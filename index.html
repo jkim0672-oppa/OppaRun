@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Running Master v12.8 - Server Pro</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        :root { --neon-green: #00ff88; --dark-bg: #000000; --card-bg: #111111; }
+        body { margin: 0; background: var(--dark-bg); color: var(--neon-green); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; overflow: hidden; }
+        
+        .page { display: none; height: 100vh; width: 100vw; flex-direction: column; }
+        .page.active { display: flex; }
+
+        /* 지도 스타일 - 서버에선 더 부드럽게 로딩됨 */
+        #map { height: 42vh; width: 100%; border-bottom: 1px solid #333; background: #0a0a0a; }
+
+        .dashboard { 
+            display: grid; 
+            grid-template-columns: 1fr 1fr; 
+            gap: 12px; 
+            padding: 20px; 
+            background: linear-gradient(180deg, #000 0%, #0a0a0a 100%);
+            flex: 1;
+        }
+
+        .card { 
+            background: var(--card-bg); 
+            border-radius: 16px; 
+            display: flex; 
+            flex-direction: column; 
+            justify-content: center; 
+            align-items: center; 
+            border: 1px solid #222;
+            transition: all 0.3s ease;
+        }
+
+        .label { font-size: 10px; color: #888; letter-spacing: 1px; font-weight: 600; }
+        .value { font-size: 24px; font-weight: 800; color: #fff; margin-top: 4px; }
+
+        /* 상세 분석 모달 */
+        #detail-modal { 
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: var(--dark-bg); z-index: 5000; flex-direction: column; 
+        }
+        #detail-map { height: 35%; width: 100%; border-bottom: 2px solid var(--neon-green); }
+        .detail-scroll { flex: 1; padding: 20px; overflow-y: auto; }
+
+        .split-row { display: flex; justify-content: space-between; padding: 12px; border-bottom: 1px solid #222; }
+
+        /* 컨트롤 버튼 */
+        .controls { position: absolute; bottom: 100px; width: 100%; text-align: center; z-index: 1000; pointer-events: none; }
+        #start-btn { 
+            width: 75px; height: 75px; border-radius: 50%; border: none; 
+            background: #ff3b30; color: #fff; font-weight: bold; 
+            box-shadow: 0 0 20px rgba(255, 59, 48, 0.4); pointer-events: auto;
+        }
+
+        .tab-bar { 
+            position: fixed; bottom: 0; width: 100%; height: 70px; 
+            background: rgba(10, 10, 10, 0.95); display: flex; 
+            border-top: 1px solid #222; backdrop-filter: blur(10px);
+        }
+        .tab-btn { flex: 1; background: none; border: none; color: #555; font-size: 11px; font-weight: bold; }
+        .tab-btn.active { color: var(--neon-green); }
+        
+        .status-tag { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.6); padding: 4px 8px; border-radius: 4px; font-size: 10px; z-index: 1000; }
+    </style>
+</head>
+<body>
+
+<div id="detail-modal">
+    <div id="detail-map"></div>
+    <div class="detail-scroll" id="detail-body"></div>
+    <button onclick="closeDetail()" style="padding:18px; background:#222; color:#fff; border:none; font-weight:bold;">닫기</button>
+</div>
+
+<div id="page-home" class="page active">
+    <div id="map"></div>
+    <div id="gps-status" class="status-tag">GPS 대기 중...</div>
+    <div class="dashboard">
+        <div class="card"><div class="label">DISTANCE (KM)</div><div class="value" id="dist">0.00</div></div>
+        <div class="card"><div class="label">TIME</div><div class="value" id="time">00:00:00</div></div>
+        <div class="card"><div class="label">PACE</div><div class="value" id="avgPace">0'00"</div></div>
+        <div class="card"><div class="label">CADENCE</div><div class="value" id="cadence">0</div></div>
+        <div class="card"><div class="label">GCT (MS)</div><div class="value" id="gct">0</div></div>
+        <div class="card"><div class="label">FLIGHT (MS)</div><div class="value" id="flight">0</div></div>
+    </div>
+    <div class="controls">
+        <button id="start-btn">START</button>
+        <div id="after-stop" style="display:none; pointer-events:auto;">
+            <button onclick="saveRecord()" style="padding:15px 35px; background:var(--neon-green); color:#000; border:none; border-radius:30px; font-weight:bold; font-size:16px;">SAVE</button>
+            <button onclick="location.reload()" style="padding:15px 20px; background:#333; color:#fff; border:none; border-radius:30px; margin-left:10px;">RESET</button>
+        </div>
+    </div>
+</div>
+
+<div id="page-history" class="page">
+    <div style="padding:25px 20px 15px; font-size:20px; font-weight:800;">HISTORY</div>
+    <div id="history-list" style="flex:1; overflow-y:auto; padding:0 20px 100px;"></div>
+</div>
+
+<nav class="tab-bar">
+    <button class="tab-btn active" onclick="showPage('home')">RUNNING</button>
+    <button class="tab-btn" onclick="showPage('history')">HISTORY</button>
+</nav>
+
+<script>
+/**
+ * Running Master v12.8 
+ * 서버 최적화 엔진
+ */
+let map, detailMap, marker, pathLine, detailPathLine;
+let isRunning = false, elapsed = 0, distance = 0, timer, watchId;
+let path = [], splits = [], lapDist = 0, lapStartSec = 0;
+
+// 1. 지도 초기화 (서버 환경에선 즉시 실행이 더 유리)
+function initMaps() {
+    map = L.map('map', { zoomControl: false, attributionControl: false }).setView([37.5665, 126.9780], 16);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map); // 다크모드 전용 타일
+    pathLine = L.polyline([], { color: '#00ff88', weight: 5, opacity: 0.8 }).addTo(map);
+    marker = L.circleMarker([0,0], { radius: 7, color: '#fff', fillColor: '#007bff', fillOpacity: 1 }).addTo(map);
+
+    detailMap = L.map('detail-map', { zoomControl: false, attributionControl: false });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(detailMap);
+    detailPathLine = L.polyline([], { color: '#00ff88', weight: 5 }).addTo(detailMap);
+}
+
+// 2. 트래킹 로직
+function startTracking() {
+    if (watchId) navigator.geolocation.clearWatch(watchId);
+    watchId = navigator.geolocation.watchPosition(pos => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        if (accuracy > 30) {
+            document.getElementById('gps-status').innerText = "GPS 신호 약함";
+            return;
+        }
+        document.getElementById('gps-status').innerText = "GPS 연결됨";
+        
+        const newPoint = [latitude, longitude];
+        if (path.length > 0) {
+            const d = calcDist(path[path.length-1][0], path[path.length-1][1], latitude, longitude);
+            if (d > 0.003) { // 3m 이상 이동 시만 기록
+                distance += d;
+                lapDist += d;
+                // 구간 페이스 체크 (1km 단위)
+                if (lapDist >= 1.0) {
+                    const time = elapsed - lapStartSec;
+                    splits.push({ km: splits.length + 1, pace: formatPace(time, 1) });
+                    lapDist = 0; lapStartSec = elapsed;
+                }
+            }
+        }
+        path.push(newPoint);
+        pathLine.setLatLngs(path);
+        marker.setLatLng(newPoint);
+        map.panTo(newPoint);
+
+        document.getElementById('dist').innerText = distance.toFixed(2);
+        // 가상 데이터 시뮬레이션 (실제 센서 API 연결 가능)
+        document.getElementById('cadence').innerText = Math.floor(Math.random()*5+178);
+        document.getElementById('gct').innerText = Math.floor(Math.random()*10+245);
+        document.getElementById('flight').innerText = Math.floor(Math.random()*5+98);
+    }, err => console.error(err), { enableHighAccuracy: true });
+}
+
+// 3. 타이머 및 유틸리티
+function updateUI() {
+    elapsed++;
+    const m = Math.floor((elapsed % 3600) / 60), s = elapsed % 60;
+    document.getElementById('time').innerText = `00:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    document.getElementById('avgPace').innerText = formatPace(elapsed, distance);
+}
+
+function formatPace(sec, km) {
+    if (km < 0.01) return "0'00\"";
+    const p = (sec / 60) / km;
+    const mm = Math.floor(p), ss = Math.round((p - mm) * 60);
+    return `${mm}'${String(ss).padStart(2,'0')}"`;
+}
+
+function calcDist(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = (lat2-lat1)*Math.PI/180, dLon = (lon2-lon1)*Math.PI/180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// 4. 이벤트 핸들러
+document.getElementById('start-btn').onclick = function() {
+    if (!isRunning) {
+        isRunning = true;
+        this.innerText = "STOP";
+        this.style.background = "#444";
+        timer = setInterval(updateUI, 1000);
+        startTracking();
+    } else {
+        isRunning = false;
+        clearInterval(timer);
+        navigator.geolocation.clearWatch(watchId);
+        this.style.display = "none";
+        document.getElementById('after-stop').style.display = "block";
+    }
+};
+
+function saveRecord() {
+    const data = {
+        id: Date.now(),
+        date: new Date().toLocaleString(),
+        dist: distance.toFixed(2),
+        time: document.getElementById('time').innerText,
+        pace: document.getElementById('avgPace').innerText,
+        path: path,
+        splits: splits
+    };
+    const logs = JSON.parse(localStorage.getItem('RUN_LOGS') || "[]");
+    logs.unshift(data);
+    localStorage.setItem('RUN_LOGS', JSON.stringify(logs));
+    alert("오빠, 기록 저장 완료! 고생했어 ❤️");
+    location.reload();
+}
+
+function showPage(p) {
+    document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+    if (p === 'home') {
+        document.getElementById('page-home').classList.add('active');
+        document.querySelectorAll('.tab-btn')[0].classList.add('active');
+        setTimeout(() => map.invalidateSize(), 200);
+    } else {
+        document.getElementById('page-history').classList.add('active');
+        document.querySelectorAll('.tab-btn')[1].classList.add('active');
+        renderHistory();
+    }
+}
+
+function renderHistory() {
+    const logs = JSON.parse(localStorage.getItem('RUN_LOGS') || "[]");
+    const container = document.getElementById('history-list');
+    container.innerHTML = logs.map(l => `
+        <div style="background:#111; padding:20px; border-radius:15px; margin-bottom:15px; border-left:4px solid var(--neon-green);" onclick="openDetail(${l.id})">
+            <div style="font-size:11px; color:#666;">${l.date}</div>
+            <div style="font-size:20px; font-weight:800; color:#fff; margin-top:5px;">${l.dist} KM <span style="font-size:14px; color:var(--neon-green); margin-left:10px;">${l.pace}</span></div>
+        </div>
+    `).join('') || '<div style="text-align:center; padding:50px; color:#444;">기록이 없어요</div>';
+}
+
+function openDetail(id) {
+    const log = JSON.parse(localStorage.getItem('RUN_LOGS')).find(l => l.id === id);
+    let html = `<div style="margin-bottom:20px;"><div style="color:#888; font-size:12px;">SUMMARY</div><div style="font-size:24px; font-weight:900;">${log.dist} KM / ${log.time}</div></div>`;
+    html += `<div style="background:#111; border-radius:12px; padding:10px;">${log.splits.map(s => `<div class="split-row"><span>${s.km} KM</span><span style="color:var(--neon-green); font-weight:bold;">${s.pace}</span></div>`).join('') || '<p style="text-align:center; font-size:12px; color:#444;">구간 기록 없음</p>'}</div>`;
+    
+    document.getElementById('detail-body').innerHTML = html;
+    document.getElementById('detail-modal').style.display = "flex";
+    setTimeout(() => {
+        detailMap.invalidateSize();
+        if (log.path.length) {
+            detailPathLine.setLatLngs(log.path);
+            detailMap.fitBounds(detailPathLine.getBounds(), { padding: [30, 30] });
+        }
+    }, 300);
+}
+
+function closeDetail() { document.getElementById('detail-modal').style.display = "none"; }
+
+// 초기화 시작
+window.onload = initMaps;
+</script>
+</body>
+</html>
