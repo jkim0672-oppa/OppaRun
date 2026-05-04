@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun v13.8.8</title>
+    <title>OppaRun v13.8.9</title>
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
@@ -13,13 +13,11 @@
         :root { --primary: #00ff88; --bg: #000000; --card-bg: #121212; --text-main: #ffffff; --text-dim: #888888; --danger: #ff3b30; }
         body { margin: 0; background: var(--bg); color: var(--text-main); font-family: -apple-system, system-ui; overflow: hidden; height: 100vh; }
         
-        /* Minimal Alert */
         #custom-alert { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 10000; justify-content: center; align-items: center; }
         .alert-box { background: #1a1a1a; width: 180px; border-radius: 20px; padding: 25px; text-align: center; border: 1px solid #333; }
         .alert-msg { font-size: 14px; font-weight: 800; color: var(--primary); margin-bottom: 20px; letter-spacing: 2px; }
         .alert-btn { background: var(--primary); color: #000; border: none; width: 100%; padding: 10px; border-radius: 12px; font-weight: 800; font-size: 13px; text-transform: uppercase; }
 
-        /* Dim Overlay - 이 부분이 오빠의 화면을 흐릿하게 지켜줘요 */
         #dim-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.92); z-index: 9999; display: none; justify-content: center; align-items: center; pointer-events: auto; }
         #dim-overlay.active { display: flex; }
 
@@ -41,7 +39,10 @@
         .tab-bar { position: fixed; bottom: 0; width: 100%; height: 65px; background: #0a0a0a; display: flex; border-top: 1px solid #222; z-index: 2000; }
         .tab-btn { flex: 1; background: none; border: none; color: #555; font-size: 11px; font-weight: bold; }
         .tab-btn.active { color: var(--primary); }
-        #detail-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 5000; flex-direction: column; }
+        
+        /* History Item Style with Delete Button */
+        .history-item { background:#121212; padding:15px; border-radius:12px; margin-bottom:10px; border-left:4px solid var(--primary); display: flex; justify-content: space-between; align-items: center; }
+        .del-btn { background: none; border: 1px solid #444; color: #ff3b30; font-size: 10px; padding: 5px 10px; border-radius: 8px; font-weight: bold; }
     </style>
 </head>
 <body onclick="resetDimTimer()">
@@ -56,13 +57,13 @@
 <div id="dim-overlay" onclick="resetDimTimer()">
     <div style="text-align:center;">
         <div style="color:var(--primary); font-size:45px; font-weight:900;" id="dim-dist">0.00</div>
-        <div style="color:#ffcc00; font-size:14px; margin-top:5px;">TAP TO WAKE UP</div>
+        <div style="color:#ffcc00; font-size:14px; margin-top:5px;">터치하여 깨우기</div>
     </div>
 </div>
 
 <div id="page-home" class="page active">
     <div id="map"></div>
-    <div id="status" class="status-bar">GPS INITIALIZING...</div>
+    <div id="status" class="status-bar">GPS 초기화 중...</div>
     <div class="dashboard">
         <div class="card"><div class="label">DISTANCE</div><div class="value"><span id="dist">0.00</span><span class="unit">KM</span></div></div>
         <div class="card"><div class="label">TIME</div><div class="value" id="time">00:00:00</div></div>
@@ -97,23 +98,17 @@ let map, marker, pathLine, pathArray = [];
 let totalDistance = 0, isRunning = false, isPaused = false, isAutoPaused = false, elapsedSeconds = 0;
 let watchId, timerInterval, dimTimer, wakeLock = null;
 
-// --- Always Awake Function ---
 async function requestWakeLock() {
-    try {
-        if ('wakeLock' in navigator) {
-            wakeLock = await navigator.wakeLock.request('screen');
-        }
-    } catch (err) { console.error(err); }
+    try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } 
+    catch (err) { console.error(err); }
 }
 
-function releaseWakeLock() {
-    if (wakeLock !== null) { wakeLock.release(); wakeLock = null; }
-}
+function releaseWakeLock() { if (wakeLock !== null) { wakeLock.release(); wakeLock = null; } }
 
 function speak(text) {
     if ('speechSynthesis' in window) {
         const msg = new SpeechSynthesisUtterance(text);
-        msg.lang = 'en-US'; msg.rate = 1.0;
+        msg.lang = 'ko-KR'; msg.rate = 1.0; // 한국어 설정 완료!
         window.speechSynthesis.speak(msg);
     }
 }
@@ -139,15 +134,15 @@ function startTracking() {
                 if (!isAutoPaused) { 
                     isAutoPaused = true; 
                     document.getElementById('status').textContent = "AUTO PAUSED"; 
-                    document.getElementById('running-state').textContent = "AUTO PAUSE";
-                    speak("Auto paused.");
+                    document.getElementById('running-state').textContent = "일시정지";
+                    speak("일시 정지되었습니다.");
                 }
             } else {
                 if (isAutoPaused) { 
                     isAutoPaused = false; 
                     document.getElementById('status').textContent = "TRACKING LIVE"; 
                     document.getElementById('running-state').textContent = "RUNNING";
-                    speak("Resuming.");
+                    speak("다시 시작합니다.");
                 }
             }
             if (!isAutoPaused) {
@@ -157,7 +152,7 @@ function startTracking() {
                     if (d > 0.002 && d < 0.03) { 
                         const prevDist = Math.floor(totalDistance);
                         totalDistance += d; 
-                        if (Math.floor(totalDistance) > prevDist) speak(Math.floor(totalDistance) + " kilometers.");
+                        if (Math.floor(totalDistance) > prevDist) speak(Math.floor(totalDistance) + " 킬로미터 돌파.");
                         updateUI(); 
                     }
                 }
@@ -171,7 +166,7 @@ function startTracking() {
 
 function saveData() {
     const record = { 
-        id: Date.now(), date: new Date().toLocaleString('en-US'), 
+        id: Date.now(), date: new Date().toLocaleString('ko-KR'), 
         dist: totalDistance.toFixed(2), time: document.getElementById('time').textContent, 
         pace: document.getElementById('avgPace').textContent, route: pathArray 
     };
@@ -179,8 +174,17 @@ function saveData() {
     history.unshift(record); 
     localStorage.setItem('OppaRun_Data', JSON.stringify(history));
     releaseWakeLock();
-    speak("Workout saved.");
+    speak("운동 기록이 저장되었습니다.");
     document.getElementById('custom-alert').style.display = 'flex';
+}
+
+function deleteHistory(id) {
+    if(confirm("이 기록을 삭제할까요?")) {
+        let history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
+        history = history.filter(h => h.id !== id);
+        localStorage.setItem('OppaRun_Data', JSON.stringify(history));
+        loadHistory();
+    }
 }
 
 document.getElementById('main-btn').onclick = function() {
@@ -190,12 +194,12 @@ document.getElementById('main-btn').onclick = function() {
         this.textContent = 'STOP'; this.style.background = '#444';
         document.getElementById('running-state').textContent = "RUNNING";
         requestWakeLock();
-        speak("Start running.");
+        speak("러닝을 시작합니다.");
     } else {
         isPaused = true; this.style.display = 'none';
         document.getElementById('after-stop').style.display = 'flex';
         document.getElementById('running-state').textContent = "PAUSED";
-        speak("Paused.");
+        speak("정지.");
     }
 };
 
@@ -203,7 +207,7 @@ function resumeTracking() {
     isPaused = false; document.getElementById('after-stop').style.display = 'none';
     document.getElementById('main-btn').style.display = 'block';
     document.getElementById('running-state').textContent = "RUNNING";
-    speak("Resuming.");
+    speak("다시 시작합니다.");
 }
 
 function updateUI() {
@@ -235,9 +239,16 @@ function switchPage(p) {
 function loadHistory() {
     const container = document.getElementById('history-container');
     const history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
-    container.innerHTML = history.map(h => `<div style="background:#121212; padding:15px; border-radius:12px; margin-bottom:10px; border-left:4px solid #00ff88;">
-        <div style="font-size:11px; color:#00ff88;">${h.date}</div>
-        <div style="font-size:18px; font-weight:bold; margin-top:5px;">${h.dist} KM <span style="font-size:14px; color:#888;">(${h.time})</span></div>
+    if(history.length === 0) {
+        container.innerHTML = '<div style="text-align:center; color:#555; margin-top:50px;">기록이 없습니다.</div>';
+        return;
+    }
+    container.innerHTML = history.map(h => `<div class="history-item">
+        <div>
+            <div style="font-size:11px; color:#00ff88;">${h.date}</div>
+            <div style="font-size:18px; font-weight:bold; margin-top:5px;">${h.dist} KM <span style="font-size:14px; color:#888;">(${h.time})</span></div>
+        </div>
+        <button class="del-btn" onclick="deleteHistory(${h.id})">삭제</button>
     </div>`).join('');
 }
 
