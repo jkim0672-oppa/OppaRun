@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun v14.2.0</title>
+    <title>OppaRun v14.2.5</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -28,24 +28,22 @@
         .unit { font-size: 12px; color: var(--primary); margin-left: 3px; }
         
         .controls { position: absolute; bottom: 100px; width: 100%; display: flex; justify-content: center; z-index: 1000; pointer-events: none; }
-        #main-btn { width: 76px; height: 76px; border-radius: 50%; border: none; background: var(--danger); color: #fff; font-weight: 900; pointer-events: auto; box-shadow: 0 0 20px rgba(255,59,48,0.4); }
+        #main-btn { width: 76px; height: 76px; border-radius: 50%; border: none; background: var(--danger); color: #fff; font-weight: 900; pointer-events: auto; }
         #after-stop { display: none; gap: 18px; pointer-events: auto; }
         .btn-action { padding: 16px 30px; border: none; font-weight: 800; border-radius: 40px; font-size: 15px; }
 
         .tab-bar { position: fixed; bottom: 0; width: 100%; height: 75px; background: #0a0a0a; display: flex; border-top: 1px solid #222; z-index: 2000; padding-bottom: env(safe-area-inset-bottom); }
         .tab-btn { flex: 1; background: none; border: none; color: #555; font-size: 11px; font-weight: 800; }
         .tab-btn.active { color: var(--primary); }
-        
-        .history-item { background: #161616; padding: 20px; border-radius: 20px; margin-bottom: 12px; border-left: 5px solid var(--primary); display: flex; justify-content: space-between; align-items: center; }
     </style>
 </head>
-<body onclick="resetDimTimer()">
+<body>
 
 <div id="map-modal">
     <div id="modal-map-container">
         <div id="history-map"></div>
         <div id="split-info"></div>
-        <button style="width:100%; padding:20px; background:#222; color:#fff; border:none; font-weight:900;" onclick="closeMapModal()">CLOSE</button>
+        <button style="width:100%; padding:20px; background:#222; color:#fff; border:none; font-weight:900;" onclick="location.reload()">CLOSE</button>
     </div>
 </div>
 
@@ -84,44 +82,31 @@
 <script>
 let map, marker, pathLine, pathArray = [], splits = [];
 let totalDistance = 0, isRunning = false, isPaused = false, elapsedSeconds = 0;
-let stepCount = 0, lastStepTime = 0, wakeLock = null;
-let lastUpdatePos = null;
+let lastUpdatePos = null, stepCount = 0, lastStepTime = 0;
 
-// 절전 모드 방지
-async function requestWakeLock() {
-    if ('wakeLock' in navigator) {
-        try { wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {}
-    }
-}
-
-function initMaps() {
-    map = L.map('map', {zoomControl: false}).setView([37.5665, 126.9780], 17);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-    pathLine = L.polyline([], {color: '#00ff88', weight: 6, opacity: 0.8}).addTo(map);
-    marker = L.circleMarker([0, 0], {radius: 8, color: '#000', fillColor: '#00ff88', fillOpacity: 1, weight: 2}).addTo(map);
-}
-
+// 핵심: 위치 추적 및 백그라운드 유지
 function startTracking() {
+    if (!navigator.geolocation) return;
+    
+    const options = { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 };
+    
     navigator.geolocation.watchPosition(pos => {
         const { latitude, longitude, accuracy, altitude } = pos.coords;
-        if (accuracy > 40) return;
+        if (accuracy > 35) return;
 
         document.getElementById('status').textContent = "TRACKING LIVE";
         const newPos = [latitude, longitude];
-        marker.setLatLng(newPos);
+        if (marker) marker.setLatLng(newPos);
         if (map && !isPaused) map.panTo(newPos);
         if (altitude) document.getElementById('altitude').textContent = altitude.toFixed(1);
 
         if (isRunning && !isPaused) {
             if (lastUpdatePos) {
                 const d = calculateDistance(lastUpdatePos[0], lastUpdatePos[1], latitude, longitude);
-                
-                // 1m~50m 사이의 이동만 거리로 인정 (GPS 튐 방지 및 미세 이동 감지)
-                if (d > 0.001 && d < 0.05) {
+                // 1m ~ 40m 사이 이동만 필터링
+                if (d > 0.001 && d < 0.04) {
                     const prevDist = totalDistance;
                     totalDistance += d;
-                    
-                    // 1km 구간 체크 및 저장
                     if (Math.floor(totalDistance) > Math.floor(prevDist)) {
                         splits.push({ km: Math.floor(totalDistance), pace: document.getElementById('avgPace').textContent });
                     }
@@ -130,14 +115,19 @@ function startTracking() {
             }
             lastUpdatePos = newPos;
             pathArray.push(newPos);
-            pathLine.setLatLngs(pathArray);
+            if (pathLine) pathLine.setLatLngs(pathArray);
+            
+            // 데이터 실시간 백업 (튕김 방지)
+            localStorage.setItem('OppaRun_Backup', JSON.stringify({ dist: totalDistance, time: elapsedSeconds, path: pathArray, splits: splits }));
         }
-    }, e => {}, { enableHighAccuracy: true, timeout: 3000, maximumAge: 0 });
+    }, err => {
+        document.getElementById('status').textContent = "GPS SEARCHING...";
+    }, options);
 }
 
 function updateUI() {
     document.getElementById('dist').textContent = totalDistance.toFixed(2);
-    if (totalDistance > 0.002) { // 2미터만 움직여도 페이스 계산 시작
+    if (totalDistance > 0.001) {
         const p = (elapsedSeconds / 60) / totalDistance;
         const min = Math.floor(p);
         const sec = String(Math.floor((p - min) * 60)).padStart(2, '0');
@@ -145,26 +135,19 @@ function updateUI() {
     }
 }
 
-// 가속도 센서 보정 (주머니 안에서 진동 감지)
-window.addEventListener('devicemotion', (e) => {
-    if (!isRunning || isPaused) return;
-    const acc = e.accelerationIncludingGravity;
-    const mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-    if (mag > 12.0) { // 감도 살짝 올림
-        const now = Date.now();
-        if (now - lastStepTime > 260) {
-            stepCount++;
-            lastStepTime = now;
-            document.getElementById('cadence').textContent = Math.round((stepCount / (elapsedSeconds || 1)) * 60);
-            document.getElementById('gct').textContent = Math.round(240 + Math.random() * 40);
-            document.getElementById('flight').textContent = Math.round(60 + Math.random() * 30);
-        }
-    }
-});
+function updateTimerUI() {
+    const m = String(Math.floor((elapsedSeconds % 3600) / 60)).padStart(2, '0');
+    const s = String(elapsedSeconds % 60).padStart(2, '0');
+    document.getElementById('time').textContent = `00:${m}:${s}`;
+}
 
 document.getElementById('main-btn').onclick = function() {
     if (!isRunning) {
-        isRunning = true; requestWakeLock();
+        isRunning = true;
+        // 오디오 객체를 생성하여 백그라운드에서 앱이 죽지 않게 함
+        const silentAudio = new Audio('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3');
+        silentAudio.volume = 0.01; silentAudio.play().catch(e => {}); 
+
         setInterval(() => { if(isRunning && !isPaused) { elapsedSeconds++; updateTimerUI(); } }, 1000);
         this.textContent = 'STOP'; this.style.background = '#444';
         document.getElementById('running-state').textContent = "RUNNING";
@@ -175,30 +158,79 @@ document.getElementById('main-btn').onclick = function() {
     }
 };
 
-function updateTimerUI() {
-    const m = String(Math.floor((elapsedSeconds % 3600) / 60)).padStart(2, '0');
-    const s = String(elapsedSeconds % 60).padStart(2, '0');
-    document.getElementById('time').textContent = `00:${m}:${s}`;
-}
-
 function saveData() {
     const record = { id: Date.now(), date: new Date().toLocaleString('ko-KR'), dist: totalDistance.toFixed(2), time: document.getElementById('time').textContent, pace: document.getElementById('avgPace').textContent, route: pathArray, splits: splits };
     let history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
     history.unshift(record);
     localStorage.setItem('OppaRun_Data', JSON.stringify(history));
+    localStorage.removeItem('OppaRun_Backup');
     location.reload();
+}
+
+// 가속도 센서
+window.addEventListener('devicemotion', (e) => {
+    if (!isRunning || isPaused) return;
+    const mag = Math.sqrt(e.accelerationIncludingGravity.x**2 + e.accelerationIncludingGravity.y**2 + e.accelerationIncludingGravity.z**2);
+    if (mag > 12.0) {
+        const now = Date.now();
+        if (now - lastStepTime > 260) {
+            stepCount++; lastStepTime = now;
+            document.getElementById('cadence').textContent = Math.round((stepCount / (elapsedSeconds || 1)) * 60);
+        }
+    }
+});
+
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371; const dLat = (lat2-lat1)*Math.PI/180; const dLon = (lon2-lon1)*Math.PI/180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function initMaps() {
+    map = L.map('map', {zoomControl: false}).setView([37.5665, 126.9780], 17);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    pathLine = L.polyline([], {color: '#00ff88', weight: 6}).addTo(map);
+    marker = L.circleMarker([0, 0], {radius: 8, color: '#000', fillColor: '#00ff88', fillOpacity: 1}).addTo(map);
+}
+
+window.onload = () => { 
+    initMaps(); 
+    startTracking(); 
+    // 백업 복구 로직
+    const backup = JSON.parse(localStorage.getItem('OppaRun_Backup'));
+    if(backup) {
+        if(confirm("이전 기록을 복구할까요?")) {
+            totalDistance = backup.dist; elapsedSeconds = backup.time; pathArray = backup.path; splits = backup.splits;
+            updateUI(); updateTimerUI();
+        }
+    }
+};
+
+function switchPage(p) {
+    document.getElementById('page-home').classList.toggle('active', p === 'home');
+    document.getElementById('page-history').classList.toggle('active', p === 'history');
+    if (p === 'history') loadHistory();
+}
+
+function loadHistory() {
+    const history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
+    document.getElementById('history-container').innerHTML = history.map(h => `
+        <div class="history-item" onclick="showRouteOnMap(${h.id})">
+            <div><div style="font-size:11px; color:var(--primary)">${h.date}</div><div style="font-size:22px; font-weight:900;">${h.dist} KM</div></div>
+            <div style="text-align:right"><div style="font-size:15px; font-weight:800;">${h.pace}</div><div style="font-size:12px; color:#666">${h.time}</div></div>
+        </div>`).join('');
 }
 
 function showRouteOnMap(id) {
     const history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
     const record = history.find(h => h.id === id);
-    if(!record) return;
     document.getElementById('map-modal').style.display = 'flex';
     let hMap = L.map('history-map', {zoomControl: false});
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(hMap);
-    if(record.route.length > 0) {
-        let pl = L.polyline(record.route, {color: '#00ff88', weight: 5}).addTo(hMap);
-        hMap.fitBounds(pl.getBounds(), {padding: [30, 30]});
-    }
-    document.getElementById('split-info').innerHTML = '<div style="font-weight:900; margin-bottom:10px;">[구간 페이스 기록]</div>' + 
-        (record.splits.map(s => `<div class="split-row"><span>${s.km} KM</span><b>${s.pace}</b></div>`).join('') || "
+    let pl = L.polyline(record.route, {color: '#00ff88', weight: 5}).addTo(hMap);
+    hMap.fitBounds(pl.getBounds(), {padding: [30, 30]});
+    document.getElementById('split-info').innerHTML = record.splits.map(s => `<div class="split-row"><span>${s.km} KM</span><b>${s.pace}</b></div>`).join('') || "1km 미만 기록.";
+}
+</script>
+</body>
+</html>
