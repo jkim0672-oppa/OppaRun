@@ -1,14 +1,31 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun v13.8.3</title>
+    <title>OppaRun v13.8.6</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         :root { --primary: #00ff88; --bg: #000000; --card-bg: #121212; --text-main: #ffffff; --text-dim: #888888; --danger: #ff3b30; }
         body { margin: 0; background: var(--bg); color: var(--text-main); font-family: -apple-system, system-ui; overflow: hidden; height: 100vh; }
+        
+        /* Ultra Minimal Alert */
+        #custom-alert {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); z-index: 10000; justify-content: center; align-items: center;
+        }
+        .alert-box {
+            background: #1a1a1a; width: 180px; border-radius: 20px; padding: 25px;
+            text-align: center; border: 1px solid #333;
+        }
+        .alert-msg { font-size: 14px; font-weight: 800; color: var(--primary); margin-bottom: 20px; letter-spacing: 2px; }
+        .alert-btn {
+            background: var(--primary); color: #000; border: none; width: 100%; padding: 10px;
+            border-radius: 12px; font-weight: 800; font-size: 13px; text-transform: uppercase;
+        }
+
+        /* Layout Styles */
         #dim-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.95); z-index: 9999; display: none; justify-content: center; align-items: center; }
         #dim-overlay.active { display: flex; }
         .page { display: none; height: 100vh; flex-direction: column; }
@@ -34,19 +51,26 @@
 </head>
 <body onclick="resetDimTimer()">
 
+<div id="custom-alert">
+    <div class="alert-box">
+        <div class="alert-msg">SAVED</div>
+        <button class="alert-btn" onclick="location.reload()">OK</button>
+    </div>
+</div>
+
 <div id="dim-overlay" onclick="resetDimTimer()">
     <div style="text-align:center;">
         <div style="color:var(--primary); font-size:45px; font-weight:900;" id="dim-dist">0.00</div>
-        <div id="dim-status" style="color:#ffcc00; font-size:14px; margin-top:5px;">TAP TO WAKE UP</div>
+        <div style="color:#ffcc00; font-size:14px; margin-top:5px;">TAP TO WAKE UP</div>
     </div>
 </div>
 
 <div id="detail-modal">
     <div id="detail-map"></div>
     <div style="padding:20px; flex:1; overflow-y:auto;">
-        <h2 id="det-date" style="color:var(--primary); margin:0 0 10px 0; font-size:18px;"></h2>
+        <h2 id="det-date" style="color:var(--primary); margin:0 0 10px 0; font-size:16px;"></h2>
         <div id="det-info" style="color:#fff; font-size:16px; line-height:1.6; margin-bottom:20px;"></div>
-        <button onclick="closeDetail()" style="width:100%; padding:15px; background:#222; color:#fff; border:none; border-radius:10px; font-weight:bold;">닫기</button>
+        <button onclick="closeDetail()" style="width:100%; padding:15px; background:#222; color:#fff; border:none; border-radius:10px; font-weight:bold;">CLOSE</button>
     </div>
 </div>
 
@@ -60,8 +84,8 @@
         <div class="card"><div class="label">ALTITUDE</div><div class="value"><span id="altitude">0.0</span><span class="unit">M</span></div></div>
         <div class="card"><div class="label">CADENCE</div><div class="value"><span id="cadence">0</span><span class="unit">SPM</span></div></div>
         <div class="card"><div class="label">FLIGHT</div><div class="value"><span id="flight">0</span><span class="unit">MS</span></div></div>
-        <div class="card"><div class="label">GCT (지면접촉)</div><div class="value"><span id="gct">0</span><span class="unit">MS</span></div></div>
-        <div class="card"><div class="label">STATUS</div><div id="running-state" class="value" style="font-size:14px; color:#ffcc00;">READY</div></div>
+        <div class="card"><div class="label">GCT</div><div class="value"><span id="gct">0</span><span class="unit">MS</span></div></div>
+        <div class="card"><div class="label">STATUS</div><div id="running-state" class="value" style="font-size:13px; color:#ffcc00; font-weight:900;">READY</div></div>
     </div>
     <div class="controls">
         <button id="main-btn">START</button>
@@ -87,114 +111,80 @@ let map, detailMap, marker, pathLine, detailPathLine, pathArray = [];
 let totalDistance = 0, isRunning = false, isPaused = false, isAutoPaused = false, elapsedSeconds = 0;
 let watchId, timerInterval, dimTimer;
 
-function speak(text) {
-    if ('speechSynthesis' in window) {
-        const msg = new SpeechSynthesisUtterance(text);
-        msg.lang = 'ko-KR';
-        window.speechSynthesis.speak(msg);
-    }
-}
-
 function initMaps() {
     map = L.map('map', {zoomControl: false}).setView([37.5665, 126.9780], 17);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
     pathLine = L.polyline([], {color: '#00ff88', weight: 6, opacity: 0.9}).addTo(map);
     marker = L.circleMarker([0, 0], {radius: 7, color: '#000', fillColor: '#00ff88', fillOpacity: 1}).addTo(map);
-    
     detailMap = L.map('detail-map', {zoomControl: false});
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(detailMap);
     detailPathLine = L.polyline([], {color: '#00ff88', weight: 6}).addTo(detailMap);
-    
     setTimeout(() => map.invalidateSize(), 500);
 }
 
 function startTracking() {
     watchId = navigator.geolocation.watchPosition(pos => {
         const { latitude, longitude, speed, accuracy, altitude } = pos.coords;
-        if (accuracy > 30) return;
-
+        if (accuracy > 35) return;
         const newPos = [latitude, longitude];
         marker.setLatLng(newPos);
         if (!isPaused) map.panTo(newPos);
-
         if (isRunning && !isPaused) {
-            // 오토 스탑 로직 강화 (시속 1km 미만일 때)
             const currentSpeedKmh = (speed || 0) * 3.6;
-            if (currentSpeedKmh < 1.0) {
-                if (!isAutoPaused) { 
-                    isAutoPaused = true; 
-                    document.getElementById('status').textContent = "AUTO PAUSED";
-                    document.getElementById('running-state').textContent = "PAUSED";
-                }
+            if (currentSpeedKmh < 0.8) {
+                if (!isAutoPaused) { isAutoPaused = true; document.getElementById('status').textContent = "AUTO PAUSED"; document.getElementById('running-state').textContent = "AUTO PAUSE"; }
             } else {
-                if (isAutoPaused) { 
-                    isAutoPaused = false; 
-                    document.getElementById('status').textContent = "TRACKING LIVE";
-                    document.getElementById('running-state').textContent = "RUNNING";
-                }
+                if (isAutoPaused) { isAutoPaused = false; document.getElementById('status').textContent = "TRACKING LIVE"; document.getElementById('running-state').textContent = "RUNNING"; }
             }
-
             if (!isAutoPaused) {
                 if (pathArray.length > 0) {
                     const last = pathArray[pathArray.length - 1];
                     const d = calculateDistance(last[0], last[1], latitude, longitude);
-                    if (d > 0.002 && d < 0.03) {
-                        const prevDist = Math.floor(totalDistance);
-                        totalDistance += d;
-                        if (Math.floor(totalDistance) > prevDist) {
-                            speak(`${Math.floor(totalDistance)} 킬로미터 통과.`);
-                        }
-                        updateUI();
-                    }
+                    if (d > 0.002 && d < 0.03) { totalDistance += d; updateUI(); }
                 }
                 pathArray.push(newPos);
                 pathLine.setLatLngs(pathArray);
                 if(altitude) document.getElementById('altitude').textContent = altitude.toFixed(1);
-                
-                // 가짜 데이터 생성 (GCT 포함)
                 document.getElementById('cadence').textContent = Math.floor(Math.random()*5+175);
-                document.getElementById('flight').textContent = Math.floor(Math.random()*5+90);
                 document.getElementById('gct').textContent = Math.floor(Math.random()*10+240);
             }
         }
-        if(!isRunning) document.getElementById('status').textContent = `READY (±${Math.round(accuracy)}m)`;
     }, err => {}, { enableHighAccuracy: true });
+}
+
+function saveData() {
+    const record = { 
+        id: Date.now(), date: new Date().toLocaleString('en-US'), 
+        dist: totalDistance.toFixed(2), time: document.getElementById('time').textContent, 
+        pace: document.getElementById('avgPace').textContent, route: pathArray 
+    };
+    let history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
+    history.unshift(record); 
+    localStorage.setItem('OppaRun_Data', JSON.stringify(history));
+    document.getElementById('custom-alert').style.display = 'flex';
 }
 
 document.getElementById('main-btn').onclick = function() {
     if (!isRunning) {
-        isRunning = true; isPaused = false; totalDistance = 0; elapsedSeconds = 0; pathArray = [];
-        pathLine.setLatLngs([]);
-        speak("오빠런을 시작합니다. 다치지 않게 조심하세요!");
-        timerInterval = setInterval(() => {
-            if(!isPaused && !isAutoPaused) {
-                elapsedSeconds++;
-                updateTimerUI();
-            }
-        }, 1000);
+        isRunning = true; elapsedSeconds = 0; pathArray = [];
+        timerInterval = setInterval(() => { if(!isPaused && !isAutoPaused) { elapsedSeconds++; updateTimerUI(); } }, 1000);
         this.textContent = 'STOP'; this.style.background = '#444';
         document.getElementById('running-state').textContent = "RUNNING";
-        resetDimTimer();
     } else {
-        isPaused = true;
-        this.style.display = 'none';
+        isPaused = true; this.style.display = 'none';
         document.getElementById('after-stop').style.display = 'flex';
         document.getElementById('running-state').textContent = "PAUSED";
-        speak("잠시 멈췄어요. 충분히 쉬고 다시 시작하세요.");
     }
 };
 
 function resumeTracking() {
-    isPaused = false; isAutoPaused = false;
-    document.getElementById('after-stop').style.display = 'none';
+    isPaused = false; document.getElementById('after-stop').style.display = 'none';
     document.getElementById('main-btn').style.display = 'block';
     document.getElementById('running-state').textContent = "RUNNING";
-    speak("다시 달리기 시작합니다!");
 }
 
 function updateUI() {
     document.getElementById('dist').textContent = totalDistance.toFixed(2);
-    document.getElementById('dim-dist').textContent = totalDistance.toFixed(2) + " KM";
     if (totalDistance > 0.01) {
         const p = (elapsedSeconds / 60) / totalDistance;
         document.getElementById('avgPace').textContent = `${Math.floor(p)}'${String(Math.floor((p-Math.floor(p))*60)).padStart(2, '0')}"`;
@@ -206,23 +196,6 @@ function updateTimerUI() {
     const m = String(Math.floor((elapsedSeconds % 3600) / 60)).padStart(2, '0');
     const s = String(elapsedSeconds % 60).padStart(2, '0');
     document.getElementById('time').textContent = `${h}:${m}:${s}`;
-}
-
-function saveData() {
-    speak("수고하셨습니다! 오늘의 기록을 저장할게요.");
-    const record = { 
-        id: Date.now(), 
-        date: new Date().toLocaleString(), 
-        dist: totalDistance.toFixed(2), 
-        time: document.getElementById('time').textContent, 
-        pace: document.getElementById('avgPace').textContent,
-        route: pathArray 
-    };
-    let history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
-    history.unshift(record); 
-    localStorage.setItem('OppaRun_Data', JSON.stringify(history));
-    alert("기록이 안전하게 저장되었습니다! ❤️"); 
-    location.reload();
 }
 
 function switchPage(p) {
@@ -237,49 +210,37 @@ function switchPage(p) {
 function loadHistory() {
     const container = document.getElementById('history-container');
     const history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
-    container.innerHTML = history.length === 0 ? '<div style="text-align:center; color:#444; margin-top:50px;">아직 기록이 없어요!</div>' : 
-        history.map(h => `<div style="background:#121212; padding:15px; border-radius:12px; margin-bottom:10px; border-left:4px solid #00ff88;" onclick="openDetail(${h.id})">
-            <div style="font-size:11px; color:#00ff88;">${h.date}</div>
-            <div style="font-size:18px; font-weight:bold; margin-top:5px;">${h.dist} KM <span style="font-size:14px; color:#888;">(${h.time})</span></div>
-        </div>`).join('');
+    container.innerHTML = history.map(h => `<div style="background:#121212; padding:15px; border-radius:12px; margin-bottom:10px; border-left:4px solid #00ff88;" onclick="openDetail(${h.id})">
+        <div style="font-size:11px; color:#00ff88;">${h.date}</div>
+        <div style="font-size:18px; font-weight:bold; margin-top:5px;">${h.dist} KM <span style="font-size:14px; color:#888;">(${h.time})</span></div>
+    </div>`).join('');
 }
 
 function openDetail(id) {
     const history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
-    const h = history.find(item => item.id === id); 
-    if (!h) return;
-    
+    const h = history.find(item => item.id === id); if (!h) return;
     document.getElementById('det-date').innerText = h.date;
-    document.getElementById('det-info').innerHTML = `거리: ${h.dist} KM<br>시간: ${h.time}<br>페이스: ${h.pace}`;
+    document.getElementById('det-info').innerHTML = `DISTANCE: ${h.dist} KM<br>TIME: ${h.time}<br>PACE: ${h.pace}`;
     document.getElementById('detail-modal').style.display = 'flex';
-    
     setTimeout(() => {
         detailMap.invalidateSize();
         if(h.route && h.route.length > 0) {
-            detailPathLine.setLatLngs(h.route);
-            detailMap.fitBounds(detailPathLine.getBounds(), {padding: [30, 30]});
+            detailPathLine.setLatLngs(h.route); detailMap.fitBounds(detailPathLine.getBounds(), {padding: [30, 30]});
         }
     }, 300);
 }
 
 function closeDetail() { document.getElementById('detail-modal').style.display = 'none'; }
-
 function calculateDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371;
-    const dLat = (lat2-lat1)*Math.PI/180;
-    const dLon = (lon2-lon1)*Math.PI/180;
+    const R = 6371; const dLat = (lat2-lat1)*Math.PI/180; const dLon = (lon2-lon1)*Math.PI/180;
     const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
-
 function resetDimTimer() {
     document.getElementById('dim-overlay').classList.remove('active');
     clearTimeout(dimTimer);
-    if (isRunning && !isPaused) {
-        dimTimer = setTimeout(() => document.getElementById('dim-overlay').classList.add('active'), 45000);
-    }
+    if (isRunning && !isPaused) dimTimer = setTimeout(() => document.getElementById('dim-overlay').classList.add('active'), 45000);
 }
-
 window.onload = () => { initMaps(); startTracking(); };
 </script>
 </body>
