@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun v13.8.6</title>
+    <title>OppaRun v13.8.7</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -10,7 +10,7 @@
         :root { --primary: #00ff88; --bg: #000000; --card-bg: #121212; --text-main: #ffffff; --text-dim: #888888; --danger: #ff3b30; }
         body { margin: 0; background: var(--bg); color: var(--text-main); font-family: -apple-system, system-ui; overflow: hidden; height: 100vh; }
         
-        /* Ultra Minimal Alert */
+        /* Minimal Alert */
         #custom-alert {
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.85); z-index: 10000; justify-content: center; align-items: center;
@@ -25,7 +25,6 @@
             border-radius: 12px; font-weight: 800; font-size: 13px; text-transform: uppercase;
         }
 
-        /* Layout Styles */
         #dim-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.95); z-index: 9999; display: none; justify-content: center; align-items: center; }
         #dim-overlay.active { display: flex; }
         .page { display: none; height: 100vh; flex-direction: column; }
@@ -111,6 +110,16 @@ let map, detailMap, marker, pathLine, detailPathLine, pathArray = [];
 let totalDistance = 0, isRunning = false, isPaused = false, isAutoPaused = false, elapsedSeconds = 0;
 let watchId, timerInterval, dimTimer;
 
+// --- New English Voice Function ---
+function speak(text) {
+    if ('speechSynthesis' in window) {
+        const msg = new SpeechSynthesisUtterance(text);
+        msg.lang = 'en-US'; 
+        msg.rate = 1.0;
+        window.speechSynthesis.speak(msg);
+    }
+}
+
 function initMaps() {
     map = L.map('map', {zoomControl: false}).setView([37.5665, 126.9780], 17);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
@@ -132,15 +141,32 @@ function startTracking() {
         if (isRunning && !isPaused) {
             const currentSpeedKmh = (speed || 0) * 3.6;
             if (currentSpeedKmh < 0.8) {
-                if (!isAutoPaused) { isAutoPaused = true; document.getElementById('status').textContent = "AUTO PAUSED"; document.getElementById('running-state').textContent = "AUTO PAUSE"; }
+                if (!isAutoPaused) { 
+                    isAutoPaused = true; 
+                    document.getElementById('status').textContent = "AUTO PAUSED"; 
+                    document.getElementById('running-state').textContent = "AUTO PAUSE";
+                    speak("Auto paused.");
+                }
             } else {
-                if (isAutoPaused) { isAutoPaused = false; document.getElementById('status').textContent = "TRACKING LIVE"; document.getElementById('running-state').textContent = "RUNNING"; }
+                if (isAutoPaused) { 
+                    isAutoPaused = false; 
+                    document.getElementById('status').textContent = "TRACKING LIVE"; 
+                    document.getElementById('running-state').textContent = "RUNNING";
+                    speak("Resuming.");
+                }
             }
             if (!isAutoPaused) {
                 if (pathArray.length > 0) {
                     const last = pathArray[pathArray.length - 1];
                     const d = calculateDistance(last[0], last[1], latitude, longitude);
-                    if (d > 0.002 && d < 0.03) { totalDistance += d; updateUI(); }
+                    if (d > 0.002 && d < 0.03) { 
+                        const prevDist = Math.floor(totalDistance);
+                        totalDistance += d; 
+                        if (Math.floor(totalDistance) > prevDist) {
+                            speak(Math.floor(totalDistance) + " kilometers.");
+                        }
+                        updateUI(); 
+                    }
                 }
                 pathArray.push(newPos);
                 pathLine.setLatLngs(pathArray);
@@ -161,6 +187,7 @@ function saveData() {
     let history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
     history.unshift(record); 
     localStorage.setItem('OppaRun_Data', JSON.stringify(history));
+    speak("Workout saved.");
     document.getElementById('custom-alert').style.display = 'flex';
 }
 
@@ -170,10 +197,12 @@ document.getElementById('main-btn').onclick = function() {
         timerInterval = setInterval(() => { if(!isPaused && !isAutoPaused) { elapsedSeconds++; updateTimerUI(); } }, 1000);
         this.textContent = 'STOP'; this.style.background = '#444';
         document.getElementById('running-state').textContent = "RUNNING";
+        speak("Start running.");
     } else {
         isPaused = true; this.style.display = 'none';
         document.getElementById('after-stop').style.display = 'flex';
         document.getElementById('running-state').textContent = "PAUSED";
+        speak("Paused.");
     }
 };
 
@@ -181,6 +210,7 @@ function resumeTracking() {
     isPaused = false; document.getElementById('after-stop').style.display = 'none';
     document.getElementById('main-btn').style.display = 'block';
     document.getElementById('running-state').textContent = "RUNNING";
+    speak("Resuming.");
 }
 
 function updateUI() {
