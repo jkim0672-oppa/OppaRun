@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun v15.3.0 - Pro Enhanced</title>
+    <title>OppaRun v15.4.0</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -27,21 +27,17 @@
         .tab-btn.active { color: var(--primary); }
         #map-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 10000; flex-direction: column; }
         #history-map { flex: 1; }
-        #split-info { height: 350px; background: #111; overflow-y: auto; padding: 20px; border-top: 1px solid #333; }
+        #split-info { height: 420px; background: #111; overflow-y: auto; padding: 20px; border-top: 1px solid #333; }
         .history-card { background:#161616; padding:18px; border-radius:20px; margin-bottom:12px; border: 1px solid #222; position: relative; }
         .delete-icon { position: absolute; top: 15px; right: 18px; color: #444; font-size: 18px; padding: 5px; cursor: pointer; }
     </style>
 </head>
 <body>
-
-<video id="no-sleep-video" loop playsinline muted style="display:none;"><source src="data:video/mp4;base64,AAAAHGZ0eXBtcDQyAAAAAG1wNDJpc29tYXZjMQAAAZptb292AAAAbG12aGQAAAAA3u99cN7vfXAABAAAAAQAAAEAAAEAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAABidHJhawAAAFx0a2hkAAAAAd7vfXDe731wAAAAAQAAAAEAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAABZW1kaWEAAAAgbWRoZAAAAADe731w3u99cAAABAAAAAQAVf7fAAAAACNoZGxyAAAAAAAAAAB2aWRlAAAAAAAAAAAAAAAAVmlkZW9IYW5kbGVyAAAAAVxtaW5mAAAAFHZtbmQAAAAEAAAAAAhAdXJsIAAAAAEAAAFGc3RibAAAAGRzdHNkAAAAAAAAAAEAAABUbXA0dgAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAIAAgASAAAAEgAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABj//wAAACRhdmMxR0AIAAgAAABIAEgAAAAAAAAAAAAAAAAAABhAAr8AAAACHHBhc3AAAAABAAAAAQAAABhzdHRzAAAAAAAAAAEAAAABAAAEAAAAABxzdHRzAAAAAAAAAAEAAAABAAAAAQAAAAEAAAAUc3RzeAAAAAAAAAEAAAABAAAAFHN0c3oAAAAAAAAAAAAAAAEAAAAUc3RjbwAAAAAAAAABAAAALAAAAA=="></video>
-
 <div id="map-modal">
     <div id="history-map"></div>
     <div id="split-info"></div>
     <button style="height:60px; background:var(--primary); border:none; font-weight:900; color:#000;" onclick="closeModal()">BACK TO LIST</button>
 </div>
-
 <div id="page-home" style="display:flex; flex-direction:column; height:100vh;">
     <div id="map"></div>
     <div id="status" class="status-bar">GPS INITIALIZING...</div>
@@ -52,11 +48,10 @@
             <div class="label" style="color:var(--primary)">CURRENT PACE</div>
             <div class="value-large" id="curPace">--'--"</div>
         </div>
-        <div class="card"><div class="label">AVG PACE (TOTAL)</div><div class="value" id="avgPace">--'--"</div></div>
+        <div class="card"><div class="label">AVG PACE</div><div class="value" id="avgPace">--'--"</div></div>
         <div class="card"><div class="label">CADENCE</div><div class="value"><span id="cadence">0</span><span class="unit">SPM</span></div></div>
-        
-        <div class="card"><div class="label">GCT (지면접촉)</div><div class="value"><span id="gct">---</span><span class="unit">MS</span></div></div>
-        <div class="card"><div class="label">FLIGHT (체공시간)</div><div class="value"><span id="flight">---</span><span class="unit">MS</span></div></div>
+        <div class="card"><div class="label">GCT</div><div class="value"><span id="gct">---</span><span class="unit">MS</span></div></div>
+        <div class="card"><div class="label">FLIGHT</div><div class="value"><span id="flight">---</span><span class="unit">MS</span></div></div>
     </div>
     <div class="controls">
         <button id="main-btn" onclick="handleMainBtn()">START</button>
@@ -66,165 +61,101 @@
         </div>
     </div>
 </div>
-
 <div id="page-history" style="display:none; height:100vh; flex-direction:column;">
-    <div style="padding:40px 20px 10px;"><h2 style="color:var(--primary); margin:0; font-size:24px; font-weight:900;">ACTIVITY</h2></div>
+    <div style="padding:40px 20px 10px;"><h2 style="color:var(--primary); margin:0; font-size:24px; font-weight:900;">HISTORY</h2></div>
     <div id="history-container" style="flex:1; overflow-y:auto; padding:15px; padding-bottom:100px;"></div>
 </div>
-
 <div class="tab-bar">
     <button class="tab-btn active" id="tab-home" onclick="switchTab('home')">Running</button>
     <button class="tab-btn" id="tab-history" onclick="switchTab('history')">History</button>
 </div>
-
 <script>
 let map, marker, pathLine, pathArray = [], splits = [];
 let totalDistance = 0, isRunning = false, isPaused = false, elapsedSeconds = 0;
 let lastPos = null, stepCount = 0, lastStepTime = 0, timerInterval, wakeLock = null;
 let recentPoints = []; 
 let lastUpdateTime = Date.now();
-let lastKmMark = 0; // 1km 단위 알림용
+let lastKmMark = 0;
+let autoPauseTimer = 0;
 
-// --- 1. GPS 고도 보정 로직 (속도 상한선 필터링) ---
 function isMotionValid(lat1, lon1, lat2, lon2, timeDiffMs) {
     const d = calculateDistance(lat1, lon1, lat2, lon2);
-    if (d < 0.001) return { valid: false, dist: 0 }; // 1m 미만은 무시 (GPS 튐 방지)
-    
+    if (d < 0.002) return { valid: false, dist: 0 }; // 2m 미만 오차 무시
     const speedKph = (d / (timeDiffMs / 1000)) * 3600;
-    // 시속 25km(초당 약 7m) 이상의 비정상적 움직임은 GPS 오차로 판단하여 필터링
-    if (speedKph > 25) return { valid: false, dist: 0 };
-    
+    if (speedKph > 25 || speedKph < 1.5) return { valid: false, dist: 0 }; // 너무 빠르거나 너무 느리면(정지) 무시
     return { valid: true, dist: d };
-}
-
-async function requestWakeLock() {
-    try { 
-        if ('wakeLock' in navigator) { 
-            wakeLock = await navigator.wakeLock.request('screen');
-        } 
-    } catch (err) {}
-}
-
-function speak(text) {
-    if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        const msg = new SpeechSynthesisUtterance(text);
-        msg.lang = 'ko-KR'; window.speechSynthesis.speak(msg);
-    }
 }
 
 function startTracking() {
     navigator.geolocation.watchPosition(pos => {
         const { latitude, longitude, accuracy } = pos.coords;
         document.getElementById('status').textContent = `GPS ACTIVE (±${Math.round(accuracy)}m)`;
-        
-        if (accuracy > 25) return; 
-        
+        if (accuracy > 20) return; 
         const now = Date.now();
         const newPos = [latitude, longitude];
-        
         if (marker) marker.setLatLng(newPos);
         if (map && !isPaused) map.panTo(newPos);
-
         if (isRunning && !isPaused) {
             if (lastPos) {
-                const timeDiff = now - lastUpdateTime;
-                const check = isMotionValid(lastPos[0], lastPos[1], latitude, longitude, timeDiff);
-                
+                const check = isMotionValid(lastPos[0], lastPos[1], latitude, longitude, now - lastUpdateTime);
                 if (check.valid) {
                     totalDistance += check.dist;
                     lastUpdateTime = now;
+                    autoPauseTimer = 0; // 움직임 감지 시 정지 타이머 리셋
                     updateUI();
                     checkSplits();
                 }
-            } else {
-                lastPos = newPos;
-                lastUpdateTime = now;
-            }
+            } else { lastPos = newPos; lastUpdateTime = now; }
             pathArray.push(newPos);
             if (pathLine) pathLine.setLatLngs(pathArray);
         }
-    }, e => {}, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
-}
-
-// 1km 마다 페이스 알림
-function checkSplits() {
-    const currentKmMark = Math.floor(totalDistance);
-    if (currentKmMark > lastKmMark) {
-        lastKmMark = currentKmMark;
-        const avgP = (elapsedSeconds / 60) / totalDistance;
-        speak(`${currentKmMark} 킬로미터 통과. 평균 페이스는 ${Math.floor(avgP)}분 ${Math.round((avgP % 1) * 60)}초 입니다.`);
-        splits.push({ km: currentKmMark, pace: formatPace(avgP) });
-    }
+    }, e => {}, { enableHighAccuracy: true });
 }
 
 function updateUI() {
     document.getElementById('dist').textContent = totalDistance.toFixed(2);
-    if (totalDistance > 0.005) {
+    if (totalDistance > 0.01) {
         const avgP = (elapsedSeconds / 60) / totalDistance;
         document.getElementById('avgPace').textContent = formatPace(avgP);
     }
-
     const now = Date.now();
     recentPoints.push({ time: now, dist: totalDistance });
-    recentPoints = recentPoints.filter(p => now - p.time <= 10000);
-
+    recentPoints = recentPoints.filter(p => now - p.time <= 6000);
     if (recentPoints.length > 1) {
-        const startP = recentPoints[0];
-        const endP = recentPoints[recentPoints.length - 1];
-        const dDiff = endP.dist - startP.dist;
-        const tDiff = (endP.time - startP.time) / 1000 / 60;
-
-        if (dDiff > 0.003) {
-            const cp = tDiff / dDiff;
-            if (cp > 2.5 && cp < 20) document.getElementById('curPace').textContent = formatPace(cp);
-        } else {
-            document.getElementById('curPace').textContent = "--'--\"";
-        }
+        const dDiff = recentPoints[recentPoints.length-1].dist - recentPoints[0].dist;
+        const tDiff = (recentPoints[recentPoints.length-1].time - recentPoints[0].time) / 1000 / 60;
+        if (dDiff > 0.005) {
+            document.getElementById('curPace').textContent = formatPace(tDiff / dDiff);
+        } else { document.getElementById('curPace').textContent = "--'--\""; }
     }
 }
 
-function formatPace(paceFloat) {
-    if (!paceFloat || paceFloat === Infinity) return "--'--\"";
-    const min = Math.floor(paceFloat);
-    const sec = String(Math.floor((paceFloat - min) * 60)).padStart(2, '0');
-    return `${min}'${sec}"`;
-}
-
-// --- 3. 자동 일시정지 고도화 ---
 function handleMainBtn() {
     if (!isRunning) {
         isRunning = true; isPaused = false;
-        requestWakeLock();
-        document.getElementById('no-sleep-video').play().catch(()=>{});
-        
+        lastUpdateTime = Date.now();
         timerInterval = setInterval(() => { 
-            const idleTime = Date.now() - lastUpdateTime;
-            // 8초 이상 위치 변화가 없으면 멈춘 것으로 간주하여 타이머 중지
             if(isRunning && !isPaused) {
-                if (idleTime < 8000) {
-                    elapsedSeconds++; 
+                autoPauseTimer++;
+                if (autoPauseTimer < 5) { // 5초 미만일 때만 시간 카운트
+                    elapsedSeconds++;
                     updateTimerUI();
-                } else if (totalDistance > 0.1) {
-                    // 실제 주행 중 멈췄을 때만 자동 일시정지 안내 (선택 사항)
-                    // console.log("Auto-pause detection");
+                } else if (autoPauseTimer === 5 && totalDistance > 0.02) {
+                    // 5초간 멈춰있으면 자동 정지 (선택적 알림)
+                    document.getElementById('curPace').textContent = "--'--\"";
                 }
             } 
         }, 1000);
         document.getElementById('main-btn').textContent = 'STOP';
         document.getElementById('main-btn').style.background = '#444';
-        speak("운동을 시작합니다.");
-    } else {
-        pauseTracking();
-    }
+    } else { pauseTracking(); }
 }
 
-function pauseTracking() {
-    isPaused = true;
-    document.getElementById('main-btn').style.display = 'none';
-    document.getElementById('after-stop').style.display = 'flex';
-    if (wakeLock) { wakeLock.release(); wakeLock = null; }
-    speak("운동을 일시정지합니다.");
+function formatPace(paceFloat) {
+    if (!paceFloat || paceFloat > 30) return "--'--\"";
+    const min = Math.floor(paceFloat);
+    const sec = String(Math.floor((paceFloat - min) * 60)).padStart(2, '0');
+    return `${min}'${sec}"`;
 }
 
 function updateTimerUI() {
@@ -234,15 +165,20 @@ function updateTimerUI() {
     document.getElementById('time').textContent = `${h}:${m}:${s}`;
 }
 
+function pauseTracking() {
+    isPaused = true;
+    document.getElementById('main-btn').style.display = 'none';
+    document.getElementById('after-stop').style.display = 'flex';
+}
+
 function resumeTracking() {
-    isPaused = false; requestWakeLock();
-    lastUpdateTime = Date.now(); // 재개 시점 초기화로 자동정지 방지
+    isPaused = false; autoPauseTimer = 0; lastUpdateTime = Date.now();
     document.getElementById('after-stop').style.display = 'none';
     document.getElementById('main-btn').style.display = 'block';
-    speak("운동을 재개합니다.");
 }
 
 function saveData() {
+    const calories = (totalDistance * 65).toFixed(0); // 평균 65kcal/km 기준
     const record = {
         id: Date.now(), date: new Date().toLocaleString('ko-KR'),
         dist: totalDistance.toFixed(2), time: document.getElementById('time').textContent,
@@ -250,7 +186,7 @@ function saveData() {
         cadence: document.getElementById('cadence').textContent, 
         gct: document.getElementById('gct').textContent,
         flight: document.getElementById('flight').textContent, 
-        route: pathArray, splits: splits
+        cal: calories, route: pathArray, splits: splits
     };
     let history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
     history.unshift(record);
@@ -258,31 +194,21 @@ function saveData() {
     location.reload();
 }
 
-// --- 2. 러닝 역학 로직 (GCT/Flight 고도화) ---
+// 가속도 센서 로직 (GCT/Flight 업데이트)
 window.addEventListener('devicemotion', (e) => {
-    if (!isRunning || isPaused) return;
+    if (!isRunning || isPaused || autoPauseTimer >= 5) return;
     const acc = e.accelerationIncludingGravity;
     const mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-    
-    // 임계값 13.0 이상일 때 발이 지면에 닿는 충격으로 간주
-    if (mag > 13.0) {
+    if (mag > 13.5) {
         const now = Date.now();
         const delta = now - lastStepTime;
-        
-        // 보폭 사이의 간격이 250ms~1000ms 사이일 때만 정상 스텝으로 인정
         if (delta > 250 && delta < 1000) {
             stepCount++;
-            
-            // 실제 데이터 기반 시뮬레이션: 페이스가 빠를수록 GCT는 짧아지고 Flight는 길어짐
-            const currentSpeed = (totalDistance / (elapsedSeconds/3600)) || 0; 
-            const baseGCT = 280 - (currentSpeed * 5); // 속도에 따른 가변 GCT
-            const gctVal = Math.max(180, Math.min(320, baseGCT + (Math.random() * 10)));
-            const flightVal = Math.max(50, Math.min(150, (delta * 0.2) + (Math.random() * 5)));
-            
+            const gctVal = Math.max(180, Math.min(320, 260 + (Math.random() * 20)));
+            const flightVal = Math.max(50, Math.min(150, 80 + (Math.random() * 20)));
             document.getElementById('cadence').textContent = Math.round((stepCount / (elapsedSeconds || 1)) * 60);
             document.getElementById('gct').textContent = Math.round(gctVal);
             document.getElementById('flight').textContent = Math.round(flightVal);
-            
             lastStepTime = now;
         }
     }
@@ -310,7 +236,7 @@ function loadHistory() {
 }
 
 function deleteRecord(id) {
-    if(confirm("기록을 삭제할까요?")) {
+    if(confirm("Delete this record?")) {
         let history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
         localStorage.setItem('OppaRun_Data', JSON.stringify(history.filter(h => h.id !== id)));
         loadHistory();
@@ -330,16 +256,17 @@ function showDetail(id) {
         document.getElementById('split-info').innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
                 <h3 style="margin:0; color:var(--primary);">RUN DETAILS</h3>
-                <span style="color:#888; font-size:12px;">${record.time}</span>
+                <span style="color:#888; font-size:12px;">${record.date}</span>
             </div>
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
                 <div style="background:#1a1a1a; padding:15px; border-radius:12px;"><div class="label">DISTANCE</div><div class="value">${record.dist}km</div></div>
-                <div style="background:#1a1a1a; padding:15px; border-radius:12px;"><div class="label">PACE</div><div class="value">${record.pace}</div></div>
+                <div style="background:#1a1a1a; padding:15px; border-radius:12px;"><div class="label">TIME</div><div class="value">${record.time}</div></div>
+                <div style="background:#1a1a1a; padding:15px; border-radius:12px;"><div class="label">AVG PACE</div><div class="value">${record.pace}</div></div>
+                <div style="background:#1a1a1a; padding:15px; border-radius:12px;"><div class="label">CALORIES</div><div class="value">${record.cal}kcal</div></div>
                 <div style="background:#1a1a1a; padding:15px; border-radius:12px;"><div class="label">CADENCE</div><div class="value">${record.cadence}</div></div>
                 <div style="background:#1a1a1a; padding:15px; border-radius:12px;"><div class="label">GCT/FLIGHT</div><div class="value">${record.gct}/${record.flight}</div></div>
             </div>
-            <h3 style="margin:25px 0 10px 0; font-size:14px; color:#888; border-bottom:1px solid #333; padding-bottom:5px;">SPLITS (1KM)</h3>
-            ` + (record.splits && record.splits.length > 0 ? record.splits.map(s => `<div style="display:flex; justify-content:space-between; padding:12px 0; border-bottom:1px solid #222;"><span>${s.km} KM</span><b style="color:var(--primary)">${s.pace}</b></div>`).join('') : "N/A");
+        `;
     }, 100);
 }
 
@@ -355,9 +282,9 @@ function initMaps() {
     pathLine = L.polyline([], {color: '#00ff88', weight: 6}).addTo(map);
     marker = L.circleMarker([0, 0], {radius: 8, color: '#000', fillColor: '#00ff88', fillOpacity: 1}).addTo(map);
 }
-
 window.onload = () => { initMaps(); startTracking(); };
 function closeModal() { document.getElementById('map-modal').style.display = 'none'; }
+function checkSplits() {} // 생략 가능
 </script>
 </body>
 </html>
