@@ -3,62 +3,148 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Oppa Run v15.4.4</title>
+    <title>Oppa Run - The Original Design</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
     <style>
         body { margin: 0; padding: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; height: 100vh; }
         .app-container { height: 100%; display: flex; flex-direction: column; }
+        
+        /* 지도: 오빠가 좋아한 비율 */
         #map { flex: 1.5; border-bottom: 2px solid #222; }
-        .gps-status { background: #000; color: #FFD700; text-align: center; padding: 5px; font-size: 0.8rem; font-weight: bold; }
+        .gps-status { background: #000; color: #FFD700; text-align: center; padding: 5px; font-size: 0.8rem; font-weight: bold; border-bottom: 1px solid #222; }
+
+        /* 대시보드: 차 안에서 보던 그 느낌 그대로 */
         .dashboard { flex: 2.5; padding: 15px; display: flex; flex-direction: column; gap: 10px; justify-content: space-around; }
         .row { display: flex; gap: 10px; }
-        .box { background: #111; border-radius: 15px; flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #222; height: 70px; }
-        .label { font-size: 0.7rem; color: #888; text-transform: uppercase; }
+        .box { background: #111; border-radius: 15px; flex: 1; height: 75px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #222; }
+        .label { font-size: 0.7rem; color: #888; text-transform: uppercase; margin-bottom: 3px; }
         .value { font-size: 1.6rem; font-weight: bold; }
         .unit { font-size: 0.8rem; color: #00FF00; margin-left: 3px; }
-        .pace-box { background: #000; border: 2px solid #00FF00; border-radius: 15px; flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+
+        /* 중앙 페이스 박스: 디자인의 핵심 */
+        .pace-box { background: #000; border: 2px solid #00FF00; border-radius: 15px; flex: 1.1; display: flex; flex-direction: column; justify-content: center; align-items: center; }
         .pace-box .label { color: #00FF00; }
-        .pace-box .value { font-size: 2.8rem; color: #00FF00; }
+        .pace-box .value { font-size: 3rem; color: #00FF00; line-height: 1; }
+
         .controls-row { display: flex; justify-content: space-around; align-items: center; flex: 1.2; }
+        
+        /* 오리지널 빨간 버튼 */
         .start-btn { 
             width: 90px; height: 90px; background: #FF453A; border-radius: 50%; 
             display: flex; justify-content: center; align-items: center; 
             font-weight: bold; font-size: 1.1rem; color: #fff; border: none;
             box-shadow: 0 0 20px rgba(255, 69, 58, 0.4);
         }
+
+        /* 하단 메뉴: 절대 밀리지 않게 고정 */
         .tab-menu { display: flex; border-top: 1px solid #222; padding: 15px 0; background: #000; }
         .tab-item { flex: 1; text-align: center; color: #00FF00; font-size: 0.9rem; font-weight: bold; }
+        .tab-item.history { color: #888; }
     </style>
 </head>
 <body>
+
 <div class="app-container">
     <div id="map"></div>
-    <div class="gps-status">GPS ACTIVE (±20m)</div>
+    <div class="gps-status" id="gpsStatus">GPS READY</div>
+
     <div class="dashboard">
         <div class="row">
-            <div class="box"><div class="label">Distance</div><div class="value">0.00<span class="unit">KM</span></div></div>
-            <div class="box"><div class="label">Time</div><div class="value">00:00:00</div></div>
+            <div class="box">
+                <div class="label">Distance</div>
+                <div class="value" id="distDisplay">0.00<span class="unit">KM</span></div>
+            </div>
+            <div class="box">
+                <div class="label">Time</div>
+                <div class="value" id="timeDisplay">00:00:00</div>
+            </div>
         </div>
+
         <div class="pace-box">
             <div class="label">CURRENT PACE</div>
-            <div class="value">--'--"</div>
+            <div class="value" id="paceDisplay">--'--"</div>
+            <div id="kcalDisplay" style="font-size: 0.9rem; color: #555; margin-top: 5px;">0 kcal</div>
         </div>
+
         <div class="controls-row">
-            <div style="text-align: center;"><div class="label">AVG PACE</div><div class="value" style="font-size: 1.2rem;">--'--"</div></div>
-            <button class="start-btn">START</button>
-            <div style="text-align: center;"><div class="label">CADENCE</div><div class="value" style="font-size: 1.2rem;">0<span class="unit">SPM</span></div></div>
+            <div style="text-align: center;">
+                <div class="label">AVG PACE</div>
+                <div id="avgPaceDisplay" class="value" style="font-size: 1.1rem;">--'--"</div>
+            </div>
+
+            <button class="start-btn" id="mainBtn" onclick="toggleRun()">START</button>
+
+            <div style="text-align: center;">
+                <div class="label">CADENCE</div>
+                <div id="cadenceDisplay" class="value" style="font-size: 1.2rem;">0<span class="unit">SPM</span></div>
+            </div>
         </div>
     </div>
+
     <div class="tab-menu">
         <div class="tab-item">RUNNING</div>
-        <div class="tab-item" style="color:#888;">HISTORY</div>
+        <div class="tab-item history">HISTORY</div>
     </div>
 </div>
+
 <script>
-    var map = L.map('map', { zoomControl: false }).setView([37.5, 126.7], 15);
+    let map, path, watchId, timerInterval, startTime, running = false, distance = 0, lastPos = null;
+
+    // 1. 지도 오빠 현위치로 초기화
+    map = L.map('map', { zoomControl: false }).setView([37.456, 126.705], 16); 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-    // 오빠, 이 밑으로는 GPS랑 자동정지 로직이 쭉 이어졌던 그 코드예요!
+    path = L.polyline([], { color: '#00FF00', weight: 5 }).addTo(map);
+
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(pos => {
+            map.setView([pos.coords.latitude, pos.coords.longitude], 16);
+        });
+    }
+
+    function toggleRun() {
+        const btn = document.getElementById('mainBtn');
+        if (!running) {
+            running = true; btn.innerText = "STOP"; btn.style.background = "#444";
+            distance = 0; lastPos = null; path.setLatLngs([]);
+            startTime = Date.now();
+            timerInterval = setInterval(updateUI, 1000);
+            startTracking();
+        } else {
+            if(confirm("Finish and save?")) location.reload();
+        }
+    }
+
+    function startTracking() {
+        watchId = navigator.geolocation.watchPosition(pos => {
+            const currentPos = [pos.coords.latitude, pos.coords.longitude];
+            if (lastPos && map.distance(lastPos, currentPos) > 2) {
+                distance += map.distance(lastPos, currentPos);
+                path.addLatLng(currentPos);
+                map.panTo(currentPos);
+            }
+            lastPos = currentPos;
+            document.getElementById('gpsStatus').innerText = `GPS ACTIVE (±${Math.round(pos.coords.accuracy)}m)`;
+        }, null, { enableHighAccuracy: true });
+    }
+
+    function updateUI() {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+        const s = String(elapsed % 60).padStart(2, '0');
+        document.getElementById('timeDisplay').innerText = `00:${m}:${s}`;
+        
+        const distKm = (distance / 1000).toFixed(2);
+        document.getElementById('distDisplay').innerHTML = `${distKm}<span class="unit">KM</span>`;
+        document.getElementById('kcalDisplay').innerText = `${(75 * distKm).toFixed(1)} kcal`;
+
+        if (distance > 5) {
+            const paceMin = (elapsed / 60) / distKm;
+            const pM = Math.floor(paceMin);
+            const pS = String(Math.floor((paceMin - pM) * 60)).padStart(2, '0');
+            document.getElementById('paceDisplay').innerText = `${pM}'${pS}"`;
+        }
+    }
 </script>
 </body>
 </html>
