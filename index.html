@@ -2,34 +2,29 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun v14.3.0</title>
+    <title>OppaRun v14.3.5</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         :root { --primary: #00ff88; --bg: #000000; --card-bg: #121212; --text-main: #ffffff; --text-dim: #888888; --danger: #ff3b30; }
         body { margin: 0; background: var(--bg); color: var(--text-main); font-family: -apple-system, system-ui; overflow: hidden; height: 100vh; padding-top: env(safe-area-inset-top); }
-        
         #map { height: 35vh; width: 100%; background: #222; }
         .status-bar { text-align: center; color: #ffcc00; font-size: 11px; padding: 10px; background: #121212; font-weight: bold; }
-        
         .dashboard { flex: 1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: repeat(4, 1fr); gap: 10px; padding: 15px; padding-bottom: 120px; }
         .card { background: var(--card-bg); border-radius: 18px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #222; }
         .label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
         .value { font-size: 26px; font-weight: 900; color: #fff; }
         .unit { font-size: 12px; color: var(--primary); margin-left: 3px; }
-        
         .controls { position: absolute; bottom: 110px; width: 100%; display: flex; justify-content: center; z-index: 1000; }
-        #main-btn { width: 80px; height: 80px; border-radius: 50%; border: none; background: var(--danger); color: #fff; font-weight: 900; font-size: 16px; box-shadow: 0 0 20px rgba(255,59,48,0.3); transition: transform 0.1s; }
+        #main-btn { width: 80px; height: 80px; border-radius: 50%; border: none; background: var(--danger); color: #fff; font-weight: 900; font-size: 16px; }
         #after-stop { display: none; gap: 20px; }
-        .btn-action { width: 120px; height: 55px; border: none; font-weight: 800; border-radius: 30px; font-size: 16px; color: #000; }
-
+        .btn-action { width: 120px; height: 55px; border: none; font-weight: 800; border-radius: 30px; font-size: 16px; }
         .tab-bar { position: fixed; bottom: 0; width: 100%; height: 75px; background: #0a0a0a; display: flex; border-top: 1px solid #222; z-index: 2000; }
         .tab-btn { flex: 1; background: none; border: none; color: #555; font-size: 11px; font-weight: 800; }
         .tab-btn.active { color: var(--primary); }
-
         #map-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 10000; flex-direction: column; }
-        #history-map { flex: 1; width: 100%; }
+        #history-map { flex: 1; }
         #split-info { height: 250px; background: #111; overflow-y: auto; padding: 20px; border-top: 1px solid #333; }
         .split-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #222; font-size: 16px; }
         .history-item { background: #161616; padding: 20px; border-radius: 20px; margin-bottom: 12px; border-left: 5px solid var(--primary); display: flex; justify-content: space-between; align-items: center; }
@@ -40,12 +35,12 @@
 <div id="map-modal">
     <div id="history-map"></div>
     <div id="split-info"></div>
-    <button style="height:70px; background:var(--primary); border:none; font-weight:900; font-size:18px;" onclick="closeModal()">BACK TO LIST</button>
+    <button style="height:70px; background:var(--primary); border:none; font-weight:900;" onclick="closeModal()">BACK TO LIST</button>
 </div>
 
 <div id="page-home" style="display:flex; flex-direction:column; height:100vh;">
     <div id="map"></div>
-    <div id="status" class="status-bar">WAITING FOR GPS...</div>
+    <div id="status" class="status-bar">GPS INITIALIZING...</div>
     <div class="dashboard">
         <div class="card"><div class="label">DISTANCE</div><div class="value"><span id="dist">0.00</span><span class="unit">KM</span></div></div>
         <div class="card"><div class="label">TIME</div><div class="value" id="time">00:00:00</div></div>
@@ -57,10 +52,10 @@
         <div class="card"><div class="label">STATE</div><div id="running-state" class="value" style="font-size:14px; color:#ffcc00;">READY</div></div>
     </div>
     <div class="controls">
-        <button id="main-btn" ontouchstart="handleMainBtn()">START</button>
+        <button id="main-btn" onclick="handleMainBtn()">START</button>
         <div id="after-stop">
-            <button class="btn-action" style="background:var(--primary)" ontouchstart="resumeTracking()">RESUME</button>
-            <button class="btn-action" style="background:var(--danger); color:#fff" ontouchstart="saveData()">FINISH</button>
+            <button class="btn-action" style="background:var(--primary)" onclick="resumeTracking()">RESUME</button>
+            <button class="btn-action" style="background:var(--danger); color:#fff" onclick="saveData()">FINISH</button>
         </div>
     </div>
 </div>
@@ -80,28 +75,40 @@ let map, marker, pathLine, pathArray = [], splits = [];
 let totalDistance = 0, isRunning = false, isPaused = false, elapsedSeconds = 0;
 let lastPos = null, stepCount = 0, lastStepTime = 0, timerInterval;
 
-// GPS 추적 로직 (점프 방지 필터 포함)
+// 제니 목소리 엔진 (TTS)
+function speak(text) {
+    if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel(); // 겹침 방지
+        const msg = new SpeechSynthesisUtterance(text);
+        msg.lang = 'ko-KR'; msg.rate = 1.0; msg.pitch = 1.1;
+        window.speechSynthesis.speak(msg);
+    }
+}
+
 function startTracking() {
     navigator.geolocation.watchPosition(pos => {
         const { latitude, longitude, accuracy, altitude } = pos.coords;
         if (accuracy > 35) return;
-
         const newPos = [latitude, longitude];
         if (marker) marker.setLatLng(newPos);
         if (map && !isPaused) map.panTo(newPos);
         if (altitude) document.getElementById('altitude').textContent = altitude.toFixed(1);
+        
+        if (document.getElementById('status').textContent === "GPS INITIALIZING...") {
+            speak("GPS가 연결되었습니다. 준비가 되었습니다.");
+        }
         document.getElementById('status').textContent = "TRACKING LIVE";
 
         if (isRunning && !isPaused) {
             if (lastPos) {
                 const d = calculateDistance(lastPos[0], lastPos[1], latitude, longitude);
-                // 점프 필터: 1초당 30m(시속 100km 이상) 이동은 GPS 튐으로 간주하여 무시
-                if (d > 0.001 && d < 0.03) {
+                if (d > 0.001 && d < 0.04) {
                     const prevDist = totalDistance;
                     totalDistance += d;
-                    // 1km 스플릿 체크
                     if (Math.floor(totalDistance) > Math.floor(prevDist)) {
-                        splits.push({ km: Math.floor(totalDistance), pace: document.getElementById('avgPace').textContent });
+                        const curPace = document.getElementById('avgPace').textContent;
+                        splits.push({ km: Math.floor(totalDistance), pace: curPace });
+                        speak(`${Math.floor(totalDistance)} 킬로미터 완료. 현재 페이스는 ${curPace} 입니다.`);
                     }
                     updateUI();
                 }
@@ -126,7 +133,9 @@ function updateUI() {
 function handleMainBtn() {
     if (!isRunning) {
         isRunning = true;
-        // 백그라운드 유지용 무음 사운드
+        speak("러닝을 시작합니다. 화이팅 하세요 오빠!");
+        
+        // 백그라운드 유지
         const audio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=');
         audio.loop = true; audio.play().catch(()=>{});
         
@@ -143,6 +152,7 @@ function handleMainBtn() {
         document.getElementById('running-state').textContent = "RUNNING";
     } else {
         isPaused = true;
+        speak("일시 정지합니다.");
         document.getElementById('main-btn').style.display = 'none';
         document.getElementById('after-stop').style.display = 'flex';
         document.getElementById('running-state').textContent = "PAUSED";
@@ -151,22 +161,23 @@ function handleMainBtn() {
 
 function resumeTracking() {
     isPaused = false;
+    speak("다시 시작합니다.");
     document.getElementById('after-stop').style.display = 'none';
     document.getElementById('main-btn').style.display = 'block';
     document.getElementById('running-state').textContent = "RUNNING";
 }
 
 function saveData() {
+    speak("러닝을 마칩니다. 기록을 저장합니다. 수고하셨어요!");
     const finalPace = document.getElementById('avgPace').textContent;
-    // 1km가 안 되더라도 마지막 구간 추가
-    if (totalDistance > 0 && totalDistance < 1) {
+    if (totalDistance > 0 && splits.length === 0) {
         splits = [{ km: "FINAL", pace: finalPace }];
     }
     const record = { id: Date.now(), date: new Date().toLocaleString('ko-KR'), dist: totalDistance.toFixed(2), time: document.getElementById('time').textContent, pace: finalPace, route: pathArray, splits: splits };
     let history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
     history.unshift(record);
     localStorage.setItem('OppaRun_Data', JSON.stringify(history));
-    location.reload();
+    setTimeout(() => location.reload(), 1500);
 }
 
 function switchTab(t) {
@@ -196,7 +207,7 @@ function showDetail(id) {
         hMap.fitBounds(pl.getBounds(), {padding: [30, 30]});
     }
     document.getElementById('split-info').innerHTML = `<h3 style="margin:0 0 15px 0; color:var(--primary)">SPLITS (1KM)</h3>` + 
-        (record.splits.map(s => `<div class="split-row"><span>${s.km} KM</span><b>${s.pace}</b></div>`).join('') || "No split data.");
+        (record.splits.map(s => `<div class="split-row"><span>${s.km} KM</span><b>${s.pace}</b></div>`).join('') || "1km 미만 주행");
 }
 
 function calculateDistance(lat1, lon1, lat2, lon2) {
@@ -215,7 +226,6 @@ function initMaps() {
 window.onload = () => { initMaps(); startTracking(); };
 function closeModal() { document.getElementById('map-modal').style.display = 'none'; location.reload(); }
 
-// 가속도 센서 (케이던스)
 window.addEventListener('devicemotion', (e) => {
     if (!isRunning || isPaused) return;
     const mag = Math.sqrt(e.accelerationIncludingGravity.x**2 + e.accelerationIncludingGravity.y**2 + e.accelerationIncludingGravity.z**2);
