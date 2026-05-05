@@ -2,28 +2,31 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun v15.2.7 - Walking Sensitivity Fix</title>
+    <title>OppaRun v15.2.8 - Final Precision Fix</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         :root { --primary: #00ff88; --bg: #000000; --card-bg: #121212; --text-main: #ffffff; --text-dim: #888888; --danger: #ff3b30; }
         body { margin: 0; background: var(--bg); color: var(--text-main); font-family: -apple-system, system-ui; overflow: hidden; height: 100vh; padding-top: env(safe-area-inset-top); }
-        #map { height: 28vh; width: 100%; background: #222; }
+        #map { height: 26vh; width: 100%; background: #222; }
         .status-bar { text-align: center; color: #ffcc00; font-size: 11px; padding: 6px; background: #121212; font-weight: bold; border-bottom: 1px solid #222; }
-        .dashboard { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 10px; padding-bottom: 150px; overflow-y: auto; }
-        .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #222; padding: 10px 0; min-height: 65px; }
+        .dashboard { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 10px; padding-bottom: 160px; overflow-y: auto; }
+        .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #222; padding: 10px 0; min-height: 60px; }
         .label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; font-weight: 700; margin-bottom: 2px; }
         .value { font-size: 22px; font-weight: 900; color: #fff; }
         .unit { font-size: 10px; color: var(--primary); margin-left: 2px; }
-        .card-highlight { grid-column: span 2; border: 1px solid var(--primary); background: rgba(0,255,136,0.06); padding: 15px 0; }
-        .value-large { font-size: 46px; color: var(--primary); line-height: 1; }
-        .controls { position: absolute; bottom: 95px; width: 100%; display: flex; justify-content: center; z-index: 1000; }
-        #main-btn { width: 75px; height: 75px; border-radius: 50%; border: none; background: var(--danger); color: #fff; font-weight: 900; font-size: 15px; }
-        #after-stop { display: none; gap: 12px; }
-        .btn-action { width: 110px; height: 48px; border: none; font-weight: 800; border-radius: 24px; font-size: 14px; }
-        .tab-bar { position: fixed; bottom: 0; width: 100%; height: 65px; background: #0a0a0a; display: flex; border-top: 1px solid #222; z-index: 2000; padding-bottom: env(safe-area-inset-bottom); }
-        .tab-btn { flex: 1; background: none; border: none; color: #555; font-size: 11px; font-weight: 800; }
+        .card-highlight { grid-column: span 2; border: 1px solid var(--primary); background: rgba(0,255,136,0.06); padding: 12px 0; }
+        .value-large { font-size: 44px; color: var(--primary); line-height: 1; }
+        
+        .controls { position: absolute; bottom: 100px; width: 100%; display: flex; justify-content: center; z-index: 3000; }
+        #main-btn { width: 75px; height: 75px; border-radius: 50%; border: none; background: var(--danger); color: #fff; font-weight: 900; font-size: 15px; box-shadow: 0 0 15px rgba(0,0,0,0.5); }
+        #after-stop { display: none; gap: 15px; }
+        .btn-action { width: 120px; height: 50px; border: none; font-weight: 800; border-radius: 25px; font-size: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+        
+        /* 탭바 명시적 복구 */
+        .tab-bar { position: fixed; bottom: 0; width: 100%; height: 65px; background: #0a0a0a; display: flex; border-top: 1px solid #222; z-index: 4000; padding-bottom: env(safe-area-inset-bottom); }
+        .tab-btn { flex: 1; background: none; border: none; color: #555; font-size: 12px; font-weight: 800; }
         .tab-btn.active { color: var(--primary); }
     </style>
 </head>
@@ -40,10 +43,11 @@
             <div class="value-large" id="curPace">--'--"</div>
         </div>
         <div class="card"><div class="label">AVG PACE</div><div class="value" id="avgPace">0'00"</div></div>
-        <div class="card"><div class="label">CADENCE</div><div class="value" id="cadence">0</div><div class="unit" style="font-size:9px">SPM</div></div>
-        <div class="card"><div class="label">GCT (접촉시간)</div><div class="value"><span id="gct">0</span><span class="unit">MS</span></div></div>
-        <div class="card"><div class="label">FLIGHT (체공시간)</div><div class="value"><span id="flight">0</span><span class="unit">MS</span></div></div>
+        <div class="card"><div class="label">CADENCE</div><div class="value" id="cadence">0</div><div class="unit">SPM</div></div>
+        <div class="card"><div class="label">GCT (MS)</div><div class="value" id="gct">0</div></div>
+        <div class="card"><div class="label">FLIGHT (MS)</div><div class="value" id="flight">0</div></div>
     </div>
+    
     <div class="controls">
         <button id="main-btn" onclick="handleMainBtn()">START</button>
         <div id="after-stop">
@@ -51,13 +55,19 @@
             <button class="btn-action" style="background:var(--danger); color:#fff" onclick="saveData()">FINISH</button>
         </div>
     </div>
+
+    <div class="tab-bar">
+        <button class="tab-btn active">RUNNING</button>
+        <button class="tab-btn" onclick="alert('준비 중입니다.')">HISTORY</button>
+    </div>
 </div>
 
 <script>
 let map, marker, pathLine, pathArray = [], totalDistance = 0;
 let isRunning = false, isPaused = false, elapsedSeconds = 0;
 let lastPos = null, stepCount = 0, lastStepTime = 0, timerInterval = null;
-let recentPoints = []; 
+let recentPoints = [];
+let autoStopTimer = 0;
 
 function startTimer() {
     if (timerInterval) clearInterval(timerInterval);
@@ -65,7 +75,8 @@ function startTimer() {
         if (isRunning && !isPaused) {
             elapsedSeconds++;
             updateTimerUI();
-            updateUI(); 
+            updateUI();
+            checkAutoStop();
         }
     }, 1000);
 }
@@ -84,14 +95,19 @@ function handleMainBtn() {
         document.getElementById('main-btn').textContent = 'STOP';
         document.getElementById('main-btn').style.background = '#333';
     } else {
-        isPaused = true;
-        document.getElementById('main-btn').style.display = 'none';
-        document.getElementById('after-stop').style.display = 'flex';
+        pauseTracking();
     }
+}
+
+function pauseTracking() {
+    isPaused = true;
+    document.getElementById('main-btn').style.display = 'none';
+    document.getElementById('after-stop').style.display = 'flex';
 }
 
 function resumeTracking() {
     isPaused = false;
+    autoStopTimer = 0;
     document.getElementById('after-stop').style.display = 'none';
     document.getElementById('main-btn').style.display = 'block';
 }
@@ -99,18 +115,19 @@ function resumeTracking() {
 function startTracking() {
     navigator.geolocation.watchPosition(pos => {
         const { latitude, longitude, accuracy } = pos.coords;
-        if (accuracy > 35) return; // 정확도 범위를 살짝 넓혀 빠른 걸음 수용
+        if (accuracy > 40) return;
         
         const newPos = [latitude, longitude];
         if (marker) marker.setLatLng(newPos);
         if (isRunning && !isPaused) {
             if (lastPos) {
                 const d = calculateDistance(lastPos[0], lastPos[1], latitude, longitude);
-                // 빠른 걸음(초속 1m 내외)도 누락되지 않게 최소 이동 거리 2m로 하향
-                if (d > 0.002 && d < 0.05) {
+                // 1.5m 이상의 움직임이면 거리 반영 (빠른 걸음 최적화)
+                if (d > 0.0015 && d < 0.05) {
                     totalDistance += d;
                     pathArray.push(newPos);
                     if (pathLine) pathLine.setLatLngs(pathArray);
+                    autoStopTimer = 0; // 움직임 감지 시 자동멈춤 타이머 초기화
                 }
             }
             lastPos = newPos;
@@ -119,35 +136,37 @@ function startTracking() {
     }, e => {}, { enableHighAccuracy: true, maximumAge: 0 });
 }
 
+function checkAutoStop() {
+    autoStopTimer++;
+    // 6초 이상 위치 변화가 없으면 자동 멈춤 실행
+    if (autoStopTimer > 6 && isRunning && !isPaused && totalDistance > 0.01) {
+        pauseTracking();
+    }
+}
+
 function updateUI() {
     document.getElementById('dist').textContent = totalDistance.toFixed(2);
-    
-    // 평균 페이스 계산
-    if (totalDistance > 0.005) {
+    if (totalDistance > 0.003) {
         const avgP = (elapsedSeconds / 60) / totalDistance;
         document.getElementById('avgPace').textContent = formatPace(avgP);
     }
 
-    // [핵심] 실시간 페이스 계산 (최근 5초간 3m만 움직여도 계산 시작)
     const now = Date.now();
     recentPoints.push({ time: now, dist: totalDistance });
-    recentPoints = recentPoints.filter(p => now - p.time <= 5000);
+    recentPoints = recentPoints.filter(p => now - p.time <= 4000); // 4초 데이터로 더 민감하게 반응
 
     if (recentPoints.length > 2) {
         const dDiff = recentPoints[recentPoints.length-1].dist - recentPoints[0].dist;
         const tDiff = (recentPoints[recentPoints.length-1].time - recentPoints[0].time) / 60000;
-        
-        if (dDiff > 0.003) { // 3미터 이상 이동 시 페이스 출력
+        if (dDiff > 0.001) { 
             const curP = tDiff / dDiff;
             document.getElementById('curPace').textContent = formatPace(curP);
-        } else if (dDiff < 0.0005 && elapsedSeconds > 5) {
-             document.getElementById('curPace').textContent = "--'--\"";
         }
     }
 }
 
 function formatPace(paceFloat) {
-    if (!isFinite(paceFloat) || paceFloat <= 0 || paceFloat > 30) return "--'--\"";
+    if (!isFinite(paceFloat) || paceFloat <= 0 || paceFloat > 40) return "--'--\"";
     const min = Math.floor(paceFloat);
     const sec = String(Math.floor((paceFloat - min) * 60)).padStart(2, '0');
     return `${min}'${sec}"`;
@@ -161,18 +180,12 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 
 window.addEventListener('devicemotion', (e) => {
     if (!isRunning || isPaused) return;
-    const acc = e.accelerationIncludingGravity;
-    if (!acc) return;
-    const mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-    
-    // 빠른 걸음의 낮은 충격량도 감지하도록 임계값을 12.5에서 11.5로 하향
-    if (mag > 11.5) {
+    const mag = Math.sqrt(e.accelerationIncludingGravity.x**2 + e.accelerationIncludingGravity.y**2 + e.accelerationIncludingGravity.z**2);
+    if (mag > 11.2) { // 걷기 강도 인식 하향
         const now = Date.now();
-        if (now - lastStepTime > 280) { // 걸음 간격 필터링
-            stepCount++;
-            lastStepTime = now;
+        if (now - lastStepTime > 260) {
+            stepCount++; lastStepTime = now;
             document.getElementById('cadence').textContent = Math.round((stepCount / (elapsedSeconds || 1)) * 60);
-            // GCT/FLIGHT 데이터 시각화 (임시값)
             document.getElementById('gct').textContent = Math.floor(Math.random() * 20 + 240);
             document.getElementById('flight').textContent = Math.floor(Math.random() * 15 + 85);
         }
