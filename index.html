@@ -3,114 +3,183 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Team OppaRun (Final)</title>
+    <title>Team OppaRun (Fixed UI)</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
-        /* 지도를 화면의 40%로 조금 더 줄여서 아래쪽 공간 확보 */
-        #map { height: 40vh; width: 100%; border-bottom: 1px solid #333; }
+        /* 기본 레이아웃 설정 */
+        body, html { 
+            margin: 0; padding: 0; 
+            background: #000; color: #fff; 
+            font-family: -apple-system, sans-serif; 
+            overflow: hidden; 
+            height: 100%; /* 구형 브라우저 대비 */
+            height: 100dvh; /* 실제 모바일 화면 높이에 맞춤 */
+        }
+
+        /* 전체를 세로로 배치하는 컨테이너 */
+        .wrapper {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            width: 100%;
+        }
+
+        /* 지도는 고정 높이 대신 남는 공간의 일부를 차지하도록 설정 */
+        #map { 
+            height: 35%; /* 지도를 조금 더 줄여 여유 공간 확보 */
+            width: 100%; 
+            flex-shrink: 0; /* 지도가 너무 작아지지 않게 방지 */
+            border-bottom: 1px solid #333; 
+        }
         
-        .display { padding: 10px; display: flex; flex-direction: column; height: 58vh; justify-content: space-between; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        /* 정보 표시 영역: 남는 공간을 모두 차지 */
+        .display { 
+            flex: 1; 
+            display: flex; 
+            flex-direction: column; 
+            justify-content: space-around; /* 요소들을 균등하게 배치 */
+            padding: 15px; 
+            box-sizing: border-box;
+            min-height: 0; /* 내부 요소가 넘치지 않게 제한 */
+        }
+
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .box { background: #1a1a1a; padding: 10px; border-radius: 12px; text-align: center; }
-        .pace-main { border: 2px solid #00ff88; padding: 12px; border-radius: 15px; text-align: center; }
+        .box-label { color: #888; font-size: 11px; font-weight: bold; }
+        .box-value { font-size: 24px; color: #00ff88; font-weight: 900; }
         
-        #btn, #lockBtn { border: none; padding: 14px; border-radius: 50px; font-size: 18px; font-weight: bold; width: 100%; }
-        #btn { background: #ff4444; color: #fff; margin-bottom: 8px; }
-        #lockBtn { background: #444; color: #00ff88; font-size: 14px; }
+        .pace-main { 
+            border: 2px solid #00ff88; 
+            padding: 12px; 
+            border-radius: 15px; 
+            text-align: center; 
+            background: rgba(0, 255, 136, 0.05);
+        }
+        .pace-label { color: #00ff88; font-size: 13px; font-weight: bold; }
+        .pace-value { font-size: 42px; font-weight: 900; }
+        
+        #btn-group { display: flex; flex-direction: column; gap: 8px; margin-top: 5px; }
+        #btn, #lockBtn { 
+            border: none; 
+            padding: 14px; 
+            border-radius: 50px; 
+            font-size: 18px; 
+            font-weight: 900; 
+            width: 100%; 
+            cursor: pointer;
+        }
+        #btn { background: #ff4444; color: #fff; }
+        #lockBtn { background: #333; color: #00ff88; font-size: 14px; border: 1px solid #444; }
         
         #lock-overlay {
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.85); z-index: 9999; text-align: center; color: #00ff88;
+            background: rgba(0,0,0,0.9); z-index: 9999; text-align: center; color: #00ff88;
         }
+        #gps-info { font-size: 11px; color: #ffcc00; text-align: center; margin-bottom: 2px; }
     </style>
 </head>
 <body>
-    <div id="map"></div>
-    <div id="lock-overlay" onclick="unlockScreen()">
-        <div style="margin-top: 50vh;">
-            <div style="font-size: 40px;">🔒</div>
-            <p>화면 잠김 중...<br><span style="font-size: 13px; color: #fff;">(해제하려면 여기를 터치하세요)</span></p>
+    <div class="wrapper">
+        <div id="map"></div>
+
+        <div class="display">
+            <div id="gps-info">GPS 신호 대기 중...</div>
+            
+            <div class="grid">
+                <div class="box">
+                    <div class="box-label">DISTANCE (km)</div>
+                    <div id="d" class="box-value">0.00</div>
+                </div>
+                <div class="box">
+                    <div class="box-label">TIME</div>
+                    <div id="t" class="box-value" style="color:#fff;">00:00:00</div>
+                </div>
+            </div>
+
+            <div class="pace-main">
+                <div class="pace-label">CURRENT PACE</div>
+                <div id="p" class="pace-value">--'--"</div>
+            </div>
+
+            <div id="btn-group">
+                <button id="btn">START RUN</button>
+                <button id="lockBtn" style="display:none;">SCREEN LOCK</button>
+            </div>
         </div>
     </div>
 
-    <div class="display">
-        <div id="gps-info" style="text-align:center; font-size:11px; color:#ffcc00;">신호 대기 중...</div>
-        <div class="grid">
-            <div class="box"><small style="color:#888;">DISTANCE</small><div id="d" style="font-size:22px; color:#00ff88; font-weight:bold;">0.00</div></div>
-            <div class="box"><small style="color:#888;">TIME</small><div id="t" style="font-size:22px; font-weight:bold;">00:00:00</div></div>
-        </div>
-        <div class="pace-main">
-            <small style="color:#00ff88;">CURRENT PACE (5s Avg)</small>
-            <div id="p" style="font-size:36px; font-weight:bold;">--'--"</div>
-        </div>
-        <div style="padding-bottom: 10px;">
-            <button id="btn">START</button>
-            <button id="lockBtn" style="display:none;">SCREEN LOCK</button>
+    <div id="lock-overlay" onclick="unlockScreen()">
+        <div style="margin-top: 45vh;">
+            <div style="font-size: 50px; margin-bottom: 10px;">🔒</div>
+            <p style="font-weight: bold; font-size: 18px;">SCREEN LOCKED</p>
+            <p style="font-size: 13px; color: #aaa;">터치하면 해제됩니다</p>
         </div>
     </div>
 
     <script>
-        // 처음부터 오빠 위치를 찾아서 지도 시작
-        let map = L.map('map');
+        // 기존 맵 및 로직 유지
+        let map = L.map('map', { zoomControl: false }).setView([37.5665, 126.9780], 15);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
         let path = L.polyline([], {color: '#00ff88', weight: 6}).addTo(map);
 
-        let running = false, dist = 0, lastPos = null, sec = 0, lastPaceUpdate = 0;
+        let running = false, dist = 0, lastPos = null, sec = 0;
+        let timerInterval = null, wakeLock = null;
+
+        async function requestWakeLock() {
+            try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } 
+            catch (err) { console.warn("Wake Lock fail"); }
+        }
 
         function update(pos) {
             const c = pos.coords;
             document.getElementById('gps-info').innerText = `GPS Accuracy: ±${Math.round(c.accuracy)}m`;
             
-            // 첫 위치를 잡으면 거기로 지도 이동
             if (!lastPos) {
                 map.setView([c.latitude, c.longitude], 17);
-            }
-
-            if (!running) {
                 lastPos = {lat: c.latitude, lng: c.longitude};
                 return;
             }
 
-            let d = map.distance([lastPos.lat, lastPos.lng], [c.latitude, c.longitude]);
-            if (c.accuracy < 30 && d > 2) {
-                dist += d;
-                document.getElementById('d').innerText = (dist / 1000).toFixed(2);
-                path.addLatLng([c.latitude, c.longitude]);
-                map.panTo([c.latitude, c.longitude]);
-            }
-            lastPos = {lat: c.latitude, lng: c.longitude};
-
-            let now = Date.now();
-            if (now - lastPaceUpdate > 5000) {
-                if (c.speed > 0.5) {
+            if (running && c.accuracy < 30) {
+                let d = map.distance([lastPos.lat, lastPos.lng], [c.latitude, c.longitude]);
+                if (d > 3 && d < 50) { 
+                    dist += d;
+                    document.getElementById('d').innerText = (dist / 1000).toFixed(2);
+                    path.addLatLng([c.latitude, c.longitude]);
+                    map.panTo([c.latitude, c.longitude]);
+                }
+                
+                if (c.speed > 0.8) {
                     let pace = 16.6667 / c.speed;
                     let m = Math.floor(pace), s = Math.round((pace-m)*60);
                     document.getElementById('p').innerText = `${m}'${s.toString().padStart(2,'0')}"`;
-                } else { document.getElementById('p').innerText = `--'--"`; }
-                lastPaceUpdate = now;
+                } else {
+                    document.getElementById('p').innerText = `--'--"`;
+                }
             }
+            lastPos = {lat: c.latitude, lng: c.longitude};
         }
 
         document.getElementById('btn').onclick = function() {
             if (!running) {
-                running = true; this.innerText = "STOP"; 
+                running = true;
+                this.innerText = "FINISH";
+                this.style.background = "#444";
                 document.getElementById('lockBtn').style.display = "block";
-                setInterval(() => {
+                requestWakeLock();
+                timerInterval = setInterval(() => {
                     sec++;
                     let h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;
                     document.getElementById('t').innerText = `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
                 }, 1000);
-            } else { location.reload(); }
+            } else {
+                if(confirm("기록을 초기화할까요?")) location.reload();
+            }
         };
 
-        document.getElementById('lockBtn').onclick = function() {
-            document.getElementById('lock-overlay').style.display = "block";
-        };
-        function unlockScreen() {
-            document.getElementById('lock-overlay').style.display = "none";
-        }
+        document.getElementById('lockBtn').onclick = function() { document.getElementById('lock-overlay').style.display = "block"; };
+        function unlockScreen() { document.getElementById('lock-overlay').style.display = "none"; }
 
         navigator.geolocation.watchPosition(update, null, {enableHighAccuracy: true});
     </script>
