@@ -3,68 +3,59 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Team OppaRun (Stable)</title>
+    <title>Team OppaRun (Final)</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        /* 화면이 위아래로 덜렁거리지 않게 고정 */
-        body { margin: 0; background: #000; color: #fff; font-family: -apple-system, sans-serif; overflow: hidden; }
+        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
+        /* 지도를 화면의 40%로 조금 더 줄여서 아래쪽 공간 확보 */
+        #map { height: 40vh; width: 100%; border-bottom: 1px solid #333; }
         
-        /* 지도를 화면의 약 45% 정도로 고정해서 아래쪽 공간 확보 */
-        #map { height: 45vh; width: 100%; border-bottom: 1px solid #333; }
+        .display { padding: 10px; display: flex; flex-direction: column; height: 58vh; justify-content: space-between; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .box { background: #1a1a1a; padding: 10px; border-radius: 12px; text-align: center; }
+        .pace-main { border: 2px solid #00ff88; padding: 12px; border-radius: 15px; text-align: center; }
         
-        .display { padding: 15px; display: flex; flex-direction: column; height: 50vh; justify-content: space-between; }
+        #btn, #lockBtn { border: none; padding: 14px; border-radius: 50px; font-size: 18px; font-weight: bold; width: 100%; }
+        #btn { background: #ff4444; color: #fff; margin-bottom: 8px; }
+        #lockBtn { background: #444; color: #00ff88; font-size: 14px; }
         
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        .box { background: #1a1a1a; padding: 12px; border-radius: 12px; text-align: center; }
-        
-        /* 페이스를 강조하는 박스 */
-        .pace-main { 
-            border: 2px solid #00ff88; 
-            padding: 15px; 
-            border-radius: 15px; 
-            text-align: center;
-            background: rgba(0, 255, 136, 0.05);
+        #lock-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); z-index: 9999; text-align: center; color: #00ff88;
         }
-        
-        #btn { 
-            background: #ff4444; color: #fff; border: none; 
-            padding: 15px; border-radius: 50px; 
-            width: 100%; font-size: 22px; font-weight: bold; 
-            box-shadow: 0 4px 15px rgba(255, 68, 68, 0.3);
-        }
-        
-        small { color: #888; font-size: 12px; letter-spacing: 1px; }
-        .nav-text { text-align: center; color: #444; font-size: 12px; margin-top: 5px; }
     </style>
 </head>
 <body>
     <div id="map"></div>
-    
-    <div class="display">
-        <div id="gps-info" style="text-align:center; font-size:11px; color:#ffcc00;">GPS 신호 대기 중...</div>
-        
-        <div class="grid">
-            <div class="box"><small>DISTANCE</small><div id="d" style="font-size:26px; color:#00ff88; font-weight:bold;">0.00</div><small>KM</small></div>
-            <div class="box"><small>TIME</small><div id="t" style="font-size:26px; font-weight:bold;">00:00:00</div></div>
+    <div id="lock-overlay" onclick="unlockScreen()">
+        <div style="margin-top: 50vh;">
+            <div style="font-size: 40px;">🔒</div>
+            <p>화면 잠김 중...<br><span style="font-size: 13px; color: #fff;">(해제하려면 여기를 터치하세요)</span></p>
         </div>
+    </div>
 
+    <div class="display">
+        <div id="gps-info" style="text-align:center; font-size:11px; color:#ffcc00;">신호 대기 중...</div>
+        <div class="grid">
+            <div class="box"><small style="color:#888;">DISTANCE</small><div id="d" style="font-size:22px; color:#00ff88; font-weight:bold;">0.00</div></div>
+            <div class="box"><small style="color:#888;">TIME</small><div id="t" style="font-size:22px; font-weight:bold;">00:00:00</div></div>
+        </div>
         <div class="pace-main">
             <small style="color:#00ff88;">CURRENT PACE (5s Avg)</small>
-            <div id="p" style="font-size:42px; font-weight:bold; letter-spacing: 2px;">--'--"</div>
+            <div id="p" style="font-size:36px; font-weight:bold;">--'--"</div>
         </div>
-
-        <div>
+        <div style="padding-bottom: 10px;">
             <button id="btn">START</button>
-            <div class="nav-text">RUNNING  |  HISTORY</div>
+            <button id="lockBtn" style="display:none;">SCREEN LOCK</button>
         </div>
     </div>
 
     <script>
-        // 초기 지도는 오빠 위치 위주로
-        let map = L.map('map').setView([37.44, 126.5], 17);
+        // 처음부터 오빠 위치를 찾아서 지도 시작
+        let map = L.map('map');
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-        let path = L.polyline([], {color: '#00ff88', weight: 6, opacity: 0.8}).addTo(map);
+        let path = L.polyline([], {color: '#00ff88', weight: 6}).addTo(map);
 
         let running = false, dist = 0, lastPos = null, sec = 0, lastPaceUpdate = 0;
 
@@ -72,55 +63,56 @@
             const c = pos.coords;
             document.getElementById('gps-info').innerText = `GPS Accuracy: ±${Math.round(c.accuracy)}m`;
             
-            if (!running) return;
+            // 첫 위치를 잡으면 거기로 지도 이동
+            if (!lastPos) {
+                map.setView([c.latitude, c.longitude], 17);
+            }
 
-            // 1. 거리 계산 및 경로 그리기
-            if (lastPos) {
-                let d = map.distance([lastPos.lat, lastPos.lng], [c.latitude, c.longitude]);
-                // 정확도가 30m 이내이고, 2m 이상 움직였을 때만 기록
-                if (c.accuracy < 30 && d > 2) {
-                    dist += d;
-                    document.getElementById('d').innerText = (dist / 1000).toFixed(2);
-                    path.addLatLng([c.latitude, c.longitude]);
-                    map.panTo([c.latitude, c.longitude]);
-                }
+            if (!running) {
+                lastPos = {lat: c.latitude, lng: c.longitude};
+                return;
+            }
+
+            let d = map.distance([lastPos.lat, lastPos.lng], [c.latitude, c.longitude]);
+            if (c.accuracy < 30 && d > 2) {
+                dist += d;
+                document.getElementById('d').innerText = (dist / 1000).toFixed(2);
+                path.addLatLng([c.latitude, c.longitude]);
+                map.panTo([c.latitude, c.longitude]);
             }
             lastPos = {lat: c.latitude, lng: c.longitude};
 
-            // 2. 5초마다 페이스 계산
             let now = Date.now();
             if (now - lastPaceUpdate > 5000) {
-                if (c.speed > 0.5) { // 시속 약 1.8km 이상일 때만 페이스 계산
+                if (c.speed > 0.5) {
                     let pace = 16.6667 / c.speed;
                     let m = Math.floor(pace), s = Math.round((pace-m)*60);
                     document.getElementById('p').innerText = `${m}'${s.toString().padStart(2,'0')}"`;
-                } else {
-                    document.getElementById('p').innerText = `--'--"`;
-                }
+                } else { document.getElementById('p').innerText = `--'--"`; }
                 lastPaceUpdate = now;
             }
         }
 
         document.getElementById('btn').onclick = function() {
             if (!running) {
-                running = true; 
-                this.innerText = "STOP"; 
-                this.style.background = "#444";
+                running = true; this.innerText = "STOP"; 
+                document.getElementById('lockBtn').style.display = "block";
                 setInterval(() => {
                     sec++;
                     let h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;
                     document.getElementById('t').innerText = `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
                 }, 1000);
-            } else { 
-                location.reload(); // 정지 시 깔끔하게 새로고침
-            }
+            } else { location.reload(); }
         };
 
-        navigator.geolocation.watchPosition(update, null, {
-            enableHighAccuracy: true,
-            maximumAge: 0,
-            timeout: 5000
-        });
+        document.getElementById('lockBtn').onclick = function() {
+            document.getElementById('lock-overlay').style.display = "block";
+        };
+        function unlockScreen() {
+            document.getElementById('lock-overlay').style.display = "none";
+        }
+
+        navigator.geolocation.watchPosition(update, null, {enableHighAccuracy: true});
     </script>
 </body>
 </html>
