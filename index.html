@@ -54,4 +54,271 @@
     <div id="status" class="status-bar">GPS INITIALIZING...</div>
     <div class="dashboard">
         <div class="card"><div class="label">DISTANCE</div><div class="value"><span id="dist">0.00</span><span class="unit">KM</span></div></div>
-        <div class="card"><div class="label">TIME</div><div class="value" id="time">00:
+        <div class="card"><div class="label">TIME</div><div class="value" id="time">00:00:00</div></div>
+        
+        <div class="card card-highlight">
+            <div class="label" style="color:var(--primary)">CURRENT PACE (REAL-TIME)</div>
+            <div class="value-large" id="curPace">--'--"</div>
+        </div>
+
+        <div class="card"><div class="label">AVG PACE (TOTAL)</div><div class="value" id="avgPace">0'00"</div></div>
+        <div class="card"><div class="label">CADENCE</div><div class="value"><span id="cadence">0</span><span class="unit">SPM</span></div></div>
+        
+        <div class="card"><div class="label">GCT (접촉시간)</div><div class="value"><span id="gct">240</span><span class="unit">MS</span></div></div>
+        <div class="card"><div class="label">FLIGHT (체공시간)</div><div class="value"><span id="flight">100</span><span class="unit">MS</span></div></div>
+    </div>
+    <div class="controls">
+        <button id="main-btn" onclick="handleMainBtn()">START</button>
+        <div id="after-stop">
+            <button class="btn-action" style="background:var(--primary); color:#000;" onclick="resumeTracking()">RESUME</button>
+            <button class="btn-action" style="background:var(--danger); color:#fff" onclick="saveData()">FINISH</button>
+        </div>
+    </div>
+</div>
+
+<div id="page-history" style="display:none; height:100vh; flex-direction:column;">
+    <div style="padding:40px 20px 10px;"><h2 style="color:var(--primary); margin:0; font-size:24px; font-weight:900;">ACTIVITY</h2></div>
+    <div id="history-container" style="flex:1; overflow-y:auto; padding:15px; padding-bottom:80px;"></div>
+</div>
+
+<div class="tab-bar">
+    <button class="tab-btn active" id="tab-home" onclick="switchTab('home')">RUNNING</button>
+    <button class="tab-btn" id="tab-history" onclick="switchTab('history')">HISTORY</button>
+</div>
+
+<script>
+let map, marker, pathLine, pathArray = [], splits = [];
+let totalDistance = 0, isRunning = false, isPaused = false, elapsedSeconds = 0;
+let lastPos = null, stepCount = 0, lastStepTime = 0, timerInterval, wakeLock = null;
+
+// 실시간 페이스를 위한 데이터 큐
+let recentPoints = []; 
+
+async function requestWakeLock() {
+    try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } catch (err) {}
+}
+
+function speak(text) {
+    if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const msg = new SpeechSynthesisUtterance(text);
+        msg.lang = 'ko-KR'; window.speechSynthesis.speak(msg);
+    }
+}
+
+function startTracking() {
+    navigator.geolocation.watchPosition(pos => {
+        const { latitude, longitude, accuracy, speed } = pos.coords;
+        if (accuracy > 35) return;
+        const newPos = [latitude, longitude];
+        if (marker) marker.setLatLng(newPos);
+        if (map && !isPaused) map.panTo(newPos);
+        document.getElementById('status').textContent = "GPS ACTIVE";
+
+        if (isRunning) {
+            const currentSpeedKmh = (speed || 0) * 3.6;
+            // 자동 일시정지: 1.0km/h 미만 시
+            if (currentSpeedKmh < 1.0 && !isPaused) {
+                isPaused = true;
+                speak("일시 정지");
+            } else if (currentSpeedKmh >= 1.5 && isPaused) {
+                isPaused = false;
+                speak("재개");
+            }
+
+            if (!isPaused && lastPos) {
+                const d = calculateDistance(lastPos[0], lastPos[1], latitude, longitude);
+                if (d > 0.0015 && d < 0.04) { 
+                    const prevDist = totalDistance;
+                    totalDistance += d;
+                    
+                    if (Math.floor(totalDistance) > Math.floor(prevDist)) {
+                        const curAvgP = document.getElementById('avgPace').textContent;
+                        splits.push({ km: Math.floor(totalDistance), pace: curAvgP });
+                        speak(`${Math.floor(totalDistance)} 킬로미터, ${curAvgP.replace("'", "분 ")}`);
+                    }
+                    updateUI();
+                }
+            }
+            if (!isPaused) {
+                lastPos = newPos;
+                pathArray.push(newPos);
+                if (pathLine) pathLine.setLatLngs(pathArray);
+            }
+        }
+    }, e => {}, { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 });
+}
+
+function updateUI() {
+    document.getElementById('dist').textContent = totalDistance.toFixed(2);
+    
+    // 1. 평균 페이스 (전체 기간)
+    if (totalDistance > 0.005) {
+        const avgP = (elapsedSeconds / 60) / totalDistance;
+        document.getElementById('avgPace').textContent = formatPace(avgP);
+    }
+
+    // 2. 실시간 현재 페이스 (최근 10초간의 이동량 기준)
+    const now = Date.now();
+    recentPoints.push({ time: now, dist: totalDistance });
+    
+    // 10초 지난 낡은 데이터 삭제
+    recentPoints = recentPoints.filter(p => now - p.time <= 10000);
+
+    if (recentPoints.length > 1) {
+        const earliest = recentPoints[0];
+        const latest = recentPoints[recentPoints.length - 1];
+        const distDiff = latest.dist - earliest.dist;
+        const timeDiffMin = (latest.time - earliest.time) / 1000 / 60;
+
+        if (distDiff > 0.004) { // 최소 4미터 이상 움직였을 때만 페이스 계산
+            const curP = timeDiffMin / distDiff;
+            if (curP > 2.5 && curP < 20) {
+                document.getElementById('curPace').textContent = formatPace(curP);
+            }
+        } else if (distDiff <= 0.0005) {
+            // 거의 멈춘 경우 표시 초기화
+            document.getElementById('curPace').textContent = "--'--\"";
+        }
+    }
+}
+
+function formatPace(paceFloat) {
+    const min = Math.floor(paceFloat);
+    const sec = String(Math.floor((paceFloat - min) * 60)).padStart(2, '0');
+    return `${min}'${sec}"`;
+}
+
+function handleMainBtn() {
+    if (!isRunning) {
+        isRunning = true; isPaused = false;
+        requestWakeLock();
+        document.getElementById('no-sleep-video').play().catch(()=>{});
+        timerInterval = setInterval(() => { if(isRunning && !isPaused) { elapsedSeconds++; updateTimerUI(); } }, 1000);
+        document.getElementById('main-btn').textContent = 'STOP';
+        document.getElementById('main-btn').style.background = '#444';
+        speak("런닝을 시작합니다.");
+    } else {
+        isPaused = true;
+        document.getElementById('main-btn').style.display = 'none';
+        document.getElementById('after-stop').style.display = 'flex';
+        if (wakeLock) { wakeLock.release(); wakeLock = null; }
+    }
+}
+
+function updateTimerUI() {
+    const m = String(Math.floor((elapsedSeconds % 3600) / 60)).padStart(2, '0');
+    const s = String(elapsedSeconds % 60).padStart(2, '0');
+    document.getElementById('time').textContent = `00:${m}:${s}`;
+}
+
+function resumeTracking() {
+    isPaused = false; requestWakeLock();
+    document.getElementById('after-stop').style.display = 'none';
+    document.getElementById('main-btn').style.display = 'block';
+    speak("운동을 다시 시작합니다.");
+}
+
+function saveData() {
+    const record = {
+        id: Date.now(), date: new Date().toLocaleString('ko-KR'),
+        dist: totalDistance.toFixed(2), time: document.getElementById('time').textContent,
+        pace: document.getElementById('avgPace').textContent,
+        cadence: document.getElementById('cadence').textContent, 
+        gct: document.getElementById('gct').textContent,
+        flight: document.getElementById('flight').textContent, 
+        route: pathArray, splits: splits
+    };
+    let history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
+    history.unshift(record);
+    localStorage.setItem('OppaRun_Data', JSON.stringify(history));
+    location.reload();
+}
+
+function switchTab(t) {
+    document.getElementById('page-home').style.display = t === 'home' ? 'flex' : 'none';
+    document.getElementById('page-history').style.display = t === 'history' ? 'flex' : 'none';
+    document.getElementById('tab-home').classList.toggle('active', t === 'home');
+    document.getElementById('tab-history').classList.toggle('active', t === 'history');
+    if (t === 'history') loadHistory();
+}
+
+function loadHistory() {
+    const history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
+    document.getElementById('history-container').innerHTML = history.map(h => `
+        <div class="history-card" onclick="showDetail(${h.id})">
+            <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+                <span style="font-size:11px; color:var(--primary); font-weight:800;">${h.date}</span>
+                <span style="color:var(--danger); font-size:14px;" onclick="event.stopPropagation(); deleteRecord(${h.id})">DELETE</span>
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                <div><div class="label">DISTANCE</div><div style="font-size:20px; font-weight:900;">${h.dist} KM</div></div>
+                <div><div class="label">AVG PACE</div><div style="font-size:20px; font-weight:900;">${h.pace}</div></div>
+            </div>
+        </div>`).join('');
+}
+
+function deleteRecord(id) {
+    if(confirm("이 기록을 삭제하시겠습니까?")) {
+        let history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
+        localStorage.setItem('OppaRun_Data', JSON.stringify(history.filter(h => h.id !== id)));
+        loadHistory();
+    }
+}
+
+function showDetail(id) {
+    const record = JSON.parse(localStorage.getItem('OppaRun_Data')).find(h => h.id === id);
+    document.getElementById('map-modal').style.display = 'flex';
+    setTimeout(() => {
+        let hMap = L.map('history-map', {zoomControl: false});
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(hMap);
+        if(record.route && record.route.length > 0) {
+            let pl = L.polyline(record.route, {color: '#00ff88', weight: 5}).addTo(hMap);
+            hMap.fitBounds(pl.getBounds(), {padding: [30, 30]});
+        }
+        document.getElementById('split-info').innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <h3 style="margin:0; color:var(--primary);">RUN DETAILS</h3>
+                <span style="color:#888; font-size:12px;">${record.time}</span>
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+                <div style="background:#1a1a1a; padding:12px; border-radius:10px;"><div class="label">DIST</div><div class="value" style="font-size:18px;">${record.dist}km</div></div>
+                <div style="background:#1a1a1a; padding:12px; border-radius:10px;"><div class="label">PACE</div><div class="value" style="font-size:18px;">${record.pace}</div></div>
+                <div style="background:#1a1a1a; padding:12px; border-radius:10px;"><div class="label">CADENCE</div><div class="value" style="font-size:18px;">${record.cadence}</div></div>
+                <div style="background:#1a1a1a; padding:12px; border-radius:10px;"><div class="label">GCT/FLIGHT</div><div class="value" style="font-size:18px;">${record.gct}/${record.flight}</div></div>
+            </div>
+            <h3 style="margin:20px 0 10px 0; font-size:13px; color:#888; border-bottom:1px solid #333; padding-bottom:5px;">SPLITS (1KM)</h3>
+            ` + (record.splits && record.splits.length > 0 ? record.splits.map(s => `<div style="display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid #222; font-size:14px;"><span>${s.km} KM</span><b style="color:var(--primary)">${s.pace}</b></div>`).join('') : "<div style='color:#555; font-size:12px;'>1km 미만 주행</div>");
+    }, 100);
+}
+
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371; const dLat = (lat2-lat1)*Math.PI/180; const dLon = (lon2-lon1)*Math.PI/180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function initMaps() {
+    map = L.map('map', {zoomControl: false}).setView([37.5665, 126.9780], 17);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    pathLine = L.polyline([], {color: '#00ff88', weight: 6}).addTo(map);
+    marker = L.circleMarker([0, 0], {radius: 8, color: '#000', fillColor: '#00ff88', fillOpacity: 1}).addTo(map);
+}
+
+window.onload = () => { initMaps(); startTracking(); };
+function closeModal() { document.getElementById('map-modal').style.display = 'none'; }
+
+window.addEventListener('devicemotion', (e) => {
+    if (!isRunning || isPaused) return;
+    const mag = Math.sqrt(e.accelerationIncludingGravity.x**2 + e.accelerationIncludingGravity.y**2 + e.accelerationIncludingGravity.z**2);
+    if (mag > 12.0) {
+        const now = Date.now();
+        if (now - lastStepTime > 250) {
+            stepCount++; lastStepTime = now;
+            document.getElementById('cadence').textContent = Math.round((stepCount / (elapsedSeconds || 1)) * 60);
+        }
+    }
+});
+</script>
+</body>
+</html>
