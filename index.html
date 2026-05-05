@@ -3,185 +3,96 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Team OppaRun (Fixed UI)</title>
+    <title>OppaRun Pro (Fixed Marker)</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        /* 기본 레이아웃 설정 */
-        body, html { 
-            margin: 0; padding: 0; 
-            background: #000; color: #fff; 
-            font-family: -apple-system, sans-serif; 
-            overflow: hidden; 
-            height: 100%; /* 구형 브라우저 대비 */
-            height: 100dvh; /* 실제 모바일 화면 높이에 맞춤 */
-        }
-
-        /* 전체를 세로로 배치하는 컨테이너 */
-        .wrapper {
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-            width: 100%;
-        }
-
-        /* 지도는 고정 높이 대신 남는 공간의 일부를 차지하도록 설정 */
-        #map { 
-            height: 35%; /* 지도를 조금 더 줄여 여유 공간 확보 */
-            width: 100%; 
-            flex-shrink: 0; /* 지도가 너무 작아지지 않게 방지 */
-            border-bottom: 1px solid #333; 
-        }
+        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; height: 100vh; }
+        .container { display: flex; flex-direction: column; height: 100vh; }
+        #map { height: 35vh; width: 100%; border-bottom: 1px solid #333; }
+        .content { flex: 1; display: flex; flex-direction: column; padding: 10px; justify-content: space-between; }
+        .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+        .box { background: #151515; padding: 8px; border-radius: 10px; text-align: center; border: 1px solid #222; }
+        .box small { color: #888; font-size: 11px; display: block; margin-bottom: 2px; }
+        .val { font-size: 18px; font-weight: bold; color: #fff; }
+        .green-val { color: #00ff88; }
+        .pace-main { border: 2px solid #00ff88; padding: 10px; border-radius: 15px; text-align: center; background: rgba(0,255,136,0.05); margin: 5px 0; }
+        .btn-area { display: flex; flex-direction: column; gap: 5px; }
+        button { border: none; padding: 12px; border-radius: 30px; font-size: 16px; font-weight: bold; width: 100%; }
+        #startBtn { background: #ff4444; color: #fff; }
+        .sub-btns { display: none; gap: 5px; }
+        #resumeBtn { background: #00ff88; color: #000; flex: 1; }
+        #finishBtn { background: #444; color: #fff; flex: 1; }
+        #lockBtn { background: #222; color: #00ff88; font-size: 13px; margin-top: 2px; }
+        .tab-bar { display: flex; border-top: 1px solid #333; background: #000; padding: 10px 0; }
+        .tab-item { flex: 1; text-align: center; font-size: 12px; color: #555; }
+        .tab-active { color: #00ff88; font-weight: bold; }
+        #lock-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 9999; text-align: center; }
         
-        /* 정보 표시 영역: 남는 공간을 모두 차지 */
-        .display { 
-            flex: 1; 
-            display: flex; 
-            flex-direction: column; 
-            justify-content: space-around; /* 요소들을 균등하게 배치 */
-            padding: 15px; 
-            box-sizing: border-box;
-            min-height: 0; /* 내부 요소가 넘치지 않게 제한 */
-        }
-
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        .box { background: #1a1a1a; padding: 10px; border-radius: 12px; text-align: center; }
-        .box-label { color: #888; font-size: 11px; font-weight: bold; }
-        .box-value { font-size: 24px; color: #00ff88; font-weight: 900; }
-        
-        .pace-main { 
-            border: 2px solid #00ff88; 
-            padding: 12px; 
-            border-radius: 15px; 
-            text-align: center; 
-            background: rgba(0, 255, 136, 0.05);
-        }
-        .pace-label { color: #00ff88; font-size: 13px; font-weight: bold; }
-        .pace-value { font-size: 42px; font-weight: 900; }
-        
-        #btn-group { display: flex; flex-direction: column; gap: 8px; margin-top: 5px; }
-        #btn, #lockBtn { 
-            border: none; 
-            padding: 14px; 
-            border-radius: 50px; 
-            font-size: 18px; 
-            font-weight: 900; 
-            width: 100%; 
-            cursor: pointer;
-        }
-        #btn { background: #ff4444; color: #fff; }
-        #lockBtn { background: #333; color: #00ff88; font-size: 14px; border: 1px solid #444; }
-        
-        #lock-overlay {
-            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.9); z-index: 9999; text-align: center; color: #00ff88;
-        }
-        #gps-info { font-size: 11px; color: #ffcc00; text-align: center; margin-bottom: 2px; }
+        /* 내 위치 점 스타일 */
+        .my-location { background: #007bff; border: 2px solid white; border-radius: 50%; width: 12px; height: 12px; box-shadow: 0 0 5px rgba(0,0,0,0.5); }
     </style>
 </head>
 <body>
-    <div class="wrapper">
+    <div class="container">
         <div id="map"></div>
-
-        <div class="display">
-            <div id="gps-info">GPS 신호 대기 중...</div>
-            
-            <div class="grid">
-                <div class="box">
-                    <div class="box-label">DISTANCE (km)</div>
-                    <div id="d" class="box-value">0.00</div>
-                </div>
-                <div class="box">
-                    <div class="box-label">TIME</div>
-                    <div id="t" class="box-value" style="color:#fff;">00:00:00</div>
-                </div>
+        <div id="lock-overlay" onclick="unlockScreen()"><div style="margin-top: 45vh;"><div style="font-size: 40px;">🔒</div><p>터치하여 잠금 해제</p></div></div>
+        <div class="content">
+            <div id="gps-stat" style="text-align:center; font-size:10px; color:#ffcc00;">GPS Accuracy: Wait...</div>
+            <div class="status-grid">
+                <div class="box"><small>DISTANCE</small><div id="d" class="val green-val">0.00</div></div>
+                <div class="box"><small>TIME</small><div id="t" class="val">00:00:00</div></div>
+                <div class="box"><small>AVG PACE</small><div id="avgP" class="val">--'--"</div></div>
+                <div class="box"><small>CADENCE</small><div id="cad" class="val">0</div></div>
             </div>
-
             <div class="pace-main">
-                <div class="pace-label">CURRENT PACE</div>
-                <div id="p" class="pace-value">--'--"</div>
+                <small style="color:#00ff88; font-size:11px;">CURRENT PACE</small>
+                <div id="p" style="font-size:32px; font-weight:bold;">--'--"</div>
             </div>
-
-            <div id="btn-group">
-                <button id="btn">START RUN</button>
+            <div class="btn-area">
+                <button id="startBtn">START RUN</button>
+                <div id="subBtns" class="sub-btns">
+                    <button id="resumeBtn">RESUME</button>
+                    <button id="finishBtn">STOP</button>
+                </div>
                 <button id="lockBtn" style="display:none;">SCREEN LOCK</button>
             </div>
         </div>
-    </div>
-
-    <div id="lock-overlay" onclick="unlockScreen()">
-        <div style="margin-top: 45vh;">
-            <div style="font-size: 50px; margin-bottom: 10px;">🔒</div>
-            <p style="font-weight: bold; font-size: 18px;">SCREEN LOCKED</p>
-            <p style="font-size: 13px; color: #aaa;">터치하면 해제됩니다</p>
+        <div class="tab-bar">
+            <div class="tab-item tab-active">🏃‍♂️ RUNNING</div>
+            <div class="tab-item">📜 HISTORY</div>
         </div>
     </div>
 
     <script>
-        // 기존 맵 및 로직 유지
-        let map = L.map('map', { zoomControl: false }).setView([37.5665, 126.9780], 15);
+        let map = L.map('map').setView([37.44, 126.5], 17);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
         let path = L.polyline([], {color: '#00ff88', weight: 6}).addTo(map);
+        
+        // 내 위치를 표시할 점(마커) 생성
+        let myMarker = L.marker([37.44, 126.5], {
+            icon: L.divIcon({className: 'my-location', iconSize: [12, 12]})
+        }).addTo(map);
 
-        let running = false, dist = 0, lastPos = null, sec = 0;
-        let timerInterval = null, wakeLock = null;
-
-        async function requestWakeLock() {
-            try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } 
-            catch (err) { console.warn("Wake Lock fail"); }
-        }
+        let isRunning = false, dist = 0, lastPos = null, sec = 0, timer, lastPaceUpdate = 0;
 
         function update(pos) {
             const c = pos.coords;
-            document.getElementById('gps-info').innerText = `GPS Accuracy: ±${Math.round(c.accuracy)}m`;
+            document.getElementById('gps-stat').innerText = `GPS Accuracy: ±${Math.round(c.accuracy)}m`;
             
-            if (!lastPos) {
-                map.setView([c.latitude, c.longitude], 17);
-                lastPos = {lat: c.latitude, lng: c.longitude};
-                return;
-            }
-
-            if (running && c.accuracy < 30) {
-                let d = map.distance([lastPos.lat, lastPos.lng], [c.latitude, c.longitude]);
-                if (d > 3 && d < 50) { 
-                    dist += d;
-                    document.getElementById('d').innerText = (dist / 1000).toFixed(2);
-                    path.addLatLng([c.latitude, c.longitude]);
-                    map.panTo([c.latitude, c.longitude]);
-                }
-                
-                if (c.speed > 0.8) {
-                    let pace = 16.6667 / c.speed;
-                    let m = Math.floor(pace), s = Math.round((pace-m)*60);
-                    document.getElementById('p').innerText = `${m}'${s.toString().padStart(2,'0')}"`;
-                } else {
-                    document.getElementById('p').innerText = `--'--"`;
-                }
-            }
-            lastPos = {lat: c.latitude, lng: c.longitude};
-        }
-
-        document.getElementById('btn').onclick = function() {
-            if (!running) {
-                running = true;
-                this.innerText = "FINISH";
-                this.style.background = "#444";
-                document.getElementById('lockBtn').style.display = "block";
-                requestWakeLock();
-                timerInterval = setInterval(() => {
-                    sec++;
-                    let h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;
-                    document.getElementById('t').innerText = `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
-                }, 1000);
-            } else {
-                if(confirm("기록을 초기화할까요?")) location.reload();
-            }
-        };
-
-        document.getElementById('lockBtn').onclick = function() { document.getElementById('lock-overlay').style.display = "block"; };
-        function unlockScreen() { document.getElementById('lock-overlay').style.display = "none"; }
-
-        navigator.geolocation.watchPosition(update, null, {enableHighAccuracy: true});
-    </script>
-</body>
-</html>
+            // 실시간으로 내 위치 점(Marker) 이동
+            myMarker.setLatLng([c.latitude, c.longitude]);
+            
+            if (!lastPos) map.setView([c.latitude, c.longitude], 17);
+            
+            if (isRunning && c.speed >= 0.5) {
+                if (lastPos) {
+                    let d = map.distance([lastPos.lat, lastPos.lng], [c.latitude, c.longitude]);
+                    if (c.accuracy < 30 && d > 2) {
+                        dist += d;
+                        document.getElementById('d').innerText = (dist/1000).toFixed(2);
+                        path.addLatLng([c.latitude, c.longitude]);
+                        map.panTo([c.latitude, c.longitude]);
+                        
+                        let avgPaceRaw = (sec / 60) / (dist / 1000);
+                        let am = Math.floor(avgPaceRaw), as
