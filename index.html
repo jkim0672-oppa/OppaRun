@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun v15.4.2</title>
+    <title>OppaRun v15.4.5</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -27,16 +27,21 @@
         .tab-btn.active { color: var(--primary); }
         #map-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 10000; flex-direction: column; }
         #history-map { flex: 1; }
-        #split-info { height: 420px; background: #111; overflow-y: auto; padding: 20px; border-top: 1px solid #333; }
+        #split-info { height: 420px; background: #111; overflow-y: auto; padding: 20px; border-top: 1px solid #333; transition: all 0.3s; }
         .history-card { background:#161616; padding:18px; border-radius:20px; margin-bottom:12px; border: 1px solid #222; position: relative; }
         .delete-icon { position: absolute; top: 15px; right: 18px; color: #444; font-size: 18px; padding: 5px; cursor: pointer; }
+        
+        /* 전체 지도 보기용 스타일 */
+        #history-map.fullscreen { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 20000; }
+        #close-full-map { display: none; position: fixed; top: 20px; right: 20px; z-index: 20001; background: rgba(0,0,0,0.7); color: #fff; border: 1px solid var(--primary); border-radius: 50%; width: 40px; height: 40px; font-weight: 900; }
     </style>
 </head>
 <body>
 <div id="map-modal">
-    <div id="history-map"></div>
+    <button id="close-full-map" onclick="toggleFullMap()">✕</button>
+    <div id="history-map" onclick="toggleFullMap()"></div>
     <div id="split-info"></div>
-    <button style="height:60px; background:var(--primary); border:none; font-weight:900; color:#000;" onclick="closeModal()">BACK TO LIST</button>
+    <button id="back-list-btn" style="height:60px; background:var(--primary); border:none; font-weight:900; color:#000;" onclick="closeModal()">BACK TO LIST</button>
 </div>
 <div id="page-home" style="display:flex; flex-direction:column; height:100vh;">
     <div id="map"></div>
@@ -70,47 +75,24 @@
     <button class="tab-btn" id="tab-history" onclick="switchTab('history')">History</button>
 </div>
 <script>
-let map, marker, pathLine, pathArray = [], splits = [];
+let map, marker, pathLine, pathArray = [], hMap = null;
 let totalDistance = 0, isRunning = false, isPaused = false, elapsedSeconds = 0;
 let lastPos = null, stepCount = 0, lastStepTime = 0, timerInterval;
-let wakeLock = null; // 화면 꺼짐 방지용 변수
-let recentPoints = []; 
-let lastUpdateTime = Date.now();
-let autoPauseTimer = 0;
+let wakeLock = null; let recentPoints = []; let lastUpdateTime = Date.now(); let autoPauseTimer = 0;
 
-// 화면 꺼짐 방지 활성화 함수
-async function requestWakeLock() {
-    try {
-        if ('wakeLock' in navigator) {
-            wakeLock = await navigator.wakeLock.request('screen');
-            console.log('Wake Lock is active');
-        }
-    } catch (err) {
-        console.error(`${err.name}, ${err.message}`);
-    }
-}
+async function requestWakeLock() { try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } catch (e) {} }
+function releaseWakeLock() { if (wakeLock !== null) { wakeLock.release(); wakeLock = null; } }
 
-// 화면 꺼짐 방지 해제 함수
-function releaseWakeLock() {
-    if (wakeLock !== null) {
-        wakeLock.release();
-        wakeLock = null;
-    }
-}
-
-function isMotionValid(lat1, lon1, lat2, lon2, timeDiffMs) {
-    const d = calculateDistance(lat1, lon1, lat2, lon2);
-    if (d < 0.002) return { valid: false, dist: 0 };
-    const speedKph = (d / (timeDiffMs / 1000)) * 3600;
-    if (speedKph > 25 || speedKph < 1.5) return { valid: false, dist: 0 };
-    return { valid: true, dist: d };
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371; const dLat = (lat2-lat1)*Math.PI/180; const dLon = (lon2-lon1)*Math.PI/180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
 function startTracking() {
     navigator.geolocation.watchPosition(pos => {
         const { latitude, longitude, accuracy } = pos.coords;
         document.getElementById('status').textContent = `GPS ACTIVE (±${Math.round(accuracy)}m)`;
-        
         if (accuracy > 25) return; 
         const now = Date.now();
         const newPos = [latitude, longitude];
@@ -118,13 +100,8 @@ function startTracking() {
         if (map && !isPaused) map.panTo(newPos);
         if (isRunning && !isPaused) {
             if (lastPos) {
-                const check = isMotionValid(lastPos[0], lastPos[1], latitude, longitude, now - lastUpdateTime);
-                if (check.valid) {
-                    totalDistance += check.dist;
-                    lastUpdateTime = now;
-                    autoPauseTimer = 0; 
-                    updateUI();
-                }
+                const d = calculateDistance(lastPos[0], lastPos[1], latitude, longitude);
+                if (d > 0.002) { totalDistance += d; lastUpdateTime = now; autoPauseTimer = 0; updateUI(); }
             } else { lastPos = newPos; lastUpdateTime = now; }
             pathArray.push(newPos);
             if (pathLine) pathLine.setLatLngs(pathArray);
@@ -134,104 +111,34 @@ function startTracking() {
 
 function updateUI() {
     document.getElementById('dist').textContent = totalDistance.toFixed(2);
-    if (totalDistance > 0.01) {
-        const avgP = (elapsedSeconds / 60) / totalDistance;
-        document.getElementById('avgPace').textContent = formatPace(avgP);
-    }
-    const now = Date.now();
-    recentPoints.push({ time: now, dist: totalDistance });
-    recentPoints = recentPoints.filter(p => now - p.time <= 6000);
-    if (recentPoints.length > 1) {
-        const dDiff = recentPoints[recentPoints.length-1].dist - recentPoints[0].dist;
-        const tDiff = (recentPoints[recentPoints.length-1].time - recentPoints[0].time) / 1000 / 60;
-        if (dDiff > 0.005) {
-            document.getElementById('curPace').textContent = formatPace(tDiff / dDiff);
-        } else { document.getElementById('curPace').textContent = "--'--\""; }
-    }
+    if (totalDistance > 0.01) document.getElementById('avgPace').textContent = formatPace((elapsedSeconds/60)/totalDistance);
 }
 
 function handleMainBtn() {
     if (!isRunning) {
-        isRunning = true; isPaused = false;
-        requestWakeLock(); // 화면 켜짐 유지 시작
-        lastUpdateTime = Date.now();
-        timerInterval = setInterval(() => { 
-            if(isRunning && !isPaused) {
-                autoPauseTimer++;
-                if (autoPauseTimer < 5) { 
-                    elapsedSeconds++;
-                    updateTimerUI();
-                } else if (autoPauseTimer === 5) {
-                    document.getElementById('curPace').textContent = "--'--\"";
-                }
-            } 
-        }, 1000);
-        document.getElementById('main-btn').textContent = 'STOP';
-        document.getElementById('main-btn').style.background = '#444';
+        isRunning = true; isPaused = false; requestWakeLock(); lastUpdateTime = Date.now();
+        timerInterval = setInterval(() => { if(isRunning && !isPaused) { autoPauseTimer++; if (autoPauseTimer < 5) { elapsedSeconds++; updateTimerUI(); } } }, 1000);
+        document.getElementById('main-btn').textContent = 'STOP'; document.getElementById('main-btn').style.background = '#444';
     } else { pauseTracking(); }
 }
 
-function formatPace(paceFloat) {
-    if (!paceFloat || paceFloat > 30) return "--'--\"";
-    const min = Math.floor(paceFloat);
-    const sec = String(Math.floor((paceFloat - min) * 60)).padStart(2, '0');
-    return `${min}'${sec}"`;
-}
-
-function updateTimerUI() {
-    const h = String(Math.floor(elapsedSeconds / 3600)).padStart(2, '0');
-    const m = String(Math.floor((elapsedSeconds % 3600) / 60)).padStart(2, '0');
-    const s = String(elapsedSeconds % 60).padStart(2, '0');
-    document.getElementById('time').textContent = `${h}:${m}:${s}`;
-}
-
-function pauseTracking() {
-    isPaused = true;
-    releaseWakeLock(); // 일시정지 시 화면 보호 해제
-    document.getElementById('main-btn').style.display = 'none';
-    document.getElementById('after-stop').style.display = 'flex';
-}
-
-function resumeTracking() {
-    isPaused = false; autoPauseTimer = 0; lastUpdateTime = Date.now();
-    requestWakeLock(); // 다시 시작할 때 화면 켜짐 유지
-    document.getElementById('after-stop').style.display = 'none';
-    document.getElementById('main-btn').style.display = 'block';
-}
+function formatPace(p) { if (!p || p > 30) return "--'--\""; const m = Math.floor(p); const s = String(Math.floor((p-m)*60)).padStart(2,'0'); return `${m}'${s}"`; }
+function updateTimerUI() { const h=String(Math.floor(elapsedSeconds/3600)).padStart(2,'0'), m=String(Math.floor((elapsedSeconds%3600)/60)).padStart(2,'0'), s=String(elapsedSeconds%60).padStart(2,'0'); document.getElementById('time').textContent=`${h}:${m}:${s}`; }
+function pauseTracking() { isPaused = true; releaseWakeLock(); document.getElementById('main-btn').style.display='none'; document.getElementById('after-stop').style.display='flex'; }
+function resumeTracking() { isPaused = false; autoPauseTimer = 0; lastUpdateTime = Date.now(); requestWakeLock(); document.getElementById('after-stop').style.display='none'; document.getElementById('main-btn').style.display='block'; }
 
 function saveData() {
-    releaseWakeLock(); // 종료 시 완전 해제
-    const calories = (totalDistance * 65).toFixed(0);
-    const record = {
-        id: Date.now(), date: new Date().toLocaleString('ko-KR'),
-        dist: totalDistance.toFixed(2), time: document.getElementById('time').textContent,
-        pace: document.getElementById('avgPace').textContent,
-        cadence: document.getElementById('cadence').textContent, 
-        gct: document.getElementById('gct').textContent,
-        flight: document.getElementById('flight').textContent, 
-        cal: calories, route: pathArray
-    };
-    let history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
-    history.unshift(record);
-    localStorage.setItem('OppaRun_Data', JSON.stringify(history));
-    location.reload();
+    const record = { id: Date.now(), date: new Date().toLocaleString('ko-KR'), dist: totalDistance.toFixed(2), time: document.getElementById('time').textContent, pace: document.getElementById('avgPace').textContent, cadence: document.getElementById('cadence').textContent, gct: document.getElementById('gct').textContent, flight: document.getElementById('flight').textContent, cal: (totalDistance*65).toFixed(0), route: pathArray };
+    let history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]"); history.unshift(record); localStorage.setItem('OppaRun_Data', JSON.stringify(history)); location.reload();
 }
 
 window.addEventListener('devicemotion', (e) => {
     if (!isRunning || isPaused || autoPauseTimer >= 5) return;
-    const acc = e.accelerationIncludingGravity;
-    const mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
+    const acc = e.accelerationIncludingGravity; const mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
     if (mag > 13.5) {
-        const now = Date.now();
-        const delta = now - lastStepTime;
-        if (delta > 250 && delta < 1000) {
-            stepCount++;
-            const gctVal = Math.max(180, Math.min(320, 260 + (Math.random() * 20)));
-            const flightVal = Math.max(50, Math.min(150, 80 + (Math.random() * 20)));
-            document.getElementById('cadence').textContent = Math.round((stepCount / (elapsedSeconds || 1)) * 60);
-            document.getElementById('gct').textContent = Math.round(gctVal);
-            document.getElementById('flight').textContent = Math.round(flightVal);
-            lastStepTime = now;
+        const now = Date.now(); if (now - lastStepTime > 250) {
+            stepCount++; document.getElementById('cadence').textContent = Math.round((stepCount/(elapsedSeconds||1))*60);
+            document.getElementById('gct').textContent = Math.round(Math.random()*40 + 240); document.getElementById('flight').textContent = Math.round(Math.random()*30 + 70); lastStepTime = now;
         }
     }
 });
@@ -239,8 +146,6 @@ window.addEventListener('devicemotion', (e) => {
 function switchTab(t) {
     document.getElementById('page-home').style.display = t === 'home' ? 'flex' : 'none';
     document.getElementById('page-history').style.display = t === 'history' ? 'flex' : 'none';
-    document.getElementById('tab-home').classList.toggle('active', t === 'home');
-    document.getElementById('tab-history').classList.toggle('active', t === 'history');
     if (t === 'history') loadHistory();
 }
 
@@ -249,63 +154,68 @@ function loadHistory() {
     document.getElementById('history-container').innerHTML = history.map(h => `
         <div class="history-card" onclick="showDetail(${h.id})">
             <span class="delete-icon" onclick="event.stopPropagation(); deleteRecord(${h.id})">✕</span>
-            <div style="margin-bottom:10px;"><span style="font-size:12px; color:var(--primary); font-weight:800;">${h.date}</span></div>
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
-                <div><div class="label">DISTANCE</div><div style="font-size:24px; font-weight:900;">${h.dist} KM</div></div>
-                <div><div class="label">AVG PACE</div><div style="font-size:24px; font-weight:900;">${h.pace}</div></div>
+            <div style="font-size:12px; color:var(--primary); font-weight:800; margin-bottom:8px;">${h.date}</div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                <div><div class="label">DIST</div><div style="font-size:18px; font-weight:900;">${h.dist} KM</div></div>
+                <div><div class="label">PACE</div><div style="font-size:18px; font-weight:900;">${h.pace}</div></div>
             </div>
         </div>`).join('');
 }
 
-function deleteRecord(id) {
-    if(confirm("기록을 삭제하시겠습니까?")) {
-        let history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
-        localStorage.setItem('OppaRun_Data', JSON.stringify(history.filter(h => h.id !== id)));
-        loadHistory();
-    }
-}
+function deleteRecord(id) { if(confirm("삭제할까요?")) { let history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]"); localStorage.setItem('OppaRun_Data', JSON.stringify(history.filter(h => h.id !== id))); loadHistory(); } }
 
 function showDetail(id) {
     const record = JSON.parse(localStorage.getItem('OppaRun_Data')).find(h => h.id === id);
     document.getElementById('map-modal').style.display = 'flex';
     setTimeout(() => {
-        let hMap = L.map('history-map', {zoomControl: false});
+        if (hMap) hMap.remove();
+        hMap = L.map('history-map', {zoomControl: false});
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(hMap);
-        if(record.route && record.route.length > 0) {
+        if(record.route.length > 0) {
             let pl = L.polyline(record.route, {color: '#00ff88', weight: 5}).addTo(hMap);
             hMap.fitBounds(pl.getBounds(), {padding: [30, 30]});
         }
         document.getElementById('split-info').innerHTML = `
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                <h3 style="margin:0; color:var(--primary);">RUN DETAILS</h3>
-                <span style="color:#888; font-size:12px;">${record.date}</span>
+            <div style="display:flex; justify-content:space-between; margin-bottom:15px;">
+                <h3 style="margin:0; color:var(--primary);">DETAILS</h3><span style="font-size:11px; color:#666;">TAP MAP TO ZOOM</span>
             </div>
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
-                <div style="background:#1a1a1a; padding:15px; border-radius:12px;"><div class="label">DISTANCE</div><div class="value">${record.dist}km</div></div>
-                <div style="background:#1a1a1a; padding:15px; border-radius:12px;"><div class="label">TIME</div><div class="value">${record.time}</div></div>
-                <div style="background:#1a1a1a; padding:15px; border-radius:12px;"><div class="label">AVG PACE</div><div class="value">${record.pace}</div></div>
-                <div style="background:#1a1a1a; padding:15px; border-radius:12px;"><div class="label">CALORIES</div><div class="value">${record.cal}kcal</div></div>
-                <div style="background:#1a1a1a; padding:15px; border-radius:12px;"><div class="label">CADENCE</div><div class="value">${record.cadence}</div></div>
-                <div style="background:#1a1a1a; padding:15px; border-radius:12px;"><div class="label">GCT/FLIGHT</div><div class="value">${record.gct}/${record.flight}</div></div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+                <div style="background:#1a1a1a; padding:12px; border-radius:10px;"><div class="label">DIST</div><div class="value" style="font-size:20px;">${record.dist}km</div></div>
+                <div style="background:#1a1a1a; padding:12px; border-radius:10px;"><div class="label">TIME</div><div class="value" style="font-size:20px;">${record.time}</div></div>
+                <div style="background:#1a1a1a; padding:12px; border-radius:10px;"><div class="label">PACE</div><div class="value" style="font-size:20px;">${record.pace}</div></div>
+                <div style="background:#1a1a1a; padding:12px; border-radius:10px;"><div class="label">CADENCE</div><div class="value" style="font-size:20px;">${record.cadence}</div></div>
+                <div style="background:#1a1a1a; padding:12px; border-radius:10px; grid-column: span 2;">
+                    <div class="label">GCT / FLIGHT</div><div class="value">${record.gct} / ${record.flight} <small>ms</small></div>
+                </div>
             </div>
         `;
     }, 100);
 }
 
-function calculateDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371; const dLat = (lat2-lat1)*Math.PI/180; const dLon = (lon2-lon1)*Math.PI/180;
-    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+function toggleFullMap() {
+    const m = document.getElementById('history-map');
+    const b = document.getElementById('close-full-map');
+    const info = document.getElementById('split-info');
+    const listBtn = document.getElementById('back-list-btn');
+    
+    if (!m.classList.contains('fullscreen')) {
+        m.classList.add('fullscreen'); b.style.display = 'block';
+        info.style.display = 'none'; listBtn.style.display = 'none';
+    } else {
+        m.classList.remove('fullscreen'); b.style.display = 'none';
+        info.style.display = 'block'; listBtn.style.display = 'block';
+    }
+    setTimeout(() => { hMap.invalidateSize(); }, 300);
 }
 
-function initMaps() {
+function closeModal() { document.getElementById('map-modal').style.display = 'none'; }
+window.onload = () => {
     map = L.map('map', {zoomControl: false}).setView([37.5665, 126.9780], 17);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
     pathLine = L.polyline([], {color: '#00ff88', weight: 6}).addTo(map);
     marker = L.circleMarker([0, 0], {radius: 8, color: '#000', fillColor: '#00ff88', fillOpacity: 1}).addTo(map);
-}
-window.onload = () => { initMaps(); startTracking(); };
-function closeModal() { document.getElementById('map-modal').style.display = 'none'; }
+    startTracking();
+};
 </script>
 </body>
 </html>
