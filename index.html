@@ -7,7 +7,14 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        :root { --primary: #00ff88; --bg: #000000; --card-bg: #121212; --text-main: #ffffff; --text-dim: #888888; --danger: #ff4444; }
+        :root { 
+            --primary: #00ff88; 
+            --bg: #000000; 
+            --card-bg: #121212; 
+            --text-main: #ffffff; 
+            --text-dim: #bbbbbb; /* 기존 #888888에서 더 밝게 수정 */
+            --danger: #ff4444; 
+        }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { margin: 0; background: var(--bg); color: var(--text-main); font-family: -apple-system, system-ui; height: 100vh; height: -webkit-fill-available; display: flex; flex-direction: column; overflow: hidden; }
         
@@ -19,7 +26,10 @@
         .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 10px; }
         .card { background: var(--card-bg); border-radius: 15px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #1f1f1f; padding: 15px 0; }
         .card-main { grid-column: span 3; border: 1.5px solid var(--primary); height: 95px; margin-bottom: 2px; }
-        .label { font-size: 10px; color: var(--text-dim); font-weight: 800; margin-bottom: 4px; }
+        
+        /* 메인 화면 제목 글씨 시각성 개선 */
+        .label { font-size: 10px; color: var(--text-dim); font-weight: 900; margin-bottom: 4px; letter-spacing: 0.5px; }
+        
         .value { font-size: 24px; font-weight: 900; font-variant-numeric: tabular-nums; }
         .value-large { font-size: 48px; color: var(--primary); font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
         .unit { font-size: 11px; color: var(--primary); margin-left: 2px; }
@@ -37,12 +47,14 @@
         .h-date { font-size: 11px; color: var(--primary); font-weight: 900; }
         .h-main-stats { display: flex; gap: 15px; align-items: baseline; margin-bottom: 15px; }
         .h-dist { font-size: 28px; font-weight: 900; color: #fff; }
-        .h-time { font-size: 16px; color: var(--text-dim); font-weight: 700; }
+        .h-time { font-size: 16px; color: #ddd; font-weight: 700; }
         .h-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; border-top: 1px solid #222; padding-top: 12px; }
         .h-info { display: flex; flex-direction: column; }
-        .h-info .lab { font-size: 8px; color: #555; font-weight: 800; margin-bottom: 4px; }
-        .h-info .val { font-size: 13px; font-weight: 800; color: #bbb; }
-        .h-delete { color: #333; font-size: 10px; text-decoration: underline; padding: 5px; }
+        
+        /* 히스토리 제목 글씨 시각성 개선 */
+        .h-info .lab { font-size: 8px; color: #888; font-weight: 900; margin-bottom: 4px; letter-spacing: 0.3px; }
+        .h-info .val { font-size: 13px; font-weight: 800; color: #efefef; }
+        .h-delete { color: #555; font-size: 10px; text-decoration: underline; padding: 5px; font-weight: 800; }
 
         .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 65px; background: #000; display: flex; border-top: 1px solid #222; align-items: center; padding-bottom: env(safe-area-inset-bottom); z-index: 9999; }
         .tab-btn { flex: 1; background: none; border: none; color: #444; font-size: 13px; font-weight: 800; cursor: pointer; }
@@ -96,7 +108,7 @@ let pathCoords = [], isRunning = false, isPaused = false, seconds = 0, timer;
 let lastMoveTime = Date.now(), autoPaused = false;
 let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0;
 let gctSum = 0, flightSum = 0, dataCount = 0;
-let currentSpeedKmh = 0; // 보정을 위한 실시간 속도 저장 변수
+let currentSpeedKmh = 0;
 
 async function requestWakeLock() {
     try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } 
@@ -119,7 +131,6 @@ function initMap() {
     if ("geolocation" in navigator) navigator.geolocation.watchPosition(updatePosition, null, {enableHighAccuracy: true});
     loadHistory();
     
-    // --- 센서 데이터 보정 로직 적용 ---
     window.addEventListener('devicemotion', (e) => {
         if (!isRunning || isPaused) return;
         let acc = e.accelerationIncludingGravity;
@@ -128,21 +139,19 @@ function initMap() {
         let force = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
         let now = Date.now();
         
-        // 보정 1: 케이던스 튀는 현상 방지 (최소 220ms 간격 제한)
         if (force > 13 && (now - lastStepTime) > 220) { 
             steps++; lastStepTime = now;
             
-            // 보정 2: 속도 기반 GCT/Flight 현실화
             let correctedGct, correctedFlight;
             
-            if (currentSpeedKmh > 7.5) { // 러닝 모드 (약 페이스 8분 미만)
+            if (currentSpeedKmh > 7.5) { 
                 correctedGct = Math.floor(240 - (currentSpeedKmh * 3) + (Math.random() * 20));
                 correctedGct = Math.max(180, correctedGct);
                 correctedFlight = Math.floor(18 + (currentSpeedKmh * 1.2) + (Math.random() * 5));
-            } else if (currentSpeedKmh > 1.0) { // 걷기 모드
+            } else if (currentSpeedKmh > 1.0) { 
                 correctedGct = Math.floor(450 - (currentSpeedKmh * 10) + (Math.random() * 50));
                 correctedFlight = Math.max(0, Math.floor(currentSpeedKmh * 2));
-            } else { // 정지 혹은 매우 느림
+            } else { 
                 correctedGct = 0;
                 correctedFlight = 0;
             }
@@ -158,7 +167,7 @@ function initMap() {
 
 function updatePosition(p) {
     const pos = [p.coords.latitude, p.coords.longitude];
-    currentSpeedKmh = (p.coords.speed || 0) * 3.6; // 전역 변수 업데이트
+    currentSpeedKmh = (p.coords.speed || 0) * 3.6;
     const accuracy = p.coords.accuracy || 100;
     marker.setLatLng(pos);
     if (document.getElementById('status').textContent === "LOCATING...") { map.setView(pos, 17); document.getElementById('status').textContent = "GPS READY"; }
