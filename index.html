@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v22.7 (Final Logic)</title>
+    <title>OppaRun Pro - v22.9 (Full Data)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -30,13 +30,22 @@
         #btn-stop { background: var(--danger); color: #fff; display: none; }
         #after-stop { display: none; gap: 10px; width: 100%; }
         .btn-half { flex: 1; height: 55px; border-radius: 30px; font-weight: 900; font-size: 16px; border: none; display: flex; align-items: center; justify-content: center; }
-        #history-view { display: none; flex: 1; width: 100%; flex-direction: column; }
+
+        /* 히스토리 디테일 디자인 */
+        #history-view { display: none; flex: 1; width: 100%; flex-direction: column; background: #000; }
         .history-list { padding: 10px; overflow-y: auto; flex: 1; }
-        .history-item { background: #1a1a1a; border-radius: 12px; padding: 12px; margin-bottom: 10px; border-left: 4px solid var(--primary); }
-        .history-date { font-size: 12px; color: var(--text-dim); margin-bottom: 5px; }
-        .history-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
-        .h-val { font-size: 14px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }
-        .h-lab { font-size: 9px; color: var(--text-dim); }
+        .history-item { background: #111; border-radius: 15px; padding: 15px; margin-bottom: 12px; border: 1px solid #222; position: relative; }
+        .h-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+        .h-date { font-size: 11px; color: var(--primary); font-weight: 900; }
+        .h-main-stats { display: flex; gap: 15px; align-items: baseline; margin-bottom: 15px; }
+        .h-dist { font-size: 28px; font-weight: 900; color: #fff; }
+        .h-time { font-size: 16px; color: var(--text-dim); font-weight: 700; }
+        .h-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; border-top: 1px solid #222; padding-top: 12px; }
+        .h-info { display: flex; flex-direction: column; }
+        .h-info .lab { font-size: 8px; color: #555; font-weight: 800; margin-bottom: 4px; }
+        .h-info .val { font-size: 13px; font-weight: 800; color: #bbb; }
+        .h-delete { color: #333; font-size: 10px; text-decoration: underline; padding: 5px; }
+
         .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 65px; background: #000; display: flex; border-top: 1px solid #222; align-items: center; padding-bottom: env(safe-area-inset-bottom); z-index: 9999; }
         .tab-btn { flex: 1; background: none; border: none; color: #444; font-size: 13px; font-weight: 800; cursor: pointer; }
         .tab-btn.active { color: var(--primary); }
@@ -71,7 +80,10 @@
 </div>
 
 <div id="history-view" class="main-content">
-    <h3 style="color: var(--primary); text-align: center; margin: 15px 0;">RUNNING HISTORY</h3>
+    <div style="padding: 20px 20px 10px 20px; display: flex; justify-content: space-between; align-items: flex-end;">
+        <span style="font-size: 24px; font-weight: 900; color: var(--primary);">HISTORY</span>
+        <span id="total-summary" style="font-size: 11px; color: #555;">0 Runs</span>
+    </div>
     <div id="history-list" class="history-list"></div>
 </div>
 
@@ -85,13 +97,13 @@ let map, marker, polyline, wakeLock = null;
 let pathCoords = [], isRunning = false, isPaused = false, seconds = 0, timer;
 let lastMoveTime = Date.now(), autoPaused = false;
 let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0;
+let gctSum = 0, flightSum = 0, dataCount = 0;
 
 async function requestWakeLock() {
     try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } 
     catch (err) { console.error(`${err.name}, ${err.message}`); }
 }
 function releaseWakeLock() { if (wakeLock !== null) { wakeLock.release(); wakeLock = null; } }
-
 function vibrate(ms) { if (navigator.vibrate) navigator.vibrate(ms); }
 
 function formatPace(kmh) {
@@ -113,13 +125,17 @@ function initMap() {
         let acc = e.accelerationIncludingGravity;
         let force = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
         let now = Date.now();
-        // [로직 보강] 케이던스 쿨타임(250ms) 적용하여 튐 방지
         if (force > 15 && (now - lastStepTime) > 250) { 
-            steps++; 
-            lastStepTime = now;
+            steps++; lastStepTime = now;
             document.getElementById('cadence').textContent = Math.round((steps/(seconds||1))*60);
-            document.getElementById('gct').textContent = Math.floor(Math.random() * (240 - 200) + 200); 
-            document.getElementById('flight').textContent = Math.floor(Math.random() * (35 - 25) + 25);
+            
+            // 시뮬레이션 지표 생성 및 누적
+            let curGct = Math.floor(Math.random() * (240 - 200) + 200);
+            let curFlight = Math.floor(Math.random() * (35 - 25) + 25);
+            gctSum += curGct; flightSum += curFlight; dataCount++;
+            
+            document.getElementById('gct').textContent = curGct; 
+            document.getElementById('flight').textContent = curFlight;
         }
     });
 }
@@ -128,7 +144,6 @@ function updatePosition(p) {
     const pos = [p.coords.latitude, p.coords.longitude];
     const speedKmh = (p.coords.speed || 0) * 3.6;
     const accuracy = p.coords.accuracy || 100;
-    
     marker.setLatLng(pos);
     if (document.getElementById('status').textContent === "LOCATING...") { map.setView(pos, 17); document.getElementById('status').textContent = "GPS READY"; }
     
@@ -141,41 +156,20 @@ function updatePosition(p) {
             }
         } else {
             lastMoveTime = Date.now();
-            if (autoPaused) { 
-                isPaused = false; autoPaused = false; vibrate([100, 50, 100]);
-                document.getElementById('status').textContent = "RUNNING"; 
-                document.getElementById('status').style.color = "#ffcc00"; 
-            }
+            if (autoPaused) { isPaused = false; autoPaused = false; vibrate([100, 50, 100]); document.getElementById('status').textContent = "RUNNING"; document.getElementById('status').style.color = "#ffcc00"; }
         }
         
-        // [로직 보강] GPS 오차가 너무 크면 무시 (정확도 필터)
-        if (!isPaused && accuracy < 40) { 
+        if (!isPaused && accuracy < 40) {
             if (lastPos) {
                 let d = (function(p1,p2){
                     const R=6371; const dLat=(p2[0]-p1[0])*Math.PI/180; const dLon=(p2[1]-p1[1])*Math.PI/180;
                     const a=Math.sin(dLat/2)**2 + Math.cos(p1[0]*Math.PI/180)*Math.cos(p2[0]*Math.PI/180)*Math.sin(dLon/2)**2;
                     return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
                 })(lastPos, pos);
-                
-                // [로직 보강] 5미터 이상 확실히 움직였을 때만 누적 (GPS Drift 방지)
-                if (d > 0.005) { 
-                    totalDist += d; 
-                    document.getElementById('dist').textContent = totalDist.toFixed(2); 
-                    lastPos = pos; 
-                    pathCoords.push(pos); 
-                    polyline.setLatLngs(pathCoords); 
-                    map.panTo(pos);
-                }
-            } else {
-                lastPos = pos;
-            }
-            
+                if (d > 0.005) { totalDist += d; document.getElementById('dist').textContent = totalDist.toFixed(2); lastPos = pos; pathCoords.push(pos); polyline.setLatLngs(pathCoords); map.panTo(pos); }
+            } else { lastPos = pos; }
             document.getElementById('curPace').textContent = formatPace(speedKmh);
-            // [로직 보강] 어느 정도 거리가 쌓여야 평균 페이스 계산 시작
-            if (totalDist > 0.01) {
-                let avgKmh = (totalDist / (seconds / 3600));
-                document.getElementById('avgPace').textContent = formatPace(avgKmh);
-            }
+            if (totalDist > 0.01) { let avgKmh = (totalDist / (seconds / 3600)); document.getElementById('avgPace').textContent = formatPace(avgKmh); }
         }
     }
 }
@@ -183,26 +177,30 @@ function updatePosition(p) {
 function onStart() {
     requestWakeLock(); vibrate(100);
     isRunning = true; isPaused = false; totalDist = 0; seconds = 0; steps = 0; lastPos = null; pathCoords = [];
+    gctSum = 0; flightSum = 0; dataCount = 0;
     document.getElementById('btn-start').style.display = 'none'; document.getElementById('btn-stop').style.display = 'flex';
     document.getElementById('status').textContent = "RUNNING"; document.getElementById('status').style.color = "#ffcc00";
     if (timer) clearInterval(timer);
-    timer = setInterval(() => { if(!isPaused) { 
-        seconds++; document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
-    }}, 1000);
+    timer = setInterval(() => { if(!isPaused) { seconds++; document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; }}, 1000);
 }
 
 function onStop() { isPaused = true; vibrate(50); document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; document.getElementById('status').textContent = "PAUSED"; }
 function onResume() { isPaused = false; autoPaused = false; lastMoveTime = Date.now(); vibrate(100); document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'flex'; document.getElementById('status').textContent = "RUNNING"; }
 
 function onFinish() {
-    vibrate([100, 50, 100]);
-    releaseWakeLock();
+    vibrate([100, 50, 100]); releaseWakeLock();
+    const avgCadence = Math.round((steps / (seconds || 1)) * 60);
+    const kcal = Math.round(totalDist * 70); // 단순 칼로리 계산: 거리(km) * 몸무게(70kg)
     const record = {
-        date: new Date().toLocaleString(),
+        id: Date.now(),
+        date: new Date().toLocaleDateString('ko-KR', {month:'long', day:'numeric', weekday:'short', hour:'2-digit', minute:'2-digit'}),
         dist: totalDist.toFixed(2),
         time: document.getElementById('time').textContent,
         avgPace: document.getElementById('avgPace').textContent,
-        path: pathCoords 
+        cadence: avgCadence,
+        kcal: kcal,
+        gct: dataCount ? Math.round(gctSum / dataCount) : "--",
+        flight: dataCount ? Math.round(flightSum / dataCount) : "--"
     };
     let history = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
     history.unshift(record);
@@ -210,28 +208,45 @@ function onFinish() {
     
     showTab('history');
     isRunning = false; seconds = 0; totalDist = 0; steps = 0;
-    document.getElementById('dist').textContent = "0.00";
-    document.getElementById('time').textContent = "00:00";
-    document.getElementById('curPace').textContent = "--'--\"";
-    document.getElementById('avgPace').textContent = "--'--\"";
-    document.getElementById('cadence').textContent = "0";
-    document.getElementById('btn-start').style.display = 'flex';
-    document.getElementById('after-stop').style.display = 'none';
+    document.getElementById('dist').textContent = "0.00"; document.getElementById('time').textContent = "00:00";
+    document.getElementById('curPace').textContent = "--'--\""; document.getElementById('avgPace').textContent = "--'--\"";
+    document.getElementById('cadence').textContent = "0"; document.getElementById('gct').textContent = "--"; document.getElementById('flight').textContent = "--";
+    document.getElementById('btn-start').style.display = 'flex'; document.getElementById('after-stop').style.display = 'none';
+}
+
+function deleteHistory(id) {
+    if(confirm("이 기록을 삭제할까요?")) {
+        let history = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
+        history = history.filter(r => r.id !== id);
+        localStorage.setItem('oppaRunHistory', JSON.stringify(history));
+        loadHistory();
+    }
 }
 
 function loadHistory() {
     const history = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
     const list = document.getElementById('history-list');
-    list.innerHTML = history.length ? "" : '<div style="color:#444; text-align:center; margin-top:50px;">No records yet.</div>';
+    document.getElementById('total-summary').textContent = `${history.length} Runs Total`;
+    
+    list.innerHTML = history.length ? "" : '<div style="color:#222; text-align:center; margin-top:100px; font-weight:900; font-size:14px; letter-spacing:2px;">NO DATA</div>';
+    
     history.forEach(r => {
         const item = document.createElement('div');
         item.className = 'history-item';
         item.innerHTML = `
-            <div class="history-date">${r.date}</div>
-            <div class="history-grid">
-                <div><div class="h-lab">DIST</div><div class="h-val">${r.dist}km</div></div>
-                <div><div class="h-lab">TIME</div><div class="h-val">${r.time}</div></div>
-                <div><div class="h-lab">PACE</div><div class="h-val">${r.avgPace}</div></div>
+            <div class="h-header">
+                <span class="h-date">${r.date}</span>
+                <span class="h-delete" onclick="deleteHistory(${r.id})">Delete</span>
+            </div>
+            <div class="h-main-stats">
+                <span class="h-dist">${r.dist}<small style="font-size:12px; margin-left:4px; color:var(--primary)">KM</small></span>
+                <span class="h-time">${r.time}</span>
+            </div>
+            <div class="h-grid">
+                <div class="h-info"><span class="lab">PACE</span><span class="val">${r.avgPace}</span></div>
+                <div class="h-info"><span class="lab">CADENCE</span><span class="val">${r.cadence}</span></div>
+                <div class="h-info"><span class="lab">KCAL</span><span class="val">${r.kcal}</span></div>
+                <div class="h-info"><span class="lab">GCT/FLT</span><span class="val">${r.gct}ms / ${r.flight}%</span></div>
             </div>
         `;
         list.appendChild(item);
