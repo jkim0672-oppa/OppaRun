@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v22.3 Full Engine</title>
+    <title>OppaRun Pro - v22.5 Final (WakeLock)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -10,6 +10,8 @@
         :root { --primary: #00ff88; --bg: #000000; --card-bg: #121212; --text-main: #ffffff; --text-dim: #888888; --danger: #ff4444; }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { margin: 0; background: var(--bg); color: var(--text-main); font-family: -apple-system, system-ui; height: 100vh; height: -webkit-fill-available; display: flex; flex-direction: column; overflow: hidden; }
+        
+        /* 레이아웃 절대 고정 */
         #map-area { flex-shrink: 0; width: 100%; }
         #map-container { height: 18vh; min-height: 130px; border-bottom: 2px solid #222; }
         #map { height: 100%; width: 100%; background: #222; }
@@ -29,7 +31,12 @@
         #after-stop { display: none; gap: 10px; width: 100%; }
         .btn-half { flex: 1; height: 55px; border-radius: 30px; font-weight: 900; font-size: 16px; border: none; display: flex; align-items: center; justify-content: center; }
         #history-view { display: none; flex: 1; width: 100%; flex-direction: column; }
-        .history-list { padding: 15px; overflow-y: auto; }
+        .history-list { padding: 10px; overflow-y: auto; flex: 1; }
+        .history-item { background: #1a1a1a; border-radius: 12px; padding: 12px; margin-bottom: 10px; border-left: 4px solid var(--primary); }
+        .history-date { font-size: 12px; color: var(--text-dim); margin-bottom: 5px; }
+        .history-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+        .h-val { font-size: 14px; font-weight: 700; color: #fff; }
+        .h-lab { font-size: 9px; color: var(--text-dim); }
         .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 65px; background: #000; display: flex; border-top: 1px solid #222; align-items: center; padding-bottom: env(safe-area-inset-bottom); z-index: 9999; }
         .tab-btn { flex: 1; background: none; border: none; color: #444; font-size: 13px; font-weight: 800; cursor: pointer; }
         .tab-btn.active { color: var(--primary); }
@@ -64,8 +71,8 @@
 </div>
 
 <div id="history-view" class="main-content">
-    <h3 style="color: var(--primary); text-align: center; margin: 20px 0;">HISTORY</h3>
-    <div class="history-list"><div style="color:#444; text-align:center; margin-top:50px;">No records yet.</div></div>
+    <h3 style="color: var(--primary); text-align: center; margin: 15px 0;">RUNNING HISTORY</h3>
+    <div id="history-list" class="history-list"></div>
 </div>
 
 <div class="tab-bar">
@@ -74,23 +81,20 @@
 </div>
 
 <script>
-let map, marker, polyline;
+let map, marker, polyline, wakeLock = null;
 let pathCoords = [], isRunning = false, isPaused = false, seconds = 0, timer;
 let lastMoveTime = Date.now(), autoPaused = false;
 let totalDist = 0, lastPos = null, steps = 0;
 
-// [엔진] 거리 계산 (Haversine)
-function getDist(p1, p2) {
-    const R = 6371; 
-    const dLat = (p2[0]-p1[0])*Math.PI/180;
-    const dLon = (p2[1]-p1[1])*Math.PI/180;
-    const a = Math.sin(dLat/2)**2 + Math.cos(p1[0]*Math.PI/180)*Math.cos(p2[0]*Math.PI/180)*Math.sin(dLon/2)**2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+// 화면 꺼짐 방지
+async function requestWakeLock() {
+    try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } 
+    catch (err) { console.error(`${err.name}, ${err.message}`); }
 }
+function releaseWakeLock() { if (wakeLock !== null) { wakeLock.release(); wakeLock = null; } }
 
-// [엔진] 페이스 포맷 (km/h -> min'sec")
 function formatPace(kmh) {
-    if (kmh < 0.5) return "--'--\"";
+    if (!kmh || kmh < 0.5) return "--'--\"";
     let totalSec = 3600 / kmh;
     return `${Math.floor(totalSec/60)}'${String(Math.floor(totalSec%60)).padStart(2,'0')}"`;
 }
@@ -100,20 +104,15 @@ function initMap() {
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
     marker = L.marker([0,0], {icon: L.divIcon({className:'my-location', iconSize:[12,12]})}).addTo(map);
     polyline = L.polyline([], {color: '#007bff', weight: 5, opacity: 0.8}).addTo(map);
-
-    if ("geolocation" in navigator) {
-        navigator.geolocation.watchPosition(updatePosition, null, {enableHighAccuracy: true});
-    }
+    if ("geolocation" in navigator) navigator.geolocation.watchPosition(updatePosition, null, {enableHighAccuracy: true});
+    loadHistory();
     
-    // [가속도계] 케이던스 및 GCT 추정
     window.addEventListener('devicemotion', (e) => {
         if (!isRunning || isPaused) return;
         let acc = e.accelerationIncludingGravity;
         let force = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-        if (force > 13) { // 발이 닿는 순간 감지
-            steps++;
-            document.getElementById('cadence').textContent = Math.round((steps/(seconds||1))*60);
-            // GCT와 Flight는 가속도 피크 간격으로 추정 (간략 로직)
+        if (force > 13) { 
+            steps++; document.getElementById('cadence').textContent = Math.round((steps/(seconds||1))*60);
             document.getElementById('gct').textContent = Math.floor(Math.random() * (240 - 200) + 200); 
             document.getElementById('flight').textContent = Math.floor(Math.random() * (35 - 25) + 25);
         }
@@ -124,14 +123,8 @@ function updatePosition(p) {
     const pos = [p.coords.latitude, p.coords.longitude];
     const speedKmh = (p.coords.speed || 0) * 3.6;
     marker.setLatLng(pos);
-
-    if (document.getElementById('status').textContent === "LOCATING...") {
-        map.setView(pos, 17);
-        document.getElementById('status').textContent = "GPS READY";
-    }
-
+    if (document.getElementById('status').textContent === "LOCATING...") { map.setView(pos, 17); document.getElementById('status').textContent = "GPS READY"; }
     if (isRunning) {
-        // 자동 멈춤
         if (speedKmh < 1) {
             if ((Date.now() - lastMoveTime)/1000 >= 5 && !isPaused) {
                 isPaused = true; autoPaused = true;
@@ -140,48 +133,74 @@ function updatePosition(p) {
             }
         } else {
             lastMoveTime = Date.now();
-            if (autoPaused) { 
-                isPaused = false; autoPaused = false;
-                document.getElementById('status').textContent = "RUNNING";
-                document.getElementById('status').style.color = "#ffcc00";
-            }
+            if (autoPaused) { isPaused = false; autoPaused = false; document.getElementById('status').textContent = "RUNNING"; document.getElementById('status').style.color = "#ffcc00"; }
         }
-
         if (!isPaused) {
             if (lastPos) {
-                let d = getDist(lastPos, pos);
-                if (d > 0.002) { // 2m 이상 이동 시 누적
-                    totalDist += d;
-                    document.getElementById('dist').textContent = totalDist.toFixed(2);
-                }
+                let d = (function(p1,p2){
+                    const R=6371; const dLat=(p2[0]-p1[0])*Math.PI/180; const dLon=(p2[1]-p1[1])*Math.PI/180;
+                    const a=Math.sin(dLat/2)**2 + Math.cos(p1[0]*Math.PI/180)*Math.cos(p2[0]*Math.PI/180)*Math.sin(dLon/2)**2;
+                    return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+                })(lastPos, pos);
+                if (d > 0.002) { totalDist += d; document.getElementById('dist').textContent = totalDist.toFixed(2); }
             }
-            lastPos = pos;
-            pathCoords.push(pos);
-            polyline.setLatLngs(pathCoords);
-            map.panTo(pos);
-            
-            // 데이터 업데이트
+            lastPos = pos; pathCoords.push(pos); polyline.setLatLngs(pathCoords); map.panTo(pos);
             document.getElementById('curPace').textContent = formatPace(speedKmh);
-            let avgKmh = totalDist / (seconds / 3600);
+            let avgKmh = seconds > 0 ? (totalDist / (seconds / 3600)) : 0;
             document.getElementById('avgPace').textContent = formatPace(avgKmh);
         }
     }
 }
 
 function onStart() {
-    isRunning = true; isPaused = false; totalDist = 0; seconds = 0; steps = 0; lastPos = null;
-    document.getElementById('btn-start').style.display = 'none';
-    document.getElementById('btn-stop').style.display = 'flex';
-    document.getElementById('status').textContent = "RUNNING";
+    requestWakeLock();
+    isRunning = true; isPaused = false; totalDist = 0; seconds = 0; steps = 0; lastPos = null; pathCoords = [];
+    document.getElementById('btn-start').style.display = 'none'; document.getElementById('btn-stop').style.display = 'flex';
+    document.getElementById('status').textContent = "RUNNING"; document.getElementById('status').style.color = "#ffcc00";
+    if (timer) clearInterval(timer);
     timer = setInterval(() => { if(!isPaused) { 
-        seconds++; 
-        document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
+        seconds++; document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
     }}, 1000);
 }
 
-function onStop() { isPaused = true; document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; }
-function onResume() { isPaused = false; autoPaused = false; lastMoveTime = Date.now(); document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'flex'; }
-function onFinish() { alert(`수고하셨습니다!\n거리: ${totalDist.toFixed(2)}km\n시간: ${document.getElementById('time').textContent}`); location.reload(); }
+function onStop() { isPaused = true; document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; document.getElementById('status').textContent = "PAUSED"; }
+function onResume() { isPaused = false; autoPaused = false; lastMoveTime = Date.now(); document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'flex'; document.getElementById('status').textContent = "RUNNING"; }
+
+function onFinish() {
+    releaseWakeLock();
+    const record = {
+        date: new Date().toLocaleString(),
+        dist: totalDist.toFixed(2),
+        time: document.getElementById('time').textContent,
+        avgPace: document.getElementById('avgPace').textContent,
+        path: pathCoords 
+    };
+    let history = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
+    history.unshift(record);
+    localStorage.setItem('oppaRunHistory', JSON.stringify(history));
+    alert("운동 기록이 저장되었습니다!");
+    location.reload();
+}
+
+function loadHistory() {
+    const history = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
+    const list = document.getElementById('history-list');
+    list.innerHTML = history.length ? "" : '<div style="color:#444; text-align:center; margin-top:50px;">No records yet.</div>';
+    history.forEach(r => {
+        const item = document.createElement('div');
+        item.className = 'history-item';
+        item.innerHTML = `
+            <div class="history-date">${r.date}</div>
+            <div class="history-grid">
+                <div><div class="h-lab">DIST</div><div class="h-val">${r.dist}km</div></div>
+                <div><div class="h-lab">TIME</div><div class="h-val">${r.time}</div></div>
+                <div><div class="h-lab">PACE</div><div class="h-val">${r.avgPace}</div></div>
+            </div>
+        `;
+        list.appendChild(item);
+    });
+}
+
 function showTab(tab) {
     document.getElementById('run-view').style.display = (tab === 'run' ? 'flex' : 'none');
     document.getElementById('map-area').style.display = (tab === 'run' ? 'block' : 'none');
