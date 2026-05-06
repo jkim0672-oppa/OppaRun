@@ -22,7 +22,10 @@
         #map-container { height: 18vh; min-height: 130px; border-bottom: 2px solid #222; }
         #map { height: 100%; width: 100%; background: #222; }
         .status-bar { text-align: center; color: #ffcc00; font-size: 11px; padding: 4px; background: #0a0a0a; font-weight: 800; }
+        
+        /* [스크롤 수정 핵심] main-content 자체는 고정하되 내부에서 스크롤 발생 허용 */
         .main-content { flex: 1; display: flex; flex-direction: column; padding-bottom: 80px; overflow: hidden; }
+        
         .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 10px; }
         .card { background: var(--card-bg); border-radius: 15px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #1f1f1f; padding: 15px 0; }
         .card-main { grid-column: span 3; border: 1.5px solid var(--primary); height: 95px; margin-bottom: 2px; }
@@ -32,15 +35,18 @@
         .value-large { font-size: 48px; color: var(--primary); font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
         .unit { font-size: 11px; color: var(--primary); margin-left: 2px; }
 
-        .controls { height: 90px; display: flex; justify-content: center; align-items: center; padding: 0 15px; margin-top: auto; }
+        .controls { height: 90px; display: flex; justify-content: center; align-items: center; padding: 0 15px; margin-top: auto; flex-shrink: 0; }
         .btn-capsule { width: 100%; height: 55px; border-radius: 30px; border: none; font-weight: 900; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
         #btn-start { background: var(--primary); color: #000; }
         #btn-stop { background: var(--danger); color: #fff; display: none; }
         #after-stop { display: none; gap: 10px; width: 100%; }
         .btn-half { flex: 1; height: 55px; border-radius: 30px; font-weight: 900; font-size: 16px; border: none; display: flex; align-items: center; justify-content: center; } 
 
-        #history-view { display: none; flex: 1; width: 100%; flex-direction: column; background: #000; }
-        .history-list { padding: 10px; overflow-y: auto; flex: 1; }
+        #history-view { display: none; flex: 1; width: 100%; flex-direction: column; background: #000; overflow: hidden; }
+        
+        /* [스크롤 수정 핵심] 리스트 영역에만 독립적인 스크롤 부여 */
+        .history-list { padding: 10px; overflow-y: scroll; flex: 1; -webkit-overflow-scrolling: touch; }
+        
         .history-item { background: #111; border-radius: 15px; padding: 15px; margin-bottom: 12px; border: 1px solid #222; position: relative; }
         .h-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
         .h-date { font-size: 11px; color: var(--primary); font-weight: 900; }
@@ -95,7 +101,7 @@
 </div>
 
 <div id="history-view" class="main-content">
-    <div style="padding: 20px 20px 10px 20px; display: flex; justify-content: space-between; align-items: flex-end;">
+    <div style="padding: 20px 20px 10px 20px; display: flex; justify-content: space-between; align-items: flex-end; flex-shrink: 0;">
         <span style="font-size: 24px; font-weight: 900; color: var(--primary);">HISTORY</span>
         <span id="total-summary" style="font-size: 11px; color: #aaa;">0 Runs</span>
     </div>
@@ -119,9 +125,8 @@ let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0;
 let gctSum = 0, flightSum = 0, dataCount = 0;
 let currentSpeedKmh = 0, splits = [], kmStartSeconds = 0;
 
-// [내부 로직 업데이트]
 const AUTO_PAUSE_THRESHOLD = 1.5;
-let lowSpeedTicks = 0; // 3초 딜레이용 카운터
+let lowSpeedTicks = 0; 
 
 async function requestWakeLock() {
     try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } 
@@ -174,13 +179,12 @@ function updatePosition(p) {
     marker.setLatLng(pos);
     if (document.getElementById('status').textContent === "LOCATING...") { map.setView(pos, 17); document.getElementById('status').textContent = "GPS READY"; }
     
-    // [업그레이드된 자동 멈춤 로직]
     if (isRunning && !isPaused) {
         if (currentSpeedKmh < AUTO_PAUSE_THRESHOLD) {
             lowSpeedTicks++;
-            if (lowSpeedTicks >= 3 && !isAutoPaused) { // 3초 딜레이
+            if (lowSpeedTicks >= 3 && !isAutoPaused) {
                 isAutoPaused = true;
-                vibrate([50, 50, 50]); // 멈춤 진동 (짧게 2번)
+                vibrate([50, 50, 50]); 
                 document.getElementById('status').textContent = "AUTO PAUSED";
                 document.getElementById('status').style.color = "#ff4444";
             }
@@ -188,7 +192,7 @@ function updatePosition(p) {
             lowSpeedTicks = 0;
             if (isAutoPaused) {
                 isAutoPaused = false;
-                vibrate(200); // 재개 진동 (길게 1번)
+                vibrate(200); 
                 document.getElementById('status').textContent = "RUNNING";
                 document.getElementById('status').style.color = "#ffcc00";
             }
