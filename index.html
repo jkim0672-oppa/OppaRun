@@ -2,38 +2,31 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - Auto-Pause Fix</title>
+    <title>OppaRun Pro - v18.8 Smooth</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         :root { --primary: #00ff88; --bg: #000000; --card-bg: #121212; --text-main: #ffffff; --text-dim: #888888; --danger: #ff4444; }
         body { margin: 0; background: var(--bg); color: var(--text-main); font-family: -apple-system, system-ui; overflow: hidden; height: 100vh; }
-        
         #map { height: 35vh; width: 100%; background: #222; }
-        .status-bar { text-align: center; color: #ffcc00; font-size: 11px; padding: 6px; background: #0a0a0a; border-bottom: 1px solid #222; font-weight: bold; }
-        
+        .status-bar { text-align: center; color: #ffcc00; font-size: 11px; padding: 6px; background: #0a0a0a; border-bottom: 1px solid #222; font-weight: bold; min-height: 14px; }
         .dashboard { height: 40vh; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto 1fr 1fr; gap: 8px; padding: 12px; box-sizing: border-box; }
         .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #1a1a1a; }
         .label { font-size: 9px; color: var(--text-dim); font-weight: 700; margin-bottom: 2px; text-transform: uppercase; }
         .value { font-size: 22px; font-weight: 900; }
         .unit { font-size: 11px; color: var(--primary); margin-left: 2px; }
-        
         .card-highlight { grid-column: span 2; border: 1px solid var(--primary); background: rgba(0,255,136,0.03); padding: 10px 0; }
         .value-large { font-size: 40px; color: var(--primary); font-weight: 900; }
-
         .controls { position: fixed; bottom: 85px; width: 100%; display: flex; justify-content: center; align-items: center; z-index: 1000; }
         .btn-circle { width: 80px; height: 80px; border-radius: 50%; border: none; font-weight: 900; font-size: 15px; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 15px rgba(0,0,0,0.5); }
         #btn-start { background: var(--danger); color: #fff; }
         #btn-stop { background: #333; color: #fff; display: none; }
-        
         #after-stop { display: none; gap: 15px; width: 85%; }
         .btn-action { flex: 1; height: 55px; border-radius: 28px; border: none; font-weight: 900; font-size: 16px; }
-
         .tab-bar { position: fixed; bottom: 0; width: 100%; height: 70px; background: #000; display: flex; border-top: 1px solid #222; align-items: center; padding-bottom: env(safe-area-inset-bottom); }
         .tab-btn { flex: 1; background: none; border: none; color: #444; font-size: 12px; font-weight: 800; }
         .tab-btn.active { color: var(--primary); }
-
         .my-location { background: #007bff; border: 2.5px solid #fff; border-radius: 50%; width: 14px; height: 14px; box-shadow: 0 0 10px #007bff; }
     </style>
 </head>
@@ -43,13 +36,12 @@
     <div id="map"></div>
     <div id="status" class="status-bar">LOCATING...</div>
     <div class="dashboard">
-        <div class="card-highlight card"><div class="label">CURRENT PACE</div><div id="curPace" class="value-large">--'--"</div></div>
+        <div class="card-highlight card"><div class="label" style="color:var(--primary)">CURRENT PACE</div><div id="curPace" class="value-large">--'--"</div></div>
         <div class="card"><div class="label">DISTANCE</div><div class="value"><span id="dist">0.00</span><span class="unit">KM</span></div></div>
         <div class="card"><div class="label">TIME</div><div id="time" class="value">00:00:00</div></div>
         <div class="card"><div class="label">AVG PACE</div><div id="avgPace" class="value">--'--"</div></div>
         <div class="card"><div class="label">CADENCE</div><div id="cadence" class="value">0</div></div>
     </div>
-
     <div class="controls">
         <button id="btn-start" class="btn-circle" onclick="onStart()">START</button>
         <button id="btn-stop" class="btn-circle" onclick="onStop()">STOP</button>
@@ -68,6 +60,7 @@
 <script>
 let map, marker, pathLine, pathArray = [], isRunning = false, isPaused = false, seconds = 0;
 let lastPos = null, timer, totalDist = 0;
+let stopTimer = null; 
 
 function init() {
     map = L.map('map', {zoomControl: false}).setView([37.56, 126.97], 17);
@@ -75,7 +68,6 @@ function init() {
     pathLine = L.polyline([], {color: '#00ff88', weight: 6}).addTo(map);
     marker = L.marker([0,0], {icon: L.divIcon({className:'my-location', iconSize:[14,14]})}).addTo(map);
 
-    // 초기 위치 잡기
     navigator.geolocation.getCurrentPosition(p => {
         const pos = [p.coords.latitude, p.coords.longitude];
         map.flyTo(pos, 17);
@@ -83,22 +75,32 @@ function init() {
         document.getElementById('status').textContent = "GPS READY";
     }, null, {enableHighAccuracy: true});
 
-    // 실시간 감시 및 자동 멈춤 로직
     navigator.geolocation.watchPosition(p => {
         const {latitude, longitude, accuracy, speed} = p.coords;
         const pos = [latitude, longitude];
         marker.setLatLng(pos);
 
         if(isRunning) {
-            // [자동 멈춤 체크] 속도가 거의 없으면(0.15m/s 미만)
-            if(speed !== null && speed < 0.15 && !isPaused) {
-                onStop();
-                document.getElementById('status').textContent = "AUTO-PAUSED";
-            } 
-            // [자동 재개 체크] 다시 움직이면(0.8m/s 이상)
-            else if(speed !== null && speed > 0.8 && isPaused) {
-                onResume();
-                document.getElementById('status').textContent = "AUTO-RESUMED";
+            // [지연된 자동 멈춤 로직]
+            if(speed !== null && speed < 0.2) { 
+                if(!isPaused && !stopTimer) {
+                    document.getElementById('status').textContent = "WAITING TO PAUSE (5s)...";
+                    stopTimer = setTimeout(() => {
+                        onStop();
+                        document.getElementById('status').textContent = "AUTO-PAUSED";
+                        stopTimer = null;
+                    }, 5000); 
+                }
+            } else if(speed !== null && speed > 0.7) { 
+                if(stopTimer) { 
+                    clearTimeout(stopTimer);
+                    stopTimer = null;
+                    document.getElementById('status').textContent = "RUNNING...";
+                }
+                if(isPaused) { 
+                    onResume();
+                    document.getElementById('status').textContent = "AUTO-RESUMED";
+                }
             }
 
             if(!isPaused) {
