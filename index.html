@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v23.2 Master</title>
+    <title>OppaRun Pro - v23.3 Master</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -11,7 +11,6 @@
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { margin: 0; background: var(--bg); color: var(--text-main); font-family: -apple-system, system-ui; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
         
-        /* 레이아웃 고정 (오빠와의 약속) */
         #map-area { flex-shrink: 0; width: 100%; }
         #map-container { height: 18vh; min-height: 130px; border-bottom: 2px solid #222; }
         #map { height: 100%; width: 100%; background: #222; }
@@ -28,8 +27,10 @@
 
         .controls { height: 90px; display: flex; justify-content: center; align-items: center; padding: 0 15px; margin-top: auto; }
         .btn-capsule { width: 100%; height: 55px; border-radius: 30px; border: none; font-weight: 900; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-        #btn-start { background: var(--primary); color: #000; } /* 이제 처음부터 보여! */
-        #btn-stop { background: var(--danger); color: #fff; display: none; }
+        
+        /* 버튼 상시 노출 고정 */
+        #btn-start { background: var(--primary); color: #000; display: flex !important; } 
+        #btn-stop { background: var(--danger); color: #fff; display: none !important; }
         #after-stop { display: none; gap: 10px; width: 100%; }
         .btn-half { flex: 1; height: 55px; border-radius: 30px; font-weight: 900; border: none; }
 
@@ -66,7 +67,7 @@
         <div class="card"><div class="label">AVG PACE</div><div id="avgPace" class="value">--'--"</div></div>
         <div class="card"><div class="label">CADENCE</div><div class="value"><span id="cadence">0</span><span class="unit">SPM</span></div></div>
         <div class="card"><div class="label">GCT</div><div class="value"><span id="gct">--</span><span class="unit">MS</span></div></div>
-        <div class="card"><div class="label">FLIGHT</div><div class="value"><span id="flight">--</span><span class="unit">%</span></div></div>
+        <div class="card"><div class="label">FLIGHT</div><div class="value"><span id="flight">--</span><span class="unit">MS</span></div></div>
     </div>
     <div class="controls">
         <button id="btn-start" class="btn-capsule" onclick="onStart()">START RUNNING</button>
@@ -119,11 +120,9 @@ function initMap() {
         }, {enableHighAccuracy: true, timeout: 10000, maximumAge: 0});
     }
     
-    // 강제 리사이즈로 지도 깨우기
     setTimeout(() => { map.invalidateSize(); }, 800);
     loadHistory();
     
-    // 센서 감지
     window.addEventListener('devicemotion', (e) => {
         if (!isRunning || isPaused) return;
         let acc = e.accelerationIncludingGravity;
@@ -182,18 +181,31 @@ function formatPace(kmh) {
 }
 
 function onStart() {
-    if (document.getElementById('status').textContent.includes("LOCATING")) {
-        alert("오빠, GPS 잡을 때까지 잠시만! READY 뜨면 눌러줘.");
+    const statusText = document.getElementById('status').textContent;
+    if (statusText === "LOCATING...") {
+        alert("오빠, 아직 위치를 잡고 있어! 조금만 기다렸다가 초록색 'GPS READY'가 뜨면 다시 눌러줘.");
         return;
     }
     if ('wakeLock' in navigator) navigator.wakeLock.request('screen').then(l => wakeLock = l);
     isRunning = true; totalDist = 0; seconds = 0; steps = 0; pathCoords = []; kmPaces = [];
-    document.getElementById('btn-start').style.display = 'none'; document.getElementById('btn-stop').style.display = 'flex';
+    
+    document.getElementById('btn-start').style.setProperty('display', 'none', 'important');
+    document.getElementById('btn-stop').style.setProperty('display', 'flex', 'important');
+    
     timer = setInterval(() => { if(!isPaused) { seconds++; document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; }}, 1000);
 }
 
-function onStop() { isPaused = true; document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; }
-function onResume() { isPaused = false; document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'flex'; }
+function onStop() { 
+    isPaused = true; 
+    document.getElementById('btn-stop').style.setProperty('display', 'none', 'important'); 
+    document.getElementById('after-stop').style.display = 'flex'; 
+}
+
+function onResume() { 
+    isPaused = false; 
+    document.getElementById('after-stop').style.display = 'none'; 
+    document.getElementById('btn-stop').style.setProperty('display', 'flex', 'important'); 
+}
 
 function onFinish() {
     if(wakeLock) wakeLock.release();
@@ -229,7 +241,7 @@ function openDetail(r) {
         <div><div class="label">AVG PACE</div><div class="value">${r.pace||"--'--\""}</div></div>
         <div><div class="label">CADENCE</div><div class="value">${r.cad||'0'}</div></div>
         <div><div class="label">GCT</div><div class="value">${r.gct||'--'}ms</div></div>
-        <div><div class="label">FLIGHT</div><div class="value">${r.flt||'--'}%</div></div>
+        <div><div class="label">FLIGHT</div><div class="value">${r.flt||'--'}ms</div></div>
     `;
     if (!dMap) {
         dMap = L.map('detail-map', {zoomControl: false});
