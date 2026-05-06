@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v23.0 (Map & Split Integrated)</title>
+    <title>OppaRun Pro - v24.0 (Auto-Pause Enabled)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -52,13 +52,11 @@
         .h-info .lab { font-size: 8px; color: #cccccc; font-weight: 900; margin-bottom: 4px; letter-spacing: 0.5px; }
         .h-info .val { font-size: 13px; font-weight: 800; color: #ffffff; }
         
-        /* 추가된 MAP 버튼과 SPLIT 스타일 */
         .btn-map-view { background: #222; color: var(--primary); border: 1.5px solid var(--primary); border-radius: 20px; font-size: 9px; font-weight: 900; padding: 4px 10px; }
         .splits-box { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #333; }
         .split-row { display: flex; justify-content: space-between; font-size: 10px; font-weight: 700; color: #aaa; margin-bottom: 2px; }
         .h-delete { color: #777; font-size: 10px; text-decoration: underline; padding: 5px; font-weight: 800; text-align: right; display: block; margin-top: 10px; }
 
-        /* 지도 오버레이 */
         #full-map-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 20000; }
         #full-map { width: 100%; height: calc(100% - 80px); }
         .close-map-btn { height: 80px; background: #111; color: var(--primary); display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 18px; }
@@ -116,11 +114,13 @@
 
 <script>
 let map, marker, polyline, historyMap, historyLayer, wakeLock = null;
-let pathCoords = [], isRunning = false, isPaused = false, seconds = 0, timer;
-let lastMoveTime = Date.now(), autoPaused = false;
+let pathCoords = [], isRunning = false, isPaused = false, isAutoPaused = false, seconds = 0, timer;
 let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0;
 let gctSum = 0, flightSum = 0, dataCount = 0;
 let currentSpeedKmh = 0, splits = [], kmStartSeconds = 0;
+
+// 설정: 1.5km/h 미만일 때 자동 멈춤
+const AUTO_PAUSE_THRESHOLD = 1.5;
 
 async function requestWakeLock() {
     try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } 
@@ -144,7 +144,7 @@ function initMap() {
     loadHistory();
     
     window.addEventListener('devicemotion', (e) => {
-        if (!isRunning || isPaused) return;
+        if (!isRunning || isPaused || isAutoPaused) return;
         let acc = e.accelerationIncludingGravity;
         if (!acc || acc.x === null) return; 
         let force = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
@@ -173,7 +173,22 @@ function updatePosition(p) {
     marker.setLatLng(pos);
     if (document.getElementById('status').textContent === "LOCATING...") { map.setView(pos, 17); document.getElementById('status').textContent = "GPS READY"; }
     
-    if (isRunning && !isPaused && p.coords.accuracy < 40) {
+    // 자동 멈춤 감지 로직
+    if (isRunning && !isPaused) {
+        if (currentSpeedKmh < AUTO_PAUSE_THRESHOLD && !isAutoPaused) {
+            isAutoPaused = true;
+            vibrate(50);
+            document.getElementById('status').textContent = "AUTO PAUSED";
+            document.getElementById('status').style.color = "#ff4444";
+        } else if (currentSpeedKmh >= AUTO_PAUSE_THRESHOLD && isAutoPaused) {
+            isAutoPaused = false;
+            vibrate(100);
+            document.getElementById('status').textContent = "RUNNING";
+            document.getElementById('status').style.color = "#ffcc00";
+        }
+    }
+
+    if (isRunning && !isPaused && !isAutoPaused && p.coords.accuracy < 40) {
         if (lastPos) {
             let d = (function(p1,p2){
                 const R=6371; const dLat=(p2[0]-p1[0])*Math.PI/180; const dLon=(p2[1]-p1[1])*Math.PI/180;
@@ -186,7 +201,6 @@ function updatePosition(p) {
                 document.getElementById('dist').textContent = totalDist.toFixed(2); 
                 lastPos = pos; pathCoords.push(pos); polyline.setLatLngs(pathCoords); 
                 
-                // 구간 페이스 체크 (1km 마다)
                 if (Math.floor(totalDist) > Math.floor(oldDist)) {
                     let splitTime = seconds - kmStartSeconds;
                     splits.push(Math.floor(splitTime/60) + "'" + String(splitTime%60).padStart(2,'0') + "\"");
@@ -201,15 +215,21 @@ function updatePosition(p) {
 
 function onStart() {
     requestWakeLock(); vibrate(100);
-    isRunning = true; isPaused = false; totalDist = 0; seconds = 0; steps = 0; lastPos = null; pathCoords = []; splits = [];
+    isRunning = true; isPaused = false; isAutoPaused = false; totalDist = 0; seconds = 0; steps = 0; lastPos = null; pathCoords = []; splits = [];
     gctSum = 0; flightSum = 0; dataCount = 0;
     document.getElementById('btn-start').style.display = 'none'; document.getElementById('btn-stop').style.display = 'flex';
     document.getElementById('status').textContent = "RUNNING"; 
-    timer = setInterval(() => { if(!isPaused) { seconds++; document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; }}, 1000);
+    document.getElementById('status').style.color = "#ffcc00";
+    timer = setInterval(() => { 
+        if(!isPaused && !isAutoPaused) { 
+            seconds++; 
+            document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; 
+        }
+    }, 1000);
 } 
 
 function onStop() { isPaused = true; vibrate(50); document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; document.getElementById('status').textContent = "PAUSED"; }
-function onResume() { isPaused = false; vibrate(100); document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'flex'; document.getElementById('status').textContent = "RUNNING"; } 
+function onResume() { isPaused = false; isAutoPaused = false; vibrate(100); document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'flex'; document.getElementById('status').textContent = "RUNNING"; } 
 
 function onFinish() {
     vibrate([100, 50, 100]); releaseWakeLock();
