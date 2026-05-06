@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v18.8 Smooth</title>
+    <title>OppaRun Pro - v18.9 History Fix</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -28,11 +28,13 @@
         .tab-btn { flex: 1; background: none; border: none; color: #444; font-size: 12px; font-weight: 800; }
         .tab-btn.active { color: var(--primary); }
         .my-location { background: #007bff; border: 2.5px solid #fff; border-radius: 50%; width: 14px; height: 14px; box-shadow: 0 0 10px #007bff; }
+        #history-page { display: none; padding: 20px; height: 90vh; overflow-y: auto; background: var(--bg); }
+        .history-item { background: var(--card-bg); padding: 15px; border-radius: 12px; margin-bottom: 12px; border-left: 4px solid var(--primary); }
     </style>
 </head>
 <body>
 
-<div id="page-home">
+<div id="home-page">
     <div id="map"></div>
     <div id="status" class="status-bar">LOCATING...</div>
     <div class="dashboard">
@@ -47,20 +49,24 @@
         <button id="btn-stop" class="btn-circle" onclick="onStop()">STOP</button>
         <div id="after-stop">
             <button class="btn-action" style="background:var(--primary); color:#000;" onclick="onResume()">RESUME</button>
-            <button class="btn-action" style="background:var(--danger); color:#fff;" onclick="location.reload()">FINISH</button>
+            <button class="btn-action" style="background:var(--danger); color:#fff;" onclick="onFinish()">FINISH</button>
         </div>
     </div>
 </div>
 
+<div id="history-page">
+    <h2 style="color:var(--primary); margin-top: 10px;">MY RECORDS</h2>
+    <div id="history-list"></div>
+</div>
+
 <div class="tab-bar">
-    <button class="tab-btn active">RUN</button>
-    <button class="tab-btn">HISTORY</button>
+    <button id="tab-run" class="tab-btn active" onclick="showPage('home')">RUN</button>
+    <button id="tab-hist" class="tab-btn" onclick="showPage('history')">HISTORY</button>
 </div>
 
 <script>
 let map, marker, pathLine, pathArray = [], isRunning = false, isPaused = false, seconds = 0;
-let lastPos = null, timer, totalDist = 0;
-let stopTimer = null; 
+let lastPos = null, timer, totalDist = 0, stopTimer = null;
 
 function init() {
     map = L.map('map', {zoomControl: false}).setView([37.56, 126.97], 17);
@@ -81,26 +87,14 @@ function init() {
         marker.setLatLng(pos);
 
         if(isRunning) {
-            // [지연된 자동 멈춤 로직]
             if(speed !== null && speed < 0.2) { 
                 if(!isPaused && !stopTimer) {
                     document.getElementById('status').textContent = "WAITING TO PAUSE (5s)...";
-                    stopTimer = setTimeout(() => {
-                        onStop();
-                        document.getElementById('status').textContent = "AUTO-PAUSED";
-                        stopTimer = null;
-                    }, 5000); 
+                    stopTimer = setTimeout(() => { onStop(); document.getElementById('status').textContent = "AUTO-PAUSED"; stopTimer = null; }, 5000); 
                 }
             } else if(speed !== null && speed > 0.7) { 
-                if(stopTimer) { 
-                    clearTimeout(stopTimer);
-                    stopTimer = null;
-                    document.getElementById('status').textContent = "RUNNING...";
-                }
-                if(isPaused) { 
-                    onResume();
-                    document.getElementById('status').textContent = "AUTO-RESUMED";
-                }
+                if(stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
+                if(isPaused) onResume();
             }
 
             if(!isPaused) {
@@ -117,7 +111,7 @@ function init() {
                 lastPos = pos;
             }
         }
-    }, null, {enableHighAccuracy:true, timeout: 5000, maximumAge: 0});
+    }, null, {enableHighAccuracy:true});
 }
 
 function onStart() {
@@ -132,16 +126,40 @@ function onStart() {
     }}, 1000);
 }
 
-function onStop() { 
-    isPaused = true; 
-    document.getElementById('btn-stop').style.display = 'none'; 
-    document.getElementById('after-stop').style.display = 'flex'; 
+function onStop() { isPaused = true; document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; }
+function onResume() { isPaused = false; document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'flex'; }
+
+function onFinish() {
+    const record = {
+        date: new Date().toLocaleString(),
+        dist: totalDist.toFixed(2),
+        time: document.getElementById('time').textContent,
+        pace: document.getElementById('avgPace').textContent
+    };
+    let history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
+    history.unshift(record);
+    localStorage.setItem('OppaRun_Data', JSON.stringify(history));
+    alert("Record Saved!");
+    location.reload(); 
 }
 
-function onResume() { 
-    isPaused = false; 
-    document.getElementById('after-stop').style.display = 'none'; 
-    document.getElementById('btn-stop').style.display = 'flex'; 
+function showPage(p) {
+    document.getElementById('home-page').style.display = (p === 'home' ? 'block' : 'none');
+    document.getElementById('history-page').style.display = (p === 'history' ? 'block' : 'none');
+    document.getElementById('tab-run').classList.toggle('active', p === 'home');
+    document.getElementById('tab-hist').classList.toggle('active', p === 'history');
+    if(p === 'history') loadHistory();
+}
+
+function loadHistory() {
+    const history = JSON.parse(localStorage.getItem('OppaRun_Data') || "[]");
+    document.getElementById('history-list').innerHTML = history.map(h => `
+        <div class="history-item">
+            <div style="font-size:11px; color:#888;">${h.date}</div>
+            <div style="font-size:20px; font-weight:900; margin:5px 0;">${h.dist} KM</div>
+            <div style="font-size:14px; color:#ccc;">Time: ${h.time} | Pace: ${h.pace}</div>
+        </div>
+    `).join('') || '<div style="color:#444; text-align:center; margin-top:50px;">No records yet.</div>';
 }
 
 function formatPace(p) { if(!p || p === Infinity) return "--'--\""; const m = Math.floor(p), s = String(Math.floor((p-m)*60)).padStart(2,'0'); return `${m}'${s}"`; }
