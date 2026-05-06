@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v22.5 Final (WakeLock)</title>
+    <title>OppaRun Pro - v22.6 (Clean Finish)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -11,7 +11,6 @@
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { margin: 0; background: var(--bg); color: var(--text-main); font-family: -apple-system, system-ui; height: 100vh; height: -webkit-fill-available; display: flex; flex-direction: column; overflow: hidden; }
         
-        /* 레이아웃 절대 고정 */
         #map-area { flex-shrink: 0; width: 100%; }
         #map-container { height: 18vh; min-height: 130px; border-bottom: 2px solid #222; }
         #map { height: 100%; width: 100%; background: #222; }
@@ -21,9 +20,12 @@
         .card { background: var(--card-bg); border-radius: 15px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #1f1f1f; padding: 15px 0; }
         .card-main { grid-column: span 3; border: 1.5px solid var(--primary); height: 95px; margin-bottom: 2px; }
         .label { font-size: 10px; color: var(--text-dim); font-weight: 800; margin-bottom: 4px; }
-        .value { font-size: 24px; font-weight: 900; }
+        
+        /* [개선] 숫자가 변할 때 흔들리지 않도록 고정폭 설정 */
+        .value { font-size: 24px; font-weight: 900; font-variant-numeric: tabular-nums; }
+        .value-large { font-size: 48px; color: var(--primary); font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
+        
         .unit { font-size: 11px; color: var(--primary); margin-left: 2px; }
-        .value-large { font-size: 48px; color: var(--primary); font-weight: 900; line-height: 1; }
         .controls { height: 90px; display: flex; justify-content: center; align-items: center; padding: 0 15px; margin-top: auto; }
         .btn-capsule { width: 100%; height: 55px; border-radius: 30px; border: none; font-weight: 900; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
         #btn-start { background: var(--primary); color: #000; }
@@ -35,7 +37,7 @@
         .history-item { background: #1a1a1a; border-radius: 12px; padding: 12px; margin-bottom: 10px; border-left: 4px solid var(--primary); }
         .history-date { font-size: 12px; color: var(--text-dim); margin-bottom: 5px; }
         .history-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
-        .h-val { font-size: 14px; font-weight: 700; color: #fff; }
+        .h-val { font-size: 14px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }
         .h-lab { font-size: 9px; color: var(--text-dim); }
         .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 65px; background: #000; display: flex; border-top: 1px solid #222; align-items: center; padding-bottom: env(safe-area-inset-bottom); z-index: 9999; }
         .tab-btn { flex: 1; background: none; border: none; color: #444; font-size: 13px; font-weight: 800; cursor: pointer; }
@@ -86,12 +88,14 @@ let pathCoords = [], isRunning = false, isPaused = false, seconds = 0, timer;
 let lastMoveTime = Date.now(), autoPaused = false;
 let totalDist = 0, lastPos = null, steps = 0;
 
-// 화면 꺼짐 방지
 async function requestWakeLock() {
     try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } 
     catch (err) { console.error(`${err.name}, ${err.message}`); }
 }
 function releaseWakeLock() { if (wakeLock !== null) { wakeLock.release(); wakeLock = null; } }
+
+// [개선] 진동 피드백 함수
+function vibrate(ms) { if (navigator.vibrate) navigator.vibrate(ms); }
 
 function formatPace(kmh) {
     if (!kmh || kmh < 0.5) return "--'--\"";
@@ -127,13 +131,17 @@ function updatePosition(p) {
     if (isRunning) {
         if (speedKmh < 1) {
             if ((Date.now() - lastMoveTime)/1000 >= 5 && !isPaused) {
-                isPaused = true; autoPaused = true;
+                isPaused = true; autoPaused = true; vibrate(200); // 자동 정지 시 진동
                 document.getElementById('status').textContent = "AUTO PAUSED";
                 document.getElementById('status').style.color = "#ff4444";
             }
         } else {
             lastMoveTime = Date.now();
-            if (autoPaused) { isPaused = false; autoPaused = false; document.getElementById('status').textContent = "RUNNING"; document.getElementById('status').style.color = "#ffcc00"; }
+            if (autoPaused) { 
+                isPaused = false; autoPaused = false; vibrate([100, 50, 100]); // 재개 시 진동
+                document.getElementById('status').textContent = "RUNNING"; 
+                document.getElementById('status').style.color = "#ffcc00"; 
+            }
         }
         if (!isPaused) {
             if (lastPos) {
@@ -153,7 +161,7 @@ function updatePosition(p) {
 }
 
 function onStart() {
-    requestWakeLock();
+    requestWakeLock(); vibrate(100);
     isRunning = true; isPaused = false; totalDist = 0; seconds = 0; steps = 0; lastPos = null; pathCoords = [];
     document.getElementById('btn-start').style.display = 'none'; document.getElementById('btn-stop').style.display = 'flex';
     document.getElementById('status').textContent = "RUNNING"; document.getElementById('status').style.color = "#ffcc00";
@@ -163,10 +171,12 @@ function onStart() {
     }}, 1000);
 }
 
-function onStop() { isPaused = true; document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; document.getElementById('status').textContent = "PAUSED"; }
-function onResume() { isPaused = false; autoPaused = false; lastMoveTime = Date.now(); document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'flex'; document.getElementById('status').textContent = "RUNNING"; }
+function onStop() { isPaused = true; vibrate(50); document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; document.getElementById('status').textContent = "PAUSED"; }
+function onResume() { isPaused = false; autoPaused = false; lastMoveTime = Date.now(); vibrate(100); document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'flex'; document.getElementById('status').textContent = "RUNNING"; }
 
+// [개선] 알림창 없이 자동 저장 후 히스토리 탭으로 이동
 function onFinish() {
+    vibrate([100, 50, 100]);
     releaseWakeLock();
     const record = {
         date: new Date().toLocaleString(),
@@ -178,8 +188,17 @@ function onFinish() {
     let history = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
     history.unshift(record);
     localStorage.setItem('oppaRunHistory', JSON.stringify(history));
-    alert("운동 기록이 저장되었습니다!");
-    location.reload();
+    
+    // 알림창 대신 바로 히스토리 탭으로 보내주기
+    showTab('history');
+    // 데이터 초기화
+    isRunning = false; seconds = 0; totalDist = 0;
+    document.getElementById('dist').textContent = "0.00";
+    document.getElementById('time').textContent = "00:00";
+    document.getElementById('curPace').textContent = "--'--\"";
+    document.getElementById('avgPace').textContent = "--'--\"";
+    document.getElementById('btn-start').style.display = 'flex';
+    document.getElementById('after-stop').style.display = 'none';
 }
 
 function loadHistory() {
@@ -208,6 +227,7 @@ function showTab(tab) {
     document.getElementById('tab-run').className = 'tab-btn' + (tab === 'run' ? ' active' : '');
     document.getElementById('tab-history').className = 'tab-btn' + (tab === 'history' ? ' active' : '');
     if(tab === 'run') setTimeout(() => map.invalidateSize(), 100);
+    if(tab === 'history') loadHistory(); // 탭 전환 시 히스토리 갱신
 }
 window.onload = initMap;
 </script>
