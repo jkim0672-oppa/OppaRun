@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v25.2 (Internal Update Only)</title>
+    <title>OppaRun Pro - v25.3 (History Scroll Fixed)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -23,10 +23,19 @@
         #map { height: 100%; width: 100%; background: #222; }
         .status-bar { text-align: center; color: #ffcc00; font-size: 11px; padding: 4px; background: #0a0a0a; font-weight: 800; }
         .main-content { flex: 1; display: flex; flex-direction: column; padding-bottom: 80px; overflow: hidden; }
+        
+        /* 히스토리 뷰의 스크롤 문제를 해결하기 위한 컨테이너 설정 */
+        #history-view { display: none; flex: 1; width: 100%; flex-direction: column; background: #000; overflow: hidden; }
+        .history-list { 
+            padding: 10px; 
+            overflow-y: auto; /* 세로 스크롤 허용 */
+            flex: 1; 
+            -webkit-overflow-scrolling: touch; /* iOS 부드러운 스크롤 */
+        }
+
         .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 10px; }
         .card { background: var(--card-bg); border-radius: 15px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #1f1f1f; padding: 15px 0; }
         .card-main { grid-column: span 3; border: 1.5px solid var(--primary); height: 95px; margin-bottom: 2px; }
-        
         .label { font-size: 10px; color: var(--text-dim); font-weight: 900; margin-bottom: 4px; letter-spacing: 1px; opacity: 0.9; }
         .value { font-size: 24px; font-weight: 900; font-variant-numeric: tabular-nums; }
         .value-large { font-size: 48px; color: var(--primary); font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
@@ -39,8 +48,6 @@
         #after-stop { display: none; gap: 10px; width: 100%; }
         .btn-half { flex: 1; height: 55px; border-radius: 30px; font-weight: 900; font-size: 16px; border: none; display: flex; align-items: center; justify-content: center; } 
 
-        #history-view { display: none; flex: 1; width: 100%; flex-direction: column; background: #000; }
-        .history-list { padding: 10px; overflow-y: auto; flex: 1; }
         .history-item { background: #111; border-radius: 15px; padding: 15px; margin-bottom: 12px; border: 1px solid #222; position: relative; }
         .h-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
         .h-date { font-size: 11px; color: var(--primary); font-weight: 900; }
@@ -57,14 +64,13 @@
         .split-row { display: flex; justify-content: space-between; font-size: 10px; font-weight: 700; color: #aaa; margin-bottom: 2px; }
         .h-delete { color: #777; font-size: 10px; text-decoration: underline; padding: 5px; font-weight: 800; text-align: right; display: block; margin-top: 10px; }
 
-        #full-map-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 20000; }
-        #full-map { width: 100%; height: calc(100% - 80px); }
-        .close-map-btn { height: 80px; background: #111; color: var(--primary); display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 18px; }
-
         .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 65px; background: #000; display: flex; border-top: 1px solid #222; align-items: center; padding-bottom: env(safe-area-inset-bottom); z-index: 9999; }
         .tab-btn { flex: 1; background: none; border: none; color: #888; font-size: 13px; font-weight: 800; cursor: pointer; }
         .tab-btn.active { color: var(--primary); }
         .my-location { background: #007bff; border: 2px solid #fff; border-radius: 50%; width: 12px; height: 12px; box-shadow: 0 0 10px rgba(0,123,255,0.8); }
+        #full-map-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 20000; }
+        #full-map { width: 100%; height: calc(100% - 80px); }
+        .close-map-btn { height: 80px; background: #111; color: var(--primary); display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 18px; }
     </style>
 </head>
 <body> 
@@ -95,7 +101,7 @@
 </div>
 
 <div id="history-view" class="main-content">
-    <div style="padding: 20px 20px 10px 20px; display: flex; justify-content: space-between; align-items: flex-end;">
+    <div style="padding: 20px 20px 10px 20px; display: flex; justify-content: space-between; align-items: flex-end; flex-shrink: 0;">
         <span style="font-size: 24px; font-weight: 900; color: var(--primary);">HISTORY</span>
         <span id="total-summary" style="font-size: 11px; color: #aaa;">0 Runs</span>
     </div>
@@ -119,9 +125,8 @@ let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0;
 let gctSum = 0, flightSum = 0, dataCount = 0;
 let currentSpeedKmh = 0, splits = [], kmStartSeconds = 0;
 
-// [내부 로직 업데이트]
 const AUTO_PAUSE_THRESHOLD = 1.5;
-let lowSpeedTicks = 0; // 3초 딜레이용 카운터
+let lowSpeedTicks = 0;
 
 async function requestWakeLock() {
     try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } 
@@ -174,13 +179,12 @@ function updatePosition(p) {
     marker.setLatLng(pos);
     if (document.getElementById('status').textContent === "LOCATING...") { map.setView(pos, 17); document.getElementById('status').textContent = "GPS READY"; }
     
-    // [업그레이드된 자동 멈춤 로직]
     if (isRunning && !isPaused) {
         if (currentSpeedKmh < AUTO_PAUSE_THRESHOLD) {
             lowSpeedTicks++;
-            if (lowSpeedTicks >= 3 && !isAutoPaused) { // 3초 딜레이
+            if (lowSpeedTicks >= 3 && !isAutoPaused) {
                 isAutoPaused = true;
-                vibrate([50, 50, 50]); // 멈춤 진동 (짧게 2번)
+                vibrate([50, 50, 50]);
                 document.getElementById('status').textContent = "AUTO PAUSED";
                 document.getElementById('status').style.color = "#ff4444";
             }
@@ -188,7 +192,7 @@ function updatePosition(p) {
             lowSpeedTicks = 0;
             if (isAutoPaused) {
                 isAutoPaused = false;
-                vibrate(200); // 재개 진동 (길게 1번)
+                vibrate(200);
                 document.getElementById('status').textContent = "RUNNING";
                 document.getElementById('status').style.color = "#ffcc00";
             }
@@ -207,7 +211,6 @@ function updatePosition(p) {
                 totalDist += d; 
                 document.getElementById('dist').textContent = totalDist.toFixed(2); 
                 lastPos = pos; pathCoords.push(pos); polyline.setLatLngs(pathCoords); 
-                
                 if (Math.floor(totalDist) > Math.floor(oldDist)) {
                     let splitTime = seconds - kmStartSeconds;
                     splits.push(Math.floor(splitTime/60) + "'" + String(splitTime%60).padStart(2,'0') + "\"");
@@ -264,7 +267,7 @@ function onFinish() {
 function showFullMap(id) {
     const history = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
     const item = history.find(r => r.id === id);
-    if (!item || !item.path || !item.path.length) return alert("경로 데이터가 없습니다.");
+    if (!item || !item.path || !item.path.length) return alert("경로 데이터 없음");
     document.getElementById('full-map-overlay').style.display = 'block';
     if (!historyMap) {
         historyMap = L.map('full-map', {zoomControl: false});
@@ -280,22 +283,22 @@ function loadHistory() {
     const history = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
     const list = document.getElementById('history-list');
     document.getElementById('total-summary').textContent = `${history.length} Runs`;
-    list.innerHTML = history.length ? "" : '<div style="color:#333; text-align:center; margin-top:100px; font-weight:900;">NO DATA</div>';
+    list.innerHTML = history.length ? "" : '<div style="color:#333; text-align:center; margin-top:100px;">NO DATA</div>';
     history.forEach(r => {
         const item = document.createElement('div');
         item.className = 'history-item';
         let splitHtml = (r.splits || []).map((s, i) => `<div class="split-row"><span>${i+1}KM</span><span>${s}</span></div>`).join('');
         item.innerHTML = `
             <div class="h-header"><span class="h-date">${r.date}</span><button class="btn-map-view" onclick="showFullMap(${r.id})">VIEW MAP</button></div>
-            <div class="h-main-stats"><span class="h-dist">${r.dist}<small style="font-size:12px; margin-left:4px; color:var(--primary)">KM</small></span><span class="h-time">${r.time}</span></div>
+            <div class="h-main-stats"><span class="h-dist">${r.dist}KM</span><span class="h-time">${r.time}</span></div>
             <div class="h-grid">
                 <div class="h-info"><span class="lab">PACE</span><span class="val">${r.avgPace}</span></div>
                 <div class="h-info"><span class="lab">CADENCE</span><span class="val">${r.cadence}</span></div>
                 <div class="h-info"><span class="lab">KCAL</span><span class="val">${r.kcal}</span></div>
-                <div class="h-info"><span class="lab">GCT/FLT</span><span class="val">${r.gct}ms/${r.flight}%</span></div>
+                <div class="h-info"><span class="lab">GCT/FLT</span><span class="val">${r.gct}/${r.flight}</span></div>
             </div>
             ${splitHtml ? `<div class="splits-box">${splitHtml}</div>` : ''}
-            <span class="h-delete" onclick="if(confirm('삭제할까요?')){let h=JSON.parse(localStorage.getItem('oppaRunHistory'));h=h.filter(x=>x.id!=${r.id});localStorage.setItem('oppaRunHistory',JSON.stringify(h));loadHistory();}">Delete Record</span>`;
+            <span class="h-delete" onclick="if(confirm('삭제?')){let h=JSON.parse(localStorage.getItem('oppaRunHistory'));h=h.filter(x=>x.id!=${r.id});localStorage.setItem('oppaRunHistory',JSON.stringify(h));loadHistory();}">Delete Record</span>`;
         list.appendChild(item);
     });
 } 
