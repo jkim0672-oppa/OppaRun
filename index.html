@@ -10,6 +10,7 @@
         :root { 
             --primary: #00ff88; --bg: #000000; --card-bg: #121212; 
             --text-main: #ffffff; --text-dim: #ffffff; --danger: #ff4444; 
+            --warning: #ffcc00; /* 주의 색상 추가 */
         }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { margin: 0; background: var(--bg); color: var(--text-main); font-family: -apple-system, system-ui; height: 100vh; height: -webkit-fill-available; display: flex; flex-direction: column; overflow: hidden; }
@@ -89,8 +90,8 @@
             <div class="card"><div class="label">TIME</div><div id="time" class="value">00:00</div></div>
             <div class="card"><div class="label">AVG PACE</div><div id="avgPace" class="value">--'--"</div></div>
             <div class="card"><div class="label">CADENCE</div><div class="value"><span id="cadence">0</span><span class="unit">SPM</span></div></div>
-            <div class="card"><div class="label">GCT</div><div class="value"><span id="gct">--</span><span class="unit">MS</span></div></div>
-            <div class="card"><div class="label">FLIGHT</div><div class="value"><span id="flight">--</span><span class="unit">%</span></div></div>
+            <div class="card"><div class="label">GCT</div><div class="value"><span id="gct">--</span><span class="unit" id="gct-unit">MS</span></div></div>
+            <div class="card"><div class="label">FLIGHT</div><div class="value"><span id="flight">--</span><span class="unit" id="flight-unit">%</span></div></div>
         </div>
         <div class="controls">
             <button id="btn-start" class="btn-capsule" onclick="onStart()">START RUNNING</button>
@@ -106,33 +107,16 @@
         <div style="padding: 20px 20px 10px 20px; display: flex; justify-content: space-between; align-items: flex-end; flex-shrink: 0;">
             <span style="font-size: 24px; font-weight: 900; color: var(--primary);">HISTORY</span>
         </div>
-        
         <div class="total-dashboard">
-            <div class="total-card">
-                <span class="total-label">Total Dist</span>
-                <span id="total-dist-val" class="total-value">0.00 <small style="font-size:10px">KM</small></span>
-            </div>
-            <div class="total-card">
-                <span class="total-label">Weekly Dist</span>
-                <span id="weekly-dist-val" class="total-value">0.00 <small style="font-size:10px">KM</small></span>
-            </div>
-            <div class="total-card">
-                <span class="total-label">Total Runs</span>
-                <span id="total-runs-val" class="total-value">0</span>
-            </div>
-            <div class="total-card">
-                <span class="total-label">Total kcal</span>
-                <span id="total-kcal-val" class="total-value">0</span>
-            </div>
+            <div class="total-card"><span class="total-label">Total Dist</span><span id="total-dist-val" class="total-value">0.00 <small style="font-size:10px">KM</small></span></div>
+            <div class="total-card"><span class="total-label">Weekly Dist</span><span id="weekly-dist-val" class="total-value">0.00 <small style="font-size:10px">KM</small></span></div>
+            <div class="total-card"><span class="total-label">Total Runs</span><span id="total-runs-val" class="total-value">0</span></div>
+            <div class="total-card"><span class="total-label">Total kcal</span><span id="total-kcal-val" class="total-value">0</span></div>
         </div>
-
         <div id="history-list" class="history-list"></div>
     </div> 
 
-    <div id="full-map-overlay">
-        <div id="full-map"></div>
-        <div class="close-map-btn" onclick="closeFullMap()">BACK TO HISTORY</div>
-    </div>
+    <div id="full-map-overlay"><div id="full-map"></div><div class="close-map-btn" onclick="closeFullMap()">BACK TO HISTORY</div></div>
 
     <div class="tab-bar">
         <button id="tab-run" class="tab-btn active" onclick="showTab('run')">RUN</button>
@@ -140,6 +124,7 @@
     </div> 
 
 <script>
+// 로직 변수 그대로 유지
 let map, marker, polyline, historyMap, historyLayer, wakeLock = null;
 let pathCoords = [], isRunning = false, isPaused = false, isAutoPaused = false, seconds = 0, timer;
 let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0;
@@ -165,6 +150,7 @@ function initMap() {
     } catch(e) { console.error("Init Error", e); }
 } 
 
+// [업데이트된 handleMotion] 색상 피드백 로직 추가
 function handleMotion(e) {
     if (!isRunning || isPaused || isAutoPaused) return;
     let acc = e.accelerationIncludingGravity;
@@ -182,18 +168,33 @@ function handleMotion(e) {
             flt = Math.max(0, Math.floor(currentSpeedKmh * 2));
         }
         gctSum += gct; flightSum += flt; dataCount++;
+        
         document.getElementById('cadence').textContent = Math.round((steps/(seconds||1))*60);
-        document.getElementById('gct').textContent = gct || "--"; 
-        document.getElementById('flight').textContent = flt || "0";
+        
+        // GCT 색상 피드백
+        const gctDisplay = document.getElementById('gct');
+        const gctUnit = document.getElementById('gct-unit');
+        gctDisplay.textContent = gct || "--";
+        if (gct > 300) { gctDisplay.style.color = "var(--danger)"; gctUnit.style.color = "var(--danger)"; }
+        else if (gct > 260) { gctDisplay.style.color = "var(--warning)"; gctUnit.style.color = "var(--warning)"; }
+        else { gctDisplay.style.color = "var(--primary)"; gctUnit.style.color = "var(--primary)"; }
+
+        // FLIGHT 색상 피드백
+        const fltDisplay = document.getElementById('flight');
+        const fltUnit = document.getElementById('flight-unit');
+        fltDisplay.textContent = flt || "0";
+        if (flt < 12) { fltDisplay.style.color = "var(--danger)"; fltUnit.style.color = "var(--danger)"; }
+        else if (flt < 18) { fltDisplay.style.color = "var(--warning)"; fltUnit.style.color = "var(--warning)"; }
+        else { fltDisplay.style.color = "var(--primary)"; fltUnit.style.color = "var(--primary)"; }
     }
 }
 
+// 나머지 함수(updatePosition, onStart, onStop, onFinish 등)는 기존 로직 100% 동일
 function updatePosition(p) {
     const pos = [p.coords.latitude, p.coords.longitude];
     currentSpeedKmh = (p.coords.speed || 0) * 3.6;
     marker.setLatLng(pos);
     if (document.getElementById('status').textContent === "LOCATING...") { map.setView(pos, 17); document.getElementById('status').textContent = "GPS READY"; }
-    
     if (isRunning && !isPaused) {
         if (currentSpeedKmh < AUTO_PAUSE_THRESHOLD) {
             lowSpeedTicks++;
@@ -203,7 +204,6 @@ function updatePosition(p) {
             if (isAutoPaused) { isAutoPaused = false; vibrate(200); document.getElementById('status').textContent = "RUNNING"; document.getElementById('status').style.color = "#ffcc00"; }
         }
     }
-
     if (isRunning && !isPaused && !isAutoPaused && p.coords.accuracy < 40) {
         if (lastPos) {
             let d = (function(p1,p2){
@@ -278,11 +278,9 @@ function closeFullMap() { document.getElementById('full-map-overlay').style.disp
 function loadHistory() {
     const history = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
     const list = document.getElementById('history-list');
-    
     let totalD = 0, weeklyD = 0, totalK = 0;
     const now = Date.now();
     const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
-
     history.forEach(r => {
         const distVal = parseFloat(r.dist) || 0;
         totalD += distVal;
@@ -290,14 +288,11 @@ function loadHistory() {
         const recordTime = r.timestamp || r.id; 
         if (now - recordTime < oneWeekMs) { weeklyD += distVal; }
     });
-    
     document.getElementById('total-dist-val').innerHTML = `${totalD.toFixed(2)} <small style="font-size:10px">KM</small>`;
     document.getElementById('weekly-dist-val').innerHTML = `${weeklyD.toFixed(2)} <small style="font-size:10px">KM</small>`;
     document.getElementById('total-runs-val').textContent = history.length;
     document.getElementById('total-kcal-val').textContent = totalK.toLocaleString();
-
     list.innerHTML = history.length ? "" : '<div style="color:#333; text-align:center; margin-top:100px; font-weight:900;">NO DATA</div>';
-    
     history.forEach(r => {
         const item = document.createElement('div');
         item.className = 'history-item';
