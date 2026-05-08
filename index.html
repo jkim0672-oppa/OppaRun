@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>OppaRun Basic</title>
+    <title>OppaRun v25.0 Original</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -27,21 +27,22 @@
             overflow: hidden;
         }
 
-        /* 1. 지도: 처음 소스처럼 유연하게 공간 차지 */
+        /* 지도 영역: 상단 40% 고정 (가장 안정적인 비율) */
         #map {
-            flex: 1; 
+            height: 40dvh;
             width: 100%;
             z-index: 1;
         }
 
-        /* 2. 대시보드: 사이즈만 기기에 맞춰 최적화 */
+        /* 대시보드 영역: 6개 데이터 카드 포함 */
         .dashboard {
-            padding: 10px;
+            flex: 1;
+            padding: 12px;
             display: grid;
-            grid-template-columns: repeat(3, 1fr); /* 무조건 3열 유지 */
+            grid-template-columns: repeat(3, 1fr);
             gap: 8px;
             background: var(--dark-bg);
-            padding-bottom: 20px;
+            overflow-y: auto; /* 작은 폰 대응 */
         }
 
         .pace-card {
@@ -51,6 +52,13 @@
             border-radius: 12px;
             padding: 15px;
             text-align: center;
+        }
+
+        #current-pace {
+            font-size: 3.5rem;
+            font-weight: bold;
+            color: var(--neon-green);
+            line-height: 1.1;
         }
 
         .stat-box {
@@ -64,7 +72,10 @@
             justify-content: center;
         }
 
-        /* 3. 시작 버튼: 사이즈 수정 (423.jpg처럼 안 밀리게) */
+        .label { font-size: 0.65rem; color: #888; margin-bottom: 2px; }
+        .value { font-size: 1.1rem; font-weight: bold; }
+        .unit { font-size: 0.65rem; color: var(--neon-green); margin-left: 2px; }
+
         .main-btn {
             grid-column: span 3;
             background: var(--neon-green);
@@ -74,45 +85,39 @@
             padding: 18px;
             font-weight: bold;
             font-size: 1.3rem;
-            cursor: pointer;
             margin-top: 5px;
         }
 
         /* 하단 탭 바 */
         .tab-bar {
+            height: 65px;
             display: flex;
-            height: 60px;
             background: #000;
-            border-top: 1px solid #333;
-            align-items: center;
+            border-top: 1px solid #222;
+            padding-bottom: env(safe-area-inset-bottom);
         }
 
         .tab-item {
             flex: 1;
-            text-align: center;
-            color: #666;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #555;
             text-decoration: none;
             font-weight: bold;
         }
 
         .tab-item.active { color: var(--neon-green); }
 
-        /* 히스토리 화면 (414.jpg 요약 카드 포함 기본 구조) */
+        /* 히스토리 화면 */
         #history-screen {
             display: none;
             position: absolute;
-            top: 0; left: 0; width: 100%; height: calc(100dvh - 60px);
+            top: 0; left: 0; width: 100%; height: calc(100dvh - 65px);
             background: var(--dark-bg);
             z-index: 100;
             padding: 20px;
             overflow-y: auto;
-        }
-
-        .summary-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-bottom: 20px;
         }
     </style>
 </head>
@@ -123,32 +128,32 @@
     <div id="run-dashboard" class="dashboard">
         <div class="pace-card">
             <div style="color:var(--neon-green); font-size:0.8rem;">CURRENT PACE</div>
-            <div id="current-pace" style="font-size:3.5rem; font-weight:bold; color:var(--neon-green);">--'--"</div>
+            <div id="current-pace">--'--"</div>
         </div>
 
         <div class="stat-box">
-            <div style="font-size:0.7rem; color:#888;">DIST</div>
-            <div><span id="dist" style="font-size:1.2rem; font-weight:bold;">0.00</span><span style="font-size:0.7rem;"> KM</span></div>
+            <div class="label">DIST</div>
+            <div class="value"><span id="dist">0.00</span><span class="unit">KM</span></div>
         </div>
         <div class="stat-box">
-            <div style="font-size:0.7rem; color:#888;">TIME</div>
-            <div id="time" style="font-size:1.2rem; font-weight:bold;">00:00</div>
+            <div class="label">TIME</div>
+            <div id="time" class="value">00:00</div>
         </div>
         <div class="stat-box">
-            <div style="font-size:0.7rem; color:#888;">AVG PACE</div>
-            <div id="avg-pace" style="font-size:1.2rem; font-weight:bold;">--'--"</div>
+            <div class="label">AVG PACE</div>
+            <div id="avg-pace" class="value">--'--"</div>
         </div>
         <div class="stat-box">
-            <div style="font-size:0.7rem; color:#888;">CADENCE</div>
-            <div><span id="cadence" style="font-size:1.1rem; font-weight:bold;">0</span><span style="font-size:0.7rem; color:var(--neon-green);"> SPM</span></div>
+            <div class="label">CADENCE</div>
+            <div class="value"><span id="cadence">0</span><span class="unit">SPM</span></div>
         </div>
         <div class="stat-box">
-            <div style="font-size:0.7rem; color:#888;">GCT</div>
-            <div><span id="gct" style="font-size:1.1rem; font-weight:bold;">--</span><span style="font-size:0.7rem; color:var(--neon-green);"> MS</span></div>
+            <div class="label">GCT</div>
+            <div class="value"><span id="gct">--</span><span class="unit">MS</span></div>
         </div>
         <div class="stat-box">
-            <div style="font-size:0.7rem; color:#888;">FLIGHT</div>
-            <div><span id="flight" style="font-size:1.1rem; font-weight:bold;">--</span><span style="font-size:0.7rem; color:var(--neon-green);"> %</span></div>
+            <div class="label">FLIGHT</div>
+            <div class="value"><span id="flight">--</span><span class="unit">%</span></div>
         </div>
 
         <button id="startBtn" class="main-btn" onclick="toggleRun()">START RUNNING</button>
@@ -156,18 +161,12 @@
 
     <div id="history-screen">
         <h1 style="color:var(--neon-green); margin-bottom:20px;">HISTORY</h1>
-        <div class="summary-grid">
-            <div class="stat-box"><div style="font-size:0.7rem; color:var(--neon-green);">TOTAL DIST</div><div style="font-size:1.2rem; font-weight:bold;">0.00 KM</div></div>
-            <div class="stat-box"><div style="font-size:0.7rem; color:var(--neon-green);">WEEKLY DIST</div><div style="font-size:1.2rem; font-weight:bold;">0.00 KM</div></div>
-            <div class="stat-box"><div style="font-size:0.7rem; color:var(--neon-green);">TOTAL RUNS</div><div style="font-size:1.2rem; font-weight:bold;">0</div></div>
-            <div class="stat-box"><div style="font-size:0.7rem; color:var(--neon-green);">TOTAL KCAL</div><div style="font-size:1.2rem; font-weight:bold;">0</div></div>
-        </div>
-        <div id="history-list" style="text-align:center; color:#666; margin-top:20px;">NO DATA</div>
+        <div id="history-list" style="color:#666; text-align:center;">NO DATA</div>
     </div>
 
     <nav class="tab-bar">
-        <a href="javascript:void(0)" class="tab-item active" id="tab-run" onclick="showScreen('run')">RUN</a>
-        <a href="javascript:void(0)" class="tab-item" id="tab-history" onclick="showScreen('history')">HISTORY</a>
+        <a href="javascript:void(0)" class="tab-item active" id="btn-run" onclick="showScreen('run')">RUN</a>
+        <a href="javascript:void(0)" class="tab-item" id="btn-history" onclick="showScreen('history')">HISTORY</a>
     </nav>
 
     <script>
@@ -175,67 +174,43 @@
         let map;
 
         window.onload = function() {
-            // 지도 초기화 (가장 기본 방식으로 복구)
-            map = L.map('map').setView([37.5665, 126.9780], 15);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; OpenStreetMap'
-            }).addTo(map);
-            
-            loadHistory();
+            initMap();
         };
+
+        function initMap() {
+            map = L.map('map').setView([37.5665, 126.9780], 15);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+            setTimeout(() => { map.invalidateSize(); }, 500);
+        }
 
         function toggleRun() {
             isRunning = !isRunning;
             const btn = document.getElementById('startBtn');
             btn.innerText = isRunning ? "STOP RUNNING" : "START RUNNING";
             btn.style.background = isRunning ? "#ff3333" : "#00ff66";
-            if(!isRunning) saveRunData();
         }
 
         function showScreen(screen) {
             const hScreen = document.getElementById('history-screen');
             const rDash = document.getElementById('run-dashboard');
             const mapDiv = document.getElementById('map');
-            const tabRun = document.getElementById('tab-run');
-            const tabHistory = document.getElementById('tab-history');
+            const btnRun = document.getElementById('btn-run');
+            const btnHistory = document.getElementById('btn-history');
 
             if(screen === 'history') {
                 hScreen.style.display = 'block';
                 rDash.style.display = 'none';
                 mapDiv.style.display = 'none';
-                tabRun.classList.remove('active');
-                tabHistory.classList.add('active');
+                btnRun.classList.remove('active');
+                btnHistory.classList.add('active');
             } else {
                 hScreen.style.display = 'none';
                 rDash.style.display = 'grid';
                 mapDiv.style.display = 'block';
-                tabRun.classList.add('active');
-                tabHistory.classList.remove('active');
-                map.invalidateSize(); // 화면 전환 시 지도 깨짐 방지
+                btnRun.classList.add('active');
+                btnHistory.classList.remove('active');
+                map.invalidateSize();
             }
-        }
-
-        function saveRunData() {
-            const d = document.getElementById('dist').innerText;
-            if(parseFloat(d) <= 0) return;
-            const record = { date: new Date().toLocaleString(), dist: d, time: document.getElementById('time').innerText };
-            let history = JSON.parse(localStorage.getItem('OppaRun_Data_New') || "[]");
-            history.unshift(record);
-            localStorage.setItem('OppaRun_Data_New', JSON.stringify(history));
-            loadHistory();
-        }
-
-        function loadHistory() {
-            const list = document.getElementById('history-list');
-            const data = localStorage.getItem('OppaRun_Data_New');
-            if(!data || data === "[]") return;
-            const history = JSON.parse(data);
-            list.innerHTML = history.map(item => `
-                <div style="background:#1a1a1a; padding:15px; border-radius:10px; margin-bottom:10px; border-left:4px solid var(--neon-green); text-align:left;">
-                    <div style="font-size:0.75rem; color:#888;">${item.date}</div>
-                    <div style="font-size:1.1rem; font-weight:bold; margin-top:5px;">${item.dist} KM / ${item.time}</div>
-                </div>
-            `).join('');
         }
     </script>
 </body>
