@@ -9,109 +9,119 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <style>
-        /* 2. 레이아웃 절대 보존을 위한 필수 스타일 보정 */
         :root {
             --neon-green: #00ff66;
             --dark-bg: #0a0a0a;
             --card-bg: #1a1a1a;
+            --tab-height: 60px; /* 하단 탭 높이 고정 */
         }
 
-        * {
-            box-sizing: border-box; /* 패딩으로 인한 화면 삐져나감 방지 */
-            margin: 0;
-            padding: 0;
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
 
-        body {
+        /* 전체 화면을 꽉 채우고 스크롤을 막음 (앱 느낌 구현) */
+        html, body {
+            height: 100dvh;
             background-color: var(--dark-bg);
             color: white;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            /* S25 크롬 주소창 대응: dvh 단위를 사용하여 하단 잘림 해결 */
-            height: 100vh;
-            height: 100dvh; 
+            font-family: 'Pretendard', sans-serif;
+            overflow: hidden;
             display: flex;
             flex-direction: column;
-            overflow: hidden; /* 전체 화면 스크롤 방지 (레이아웃 고정) */
         }
 
-        /* 오빠가 만든 레이아웃 구조 유지 */
+        /* 1. 지도 영역: 남는 모든 공간 차지 */
         #map {
-            flex: 1; /* 지도가 남은 공간을 차지하도록 */
+            flex: 1;
             width: 100%;
-            z-index: 1;
+            background: #222;
         }
 
+        /* 2. 대시보드 영역: 하단에 딱 붙음 */
         .dashboard {
-            padding: 15px;
-            display: grid;
-            gap: 10px;
             background: var(--dark-bg);
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
             z-index: 10;
         }
 
-        /* 이하 레이아웃 스타일은 기존 설정 그대로 유지 (색상 및 형태 보존) */
+        /* 페이스 카드: 고정 높이 대신 비율 사용 */
         .pace-card {
-            grid-column: span 3;
             background: var(--card-bg);
             border: 2px solid var(--neon-green);
-            border-radius: 15px;
-            padding: 20px;
+            border-radius: 12px;
+            padding: 12px;
             text-align: center;
         }
 
+        #current-pace {
+            font-size: clamp(2.5rem, 8vw, 3.5rem); /* 폰 크기에 따라 글자 크기 조절 */
+            font-weight: bold;
+            color: var(--neon-green);
+        }
+
+        /* 3열 그리드: 어떤 폰에서도 똑같이 3칸 유지 */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 8px;
+            gap: 6px;
         }
 
         .stat-box {
             background: var(--card-bg);
-            padding: 12px 5px;
+            padding: 10px 4px;
             border-radius: 10px;
             text-align: center;
+            min-height: 65px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
         }
 
+        .stat-label { font-size: 0.65rem; color: #888; margin-bottom: 2px; }
+        .stat-value { font-size: 1.1rem; font-weight: bold; }
+        .stat-unit { font-size: 0.65rem; color: var(--neon-green); margin-left: 2px; }
+
+        /* 시작 버튼: 꽉 차게 */
         .main-btn {
             background: var(--neon-green);
             color: black;
             border: none;
-            border-radius: 30px;
-            padding: 15px;
+            border-radius: 12px;
+            padding: 16px;
             font-weight: bold;
             font-size: 1.2rem;
-            margin-top: 10px;
             cursor: pointer;
+            width: 100%;
         }
 
-        /* 하단 탭 메뉴 고정 */
+        /* 3. 하단 탭 바: 정확히 하단에 고정 */
         .tab-bar {
+            height: var(--tab-height);
             display: flex;
-            justify-content: space-around;
-            padding: 15px 0;
             background: #000;
-            border-top: 1px solid #333;
+            border-top: 1px solid #222;
+            align-items: center;
         }
 
         .tab-item {
-            color: #666;
+            flex: 1;
+            text-align: center;
+            color: #555;
             text-decoration: none;
             font-weight: bold;
             font-size: 0.9rem;
+            transition: 0.3s;
         }
 
-        .tab-item.active {
-            color: var(--neon-green);
-        }
+        .tab-item.active { color: var(--neon-green); }
 
-        /* 기록(History) 화면 레이어 */
+        /* 기록 화면: 전체를 덮도록 설정 */
         #history-screen {
             display: none;
             position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100dvh;
+            top: 0; left: 0; width: 100%; height: calc(100dvh - var(--tab-height));
             background: var(--dark-bg);
             z-index: 100;
             padding: 20px;
@@ -123,36 +133,36 @@
 
     <div id="map"></div>
     
-    <div class="dashboard">
+    <div id="run-dashboard" class="dashboard">
         <div class="pace-card">
-            <div style="color:var(--neon-green); font-size:0.8rem; margin-bottom:5px;">CURRENT PACE</div>
-            <div id="current-pace" style="font-size:3rem; font-weight:bold; color:var(--neon-green);">--'--"</div>
+            <div style="color:var(--neon-green); font-size:0.75rem;">CURRENT PACE</div>
+            <div id="current-pace">--'--"</div>
         </div>
 
         <div class="stats-grid">
             <div class="stat-box">
-                <div style="font-size:0.7rem; color:#888;">DIST</div>
-                <div><span id="dist" style="font-size:1.2rem; font-weight:bold;">0.00</span><span style="font-size:0.7rem;"> KM</span></div>
+                <div class="stat-label">DIST</div>
+                <div class="stat-value"><span id="dist">0.00</span><span class="stat-unit">KM</span></div>
             </div>
             <div class="stat-box">
-                <div style="font-size:0.7rem; color:#888;">TIME</div>
-                <div id="time" style="font-size:1.2rem; font-weight:bold;">00:00</div>
+                <div class="stat-label">TIME</div>
+                <div id="time" class="stat-value">00:00</div>
             </div>
             <div class="stat-box">
-                <div style="font-size:0.7rem; color:#888;">AVG PACE</div>
-                <div id="avg-pace" style="font-size:1.2rem; font-weight:bold;">--'--"</div>
+                <div class="stat-label">AVG PACE</div>
+                <div id="avg-pace" class="stat-value">--'--"</div>
             </div>
             <div class="stat-box">
-                <div style="font-size:0.7rem; color:#888;">CADENCE</div>
-                <div><span id="cadence" style="font-size:1.2rem; font-weight:bold;">0</span><span style="font-size:0.7rem; color:var(--neon-green);"> SPM</span></div>
+                <div class="stat-label">CADENCE</div>
+                <div class="stat-value"><span id="cadence">0</span><span class="stat-unit">SPM</span></div>
             </div>
             <div class="stat-box">
-                <div style="font-size:0.7rem; color:#888;">GCT</div>
-                <div><span id="gct" style="font-size:1.2rem; font-weight:bold;">--</span><span style="font-size:0.7rem; color:var(--neon-green);"> MS</span></div>
+                <div class="stat-label">GCT</div>
+                <div class="stat-value"><span id="gct">--</span><span class="stat-unit">MS</span></div>
             </div>
             <div class="stat-box">
-                <div style="font-size:0.7rem; color:#888;">FLIGHT</div>
-                <div><span id="flight" style="font-size:1.2rem; font-weight:bold;">--</span><span style="font-size:0.7rem; color:var(--neon-green);"> %</span></div>
+                <div class="stat-label">FLIGHT</div>
+                <div class="stat-value"><span id="flight">--</span><span class="stat-unit">%</span></div>
             </div>
         </div>
 
@@ -160,26 +170,24 @@
     </div>
 
     <div id="history-screen">
-        <h1 style="color:var(--neon-green); margin-bottom:20px;">HISTORY</h1>
-        <div id="history-list" style="color:#ccc; text-align:center;">
+        <h1 style="color:var(--neon-green); margin-bottom:20px; font-size: 2rem;">HISTORY</h1>
+        <div id="history-list" style="color:#666; text-align:center;">
             NO DATA
         </div>
     </div>
 
     <nav class="tab-bar">
-        <a href="#" class="tab-item active" onclick="showScreen('run')">RUN</a>
-        <a href="#" class="tab-item" onclick="showScreen('history')">HISTORY</a>
+        <a href="javascript:void(0)" class="tab-item active" id="btn-run" onclick="showScreen('run')">RUN</a>
+        <a href="javascript:void(0)" class="tab-item" id="btn-history" onclick="showScreen('history')">HISTORY</a>
     </nav>
 
     <script>
-        // 3. 기본 로직 (오빠가 짠 로직 그대로 유지하면서 초기화 부분 보강)
+        // 기본 로직 보존
         let isRunning = false;
-        
-        // 크롬에서 기록이 안 나오는 현상 방지를 위해 페이지 로드 시 즉시 데이터 로드 시도
+
         window.onload = function() {
-            console.log("App Ready - Loading Data...");
             loadHistory();
-            // 지도 초기화 로직 등 기존 코드가 여기에 들어감
+            // 오빠가 짠 지도 초기화 코드 등을 여기에 붙여넣으면 돼
         };
 
         function toggleRun() {
@@ -187,59 +195,55 @@
             const btn = document.getElementById('startBtn');
             btn.innerText = isRunning ? "STOP RUNNING" : "START RUNNING";
             btn.style.background = isRunning ? "#ff3333" : "#00ff66";
-            
-            if(!isRunning) {
-                saveRunData(); // 종료 시 데이터 저장 로직 실행
-            }
+            if(!isRunning) saveRunData();
         }
 
         function showScreen(screen) {
-            const historyScreen = document.getElementById('history-screen');
-            const runTabs = document.querySelectorAll('.tab-item');
-            
+            const hScreen = document.getElementById('history-screen');
+            const rDash = document.getElementById('run-dashboard');
+            const map = document.getElementById('map');
+            const btnRun = document.getElementById('btn-run');
+            const btnHistory = document.getElementById('btn-history');
+
             if(screen === 'history') {
-                historyScreen.style.display = 'block';
-                runTabs[0].classList.remove('active');
-                runTabs[1].classList.add('active');
-                loadHistory(); // 화면 전환 시 다시 불러오기
+                hScreen.style.display = 'block';
+                rDash.style.display = 'none';
+                map.style.display = 'none';
+                btnRun.classList.remove('active');
+                btnHistory.classList.add('active');
+                loadHistory();
             } else {
-                historyScreen.style.display = 'none';
-                runTabs[1].classList.remove('active');
-                runTabs[0].classList.add('active');
+                hScreen.style.display = 'none';
+                rDash.style.display = 'flex';
+                map.style.display = 'block';
+                btnRun.classList.add('active');
+                btnHistory.classList.remove('active');
             }
         }
 
-        // 4. 데이터 저장 및 불러오기 (크롬 안정성 강화)
+        // 크롬 및 모바일 브라우저 공용 저장 로직
         function saveRunData() {
-            const currentDist = document.getElementById('dist').innerText;
-            if(parseFloat(currentDist) <= 0) return; // 0km는 저장 안 함
-
-            const newRecord = {
-                date: new Date().toLocaleDateString(),
-                dist: currentDist,
+            const d = document.getElementById('dist').innerText;
+            if(parseFloat(d) <= 0) return;
+            const record = {
+                date: new Date().toLocaleString('ko-KR'),
+                dist: d,
                 time: document.getElementById('time').innerText
             };
-
-            let history = JSON.parse(localStorage.getItem('oppa_run_history') || "[]");
-            history.unshift(newRecord);
-            localStorage.setItem('oppa_run_history', JSON.stringify(history));
-            alert("기록이 성공적으로 저장되었습니다!");
+            let history = JSON.parse(localStorage.getItem('oppaRun_Data') || "[]");
+            history.unshift(record);
+            localStorage.setItem('oppaRun_Data', JSON.stringify(history));
         }
 
         function loadHistory() {
-            const listContainer = document.getElementById('history-list');
-            const data = localStorage.getItem('oppa_run_history');
-            
-            if(!data || data === "[]") {
-                listContainer.innerHTML = "NO DATA";
-                return;
-            }
-
+            const list = document.getElementById('history-list');
+            const data = localStorage.getItem('oppaRun_Data');
+            if(!data || data === "[]") return;
             const history = JSON.parse(data);
-            listContainer.innerHTML = history.map(item => `
-                <div style="background:#1a1a1a; padding:15px; border-radius:10px; margin-bottom:10px; text-align:left; border-left:4px solid var(--neon-green);">
-                    <div style="font-size:0.8rem; color:#888;">${item.date}</div>
-                    <div style="font-size:1.1rem; font-weight:bold; margin-top:5px;">${item.dist} KM / ${item.time}</div>
+            list.innerHTML = history.map(item => `
+                <div style="background:#1a1a1a; padding:15px; border-radius:12px; margin-bottom:10px; text-align:left; border-left:4px solid var(--neon-green);">
+                    <div style="font-size:0.75rem; color:#888;">${item.date}</div>
+                    <div style="font-size:1.1rem; font-weight:bold; margin-top:4px;">${item.dist} KM / ${item.time}</div>
                 </div>
             `).join('');
         }
