@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v26.1</title>
+    <title>OppaRun Pro - v26.3</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -21,6 +21,7 @@
         
         .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
         
+        /* RUN DASHBOARD */
         .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px; flex-shrink: 0; }
         .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #1f1f1f; padding: 12px 0; }
         .card-main { grid-column: span 3; border: 1.5px solid var(--primary); height: 85px; position: relative; }
@@ -29,23 +30,30 @@
         .value { font-size: 20px; font-weight: 900; }
         .value-large { font-size: 42px; color: var(--primary); font-weight: 900; line-height: 1; }
 
+        /* HISTORY SUMMARY */
         .total-dashboard { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 12px; flex-shrink: 0; }
         .total-card { background: #1a1a1a; border-radius: 8px; padding: 8px; display: flex; flex-direction: column; align-items: center; border: 1px solid #333; }
         .total-label { font-size: 8px; color: var(--primary); font-weight: 900; margin-bottom: 2px; }
         .total-value { font-size: 14px; font-weight: 900; color: #fff; }
 
+        /* HISTORY LIST */
         .history-list { padding: 0 12px; overflow-y: auto; flex: 0 0 42vh; }
         .history-item { background: var(--card-bg); border-radius: 12px; padding: 10px 15px; margin-bottom: 8px; border: 1px solid #1f1f1f; }
         .h-header { margin-bottom: 4px; }
         .h-date { font-size: 11px; color: var(--primary); font-weight: 700; }
         .h-main { display: flex; align-items: center; gap: 15px; margin-bottom: 8px; }
         .h-dist, .h-time { font-size: 18px; font-weight: 700; color: #bbbbbb; }
+        
         .h-details { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid #222; padding-top: 8px; gap: 4px; }
+        .h-det-box { display: flex; flex-direction: column; }
+        
         .h-det-label { font-size: 9px; color: #aaaaaa; font-weight: 800; margin-bottom: 2px; text-transform: uppercase; }
+        .h-det-label::after { content: " /"; color: var(--primary); margin-left: 2px; } 
         .h-det-val { font-size: 15px; font-weight: 600; color: #dddddd; }
 
         .extra-space { flex: 1; margin: 10px 12px 85px 12px; background: #0a0a0a; border: 1px dashed #333; border-radius: 15px; display: flex; align-items: center; justify-content: center; color: #444; font-size: 14px; font-weight: 700; }
 
+        /* CONTROLS */
         .controls { height: 80px; display: flex; justify-content: center; align-items: center; padding: 0 15px; margin-bottom: 80px; flex-shrink: 0; }
         .btn-capsule { width: 100%; height: 55px; border-radius: 30px; border: none; font-weight: 900; font-size: 18px; }
         #btn-start { background: var(--primary); color: #000; }
@@ -145,21 +153,12 @@ function updatePosition(p) {
     const pos = [p.coords.latitude, p.coords.longitude];
     currentSpeedKmh = (p.coords.speed || 0) * 3.6;
     marker.setLatLng(pos);
-
     if (isRunning && !isPaused) {
-        // [신규] 자동 일시정지 로직: 시속 0.5km 미만이면 멈춤
         if (currentSpeedKmh < 0.5) {
-            if (!isAutoPaused) {
-                isAutoPaused = true;
-                document.getElementById('pause-status').style.display = 'block';
-            }
+            if (!isAutoPaused) { isAutoPaused = true; document.getElementById('pause-status').style.display = 'block'; }
         } else {
-            if (isAutoPaused) {
-                isAutoPaused = false;
-                document.getElementById('pause-status').style.display = 'none';
-            }
+            if (isAutoPaused) { isAutoPaused = false; document.getElementById('pause-status').style.display = 'none'; }
         }
-
         if (!isAutoPaused && p.coords.accuracy < 40) {
             if (lastPos) {
                 let d = (function(p1,p2){
@@ -172,9 +171,7 @@ function updatePosition(p) {
             document.getElementById('curPace').textContent = formatPace(currentSpeedKmh);
             if (totalDist > 0.01) document.getElementById('avgPace').textContent = formatPace(totalDist / (seconds / 3600));
         }
-    } else {
-        map.panTo(pos);
-    }
+    } else { map.panTo(pos); }
 } 
 
 function onStart() {
@@ -191,9 +188,14 @@ function onFinish() {
     const avgFlt = dataCount > 0 ? Math.round(flightSum / dataCount) : 0;
     const avgCad = Math.round((steps/(seconds||1))*60);
     const kcal = Math.round(totalDist * 65);
+    
+    // EN-Style Date Format
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ", " + now.toLocaleDateString('en-US', { weekday: 'short' });
+    
     const record = { 
         id: Date.now(), 
-        date: new Date().toLocaleString('ko-KR', { month:'short', day:'numeric', weekday:'short', hour:'2-digit', minute:'2-digit' }), 
+        date: dateStr, 
         dist: totalDist.toFixed(2), time: document.getElementById('time').textContent,
         pace: document.getElementById('avgPace').textContent, cadence: avgCad, kcal: kcal, gctflt: `${avgGct}/${avgFlt}%`
     };
