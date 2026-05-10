@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.4 (Smart Selector)</title>
+    <title>OppaRun Pro - v28.5 (Dimmer Mode)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -53,6 +53,19 @@
         .h-det-label { font-size: 8px; color: #888; font-weight: 800; text-transform: uppercase; }
         .h-det-val { font-size: 14px; font-weight: 600; color: #ddd; }
 
+        /* Custom Dimmer Overlay */
+        #dimmer {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0, 0, 0, 0.94); /* 94% Black for OLED efficiency */
+            z-index: 9999; display: none; 
+        }
+        .dim-info {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            text-align: center; pointer-events: none;
+        }
+        .dim-text { color: #222; font-size: 10px; font-weight: 900; letter-spacing: 2px; margin-bottom: 10px; }
+        .dim-hint { color: var(--primary); font-size: 14px; font-weight: 700; opacity: 0.3; }
+
         /* Custom Selector */
         .info-card { background: var(--card-bg); padding: 15px; border-radius: 12px; margin: 10px 12px; border: 1px solid #222; }
         .custom-select { position: relative; width: 100%; user-select: none; }
@@ -76,13 +89,20 @@
     </style>
 </head>
 <body> 
+    <div id="dimmer" onclick="toggleDimmer()">
+        <div class="dim-info">
+            <div class="dim-text">POWER SAVING MODE</div>
+            <div class="dim-hint">TAP TO WAKE</div>
+        </div>
+    </div>
+
     <div id="map-area">
         <div id="map-container"><div id="map"></div></div>
-        <div id="status" class="status-bar">GPS INITIALIZING...</div>
+        <div id="status" class="status-bar" onclick="toggleDimmer()">GPS INITIALIZING...</div>
     </div> 
 
     <div id="run-view" class="main-content">
-        <div class="dashboard">
+        <div class="dashboard" onclick="toggleDimmer()">
             <div class="card card-main">
                 <div id="pause-status" class="auto-pause-label">AUTO PAUSED</div>
                 <div id="lbl-curPace" class="label" style="color:var(--primary)">CURRENT PACE</div>
@@ -148,13 +168,30 @@
 <script>
 let map, marker, polyline, timer, isRunning = false, isPaused = false, isAutoPaused = false, seconds = 0;
 let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0, gctSum = 0, flightSum = 0, dataCount = 0, currentSpeedKmh = 0;
-let pathCoords = [];
+let pathCoords = [], wakeLock = null;
 
 const i18n = {
     ko: { name: "한국어 (Korean)", run: "러닝", history: "기록", start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료", curPace: "페이스", dist: "거리", time: "시간", avgPace: "평균", cadence: "케이던스", list: "내역", total: "통계", info: "정보", settings: "설정", infoDesc: "오빠 전용 러닝 앱", tipsTitle: "러닝 팁", tipGct: "• <b>GCT:</b> 지면 접촉 시간", tipFlight: "• <b>Flight:</b> 공중 체류 비율", tipCadence: "• <b>Cadence:</b> 170-185 SPM", langLabel: "언어 설정", autoPause: "자동 정지" },
     en: { name: "English", run: "RUN", history: "HISTORY", start: "START RUNNING", stop: "STOP", resume: "RESUME", finish: "FINISH", curPace: "PACE", dist: "DIST", time: "TIME", avgPace: "AVG", cadence: "CADENCE", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", infoDesc: "Custom Dynamics for Oppa", tipsTitle: "Running Tips", tipGct: "• <b>GCT:</b> Foot on ground", tipFlight: "• <b>Flight:</b> Ratio in air", tipCadence: "• <b>Cadence:</b> 170-185 SPM", langLabel: "Language Selection", autoPause: "AUTO PAUSED" },
-    jp: { name: "日本語 (Japanese)", run: "ラン", history: "履歴", start: "開始", stop: "停止", resume: "再開", finish: "終了", curPace: "ペース", dist: "距離", time: "時間", avgPace: "平均", cadence: "ケイデンス", list: "リスト", total: "統計", info: "情報", settings: "設定", infoDesc: "ランニングアプリ", tipsTitle: "ヒント", tipGct: "• <b>GCT:</b> 接地時間", tipFlight: "• <b>Flight:</b> 空中滞在", tipCadence: "• <b>Cadence:</b> 170-185 SPM", langLabel: "言語選択", autoPause: "オートポーズ" }
+    jp: { name: "日本語 (Japanese)", run: "ラン", history: "履歴", start: "開始", stop: "停止", resume: "再開", finish: "終了", curPace: "ペース", dist: "距離", time: "時間", avgPace: "平均", cadence: "ケイデンス", list: "リスト", total: "統計", info: "情報", settings: "設定", infoDesc: "ランニングアプリ", tipsTitle: "ヒント", tipGct: "• <b>GCT:</b> 接地시간", tipFlight: "• <b>Flight:</b> 空中滞在", tipCadence: "• <b>Cadence:</b> 170-185 SPM", langLabel: "言語選択", autoPause: "オートポーズ" }
 };
+
+// Wake Lock to prevent screen sleep
+async function requestWakeLock() {
+    if ('wakeLock' in navigator) {
+        try {
+            wakeLock = await navigator.wakeLock.request('screen');
+            wakeLock.addEventListener('release', () => { console.log('Wake Lock released'); });
+        } catch (err) { console.error(`${err.name}, ${err.message}`); }
+    }
+}
+
+function toggleDimmer() {
+    const dimmer = document.getElementById('dimmer');
+    if (isRunning) {
+        dimmer.style.display = (dimmer.style.display === 'none' || !dimmer.style.display) ? 'block' : 'none';
+    }
+}
 
 function toggleDropdown() {
     const trigger = document.getElementById('select-trigger');
@@ -248,16 +285,15 @@ function updatePosition(p) {
     document.getElementById('status').textContent = `${stateText} (±${p.coords.accuracy.toFixed(1)}m)`;
     
     if (isRunning && !isPaused) {
-        // --- Auto Pause Vibrate Logic ---
         if (currentSpeedKmh < 0.8 && !isAutoPaused) { 
             isAutoPaused = true; 
             document.getElementById('pause-status').style.display = 'block';
-            if ("vibrate" in navigator) navigator.vibrate(200); // Stop: Long vibrate
+            if ("vibrate" in navigator) navigator.vibrate(200);
         }
         else if (currentSpeedKmh >= 0.8 && isAutoPaused) { 
             isAutoPaused = false; 
             document.getElementById('pause-status').style.display = 'none';
-            if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]); // Resume: Double vibrate
+            if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]);
         }
         
         if (!isAutoPaused && p.coords.accuracy < 45) {
@@ -277,6 +313,7 @@ function updatePosition(p) {
 
 function onStart() {
     isRunning = true; isPaused = false; isAutoPaused = false; totalDist = 0; seconds = 0; steps = 0; pathCoords = []; gctSum = 0; flightSum = 0; dataCount = 0;
+    requestWakeLock();
     document.getElementById('btn-start').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block';
     timer = setInterval(() => { if(!isPaused && !isAutoPaused) { seconds++; document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; } }, 1000);
 } 
@@ -289,6 +326,7 @@ function onFinish() {
     const now = new Date();
     const record = { id: Date.now(), date: now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ", " + now.toLocaleDateString('en-US', { weekday: 'short' }), dist: totalDist.toFixed(2), time: document.getElementById('time').textContent, pace: document.getElementById('avgPace').textContent, cadence: avgCad, kcal: Math.round(totalDist * 65), gctflt: `${avgGct}/${avgFlt}%` };
     let h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]"); h.unshift(record); localStorage.setItem('oppaRunHistory', JSON.stringify(h));
+    if (wakeLock) { wakeLock.release(); wakeLock = null; }
     location.reload();
 }
 
@@ -299,7 +337,10 @@ function showTab(tab) {
     document.getElementById('tab-run').className = 'tab-btn' + (tab === 'run' ? ' active' : '');
     document.getElementById('tab-history').className = 'tab-btn' + (tab === 'history' ? ' active' : '');
     if(tab === 'run') setTimeout(() => map.invalidateSize(), 100);
-    else showSubTab('list');
+    else {
+        document.getElementById('dimmer').style.display = 'none'; // History 탭에선 Dimmer 끄기
+        showSubTab('list');
+    }
 }
 
 function showSubTab(sub) {
@@ -318,8 +359,13 @@ function updateHistoryStats() {
 
 function updateTotalStats() {
     const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
-    let tDist = 0, tSec = 0, tKcal = 0;
-    h.forEach(r => { tDist += parseFloat(r.dist); tKcal += parseInt(r.kcal); let p = r.time.split(':'); tSec += parseInt(p[0])*60 + parseInt(p[1]); });
+    let tDist = 0, tKcal = 0, tSec = 0;
+    h.forEach(r => { 
+        tDist += parseFloat(r.dist); 
+        tKcal += parseInt(r.kcal); 
+        let p = r.time.split(':'); 
+        tSec += parseInt(p[0])*60 + parseInt(p[1]); 
+    });
     document.getElementById('total-stats').innerHTML = `<div class="history-item" style="border:2px solid var(--primary);"><div class="h-date">TOTAL STATISTICS</div><div class="h-main"><span class="h-dist" style="font-size:28px; color:var(--primary);">${tDist.toFixed(2)} KM</span></div><div class="h-details" style="grid-template-columns:repeat(3,1fr);"><div class="h-det-box"><span class="h-det-label">TIME</span><span class="h-det-val">${Math.floor(tSec/3600)}h ${Math.floor((tSec%3600)/60)}m</span></div><div class="h-det-box"><span class="h-det-label">KCAL</span><span class="h-det-val">${tKcal}</span></div><div class="h-det-box"><span class="h-det-label">RUNS</span><span class="h-det-val">${h.length}</span></div></div></div>`;
 }
 
