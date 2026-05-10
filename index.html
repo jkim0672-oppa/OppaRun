@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v26.8 (Final Smart Color)</title>
+    <title>OppaRun Pro - v26.9 (Auto-Pause & GPS)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -18,19 +18,20 @@
         #map-area { flex-shrink: 0; width: 100%; }
         #map-container { height: 15vh; min-height: 110px; border-bottom: 2px solid #222; }
         #map { height: 100%; width: 100%; background: #222; }
-        .status-bar { text-align: center; color: #ffcc00; font-size: 10px; padding: 3px; background: #0a0a0a; font-weight: 800; }
+        /* 상단 상태 바 수정 */
+        .status-bar { text-align: center; color: var(--warning); font-size: 11px; padding: 4px; background: #0a0a0a; font-weight: 800; border-bottom: 1px solid #222; }
         
         .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
         
         .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px; flex-shrink: 0; }
         .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #1f1f1f; padding: 12px 0; }
         .card-main { grid-column: span 3; border: 1.5px solid var(--primary); height: 85px; position: relative; }
-        .auto-pause-label { position: absolute; top: 5px; right: 10px; font-size: 9px; color: var(--danger); font-weight: 900; display: none; }
+        .auto-pause-label { position: absolute; top: 5px; right: 10px; font-size: 10px; color: var(--danger); font-weight: 900; background: rgba(255,68,68,0.1); padding: 2px 6px; border-radius: 4px; display: none; }
         .label { font-size: 9px; color: var(--text-dim); font-weight: 900; margin-bottom: 3px; }
         .value { font-size: 20px; font-weight: 900; }
         .value-large { font-size: 42px; color: var(--primary); font-weight: 900; line-height: 1; }
 
-        .history-list { padding: 0 12px; overflow-y: auto; height: 230px; flex: 1; border-top: 1px solid #222; }
+        .history-list { padding: 0 12px; overflow-y: auto; height: 230px; flex: 1; }
         .history-item { background: var(--card-bg); border-radius: 12px; padding: 10px 15px; margin-bottom: 8px; border: 1px solid #1f1f1f; margin-top: 8px; }
         .h-header { margin-bottom: 4px; }
         .h-date { font-size: 11px; color: var(--primary); font-weight: 700; }
@@ -44,14 +45,13 @@
         .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 70px; background: #000; display: flex; border-top: 1px solid #222; align-items: center; padding-bottom: env(safe-area-inset-bottom); z-index: 9999; }
         .tab-btn { flex: 1; background: none; border: none; color: #555; font-size: 13px; font-weight: 800; }
         .tab-btn.active { color: var(--primary); }
-
         .my-location { background: #007bff; border: 2px solid #fff; border-radius: 50%; width: 12px; height: 12px; box-shadow: 0 0 10px rgba(0,123,255,0.8); }
     </style>
 </head>
 <body> 
     <div id="map-area">
         <div id="map-container"><div id="map"></div></div>
-        <div id="status" class="status-bar">GPS READY</div>
+        <div id="status" class="status-bar">GPS INITIALIZING...</div>
     </div> 
 
     <div id="run-view" class="main-content">
@@ -99,7 +99,11 @@ function initMap() {
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
     marker = L.marker([0,0], {icon: L.divIcon({className:'my-location', iconSize:[12,12]})}).addTo(map);
     polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(map);
-    if ("geolocation" in navigator) { navigator.geolocation.watchPosition(updatePosition, null, {enableHighAccuracy: true}); }
+    if ("geolocation" in navigator) { 
+        navigator.geolocation.watchPosition(updatePosition, (err) => {
+            document.getElementById('status').textContent = "GPS ERROR: " + err.message;
+        }, {enableHighAccuracy: true}); 
+    }
     updateHistoryStats();
     window.addEventListener('devicemotion', handleMotion);
 } 
@@ -111,19 +115,12 @@ function handleMotion(e) {
     let force = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
     let now = Date.now();
     
-    // 발걸음 인식 (민감도 12)
     if (force > 12 && (now - lastStepTime) > 220) { 
         steps++; lastStepTime = now;
-        
-        // GCT와 FLIGHT 실시간 계산
         let gct = currentSpeedKmh > 0.5 ? Math.floor(450 - (currentSpeedKmh * 10)) : 0;
         let flt = currentSpeedKmh > 2.0 ? Math.floor(5 + (currentSpeedKmh * 2.1)) : 0;
-        
         if(gct > 0) { gctSum += gct; flightSum += flt; dataCount++; }
-
         document.getElementById('cadence').textContent = Math.round((steps/(seconds||1))*60);
-        
-        // [핵심] 조깅/러닝 상태별 색상 업데이트
         updateDynamicsColors(gct, flt);
     }
 }
@@ -131,52 +128,52 @@ function handleMotion(e) {
 function updateDynamicsColors(gct, flt) {
     const gDisplay = document.getElementById('gct');
     const fDisplay = document.getElementById('flight');
-    
     gDisplay.textContent = gct || "--";
     fDisplay.textContent = (flt > 0) ? flt : "--";
-
     let color;
-    if (currentSpeedKmh > 9.5) { 
-        // 1. 러닝 페이스 (시속 9.5km 이상)
-        color = (gct < 310) ? "#00ff88" : "#ffcc00"; // 310ms 미만 그린, 아니면 옐로
-    } else if (currentSpeedKmh > 4.5) {
-        // 2. 조깅 페이스 (시속 4.5~9.5km)
-        // 조깅 중 GCT가 400ms를 넘으면 레드로 경고 (오빠의 데이터 기준 반영)
-        if (gct >= 400) {
-            color = "#ff4444"; // 레드 (부상 주의)
-        } else if (gct >= 320) {
-            color = "#ffcc00"; // 옐로 (안정적인 조깅)
-        } else {
-            color = "#00ff88"; // 그린 (아주 훌륭한 조깅)
-        }
-    } else {
-        // 3. 걷거나 아주 느린 조깅
-        color = (gct >= 420) ? "#ff4444" : "#ffcc00";
-    }
-
+    if (currentSpeedKmh > 9.5) color = (gct < 310) ? "#00ff88" : "#ffcc00";
+    else if (currentSpeedKmh > 4.5) {
+        if (gct >= 400) color = "#ff4444";
+        else if (gct >= 320) color = "#ffcc00";
+        else color = "#00ff88";
+    } else color = (gct >= 420) ? "#ff4444" : "#ffcc00";
     gDisplay.style.color = color;
-    // 체공시간(FLIGHT) 색상 기준
     fDisplay.style.color = (flt > 15) ? "#00ff88" : (flt > 5 ? "#ffcc00" : "#999999");
 }
 
 function updatePosition(p) {
     const pos = [p.coords.latitude, p.coords.longitude];
+    const accuracy = p.coords.accuracy.toFixed(1);
     currentSpeedKmh = (p.coords.speed || 0) * 3.6;
     marker.setLatLng(pos);
+
+    // 상단 상태 업데이트 (READY, ACTIVE, PAUSED + 오차)
+    let stateText = isRunning ? (isPaused || isAutoPaused ? "PAUSED" : "ACTIVE") : "READY";
+    document.getElementById('status').textContent = `${stateText} (±${accuracy}m)`;
+
     if (isRunning && !isPaused) {
-        if (currentSpeedKmh < 0.5) {
-            if (!isAutoPaused) { isAutoPaused = true; document.getElementById('pause-status').style.display = 'block'; }
+        // 자동 멈춤 로직 강화
+        if (currentSpeedKmh < 0.8) {
+            if (!isAutoPaused) { 
+                isAutoPaused = true; 
+                document.getElementById('pause-status').style.display = 'block';
+                document.getElementById('curPace').textContent = "--'--\"";
+            }
         } else {
-            if (isAutoPaused) { isAutoPaused = false; document.getElementById('pause-status').style.display = 'none'; }
+            if (isAutoPaused) { 
+                isAutoPaused = false; 
+                document.getElementById('pause-status').style.display = 'none'; 
+            }
         }
-        if (!isAutoPaused && p.coords.accuracy < 40) {
+
+        if (!isAutoPaused && p.coords.accuracy < 45) {
             if (lastPos) {
                 let d = (function(p1,p2){
                     const R=6371; const dLat=(p2[0]-p1[0])*Math.PI/180; const dLon=(p2[1]-p1[1])*Math.PI/180;
                     const a=Math.sin(dLat/2)**2 + Math.cos(p1[0]*Math.PI/180)*Math.cos(p2[0]*Math.PI/180)*Math.sin(dLon/2)**2;
                     return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
                 })(lastPos, pos);
-                if (d > 0.002) { totalDist += d; document.getElementById('dist').textContent = totalDist.toFixed(2); lastPos = pos; pathCoords.push(pos); polyline.setLatLngs(pathCoords); }
+                if (d > 0.0015) { totalDist += d; document.getElementById('dist').textContent = totalDist.toFixed(2); lastPos = pos; pathCoords.push(pos); polyline.setLatLngs(pathCoords); }
             } else { lastPos = pos; }
             document.getElementById('curPace').textContent = formatPace(currentSpeedKmh);
             if (totalDist > 0.01) document.getElementById('avgPace').textContent = formatPace(totalDist / (seconds / 3600));
@@ -213,15 +210,7 @@ function updateHistoryStats() {
     h.forEach(r => {
         const item = document.createElement('div');
         item.className = 'history-item';
-        item.innerHTML = `
-            <div class="h-header"><span class="h-date">${r.date}</span></div>
-            <div class="h-main"><span class="h-dist">${r.dist}KM</span><span class="h-time">${r.time}</span></div>
-            <div class="h-details">
-                <div class="h-det-box"><span class="h-det-label">PACE</span><span class="h-det-val">${r.pace}</span></div>
-                <div class="h-det-box"><span class="h-det-label">CAD</span><span class="h-det-val">${r.cadence}</span></div>
-                <div class="h-det-box"><span class="h-det-label">KCAL</span><span class="h-det-val">${r.kcal}</span></div>
-                <div class="h-det-box"><span class="h-det-label">GCT/FLT</span><span class="h-det-val" style="font-size:12px;">${r.gctflt}</span></div>
-            </div>`;
+        item.innerHTML = `<div class="h-header"><span class="h-date">${r.date}</span></div><div class="h-main"><span class="h-dist">${r.dist}KM</span><span class="h-time">${r.time}</span></div><div class="h-details"><div class="h-det-box"><span class="h-det-label">PACE</span><span class="h-det-val">${r.pace}</span></div><div class="h-det-box"><span class="h-det-label">CAD</span><span class="h-det-val">${r.cadence}</span></div><div class="h-det-box"><span class="h-det-label">KCAL</span><span class="h-det-val">${r.kcal}</span></div><div class="h-det-box"><span class="h-det-label">GCT/FLT</span><span class="h-det-val" style="font-size:12px;">${r.gctflt}</span></div></div>`;
         list.appendChild(item);
     });
 } 
