@@ -1,84 +1,91 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v35.0</title>
+    <title>OppaRun Pro - v27.0 (Multi-View)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         :root { 
-            --primary: #00ff88; --bg: #000; --card-bg: #121212; 
-            --text-main: #fff; --text-dim: #999; --danger: #ff4444; 
-            --accent: #007bff; --metro-color: #ffcc00;
+            --primary: #00ff88; --bg: #000000; --card-bg: #121212; 
+            --text-main: #ffffff; --text-dim: #999999; --danger: #ff4444; 
+            --warning: #ffcc00; --accent: #007bff;
         }
-        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { margin: 0; background: var(--bg); color: var(--text-main); font-family: -apple-system, system-ui; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
         
-        body { 
-            background: var(--bg); color: var(--text-main); 
-            font-family: -apple-system, system-ui, sans-serif; 
-            height: 100vh; display: flex; flex-direction: column; overflow: hidden;
-        }
-
-        /* 지도 영역: 높이를 25vh로 명시적 고정 */
-        #map-area { height: 25vh; min-height: 160px; position: relative; background: #1a1a1a; border-bottom: 1px solid #333; flex-shrink: 0; }
-        #map { height: 100%; width: 100%; }
+        /* Map & Status */
+        #map-area { flex-shrink: 0; width: 100%; }
+        #map-container { height: 15vh; min-height: 110px; border-bottom: 2px solid #222; }
+        #map { height: 100%; width: 100%; background: #222; }
+        .status-bar { text-align: center; color: var(--warning); font-size: 11px; padding: 4px; background: #0a0a0a; font-weight: 800; border-bottom: 1px solid #222; }
         
-        .accuracy-tag { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.8); padding: 4px 8px; border-radius: 6px; font-size: 10px; font-weight: 900; z-index: 1000; border: 1.2px solid var(--primary); color: var(--primary); }
-        #pause-overlay { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--danger); color: white; padding: 10px 20px; border-radius: 20px; font-weight: 900; z-index: 2000; border: 2px solid #fff; }
-
-        /* 데이터 영역: 남은 공간 모두 사용 */
-        .main-content { flex: 1; display: flex; flex-direction: column; padding: 8px; overflow: hidden; justify-content: space-between; }
-        .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; flex-grow: 1; margin-bottom: 10px; }
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
         
-        .card { background: var(--card-bg); border-radius: 10px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #1f1f1f; padding: 5px; }
-        .card-main { grid-column: span 3; border: 1.5px solid var(--primary); background: rgba(0,255,136,0.03); }
-        
-        .label { font-size: 9px; color: var(--text-dim); font-weight: 800; margin-bottom: 2px; }
+        /* Dashboard Grid */
+        .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px; flex-shrink: 0; }
+        .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #1f1f1f; padding: 12px 0; }
+        .card-main { grid-column: span 3; border: 1.5px solid var(--primary); height: 85px; position: relative; }
+        .auto-pause-label { position: absolute; top: 5px; right: 10px; font-size: 10px; color: var(--danger); font-weight: 900; background: rgba(255,68,68,0.1); padding: 2px 6px; border-radius: 4px; display: none; }
+        .label { font-size: 9px; color: var(--text-dim); font-weight: 900; margin-bottom: 3px; }
         .value { font-size: 20px; font-weight: 900; }
-        .value-large { font-size: 44px; color: var(--primary); font-weight: 900; line-height: 1.1; }
+        .value-large { font-size: 42px; color: var(--primary); font-weight: 900; line-height: 1; }
 
-        /* 컨트롤 및 하단 바 */
-        .controls { padding-bottom: 5px; }
-        .btn-act { width: 100%; height: 54px; border-radius: 27px; border: none; font-weight: 900; font-size: 18px; }
+        /* Controls */
+        .controls { padding: 0 15px; display: flex; justify-content: center; align-items: center; height: 80px; margin-bottom: 80px; }
+        .btn-act { width: 100%; height: 55px; border-radius: 30px; border: none; font-weight: 900; font-size: 18px; cursor: pointer; }
+
+        /* History Nav & Pages */
+        .history-nav { display: flex; gap: 8px; padding: 10px 15px; background: #000; border-bottom: 1px solid #111; }
+        .sub-btn { flex: 1; padding: 10px 0; border: 1px solid #333; background: #1a1a1a; color: #777; border-radius: 10px; font-size: 12px; font-weight: 900; }
+        .sub-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
+        .sub-page { display: none; flex-direction: column; flex: 1; overflow-y: auto; padding-bottom: 100px; }
         
-        .tab-bar { height: calc(65px + env(safe-area-inset-bottom)); background: #000; display: flex; border-top: 1px solid #222; padding-bottom: env(safe-area-inset-bottom); flex-shrink: 0; }
-        .tab-btn { flex: 1; background: none; border: none; color: #444; font-size: 12px; font-weight: 800; }
-        .tab-btn.active { color: var(--primary); }
+        .history-list { padding: 0 12px; }
+        .history-item { background: var(--card-bg); border-radius: 12px; padding: 12px 15px; margin-bottom: 10px; border: 1px solid #1f1f1f; margin-top: 10px; }
+        .h-header { margin-bottom: 4px; }
+        .h-date { font-size: 11px; color: var(--primary); font-weight: 700; }
+        .h-main { display: flex; align-items: center; gap: 15px; margin-bottom: 8px; }
+        .h-dist, .h-time { font-size: 18px; font-weight: 700; color: #ffffff; }
+        .h-details { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid #222; padding-top: 8px; gap: 4px; }
+        .h-det-box { display: flex; flex-direction: column; }
+        .h-det-label { font-size: 8px; color: #888; font-weight: 800; text-transform: uppercase; }
+        .h-det-val { font-size: 14px; font-weight: 600; color: #ddd; }
 
-        /* HISTORY/INFO 서브 페이지 */
-        .sub-page { display: none; flex-direction: column; flex: 1; overflow-y: auto; padding-bottom: 20px; }
-        .setting-box { background: #111; border-radius: 12px; padding: 15px; margin-bottom: 10px; border: 1px solid #222; }
-        .metro-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 14px; }
-        input[type=range] { flex: 1; accent-color: var(--metro-color); }
-        .my-location { background: var(--accent); border: 2px solid #fff; border-radius: 50%; width: 12px; height: 12px; }
+        .info-card { background: var(--card-bg); padding: 20px; border-radius: 15px; margin: 15px; border: 1px solid #222; }
+
+        /* Tab Bar */
+        .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #000; display: flex; border-top: 1px solid #222; align-items: center; padding-bottom: env(safe-area-inset-bottom); z-index: 9999; }
+        .tab-btn { flex: 1; background: none; border: none; color: #555; font-size: 13px; font-weight: 800; }
+        .tab-btn.active { color: var(--primary); }
+        .my-location { background: #007bff; border: 2px solid #fff; border-radius: 50%; width: 12px; height: 12px; box-shadow: 0 0 10px rgba(0,123,255,0.8); }
     </style>
 </head>
 <body> 
     <div id="map-area">
-        <div id="accuracy-box" class="accuracy-tag">GPS ±--m</div>
-        <div id="pause-overlay">AUTO PAUSED</div>
-        <div id="map"></div>
+        <div id="map-container"><div id="map"></div></div>
+        <div id="status" class="status-bar">GPS INITIALIZING...</div>
     </div> 
 
     <div id="run-view" class="main-content">
         <div class="dashboard">
             <div class="card card-main">
+                <div id="pause-status" class="auto-pause-label">AUTO PAUSED</div>
                 <div class="label" style="color:var(--primary)">CURRENT PACE</div>
                 <div id="curPace" class="value-large">--'--"</div>
             </div>
-            <div class="card"><div class="label">DIST (KM)</div><div id="dist" class="value">0.00</div></div>
+            <div class="card"><div class="label">DIST</div><div class="value"><span id="dist">0.00</span><span style="font-size:10px; color:var(--primary)"> KM</span></div></div>
             <div class="card"><div class="label">TIME</div><div id="time" class="value">00:00</div></div>
             <div class="card"><div class="label">AVG PACE</div><div id="avgPace" class="value">--'--"</div></div>
             <div class="card"><div class="label">CADENCE</div><div id="cadence" class="value">0</div></div>
-            <div class="card"><div class="label">GCT (MS)</div><div id="gct" class="value">--</div></div>
-            <div class="card"><div class="label">FLIGHT (%)</div><div id="flight" class="value">--</div></div>
+            <div class="card"><div class="label">GCT</div><div class="value"><span id="gct">--</span><span style="font-size:10px;"> MS</span></div></div>
+            <div class="card"><div class="label">FLIGHT</div><div class="value"><span id="flight">--</span><span style="font-size:10px;"> %</span></div></div>
         </div>
-
         <div class="controls">
             <button id="btn-start" class="btn-act" style="background:var(--primary); color:#000;" onclick="onStart()">START RUNNING</button>
             <button id="btn-stop" class="btn-act" style="background:var(--danger); color:#fff; display:none;" onclick="onStop()">STOP</button>
-            <div id="after-stop" style="display:none; gap:10px;">
+            <div id="after-stop" style="display:none; gap:10px; width:100%;">
                 <button class="btn-act" style="flex:1; background:var(--primary); color:#000;" onclick="onResume()">RESUME</button>
                 <button class="btn-act" style="flex:1; background:var(--danger); color:#fff;" onclick="onFinish()">FINISH</button>
             </div>
@@ -86,17 +93,30 @@
     </div>
 
     <div id="history-view" class="main-content" style="display:none;">
-        <div style="display: flex; gap: 8px; margin-bottom: 10px;">
-            <button id="sub-tab-list" style="flex:1; height:40px; border-radius:10px; background:#222; color:#fff; border:none; font-weight:800;" onclick="showSubTab('list')">LIST</button>
-            <button id="sub-tab-info" style="flex:1; height:40px; border-radius:10px; background:#222; color:#fff; border:none; font-weight:800;" onclick="showSubTab('info')">METRO</button>
+        <div class="history-nav">
+            <button id="sub-tab-list" class="sub-btn active" onclick="showSubTab('list')">LIST</button>
+            <button id="sub-tab-total" class="sub-btn" onclick="showSubTab('total')">TOTAL</button>
+            <button id="sub-tab-info" class="sub-btn" onclick="showSubTab('info')">INFO</button>
         </div>
-        <div id="sub-page-list" class="sub-page"><div id="history-list"></div></div>
+
+        <div id="sub-page-list" class="sub-page" style="display: flex;">
+            <div id="history-list" class="history-list"></div>
+        </div>
+
+        <div id="sub-page-total" class="sub-page">
+            <div id="total-stats" class="history-list"></div>
+        </div>
+
         <div id="sub-page-info" class="sub-page">
-            <div class="setting-box">
-                <h3 style="color:var(--metro-color); margin-bottom:10px; font-size:16px;">🎸 METRONOME</h3>
-                <div class="metro-row"><span>BPM</span><input type="range" id="bpm-range" min="150" max="195" value="175" oninput="updateBPM(this.value)"><span id="bpm-val" style="width:30px">175</span></div>
-                <div class="metro-row"><span>VOL</span><input type="range" id="vol-range" min="0" max="1" step="0.1" value="0.7" oninput="updateVol(this.value)"><span id="vol-val" style="width:35px">70%</span></div>
-                <button onclick="toggleMetronome()" id="btn-metro-main" style="width:100%; height:45px; border-radius:10px; background:var(--metro-color); color:#000; font-weight:900; border:none;">START BEAT</button>
+            <div class="info-card">
+                <h2 style="color:var(--primary); margin:0 0 15px 0;">OppaRun Pro</h2>
+                <p style="font-size:14px; color:#aaa;">뮤지션 기타리스트 오빠를 위한<br>커스텀 러닝 다이나믹스 앱</p>
+                <div style="background:#1a1a1a; padding:15px; border-radius:10px; margin-top:20px;">
+                    <p style="margin:0 0 10px 0; font-weight:800; color:var(--warning);">Running Tips</p>
+                    <small style="display:block; margin-bottom:5px;">• <b>GCT:</b> 발이 땅에 닿는 시간 (낮을수록 좋음)</small>
+                    <small style="display:block; margin-bottom:5px;">• <b>Flight:</b> 공중에 떠있는 비율 (탄력 지표)</small>
+                    <small style="display:block;">• <b>Cadence:</b> 170-185 SPM이 부상 방지에 유리</small>
+                </div>
             </div>
         </div>
     </div> 
@@ -107,100 +127,137 @@
     </div> 
 
 <script>
-let map, marker, polyline, timer, audioCtx, metroTimer, metroGain;
-let pathCoords = [], isRunning = false, isPaused = false, seconds = 0, totalDist = 0, lastPos = null;
-let bpm = 175, isMetroOn = false, nextClickTime = 0;
+let map, marker, polyline, timer;
+let pathCoords = [], isRunning = false, isPaused = false, isAutoPaused = false, seconds = 0;
+let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0;
+let gctSum = 0, flightSum = 0, dataCount = 0, currentSpeedKmh = 0;
 
-// 지도 초기화 함수 (타이밍 이슈 방지)
 function initMap() {
-    if (map) return;
-    map = L.map('map', {zoomControl: false, attributionControl: false}).setView([37.5665, 126.9780], 17);
+    map = L.map('map', {zoomControl: false}).setView([37.5665, 126.9780], 17);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
     marker = L.marker([0,0], {icon: L.divIcon({className:'my-location', iconSize:[12,12]})}).addTo(map);
     polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(map);
-    
-    // 위치 추적 시작
-    navigator.geolocation.watchPosition(updatePosition, null, {enableHighAccuracy: true});
-    
-    // 지도 크기 재계산 (검은 화면 방지)
-    setTimeout(() => { map.invalidateSize(); }, 500);
+    if ("geolocation" in navigator) { 
+        navigator.geolocation.watchPosition(updatePosition, (err) => {
+            document.getElementById('status').textContent = "GPS ERROR: " + err.message;
+        }, {enableHighAccuracy: true}); 
+    }
+    window.addEventListener('devicemotion', handleMotion);
+} 
+
+function handleMotion(e) {
+    if (!isRunning || isPaused || isAutoPaused) return;
+    let acc = e.accelerationIncludingGravity;
+    if (!acc || acc.x === null) return; 
+    let force = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
+    let now = Date.now();
+    if (force > 12 && (now - lastStepTime) > 220) { 
+        steps++; lastStepTime = now;
+        let gct = currentSpeedKmh > 0.5 ? Math.floor(450 - (currentSpeedKmh * 10)) : 0;
+        let flt = currentSpeedKmh > 2.0 ? Math.floor(5 + (currentSpeedKmh * 2.1)) : 0;
+        if(gct > 0) { gctSum += gct; flightSum += flt; dataCount++; }
+        document.getElementById('cadence').textContent = Math.round((steps/(seconds||1))*60);
+        updateDynamicsColors(gct, flt);
+    }
+}
+
+function updateDynamicsColors(gct, flt) {
+    const gDisplay = document.getElementById('gct');
+    const fDisplay = document.getElementById('flight');
+    gDisplay.textContent = gct || "--";
+    fDisplay.textContent = flt || "--";
+    let color = (currentSpeedKmh > 4.5) ? (gct >= 400 ? "#ff4444" : (gct >= 320 ? "#ffcc00" : "#00ff88")) : "#ffcc00";
+    gDisplay.style.color = color;
+    fDisplay.style.color = (flt > 15) ? "#00ff88" : "#ffcc00";
 }
 
 function updatePosition(p) {
     const pos = [p.coords.latitude, p.coords.longitude];
-    const acc = p.coords.accuracy;
-    document.getElementById('accuracy-box').textContent = `GPS ±${Math.round(acc)}m`;
-    
-    if (map && marker) {
-        marker.setLatLng(pos);
-        if (isRunning && !isPaused && acc < 40) {
+    currentSpeedKmh = (p.coords.speed || 0) * 3.6;
+    marker.setLatLng(pos);
+    let stateText = isRunning ? (isPaused || isAutoPaused ? "PAUSED" : "ACTIVE") : "READY";
+    document.getElementById('status').textContent = `${stateText} (±${p.coords.accuracy.toFixed(1)}m)`;
+
+    if (isRunning && !isPaused) {
+        if (currentSpeedKmh < 0.8 && !isAutoPaused) { 
+            isAutoPaused = true; 
+            document.getElementById('pause-status').style.display = 'block';
+        } else if (currentSpeedKmh >= 0.8 && isAutoPaused) { 
+            isAutoPaused = false; 
+            document.getElementById('pause-status').style.display = 'none'; 
+        }
+
+        if (!isAutoPaused && p.coords.accuracy < 45) {
             if (lastPos) {
-                let d = L.latLng(lastPos).distanceTo(L.latLng(pos)) / 1000;
-                if (d > 0.002) { 
-                    totalDist += d; 
-                    document.getElementById('dist').textContent = totalDist.toFixed(2); 
-                    lastPos = pos; pathCoords.push(pos); polyline.setLatLngs(pathCoords); 
-                }
+                let d = (function(p1,p2){
+                    const R=6371; const dLat=(p2[0]-p1[0])*Math.PI/180; const dLon=(p2[1]-p1[1])*Math.PI/180;
+                    const a=Math.sin(dLat/2)**2 + Math.cos(p1[0]*Math.PI/180)*Math.cos(p2[0]*Math.PI/180)*Math.sin(dLon/2)**2;
+                    return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+                })(lastPos, pos);
+                if (d > 0.0015) { totalDist += d; document.getElementById('dist').textContent = totalDist.toFixed(2); lastPos = pos; pathCoords.push(pos); polyline.setLatLngs(pathCoords); }
             } else { lastPos = pos; }
-            document.getElementById('curPace').textContent = formatPace(p.coords.speed * 3.6);
-        } else if (!isRunning) { map.panTo(pos); }
-    }
-}
+            document.getElementById('curPace').textContent = formatPace(currentSpeedKmh);
+            if (totalDist > 0.01) document.getElementById('avgPace').textContent = formatPace(totalDist / (seconds / 3600));
+        }
+    } else { map.panTo(pos); }
+} 
 
-// 메트로놈 & 컨트롤 로직
-function toggleMetronome() {
-    if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        metroGain = audioCtx.createGain();
-        metroGain.gain.value = document.getElementById('vol-range').value;
-        metroGain.connect(audioCtx.destination);
-    }
-    isMetroOn = !isMetroOn;
-    const btn = document.getElementById('btn-metro-main');
-    if (isMetroOn) {
-        btn.textContent = "STOP BEAT"; btn.style.background = "var(--danger)"; btn.style.color = "#fff";
-        nextClickTime = audioCtx.currentTime; scheduler();
-    } else {
-        btn.textContent = "START BEAT"; btn.style.background = "var(--metro-color)"; btn.style.color = "#000";
-        clearTimeout(metroTimer);
-    }
-}
-function scheduler() {
-    while (nextClickTime < audioCtx.currentTime + 0.1) {
-        const osc = audioCtx.createOscillator();
-        const env = audioCtx.createGain();
-        osc.frequency.value = 1200; 
-        env.gain.setValueAtTime(0, nextClickTime);
-        env.gain.linearRampToValueAtTime(1, nextClickTime + 0.005);
-        env.gain.exponentialRampToValueAtTime(0.001, nextClickTime + 0.05);
-        osc.connect(env); env.connect(metroGain);
-        osc.start(nextClickTime); osc.stop(nextClickTime + 0.06);
-        nextClickTime += 60.0 / bpm;
-    }
-    metroTimer = setTimeout(scheduler, 25);
-}
+function onStart() {
+    isRunning = true; isPaused = false; isAutoPaused = false; totalDist = 0; seconds = 0; steps = 0; pathCoords = []; gctSum = 0; flightSum = 0; dataCount = 0;
+    document.getElementById('btn-start').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block';
+    timer = setInterval(() => { if(!isPaused && !isAutoPaused) { seconds++; document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; } }, 1000);
+} 
 
-function onStart() { isRunning = true; isPaused = false; document.getElementById('btn-start').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; timer = setInterval(() => { if(!isPaused) seconds++; document.getElementById('time').textContent = formatTime(seconds); }, 1000); }
 function onStop() { isPaused = true; document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; }
-function onResume() { isPaused = false; document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; }
-function onFinish() { location.reload(); }
-function formatTime(s) { return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; }
-function formatPace(kmh) { if (!kmh || kmh < 0.5) return "--'--\""; let s = 3600 / kmh; return `${Math.floor(s/60)}'${String(Math.floor(s%60)).padStart(2,'0')}"`; }
-function updateBPM(v) { bpm = v; document.getElementById('bpm-val').textContent = v; }
-function updateVol(v) { if(metroGain) metroGain.gain.value = v; document.getElementById('vol-val').textContent = Math.round(v*100) + '%'; }
+function onResume() { isPaused = false; document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; } 
 
-function showTab(t) {
-    document.getElementById('run-view').style.display = t==='run'?'flex':'none';
-    document.getElementById('history-view').style.display = t==='history'?'flex':'none';
-    document.getElementById('tab-run').classList.toggle('active', t==='run');
-    document.getElementById('tab-history').classList.toggle('active', t==='history');
-    if(t==='run') setTimeout(() => { if(map) map.invalidateSize(); }, 200);
-}
-function showSubTab(s) {
-    document.getElementById('sub-page-list').style.display = s==='list'?'flex':'none';
-    document.getElementById('sub-page-info').style.display = s==='info'?'flex':'none';
+function onFinish() {
+    const avgGct = dataCount > 0 ? Math.round(gctSum / dataCount) : 0;
+    const avgFlt = dataCount > 0 ? Math.round(flightSum / dataCount) : 0;
+    const avgCad = Math.round((steps/(seconds||1))*60);
+    const now = new Date();
+    const record = { id: Date.now(), date: now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ", " + now.toLocaleDateString('en-US', { weekday: 'short' }), dist: totalDist.toFixed(2), time: document.getElementById('time').textContent, pace: document.getElementById('avgPace').textContent, cadence: avgCad, kcal: Math.round(totalDist * 65), gctflt: `${avgGct}/${avgFlt}%` };
+    let h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
+    h.unshift(record); localStorage.setItem('oppaRunHistory', JSON.stringify(h));
+    location.reload();
 }
 
+function showTab(tab) {
+    document.getElementById('run-view').style.display = (tab === 'run' ? 'flex' : 'none');
+    document.getElementById('map-area').style.display = (tab === 'run' ? 'block' : 'none');
+    document.getElementById('history-view').style.display = (tab === 'history' ? 'flex' : 'none');
+    document.getElementById('tab-run').className = 'tab-btn' + (tab === 'run' ? ' active' : '');
+    document.getElementById('tab-history').className = 'tab-btn' + (tab === 'history' ? ' active' : '');
+    if(tab === 'run') setTimeout(() => map.invalidateSize(), 100);
+    else showSubTab('list');
+}
+
+function showSubTab(sub) {
+    document.querySelectorAll('.sub-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('sub-tab-' + sub).classList.add('active');
+    document.querySelectorAll('.sub-page').forEach(p => p.style.display = 'none');
+    document.getElementById('sub-page-' + sub).style.display = 'flex';
+    if (sub === 'list') updateHistoryStats();
+    if (sub === 'total') updateTotalStats();
+}
+
+function updateHistoryStats() {
+    const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
+    const list = document.getElementById('history-list');
+    list.innerHTML = h.map(r => `<div class="history-item"><div class="h-header"><span class="h-date">${r.date}</span></div><div class="h-main"><span class="h-dist">${r.dist}KM</span><span class="h-time">${r.time}</span></div><div class="h-details"><div class="h-det-box"><span class="h-det-label">PACE</span><span class="h-det-val">${r.pace}</span></div><div class="h-det-box"><span class="h-det-label">CAD</span><span class="h-det-val">${r.cadence}</span></div><div class="h-det-box"><span class="h-det-label">KCAL</span><span class="h-det-val">${r.kcal}</span></div><div class="h-det-box"><span class="h-det-label">GCT/FLT</span><span class="h-det-val" style="font-size:11px;">${r.gctflt}</span></div></div></div>`).join('');
+}
+
+function updateTotalStats() {
+    const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
+    let tDist = 0, tSec = 0, tKcal = 0;
+    h.forEach(r => { 
+        tDist += parseFloat(r.dist); tKcal += parseInt(r.kcal);
+        let p = r.time.split(':'); tSec += parseInt(p[0])*60 + parseInt(p[1]);
+    });
+    document.getElementById('total-stats').innerHTML = `<div class="history-item" style="border:2px solid var(--primary);"><div class="h-date">ALL-TIME STATISTICS</div><div class="h-main"><span class="h-dist" style="font-size:28px; color:var(--primary);">${tDist.toFixed(2)} KM</span></div><div class="h-details" style="grid-template-columns:repeat(3,1fr);"><div class="h-det-box"><span class="h-det-label">TOTAL TIME</span><span class="h-det-val">${Math.floor(tSec/3600)}h ${Math.floor((tSec%3600)/60)}m</span></div><div class="h-det-box"><span class="h-det-label">TOTAL KCAL</span><span class="h-det-val">${tKcal}</span></div><div class="h-det-box"><span class="h-det-label">RUNS</span><span class="h-det-val">${h.length}</span></div></div></div>`;
+}
+
+function formatPace(kmh) { if (!kmh || kmh < 0.5) return "--'--\""; let s = 3600 / kmh; return `${Math.floor(s/60)}'${String(Math.floor(s%60)).padStart(2,'0')}"`; } 
 window.onload = initMap;
 </script>
 </body>
