@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.2 (Multi-Lang Expansion)</title>
+    <title>OppaRun Pro - v28.3 (Scrollable Lang)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -42,6 +42,7 @@
         .sub-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
         .sub-page { display: none; flex-direction: column; flex: 1; overflow-y: auto; padding-bottom: 100px; }
         
+        /* History Item */
         .history-list { padding: 0 12px; }
         .history-item { background: var(--card-bg); border-radius: 12px; padding: 12px 15px; margin-bottom: 10px; border: 1px solid #1f1f1f; margin-top: 10px; }
         .h-header { margin-bottom: 4px; }
@@ -53,12 +54,21 @@
         .h-det-label { font-size: 8px; color: #888; font-weight: 800; text-transform: uppercase; }
         .h-det-val { font-size: 14px; font-weight: 600; color: #ddd; }
 
-        /* 슬림 설정 카드 */
+        /* 설정 카드 & 스크롤 영역 */
         .info-card { background: var(--card-bg); padding: 15px; border-radius: 12px; margin: 10px 12px; border: 1px solid #222; }
+        
+        /* 언어 리스트 스크롤 박스 */
+        .lang-scroll-area { 
+            max-height: 200px; /* 최대 높이 설정 */
+            overflow-y: auto;  /* 세로 스크롤 활성화 */
+            padding-right: 5px;
+            /* 스크롤바 디자인 (웹킷 브라우저) */
+        }
+        .lang-scroll-area::-webkit-scrollbar { width: 4px; }
+        .lang-scroll-area::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
 
-        /* 다중 언어 리스트 스타일 */
         .lang-list { display: flex; flex-direction: column; gap: 8px; }
-        .lang-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: #1a1a1a; border-radius: 10px; border: 1.5px solid #333; cursor: pointer; transition: 0.2s; }
+        .lang-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: #1a1a1a; border-radius: 10px; border: 1.5px solid #333; cursor: pointer; }
         .lang-item.active { border-color: var(--primary); background: rgba(0, 255, 136, 0.05); }
         .lang-name { font-size: 14px; font-weight: 700; color: #fff; }
         .lang-item.active .lang-name { color: var(--primary); }
@@ -133,8 +143,11 @@
         <div id="sub-page-settings" class="sub-page">
             <div class="info-card">
                 <h3 id="lbl-lang-setting" style="color:var(--primary); margin:0 0 15px 0; font-size: 16px;">Language Selection</h3>
-                <div id="lang-container" class="lang-list">
-                    </div>
+                <div class="lang-scroll-area">
+                    <div id="lang-container" class="lang-list">
+                        </div>
+                </div>
+                <p id="scroll-hint" style="font-size:10px; color:var(--text-dim); margin-top:10px; text-align:center;">Scroll to view more / 밀어서 더 보기</p>
             </div>
         </div>
     </div> 
@@ -150,41 +163,15 @@ let pathCoords = [], isRunning = false, isPaused = false, isAutoPaused = false, 
 let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0;
 let gctSum = 0, flightSum = 0, dataCount = 0, currentSpeedKmh = 0;
 
-// 다국어 팩 - 여기에 새로운 언어를 추가만 하면 됩니다!
+// 언어 데이터 (중국어, 독일어, 프랑스어 등 테스트용 언어 몇 개 더 넣었습니다)
 const i18n = {
-    ko: {
-        name: "한국어 (Korean)",
-        run: "러닝", history: "기록", start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료",
-        curPace: "현재 페이스", dist: "거리", time: "시간", avgPace: "평균 페이스", cadence: "케이던스",
-        list: "내역", total: "통계", info: "정보", settings: "설정",
-        infoDesc: "뮤지션 오빠를 위한 커스텀 러닝 앱", tipsTitle: "러닝 팁",
-        tipGct: "• <b>GCT:</b> 지면 접촉 시간 (낮을수록 좋음)",
-        tipFlight: "• <b>Flight:</b> 공중 체류 비율 (탄력 지표)",
-        tipCadence: "• <b>Cadence:</b> 170-185 SPM이 부상 방지에 유리",
-        langLabel: "언어 선택", autoPause: "자동 정지"
-    },
-    en: {
-        name: "English",
-        run: "RUN", history: "HISTORY", start: "START RUNNING", stop: "STOP", resume: "RESUME", finish: "FINISH",
-        curPace: "CURRENT PACE", dist: "DIST", time: "TIME", avgPace: "AVG PACE", cadence: "CADENCE",
-        list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS",
-        infoDesc: "Custom Running Dynamics for Oppa", tipsTitle: "Running Tips",
-        tipGct: "• <b>GCT:</b> Foot on ground (Lower is better)",
-        tipFlight: "• <b>Flight:</b> Ratio in air (Elasticity indicator)",
-        tipCadence: "• <b>Cadence:</b> 170-185 SPM prevents injuries",
-        langLabel: "Language Selection", autoPause: "AUTO PAUSED"
-    },
-    jp: {
-        name: "日本語 (Japanese)",
-        run: "ランニング", history: "履歴", start: "ランニング開始", stop: "一時停止", resume: "再開", finish: "終了",
-        curPace: "現在のペース", dist: "距離", time: "時間", avgPace: "平均ペース", cadence: "ケイデンス",
-        list: "リスト", total: "統計", info: "情報", settings: "設定",
-        infoDesc: "ミュージシャンのためのカスタムランニングアプリ", tipsTitle: "ランニングのコツ",
-        tipGct: "• <b>GCT:</b> 接地時間 (短いほど良い)",
-        tipFlight: "• <b>Flight:</b> 空中滞在比率",
-        tipCadence: "• <b>Cadence:</b> 170-185 SPMが怪我予防に有効",
-        langLabel: "言語選択", autoPause: "オートポーズ"
-    }
+    ko: { name: "한국어 (Korean)", run: "러닝", history: "기록", start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료", curPace: "현재 페이스", dist: "거리", time: "시간", avgPace: "평균 페이스", cadence: "케이던스", list: "내역", total: "통계", info: "정보", settings: "설정", infoDesc: "뮤지션 오빠를 위한 커스텀 러닝 앱", tipsTitle: "러닝 팁", tipGct: "• <b>GCT:</b> 지면 접촉 시간 (낮을수록 좋음)", tipFlight: "• <b>Flight:</b> 공중 체류 비율 (탄력 지표)", tipCadence: "• <b>Cadence:</b> 170-185 SPM이 부상 방지에 유리", langLabel: "언어 선택", autoPause: "자동 정지" },
+    en: { name: "English", run: "RUN", history: "HISTORY", start: "START RUNNING", stop: "STOP", resume: "RESUME", finish: "FINISH", curPace: "CURRENT PACE", dist: "DIST", time: "TIME", avgPace: "AVG PACE", cadence: "CADENCE", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", infoDesc: "Custom Running Dynamics for Oppa", tipsTitle: "Running Tips", tipGct: "• <b>GCT:</b> Foot on ground (Lower is better)", tipFlight: "• <b>Flight:</b> Ratio in air (Elasticity indicator)", tipCadence: "• <b>Cadence:</b> 170-185 SPM prevents injuries", langLabel: "Language Selection", autoPause: "AUTO PAUSED" },
+    jp: { name: "日本語 (Japanese)", run: "ランニング", history: "履歴", start: "開始", stop: "停止", resume: "再開", finish: "終了", curPace: "現在のペース", dist: "距離", time: "時間", avgPace: "平均", cadence: "ケイデンス", list: "リスト", total: "統計", info: "情報", settings: "設定", infoDesc: "ランニングアプリ", tipsTitle: "ヒント", tipGct: "• <b>GCT:</b> 接地時間", tipFlight: "• <b>Flight:</b> 空中滞在", tipCadence: "• <b>Cadence:</b> 170-185 SPM", langLabel: "言語選択", autoPause: "オートポーズ" },
+    cn: { name: "中文 (Chinese)", name_only: "中文" },
+    de: { name: "Deutsch (German)", name_only: "Deutsch" },
+    fr: { name: "Français (French)", name_only: "Français" },
+    es: { name: "Español (Spanish)", name_only: "Español" }
 };
 
 function renderLangList() {
@@ -192,39 +179,40 @@ function renderLangList() {
     const currentLang = localStorage.getItem('oppaRunLang') || 'en';
     container.innerHTML = Object.keys(i18n).map(key => `
         <div class="lang-item ${key === currentLang ? 'active' : ''}" onclick="setLanguage('${key}')">
-            <span class="lang-name">${i18n[key].name}</span>
+            <span class="lang-name">${i18n[key].name || i18n[key].name_only}</span>
             <div class="check-icon"></div>
         </div>
     `).join('');
 }
 
 function setLanguage(lang) {
-    const t = i18n[lang];
-    document.getElementById('tab-run').innerText = t.run;
-    document.getElementById('tab-history').innerText = t.history;
-    document.getElementById('sub-tab-list').innerText = t.list;
-    document.getElementById('sub-tab-total').innerText = t.total;
-    document.getElementById('sub-tab-info').innerText = t.info;
-    document.getElementById('sub-tab-settings').innerText = t.settings;
-    document.getElementById('lbl-curPace').innerText = t.curPace;
-    document.getElementById('lbl-dist').innerText = t.dist;
-    document.getElementById('lbl-time').innerText = t.time;
-    document.getElementById('lbl-avgPace').innerText = t.avgPace;
-    document.getElementById('lbl-cadence').innerText = t.cadence;
-    document.getElementById('pause-status').innerText = t.autoPause;
-    document.getElementById('btn-start').innerText = t.start;
-    document.getElementById('btn-stop').innerText = t.stop;
-    document.getElementById('btn-resume').innerText = t.resume;
-    document.getElementById('btn-finish').innerText = t.finish;
-    document.getElementById('info-desc').innerText = t.infoDesc;
-    document.getElementById('info-tips-title').innerText = t.tipsTitle;
-    document.getElementById('tip-gct').innerHTML = t.tipGct;
-    document.getElementById('tip-flight').innerHTML = t.tipFlight;
-    document.getElementById('tip-cadence').innerHTML = t.tipCadence;
-    document.getElementById('lbl-lang-setting').innerText = t.langLabel;
-
+    const t = i18n[lang] || i18n['en']; // 데이터가 없는 언어는 영어로 대체
+    if(t.run) {
+        document.getElementById('tab-run').innerText = t.run;
+        document.getElementById('tab-history').innerText = t.history;
+        document.getElementById('sub-tab-list').innerText = t.list;
+        document.getElementById('sub-tab-total').innerText = t.total;
+        document.getElementById('sub-tab-info').innerText = t.info;
+        document.getElementById('sub-tab-settings').innerText = t.settings;
+        document.getElementById('lbl-curPace').innerText = t.curPace;
+        document.getElementById('lbl-dist').innerText = t.dist;
+        document.getElementById('lbl-time').innerText = t.time;
+        document.getElementById('lbl-avgPace').innerText = t.avgPace;
+        document.getElementById('lbl-cadence').innerText = t.cadence;
+        document.getElementById('pause-status').innerText = t.autoPause;
+        document.getElementById('btn-start').innerText = t.start;
+        document.getElementById('btn-stop').innerText = t.stop;
+        document.getElementById('btn-resume').innerText = t.resume;
+        document.getElementById('btn-finish').innerText = t.finish;
+        document.getElementById('info-desc').innerText = t.infoDesc;
+        document.getElementById('info-tips-title').innerText = t.tipsTitle;
+        document.getElementById('tip-gct').innerHTML = t.tipGct;
+        document.getElementById('tip-flight').innerHTML = t.tipFlight;
+        document.getElementById('tip-cadence').innerHTML = t.tipCadence;
+        document.getElementById('lbl-lang-setting').innerText = t.langLabel;
+    }
     localStorage.setItem('oppaRunLang', lang);
-    renderLangList(); // 리스트 상태 업데이트
+    renderLangList();
 }
 
 function initMap() {
@@ -274,7 +262,6 @@ function updatePosition(p) {
     marker.setLatLng(pos);
     let stateText = isRunning ? (isPaused || isAutoPaused ? "PAUSED" : "ACTIVE") : "READY";
     document.getElementById('status').textContent = `${stateText} (±${p.coords.accuracy.toFixed(1)}m)`;
-
     if (isRunning && !isPaused) {
         if (currentSpeedKmh < 0.8 && !isAutoPaused) { 
             isAutoPaused = true; 
