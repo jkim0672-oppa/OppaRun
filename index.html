@@ -2,29 +2,52 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.4 (Object Oriented)</title>
+    <title>OppaRun Pro - v28.5 (Dimmer Added)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        /* CSS 레이아웃은 이전과 동일하게 유지 */
         :root { --primary: #00ff88; --bg: #000; --card-bg: #121212; --text-main: #fff; --text-dim: #999; --danger: #ff4444; --warning: #ffcc00; }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { margin: 0; background: var(--bg); color: var(--text-main); font-family: -apple-system, system-ui; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        
+        /* [지도 영역] */
         #map-area { flex-shrink: 0; width: 100%; }
         #map-container { height: 15vh; min-height: 110px; border-bottom: 2px solid #222; }
         #map { height: 100%; width: 100%; background: #222; }
         .status-bar { text-align: center; color: var(--warning); font-size: 11px; padding: 4px; background: #0a0a0a; font-weight: 800; border-bottom: 1px solid #222; }
+        
+        /* [메인 대시보드] */
         .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
         .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px; flex-shrink: 0; }
         .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #1f1f1f; padding: 12px 0; }
         .card-main { grid-column: span 3; border: 1.5px solid var(--primary); height: 85px; position: relative; }
-        .auto-pause-label { position: absolute; top: 5px; right: 10px; font-size: 10px; color: var(--danger); font-weight: 900; background: rgba(255,68,68,0.1); padding: 2px 6px; border-radius: 4px; display: none; }
+        
+        /* [디머 버튼 스타일] */
+        .btn-dim { 
+            position: absolute; top: 12px; right: 12px; width: 52px; height: 52px; 
+            background: #1a1a1a; color: #777; border: 1.5px solid #333; border-radius: 12px; 
+            font-size: 10px; font-weight: 900; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10;
+        }
+        .btn-dim::before { content: '●'; color: #444; font-size: 8px; margin-bottom: 2px; }
+        
+        /* [디머 오버레이] */
+        #dimmer-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.92); z-index: 99999; display: none;
+            justify-content: center; align-items: center; color: #333; font-weight: 900; font-size: 14px;
+        }
+
+        .auto-pause-label { position: absolute; top: 5px; left: 10px; font-size: 10px; color: var(--danger); font-weight: 900; background: rgba(255,68,68,0.1); padding: 2px 6px; border-radius: 4px; display: none; }
         .label { font-size: 9px; color: var(--text-dim); font-weight: 900; margin-bottom: 3px; }
         .value { font-size: 20px; font-weight: 900; }
         .value-large { font-size: 42px; color: var(--primary); font-weight: 900; line-height: 1; }
+        
+        /* [하단 컨트롤] */
         .controls { padding: 0 15px; display: flex; justify-content: center; align-items: center; height: 80px; margin-bottom: 80px; }
         .btn-act { width: 100%; height: 55px; border-radius: 30px; border: none; font-weight: 900; font-size: 18px; cursor: pointer; }
+        
+        /* [히스토리 및 탭바] */
         .history-nav { display: flex; gap: 4px; padding: 8px; background: #000; border-bottom: 1px solid #111; }
         .sub-btn { flex: 1; padding: 8px 0; border: 1px solid #333; background: #1a1a1a; color: #777; border-radius: 8px; font-size: 10px; font-weight: 900; }
         .sub-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
@@ -37,16 +60,7 @@
         .h-details { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid #222; padding-top: 8px; gap: 4px; }
         .h-det-label { font-size: 8px; color: #888; font-weight: 800; }
         .h-det-val { font-size: 14px; font-weight: 600; color: #ddd; }
-        .info-card { background: var(--card-bg); padding: 15px; border-radius: 12px; margin: 10px 12px; border: 1px solid #222; }
-        .custom-select { position: relative; width: 100%; }
-        .select-trigger { background: #1a1a1a; padding: 14px 18px; border-radius: 10px; border: 1.5px solid #333; display: flex; justify-content: space-between; align-items: center; }
-        .select-trigger.open { border-color: var(--primary); border-radius: 10px 10px 0 0; }
-        .selected-text { font-size: 15px; font-weight: 700; color: var(--primary); }
-        .arrow { width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 6px solid #666; }
-        .select-options { position: absolute; top: 100%; left: 0; right: 0; background: #1a1a1a; border: 1.5px solid var(--primary); border-top: none; border-radius: 0 0 10px 10px; max-height: 0; overflow: hidden; opacity: 0; transition: 0.3s; z-index: 100; }
-        .select-options.show { max-height: 200px; opacity: 1; }
-        .option-item { padding: 14px 18px; border-bottom: 1px solid #222; font-size: 14px; color: #ccc; }
-        .option-item.active { color: var(--primary); background: rgba(0,255,136,0.05); }
+        
         .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #000; display: flex; border-top: 1px solid #222; align-items: center; padding-bottom: env(safe-area-inset-bottom); }
         .tab-btn { flex: 1; background: none; border: none; color: #555; font-size: 13px; font-weight: 800; }
         .tab-btn.active { color: var(--primary); }
@@ -54,6 +68,8 @@
     </style>
 </head>
 <body>
+    <div id="dimmer-overlay">TAP TO WAKE SCREEN</div>
+
     <div id="map-area">
         <div id="map-container"><div id="map"></div></div>
         <div id="status" class="status-bar">GPS INITIALIZING...</div>
@@ -65,6 +81,7 @@
                 <div id="pause-status" class="auto-pause-label">AUTO PAUSED</div>
                 <div id="lbl-curPace" class="label" style="color:var(--primary)">CURRENT PACE</div>
                 <div id="curPace" class="value-large">--'--"</div>
+                <button id="btn-dim" class="btn-dim">DIM</button>
             </div>
             <div class="card"><div id="lbl-dist" class="label">DIST</div><div class="value"><span id="dist">0.00</span><span style="font-size:10px; color:var(--primary)"> KM</span></div></div>
             <div class="card"><div id="lbl-time" class="label">TIME</div><div id="time" class="value">00:00</div></div>
@@ -87,35 +104,9 @@
         <div class="history-nav">
             <button id="sub-tab-list" class="sub-btn active">LIST</button>
             <button id="sub-tab-total" class="sub-btn">TOTAL</button>
-            <button id="sub-tab-info" class="sub-btn">INFO</button>
-            <button id="sub-tab-settings" class="sub-btn">SETTINGS</button>
         </div>
         <div id="sub-page-list" class="sub-page" style="display: flex;"><div id="history-list" class="history-list"></div></div>
         <div id="sub-page-total" class="sub-page"><div id="total-stats" class="history-list"></div></div>
-        <div id="sub-page-info" class="sub-page">
-            <div class="info-card">
-                <h2 style="color:var(--primary); margin:0 0 10px 0; font-size: 20px;">OppaRun Pro</h2>
-                <p id="info-desc" style="font-size:13px; color:#aaa; margin: 0 0 15px 0;">Custom Running Dynamics for Oppa</p>
-                <div style="background:#1a1a1a; padding:12px; border-radius:10px;">
-                    <p id="info-tips-title" style="margin:0 0 8px 0; font-size:12px; font-weight:800; color:var(--warning);">Running Tips</p>
-                    <small id="tip-gct" style="display:block; margin-bottom:5px; font-size:11px;">• <b>GCT:</b> Foot on ground</small>
-                    <small id="tip-flight" style="display:block; margin-bottom:5px; font-size:11px;">• <b>Flight:</b> Ratio in air</small>
-                    <small id="tip-cadence" style="display:block; font-size:11px;">• <b>Cadence:</b> 170-185 SPM</small>
-                </div>
-            </div>
-        </div>
-        <div id="sub-page-settings" class="sub-page">
-            <div class="info-card">
-                <h3 id="lbl-lang-setting" style="color:var(--primary); margin:0 0 15px 0; font-size: 16px;">Language Selection</h3>
-                <div class="custom-select" id="lang-selector">
-                    <div id="select-trigger" class="select-trigger">
-                        <span id="current-lang-text" class="selected-text">English</span>
-                        <div class="arrow"></div>
-                    </div>
-                    <div id="select-options" class="select-options"></div>
-                </div>
-            </div>
-        </div>
     </div> 
 
     <div class="tab-bar">
@@ -124,10 +115,6 @@
     </div> 
 
 <script>
-/**
- * OppaRunApp Class
- * 기능을 독립된 메서드로 분리하여 객체화함
- */
 class OppaRunApp {
     constructor() {
         this.isRunning = false;
@@ -144,12 +131,7 @@ class OppaRunApp {
         this.currentSpeedKmh = 0;
         this.pathCoords = [];
         this.timer = null;
-
-        this.i18n = {
-            ko: { name: "한국어 (Korean)", run: "러닝", history: "기록", start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료", curPace: "페이스", dist: "거리", time: "시간", avgPace: "평균", cadence: "케이던스", list: "내역", total: "통계", info: "정보", settings: "설정", infoDesc: "오빠 전용 러닝 앱", tipsTitle: "러닝 팁", tipGct: "• <b>GCT:</b> 지면 접촉 시간", tipFlight: "• <b>Flight:</b> 공중 체류 비율", tipCadence: "• <b>Cadence:</b> 170-185 SPM", langLabel: "언어 설정", autoPause: "자동 정지" },
-            en: { name: "English", run: "RUN", history: "HISTORY", start: "START RUNNING", stop: "STOP", resume: "RESUME", finish: "FINISH", curPace: "PACE", dist: "DIST", time: "TIME", avgPace: "AVG", cadence: "CADENCE", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", infoDesc: "Custom Dynamics for Oppa", tipsTitle: "Running Tips", tipGct: "• <b>GCT:</b> Foot on ground", tipFlight: "• <b>Flight:</b> Ratio in air", tipCadence: "• <b>Cadence:</b> 170-185 SPM", langLabel: "Language Selection", autoPause: "AUTO PAUSED" },
-            jp: { name: "日本語 (Japanese)", run: "ラン", history: "履歴", start: "開始", stop: "停止", resume: "再開", finish: "終了", curPace: "ペース", dist: "距離", time: "時間", avgPace: "平均", cadence: "ケイデンス", list: "リスト", total: "統計", info: "情報", settings: "設定", infoDesc: "ランニングアプリ", tipsTitle: "ヒント", tipGct: "• <b>GCT:</b> 接地時間", tipFlight: "• <b>Flight:</b> 空中滞在", tipCadence: "• <b>Cadence:</b> 170-185 SPM", langLabel: "言語選択", autoPause: "オートポーズ" }
-        };
+        this.wakeLock = null; // 화면 꺼짐 방지
 
         this.init();
     }
@@ -157,8 +139,6 @@ class OppaRunApp {
     init() {
         this.initMap();
         this.bindEvents();
-        const savedLang = localStorage.getItem('oppaRunLang') || 'en';
-        this.setLanguage(savedLang);
         this.updateHistoryStats();
     }
 
@@ -185,57 +165,29 @@ class OppaRunApp {
         document.getElementById('tab-history').onclick = () => this.showTab('history');
         document.getElementById('sub-tab-list').onclick = () => this.showSubTab('list');
         document.getElementById('sub-tab-total').onclick = () => this.showSubTab('total');
-        document.getElementById('sub-tab-info').onclick = () => this.showSubTab('info');
-        document.getElementById('sub-tab-settings').onclick = () => this.showSubTab('settings');
-        document.getElementById('select-trigger').onclick = () => this.toggleDropdown();
-    }
 
-    // --- 언어 및 UI 관리 ---
-    setLanguage(lang) {
-        const t = this.i18n[lang] || this.i18n['en'];
-        const elements = {
-            'tab-run': t.run, 'tab-history': t.history, 'sub-tab-list': t.list, 'sub-tab-total': t.total,
-            'sub-tab-info': t.info, 'sub-tab-settings': t.settings, 'lbl-curPace': t.curPace,
-            'lbl-dist': t.dist, 'lbl-time': t.time, 'lbl-avgPace': t.avgPace, 'lbl-cadence': t.cadence,
-            'pause-status': t.autoPause, 'btn-start': t.start, 'btn-stop': t.stop, 'btn-resume': t.resume,
-            'btn-finish': t.finish, 'info-desc': t.infoDesc, 'info-tips-title': t.tipsTitle,
-            'lbl-lang-setting': t.langLabel
+        // [디머 관련 이벤트]
+        document.getElementById('btn-dim').onclick = (e) => {
+            e.stopPropagation();
+            document.getElementById('dimmer-overlay').style.display = 'flex';
         };
-        for (let id in elements) document.getElementById(id).innerText = elements[id];
-        document.getElementById('tip-gct').innerHTML = t.tipGct;
-        document.getElementById('tip-flight').innerHTML = t.tipFlight;
-        document.getElementById('tip-cadence').innerHTML = t.tipCadence;
-        
-        localStorage.setItem('oppaRunLang', lang);
-        this.renderLangOptions(lang);
+        document.getElementById('dimmer-overlay').onclick = () => {
+            document.getElementById('dimmer-overlay').style.display = 'none';
+        };
     }
 
-    renderLangOptions(currentLang) {
-        const container = document.getElementById('select-options');
-        document.getElementById('current-lang-text').innerText = this.i18n[currentLang].name;
-        container.innerHTML = Object.keys(this.i18n).map(key => `
-            <div class="option-item ${key === currentLang ? 'active' : ''}" onclick="app.selectLanguage('${key}')">
-                ${this.i18n[key].name}
-            </div>
-        `).join('');
+    // 화면 꺼짐 방지 (Wake Lock)
+    async requestWakeLock() {
+        try {
+            if ('wakeLock' in navigator) {
+                this.wakeLock = await navigator.wakeLock.request('screen');
+            }
+        } catch (err) { console.error(`${err.name}, ${err.message}`); }
     }
 
-    toggleDropdown() {
-        document.getElementById('select-trigger').classList.toggle('open');
-        document.getElementById('select-options').classList.toggle('show');
-    }
-
-    selectLanguage(lang) {
-        this.setLanguage(lang);
-        this.toggleDropdown();
-    }
-
-    // --- 러닝 로직 ---
     onStart() {
-        this.isRunning = true; this.isPaused = false; this.isAutoPaused = false;
-        this.totalDist = 0; this.seconds = 0; this.steps = 0; this.pathCoords = [];
-        this.gctSum = 0; this.flightSum = 0; this.dataCount = 0;
-        
+        this.isRunning = true; this.isPaused = false;
+        this.requestWakeLock();
         document.getElementById('btn-start').style.display = 'none';
         document.getElementById('btn-stop').style.display = 'block';
         
@@ -255,25 +207,23 @@ class OppaRunApp {
     onFinish() {
         const avgGct = this.dataCount > 0 ? Math.round(this.gctSum / this.dataCount) : 0;
         const avgFlt = this.dataCount > 0 ? Math.round(this.flightSum / this.dataCount) : 0;
-        const avgCad = Math.round((this.steps/(this.seconds||1))*60);
-        const now = new Date();
         const record = {
             id: Date.now(),
-            date: now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ", " + now.toLocaleDateString('en-US', { weekday: 'short' }),
+            date: new Date().toLocaleDateString(),
             dist: this.totalDist.toFixed(2),
             time: document.getElementById('time').textContent,
             pace: document.getElementById('avgPace').textContent,
-            cadence: avgCad,
+            cadence: Math.round((this.steps/(this.seconds||1))*60),
             kcal: Math.round(this.totalDist * 65),
             gctflt: `${avgGct}/${avgFlt}%`
         };
         let h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
         h.unshift(record);
         localStorage.setItem('oppaRunHistory', JSON.stringify(h));
+        if (this.wakeLock) this.wakeLock.release();
         location.reload();
     }
 
-    // --- 센서 및 위치 처리 ---
     handleMotion(e) {
         if (!this.isRunning || this.isPaused || this.isAutoPaused) return;
         let acc = e.accelerationIncludingGravity;
@@ -286,34 +236,23 @@ class OppaRunApp {
             let flt = this.currentSpeedKmh > 2.0 ? Math.floor(5 + (this.currentSpeedKmh * 2.1)) : 0;
             if(gct > 0) { this.gctSum += gct; this.flightSum += flt; this.dataCount++; }
             document.getElementById('cadence').textContent = Math.round((this.steps/(this.seconds||1))*60);
-            this.updateDynamicsColors(gct, flt);
+            document.getElementById('gct').textContent = gct || "--";
+            document.getElementById('flight').textContent = flt || "--";
         }
-    }
-
-    updateDynamicsColors(gct, flt) {
-        const gDisplay = document.getElementById('gct'), fDisplay = document.getElementById('flight');
-        gDisplay.textContent = gct || "--"; fDisplay.textContent = flt || "--";
-        let color = (this.currentSpeedKmh > 4.5) ? (gct >= 400 ? "#ff4444" : (gct >= 320 ? "#ffcc00" : "#00ff88")) : "#ffcc00";
-        gDisplay.style.color = color;
-        fDisplay.style.color = (flt > 15) ? "#00ff88" : "#ffcc00";
     }
 
     updatePosition(p) {
         const pos = [p.coords.latitude, p.coords.longitude];
         this.currentSpeedKmh = (p.coords.speed || 0) * 3.6;
         this.marker.setLatLng(pos);
-        let stateText = this.isRunning ? (this.isPaused || this.isAutoPaused ? "PAUSED" : "ACTIVE") : "READY";
-        document.getElementById('status').textContent = `${stateText} (±${p.coords.accuracy.toFixed(1)}m)`;
         
         if (this.isRunning && !this.isPaused) {
             if (this.currentSpeedKmh < 0.8 && !this.isAutoPaused) {
                 this.isAutoPaused = true;
                 document.getElementById('pause-status').style.display = 'block';
-                if ("vibrate" in navigator) navigator.vibrate(200);
             } else if (this.currentSpeedKmh >= 0.8 && this.isAutoPaused) {
                 this.isAutoPaused = false;
                 document.getElementById('pause-status').style.display = 'none';
-                if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]);
             }
             
             if (!this.isAutoPaused && p.coords.accuracy < 45) {
@@ -341,7 +280,6 @@ class OppaRunApp {
 
     formatPace(kmh) { if (!kmh || kmh < 0.5) return "--'--\""; let s = 3600 / kmh; return `${Math.floor(s/60)}'${String(Math.floor(s%60)).padStart(2,'0')}"`; }
 
-    // --- 뷰 전환 및 기록 관리 ---
     showTab(tab) {
         document.getElementById('run-view').style.display = (tab === 'run' ? 'flex' : 'none');
         document.getElementById('map-area').style.display = (tab === 'run' ? 'block' : 'none');
@@ -349,7 +287,6 @@ class OppaRunApp {
         document.getElementById('tab-run').className = 'tab-btn' + (tab === 'run' ? ' active' : '');
         document.getElementById('tab-history').className = 'tab-btn' + (tab === 'history' ? ' active' : '');
         if(tab === 'run') setTimeout(() => this.map.invalidateSize(), 100);
-        else this.showSubTab('list');
     }
 
     showSubTab(sub) {
@@ -365,7 +302,7 @@ class OppaRunApp {
         const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
         document.getElementById('history-list').innerHTML = h.map(r => `
             <div class="history-item">
-                <div class="h-header"><span class="h-date">${r.date}</span></div>
+                <div class="h-date">${r.date}</div>
                 <div class="h-main"><span class="h-dist">${r.dist}KM</span><span class="h-time">${r.time}</span></div>
                 <div class="h-details">
                     <div class="h-det-box"><span class="h-det-label">PACE</span><span class="h-det-val">${r.pace}</span></div>
@@ -384,7 +321,7 @@ class OppaRunApp {
             let p = r.time.split(':'); tSec += parseInt(p[0])*60 + parseInt(p[1]); 
         });
         document.getElementById('total-stats').innerHTML = `
-            <div class="history-item" style="border:2px solid var(--primary);">
+            <div class="history-item" style="border:2px solid var(--primary); margin-top:20px;">
                 <div class="h-date">TOTAL STATISTICS</div>
                 <div class="h-main"><span class="h-dist" style="font-size:28px; color:var(--primary);">${tDist.toFixed(2)} KM</span></div>
                 <div class="h-details" style="grid-template-columns:repeat(3,1fr);">
@@ -396,7 +333,6 @@ class OppaRunApp {
     }
 }
 
-// 앱 실행
 const app = new OppaRunApp();
 </script>
 </body>
