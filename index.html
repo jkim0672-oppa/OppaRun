@@ -2,103 +2,81 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v29.20 (Route Tab Integrated)</title>
+    <title>OppaRun Pro - v29.40 (Stable Reset)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         :root { 
             --primary: #00ff88; --bg: #000000; --card-bg: #121212; 
             --text-main: #ffffff; --text-dim: #999999; --danger: #ff4444; 
-            --warning: #ffcc00; --accent: #007bff;
         }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body { margin: 0; background: var(--bg); color: var(--text-main); font-family: -apple-system, system-ui; height: 100svh; display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none; }
+        body { margin: 0; background: var(--bg); color: var(--text-main); font-family: -apple-system, system-ui; height: 100svh; overflow: hidden; display: flex; flex-direction: column; }
         
-        /* 1. 지도 영역 */
-        #map-area { flex-shrink: 0; width: 100%; }
-        #map-container { height: 15vh; min-height: 110px; border-bottom: 2px solid #222; }
-        #map { height: 100%; width: 100%; background: #222; }
-        .status-bar { text-align: center; color: var(--warning); font-size: 11px; padding: 4px; background: #0a0a0a; font-weight: 800; border-bottom: 1px solid #222; }
-        
+        /* 지도 영역: v28.11의 높이와 구조 복구 */
+        #map-area { height: 15vh; min-height: 120px; border-bottom: 2px solid #222; position: relative; }
+        #map { height: 100%; width: 100%; }
+        .status-bar { position: absolute; bottom: 0; width: 100%; text-align: center; color: #ffcc00; font-size: 11px; background: rgba(0,0,0,0.7); z-index: 1000; padding: 2px 0; font-weight: 800; }
+
         .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
         
-        /* 2. 대시보드 카드 (v28.11 유지) */
-        .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px; flex-shrink: 0; }
-        .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1.5px solid #1f1f1f; padding: 12px 0; }
-        .card-main { grid-column: span 3; border: 1.5px solid var(--primary); height: 85px; position: relative; }
-        .label { font-size: 9px; color: var(--text-dim); font-weight: 900; margin-bottom: 3px; }
-        .value { font-size: 20px; font-weight: 900; }
-        .value-large { font-size: 42px; color: var(--primary); font-weight: 900; line-height: 1; }
-        
-        /* 3. 컨트롤 버튼 */
-        .controls { padding: 0 15px; display: flex; justify-content: center; align-items: center; height: 80px; margin-bottom: 80px; }
-        .btn-act { width: 100%; height: 55px; border-radius: 30px; border: none; font-weight: 900; font-size: 18px; cursor: pointer; }
-        
-        /* 4. 히스토리 & 진단 버튼 */
-        .history-list { padding: 0 12px; overflow-y: auto; flex: 1; padding-bottom: 100px; }
-        .history-item { background: var(--card-bg); border-radius: 12px; padding: 15px; margin-bottom: 10px; border: 1px solid #1f1f1f; margin-top: 10px; }
-        .h-main { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-        .btn-link-action { font-size: 12px; font-weight: 900; padding: 5px 12px; border-radius: 6px; text-transform: uppercase; cursor: pointer; margin-left: 5px; }
-        .text-route-link { color: var(--primary); background: rgba(0, 255, 136, 0.15); }
-        .text-diag-link { color: #00a2ff; background: rgba(0, 123, 255, 0.2); }
+        /* Dashboard & Controls */
+        .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 10px; }
+        .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 15px 0; border: 1px solid #1f1f1f; }
+        .card-main { grid-column: span 3; height: 100px; border: 1.5px solid var(--primary); position: relative; }
+        .label { font-size: 10px; color: var(--text-dim); font-weight: 900; margin-bottom: 4px; }
+        .value-large { font-size: 48px; color: var(--primary); font-weight: 900; line-height: 1; }
+        .auto-pause-label { position: absolute; top: 8px; left: 12px; font-size: 11px; color: var(--danger); font-weight: 900; display: none; }
 
-        /* 5. [수정된 상세 경로 페이지] */
-        #route-detail-view { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 5000; display: none; flex-direction: column; }
-        #detail-map-container { height: 45vh; border-bottom: 2px solid #222; position: relative; }
-        #detail-map { height: 100%; width: 100%; }
+        .controls { padding: 20px; display: flex; justify-content: center; margin-bottom: 60px; }
+        .btn-act { width: 100%; height: 60px; border-radius: 30px; border: none; font-weight: 900; font-size: 20px; }
         
-        /* 지도 위 버튼 삭제됨 */
-
-        .detail-info { flex: 1; padding: 25px 20px; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; }
-        .det-row { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #222; padding-bottom: 8px; }
-        .det-val { font-size: 38px; color: var(--primary); font-weight: 900; line-height: 1; }
-
-        /* 6. 하단 탭 바 (4개 텍스트 구성) */
-        .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #000; display: flex; border-top: 1px solid #222; align-items: center; padding-bottom: env(safe-area-inset-bottom); z-index: 5001; }
-        .tab-btn { flex: 1; background: none; border: none; color: #555; font-size: 13px; font-weight: 800; text-transform: uppercase; }
+        /* 하단 탭 바 (전역 공통) */
+        .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 70px; background: #000; display: flex; border-top: 1px solid #222; align-items: center; padding-bottom: env(safe-area-inset-bottom); z-index: 9999; }
+        .tab-btn { flex: 1; background: none; border: none; color: #555; font-size: 13px; font-weight: 800; text-transform: uppercase; cursor: pointer; }
         .tab-btn.active { color: var(--primary); }
-        
-        /* 디머 및 기타 v28.11 요소 */
-        .btn-dim { position: absolute; top: 12px; right: 12px; width: 52px; height: 52px; background: #1a1a1a; color: #777; border: 1.5px solid #333; border-radius: 12px; font-size: 10px; font-weight: 900; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; }
-        #dimmer-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.93); z-index: 99999; display: none; justify-content: center; align-items: center; color: #333; font-weight: 900; }
+
+        /* 경로 상세 뷰 */
+        #route-detail-view { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 10000; display: none; flex-direction: column; }
+        #detail-map { height: 40vh; border-bottom: 1px solid #222; }
+        .detail-info { flex: 1; padding: 20px; }
+
+        /* Dimmer */
+        #dimmer-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 100000; display: none; justify-content: center; align-items: center; color: #333; font-weight: 900; }
+        .btn-dim { position: absolute; top: 12px; right: 12px; padding: 8px 12px; background: #222; border-radius: 8px; font-size: 10px; color: #777; border: 1px solid #333; z-index: 10; }
     </style>
 </head>
-<body> 
-    <div id="dimmer-overlay">TAP TO WAKE SCREEN</div>
+<body>
+    <div id="dimmer-overlay" onclick="toggleDim(false)">TAP TO WAKE</div>
 
     <div id="route-detail-view">
-        <div id="detail-map-container"><div id="detail-map"></div></div>
+        <div id="detail-map"></div>
         <div class="detail-info" id="detail-content"></div>
         <div class="tab-bar">
-            <button class="tab-btn" onclick="closeRouteDetail('run')">RUN</button>
-            <button class="tab-btn" onclick="closeRouteDetail('form')">FORM</button>
-            <button class="tab-btn" onclick="closeRouteDetail('history')">HISTORY</button>
-            <button class="tab-btn" style="color:#00a2ff;" onclick="alert('경로를 공유합니다!')">SHARE</button>
+            <button class="tab-btn" onclick="closeDetail('run')">RUN</button>
+            <button class="tab-btn">FORM</button>
+            <button class="tab-btn" onclick="closeDetail('history')">HISTORY</button>
+            <button class="tab-btn" style="color:#007bff">SHARE</button>
         </div>
     </div>
 
     <div id="map-area">
-        <div id="map-container"><div id="map"></div></div>
+        <div id="map"></div>
         <div id="status" class="status-bar">GPS INITIALIZING...</div>
-    </div> 
+    </div>
 
     <div id="run-view" class="main-content">
         <div class="dashboard">
             <div class="card card-main">
+                <span id="pause-status" class="auto-pause-label">PAUSED</span>
                 <div class="label" style="color:var(--primary)">PACE</div>
                 <div id="curPace" class="value-large">--'--"</div>
-                <button class="btn-dim" onclick="toggleDim(true)">DIM</button>
+                <div class="btn-dim" onclick="toggleDim(true)">DIM</div>
             </div>
-            <div class="card"><div class="label">DIST</div><div class="value"><span id="dist">0.00</span><span style="font-size:10px; color:var(--primary)"> KM</span></div></div>
-            <div class="card"><div class="label">TIME</div><div id="time" class="value">00:00</div></div>
-            <div class="card"><div class="label">AVG</div><div id="avgPace" class="value">--'--"</div></div>
-            <div class="card"><div class="label">CADENCE</div><div id="cadence" class="value">0</div></div>
-            <div class="card"><div class="label">GCT</div><div id="gct" class="value">--</div></div>
-            <div class="card"><div class="label">FLIGHT</div><div id="flight" class="value">--</div></div>
+            <div class="card"><div class="label">DIST</div><div id="dist" style="font-size:24px; font-weight:900;">0.00</div></div>
+            <div class="card"><div class="label">TIME</div><div id="time" style="font-size:24px; font-weight:900;">00:00</div></div>
+            <div class="card"><div class="label">CADENCE</div><div id="cadence" style="font-size:24px; font-weight:900;">0</div></div>
         </div>
         <div class="controls">
             <button id="btn-start" class="btn-act" style="background:var(--primary); color:#000;" onclick="onStart()">START RUNNING</button>
@@ -106,47 +84,62 @@
         </div>
     </div>
 
-    <div id="history-view" class="main-content" style="display:none;">
-        <div id="history-list" class="history-list"></div>
-    </div> 
+    <div id="history-view" class="main-content" style="display:none; padding:10px; overflow-y:auto;">
+        <div id="history-list"></div>
+    </div>
 
-    <div class="tab-bar" id="main-tab-bar">
-        <button id="tab-run" class="tab-btn active" onclick="showTab('run')">RUN</button>
-        <button id="tab-form" class="tab-btn" onclick="showTab('form')">FORM</button>
-        <button id="tab-history" class="tab-btn" onclick="showTab('history')">HISTORY</button>
-        <button class="tab-btn" style="color:#777;">SHARE</button>
-    </div> 
+    <div class="tab-bar" id="main-tab">
+        <button class="tab-btn active" onclick="showTab('run', this)">RUN</button>
+        <button class="tab-btn">FORM</button>
+        <button class="tab-btn" onclick="showTab('history', this)">HISTORY</button>
+        <button class="tab-btn" style="color:#444">SHARE</button>
+    </div>
 
 <script>
-let map, detailMap, marker, polyline, timer, isRunning = false, isPaused = false, seconds = 0;
-let totalDist = 0, lastPos = null, pathCoords = [];
+let map, detailMap, marker, pathLine, isRunning = false, isAutoPaused = false, seconds = 0, timer;
+let pathCoords = [], totalDist = 0, lastPos = null;
 
-function toggleDim(show) { document.getElementById('dimmer-overlay').style.display = show ? 'flex' : 'none'; }
-document.getElementById('dimmer-overlay').onclick = () => toggleDim(false);
+function toggleDim(s) { document.getElementById('dimmer-overlay').style.display = s ? 'flex' : 'none'; }
 
 function initMap() {
-    map = L.map('map', {zoomControl: false, attributionControl: false}).setView([37.5665, 126.9780], 17);
+    // 원본 Leaflet 설정 복구
+    map = L.map('map', {zoomControl:false, attributionControl:false}).setView([37.5, 127.0], 17);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-    marker = L.marker([0,0], {icon: L.divIcon({className:'my-location', iconSize:[12,12]})}).addTo(map);
-    polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(map);
-    
+    marker = L.marker([0,0], {icon: L.divIcon({className:'my-loc', html:'<div style="background:#007bff; width:12px; height:12px; border-radius:50%; border:2px solid white;"></div>'})}).addTo(map);
+    pathLine = L.polyline([], {color:'#007bff', weight:5}).addTo(map);
+
     if (navigator.geolocation) {
         navigator.geolocation.watchPosition(p => {
             const pos = [p.coords.latitude, p.coords.longitude];
+            const speedKmh = (p.coords.speed || 0) * 3.6;
+            
             marker.setLatLng(pos);
-            if (isRunning && !isPaused) {
-                if (lastPos) {
-                    let d = L.latLng(lastPos).distanceTo(pos) / 1000;
-                    if (d > 0.002) {
-                        totalDist += d;
-                        document.getElementById('dist').textContent = totalDist.toFixed(2);
-                        pathCoords.push(pos);
-                        polyline.setLatLngs(pathCoords);
-                        lastPos = pos;
+            if (!isRunning) map.panTo(pos);
+            document.getElementById('status').textContent = "GPS CONNECTED";
+
+            if (isRunning && !isAutoPaused) {
+                // 자동 정지 로직 보강
+                if (speedKmh < 0.8) {
+                    isAutoPaused = true;
+                    document.getElementById('pause-status').style.display = 'block';
+                } else {
+                    if (lastPos) {
+                        let d = L.latLng(lastPos).distanceTo(pos) / 1000;
+                        if (d > 0.002) {
+                            totalDist += d;
+                            document.getElementById('dist').textContent = totalDist.toFixed(2);
+                            pathCoords.push(pos);
+                            pathLine.setLatLngs(pathCoords);
+                        }
                     }
-                } else { lastPos = pos; pathCoords.push(pos); }
-            } else if (!isRunning) { map.panTo(pos); }
-        }, null, {enableHighAccuracy: true});
+                    lastPos = pos;
+                }
+                document.getElementById('curPace').textContent = formatPace(speedKmh);
+            } else if (isRunning && isAutoPaused && speedKmh >= 1.2) {
+                isAutoPaused = false;
+                document.getElementById('pause-status').style.display = 'none';
+            }
+        }, null, {enableHighAccuracy:true});
     }
 }
 
@@ -154,69 +147,56 @@ function onStart() {
     isRunning = true; totalDist = 0; seconds = 0; pathCoords = [];
     document.getElementById('btn-start').style.display = 'none';
     document.getElementById('btn-stop').style.display = 'block';
-    timer = setInterval(() => { if(!isPaused) { seconds++; document.getElementById('time').textContent = formatTime(seconds); } }, 1000);
+    timer = setInterval(() => { if(isRunning && !isAutoPaused) { seconds++; document.getElementById('time').textContent = formatTime(seconds); } }, 1000);
 }
 
-function viewRecordMap(id) {
-    const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
-    const r = h.find(item => item.id === id);
-    if (!r) return;
-
-    document.getElementById('route-detail-view').style.display = 'flex';
-    document.getElementById('detail-content').innerHTML = `
-        <div class="det-row"><span class="label">DISTANCE</span><span class="det-val">${r.dist}KM</span></div>
-        <div class="det-row"><span class="label">TIME</span><span class="det-val">${r.time}</span></div>
-        <div class="det-row"><span class="label">AVG PACE</span><span class="det-val">${r.pace}</span></div>
-    `;
-
-    setTimeout(() => {
-        if (detailMap) detailMap.remove();
-        detailMap = L.map('detail-map', {zoomControl: false, attributionControl: false});
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(detailMap);
-        if (r.coords && r.coords.length > 0) {
-            const p = L.polyline(r.coords, {color: '#00ff88', weight: 6}).addTo(detailMap);
-            detailMap.fitBounds(p.getBounds(), {padding: [30, 30]});
-        }
-    }, 100);
+function showTab(t, btn) {
+    document.getElementById('run-view').style.display = (t==='run'?'flex':'none');
+    document.getElementById('map-area').style.display = (t==='run'?'block':'none');
+    document.getElementById('history-view').style.display = (t==='history'?'block':'none');
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    if(btn) btn.classList.add('active');
+    if(t==='history') renderHistory();
 }
 
-// 오빠 요청: 루트 페이지에서 하단 탭 누르면 해당 탭으로 이동하며 닫기
-function closeRouteDetail(targetTab) { 
-    document.getElementById('route-detail-view').style.display = 'none'; 
-    if(targetTab) showTab(targetTab);
-}
-
-function updateHistoryStats() {
+function renderHistory() {
     const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
     document.getElementById('history-list').innerHTML = h.map(r => `
-        <div class="history-item">
-            <div class="label" style="color:var(--primary); font-size:11px;">${r.date}</div>
-            <div class="h-main">
-                <span style="font-size:20px; font-weight:900;">${r.dist}KM</span>
-                <span style="font-size:20px; font-weight:900;">${r.time}</span>
-                <span class="btn-link-action text-route-link" onclick="viewRecordMap(${r.id})">ROUTE</span>
-                <span class="btn-link-action text-diag-link" onclick="alert('진단을 시작합니다!')">진단</span>
+        <div style="background:#121212; padding:15px; border-radius:12px; margin-bottom:10px; border:1px solid #222;">
+            <div style="font-size:12px; color:#00ff88; margin-bottom:5px;">${r.date}</div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:22px; font-weight:900;">${r.dist}KM</span>
+                <button onclick="viewRoute(${r.id})" style="background:#00ff88; border:none; padding:5px 12px; border-radius:6px; font-weight:900; font-size:11px;">ROUTE</button>
             </div>
-            <div style="display:grid; grid-template-columns:repeat(4,1fr); border-top:1px solid #222; padding-top:8px;">
-                <div><span class="label">PACE</span><br>${r.pace}</div>
-                <div><span class="label">CAD</span><br>--</div>
-                <div><span class="label">KCAL</span><br>--</div>
-                <div><span class="label">GCT</span><br>--</div>
-            </div>
-        </div>`).join('');
+        </div>
+    `).join('');
 }
 
-function showTab(tab) {
-    document.getElementById('run-view').style.display = (tab === 'run' ? 'flex' : 'none');
-    document.getElementById('map-area').style.display = (tab === 'run' ? 'block' : 'none');
-    document.getElementById('history-view').style.display = (tab === 'history' ? 'flex' : 'none');
-    document.querySelectorAll('#main-tab-bar .tab-btn').forEach(b => b.classList.remove('active'));
-    const activeBtn = document.getElementById('tab-' + tab);
-    if(activeBtn) activeBtn.classList.add('active');
-    if(tab === 'history') updateHistoryStats();
+function viewRoute(id) {
+    const r = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]").find(x => x.id === id);
+    if(!r) return;
+    document.getElementById('route-detail-view').style.display = 'flex';
+    document.getElementById('detail-content').innerHTML = `<h2 style="color:#00ff88">${r.dist} KM Run</h2><p>Time: ${r.time}</p>`;
+    
+    setTimeout(() => {
+        if(detailMap) detailMap.remove();
+        detailMap = L.map('detail-map', {zoomControl:false, attributionControl:false});
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(detailMap);
+        if(r.coords && r.coords.length > 0) {
+            const p = L.polyline(r.coords, {color:'#00ff88', weight:5}).addTo(detailMap);
+            detailMap.fitBounds(p.getBounds(), {padding:[20,20]});
+        }
+    }, 200);
+}
+
+function closeDetail(tab) {
+    document.getElementById('route-detail-view').style.display = 'none';
+    if(tab) showTab(tab);
 }
 
 function formatTime(s) { return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; }
+function formatPace(kmh) { if(kmh<0.5) return "--'--\""; let s = 3600/kmh; return `${Math.floor(s/60)}'${String(Math.floor(s%60)).padStart(2,'0')}"`; }
+
 window.onload = initMap;
 </script>
 </body>
