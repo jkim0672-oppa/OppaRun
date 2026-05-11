@@ -2,175 +2,198 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.5 (Safe Dimmer)</title>
+    <title>OppaRun Pro - v28.7 (Object Oriented)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        :root { 
-            --primary: #00ff88; --bg: #000000; --card-bg: #121212; 
-            --text-main: #ffffff; --text-dim: #999999; --danger: #ff4444; 
-            --warning: #ffcc00; --accent: #007bff;
-        }
+        :root { --primary: #00ff88; --bg: #000000; --card-bg: #121212; --text-main: #ffffff; --text-dim: #999999; --danger: #ff4444; --warning: #ffcc00; }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { margin: 0; background: var(--bg); color: var(--text-main); font-family: -apple-system, system-ui; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
         
-        #map-area { flex-shrink: 0; width: 100%; }
-        #map-container { height: 15vh; min-height: 110px; border-bottom: 2px solid #222; }
-        #map { height: 100%; width: 100%; background: #222; }
-        .status-bar { text-align: center; color: var(--warning); font-size: 11px; padding: 4px; background: #0a0a0a; font-weight: 800; border-bottom: 1px solid #222; }
-        
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
-        
-        .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px; flex-shrink: 0; }
-        .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #1f1f1f; padding: 12px 0; }
-        .card-main { grid-column: span 3; border: 1.5px solid var(--primary); height: 85px; position: relative; flex-direction: row; justify-content: space-around; padding: 0 15px; }
-        .auto-pause-label { position: absolute; top: 5px; right: 75px; font-size: 10px; color: var(--danger); font-weight: 900; background: rgba(255,68,68,0.1); padding: 2px 6px; border-radius: 4px; display: none; }
-        .label { font-size: 9px; color: var(--text-dim); font-weight: 900; margin-bottom: 3px; }
-        .value { font-size: 20px; font-weight: 900; }
-        .value-large { font-size: 42px; color: var(--primary); font-weight: 900; line-height: 1; }
+        #map-container { height: 25vh; border-bottom: 2px solid #222; position: relative; }
+        #map { height: 100%; width: 100%; }
+        .status-bar { position: absolute; top: 0; width: 100%; z-index: 1000; text-align: center; color: var(--warning); font-size: 11px; padding: 4px; background: rgba(0,0,0,0.7); font-weight: 800; }
 
-        .controls { padding: 0 15px; display: flex; justify-content: center; align-items: center; height: 80px; margin-bottom: 80px; }
-        .btn-act { width: 100%; height: 55px; border-radius: 30px; border: none; font-weight: 900; font-size: 18px; cursor: pointer; }
+        .main-content { flex: 1; display: flex; flex-direction: column; padding: 12px; }
+        .dashboard { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 15px; }
+        .card { background: var(--card-bg); border-radius: 16px; padding: 15px; border: 1px solid #1f1f1f; display: flex; flex-direction: column; align-items: center; }
+        .card-full { grid-column: span 2; border: 1px solid var(--primary); }
         
-        .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #000; display: flex; border-top: 1px solid #222; align-items: center; padding-bottom: env(safe-area-inset-bottom); z-index: 1000; }
-        .tab-btn { flex: 1; background: none; border: none; color: #555; font-size: 13px; font-weight: 800; }
-        .tab-btn.active { color: var(--primary); }
-        .my-location { background: #007bff; border: 2px solid #fff; border-radius: 50%; width: 12px; height: 12px; box-shadow: 0 0 10px rgba(0,123,255,0.8); }
+        .label { font-size: 10px; color: var(--text-dim); font-weight: 900; margin-bottom: 5px; text-transform: uppercase; }
+        .value { font-size: 28px; font-weight: 900; }
+        .value-large { font-size: 56px; color: var(--primary); font-weight: 900; line-height: 1; }
 
-        #history-view { flex: 1; overflow-y: auto; padding: 10px; display: none; }
-        .history-card { background: #121212; border-radius: 10px; padding: 15px; margin-bottom: 10px; border: 1px solid #222; }
+        .controls { margin-top: auto; padding-bottom: 20px; }
+        .btn-act { width: 100%; height: 65px; border-radius: 35px; border: none; font-weight: 900; font-size: 20px; cursor: pointer; background: var(--primary); color: #000; transition: 0.2s; }
+        .btn-act.stop { background: var(--danger); color: #fff; }
     </style>
 </head>
-<body> 
-    <div id="map-area">
-        <div id="map-container"><div id="map"></div></div>
-        <div id="status" class="status-bar">GPS INITIALIZING...</div>
-    </div> 
+<body>
 
-    <div id="run-view" class="main-content">
+    <div id="map-container">
+        <div class="status-bar" id="gps-status">GPS STANDBY</div>
+        <div id="map"></div>
+    </div>
+
+    <div class="main-content">
         <div class="dashboard">
-            <div class="card card-main">
-                <div style="display: flex; flex-direction: column; align-items: center; flex: 1;">
-                    <div id="pause-status" class="auto-pause-label">AUTO PAUSED</div>
-                    <div id="lbl-curPace" class="label" style="color:var(--primary)">CURRENT PACE</div>
-                    <div id="curPace" class="value-large">--'--"</div>
-                </div>
-                <div id="btn-dimmer" onclick="toggleDimmer(event)" style="width: 60px; height: 45px; background: #222; border: 1px solid #333; border-radius: 10px; display: flex; flex-direction: column; justify-content: center; align-items: center; cursor: pointer;">
-                    <div id="dim-indicator" style="width: 8px; height: 8px; background: #555; border-radius: 50%; margin-bottom: 4px;"></div>
-                    <div id="dim-text" style="font-size: 10px; font-weight: 900; color: #777;">DIM</div>
-                </div>
+            <div class="card card-full">
+                <span class="label">Total Distance (Miles)</span>
+                <span class="value-large" id="display-dist">0.00</span>
             </div>
-            <div class="card"><div class="label">DIST</div><div class="value"><span id="dist">0.00</span><span style="font-size:10px; color:var(--primary)"> KM</span></div></div>
-            <div class="card"><div class="label">TIME</div><div id="time" class="value">00:00</div></div>
-            <div class="card"><div class="label">AVG PACE</div><div id="avgPace" class="value">--'--"</div></div>
-            <div class="card"><div class="label">CADENCE</div><div id="cadence" class="value">0</div></div>
-            <div class="card"><div class="label">GCT</div><div class="value"><span id="gct">--</span><span style="font-size:10px;"> MS</span></div></div>
-            <div class="card"><div class="label">FLIGHT</div><div class="value"><span id="flight">--</span><span style="font-size:10px;"> %</span></div></div>
+            <div class="card">
+                <span class="label">Time</span>
+                <span class="value" id="display-time">00:00</span>
+            </div>
+            <div class="card">
+                <span class="label">Pace (/mi)</span>
+                <span class="value" id="display-pace">0'00"</span>
+            </div>
         </div>
+
         <div class="controls">
-            <button id="btn-start" class="btn-act" style="background:var(--primary); color:#000;" onclick="onStart()">START RUNNING</button>
-            <button id="btn-stop" class="btn-act" style="background:var(--danger); color:#fff; display:none;" onclick="onStop()">STOP</button>
-            <div id="after-stop" style="display:none; gap:10px; width:100%;">
-                <button id="btn-resume" class="btn-act" style="flex:1; background:var(--primary); color:#000;" onclick="onResume()">RESUME</button>
-                <button id="btn-finish" class="btn-act" style="flex:1; background:var(--danger); color:#fff;" onclick="onFinish()">FINISH</button>
-            </div>
+            <button class="btn-act" id="main-btn">START RUN</button>
         </div>
     </div>
 
-    <div id="history-view">
-        <h3 style="text-align:center; color:var(--primary);">RUNNING HISTORY</h3>
-        <div id="history-list"></div>
-    </div>
+    <script>
+        const OppaRunApp = {
+            // State
+            isRunning: false,
+            seconds: 0,
+            totalDistance: 0, // unit: miles
+            path: [],
+            lastCoord: null,
+            
+            // Elements & Objects
+            timerInterval: null,
+            watchId: null,
+            map: null,
+            polyline: null,
 
-    <div id="dimmer-overlay" onclick="toggleDimmer(event)" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:900; display:none; pointer-events:auto;"></div>
+            init() {
+                this.initMap();
+                this.bindEvents();
+                console.log("OppaRun Pro v28.7 Active");
+            },
 
-    <div class="tab-bar">
-        <button id="tab-run" class="tab-btn active" onclick="showTab('run')">RUN</button>
-        <button id="tab-history" class="tab-btn" onclick="showTab('history')">HISTORY</button>
-    </div> 
+            initMap() {
+                // 초기 위치: 애너하임 인근
+                this.map = L.map('map', { zoomControl: false, attributionControl: false }).setView([33.83, -117.91], 15);
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(this.map);
+                this.polyline = L.polyline([], { color: '#00ff88', weight: 5 }).addTo(this.map);
+            },
 
-<script>
-// 2번 원칙 적용: 모든 데이터를 OppaRun 객체에 관리
-const OppaRun = {
-    map: null, marker: null, polyline: null, timer: null,
-    isRunning: false, isPaused: false, isAutoPaused: false,
-    seconds: 0, totalDist: 0, lastPos: null,
-    steps: 0, lastStepTime: 0, gctSum: 0, flightSum: 0, dataCount: 0, currentSpeedKmh: 0,
-    pathCoords: []
-};
+            bindEvents() {
+                const btn = document.getElementById('main-btn');
+                btn.onclick = () => this.isRunning ? this.stop() : this.start();
+            },
 
-function toggleDimmer(event) {
-    if (event) event.stopPropagation();
-    const overlay = document.getElementById('dimmer-overlay');
-    const indicator = document.getElementById('dim-indicator');
-    const text = document.getElementById('dim-text');
-    const btn = document.getElementById('btn-dimmer');
-    
-    if (overlay.style.display === 'none' || overlay.style.display === '') {
-        overlay.style.display = 'block';
-        indicator.style.background = 'var(--primary)';
-        btn.style.borderColor = 'var(--primary)';
-        text.style.color = 'var(--primary)';
-        text.innerText = 'ON';
-    } else {
-        overlay.style.display = 'none';
-        indicator.style.background = '#555';
-        btn.style.borderColor = '#333';
-        text.style.color = '#777';
-        text.innerText = 'DIM';
-    }
-}
+            start() {
+                this.isRunning = true;
+                this.resetData();
+                this.toggleUI(true);
 
-function showTab(tab) {
-    // 히스토리 탭으로 갈 때 디머가 켜져 있으면 끄기
-    const overlay = document.getElementById('dimmer-overlay');
-    if(tab === 'history' && overlay.style.display === 'block') {
-        toggleDimmer();
-    }
+                // 1. 타이머 시작
+                this.timerInterval = setInterval(() => {
+                    this.seconds++;
+                    this.updateDashboard();
+                }, 1000);
 
-    document.getElementById('run-view').style.display = (tab === 'run' ? 'flex' : 'none');
-    document.getElementById('history-view').style.display = (tab === 'history' ? 'block' : 'none');
-    document.getElementById('map-area').style.display = (tab === 'run' ? 'block' : 'none');
-    document.getElementById('tab-run').className = 'tab-btn' + (tab === 'run' ? ' active' : '');
-    document.getElementById('tab-history').className = 'tab-btn' + (tab === 'history' ? ' active' : '');
-    
-    if(tab === 'history') updateHistoryList();
-    if(tab === 'run' && OppaRun.map) setTimeout(() => OppaRun.map.invalidateSize(), 100);
-}
+                // 2. GPS 추적 시작
+                if ("geolocation" in navigator) {
+                    this.watchId = navigator.geolocation.watchPosition(
+                        (pos) => this.handleLocationUpdate(pos),
+                        (err) => console.error("GPS Error:", err),
+                        { enableHighAccuracy: true, distanceFilter: 5 }
+                    );
+                }
+            },
 
-function updateHistoryList() {
-    const list = document.getElementById('history-list');
-    const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
-    list.innerHTML = h.length ? h.map(r => `
-        <div class="history-card">
-            <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
-                <span style="color:var(--primary); font-weight:800;">${r.date}</span>
-                <span style="color:var(--text-dim); font-size:12px;">${r.dist} KM</span>
-            </div>
-            <div style="display:grid; grid-template-columns: repeat(3, 1fr); font-size:13px; text-align:center;">
-                <div><div style="color:var(--text-dim); font-size:10px;">TIME</div>${r.time}</div>
-                <div><div style="color:var(--text-dim); font-size:10px;">PACE</div>${r.pace}</div>
-                <div><div style="color:var(--text-dim); font-size:10px;">GCT/FLT</div>${r.gctflt}</div>
-            </div>
-        </div>
-    `).join('') : '<p style="text-align:center; color:#555;">No records yet.</p>';
-}
+            stop() {
+                this.isRunning = false;
+                this.toggleUI(false);
+                clearInterval(this.timerInterval);
+                if (this.watchId) navigator.geolocation.clearWatch(this.watchId);
+            },
 
-function initMap() {
-    OppaRun.map = L.map('map', {zoomControl: false}).setView([37.5665, 126.9780], 17);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(OppaRun.map);
-    OppaRun.marker = L.marker([0,0], {icon: L.divIcon({className:'my-location', iconSize:[12,12]})}).addTo(OppaRun.map);
-    OppaRun.polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(OppaRun.map);
-    if ("geolocation" in navigator) navigator.geolocation.watchPosition(updatePosition, (err) => { document.getElementById('status').textContent = "GPS ERROR: " + err.message; }, {enableHighAccuracy: true}); 
-    window.addEventListener('devicemotion', handleMotion);
-}
+            resetData() {
+                this.seconds = 0;
+                this.totalDistance = 0;
+                this.path = [];
+                this.lastCoord = null;
+                this.polyline.setLatLngs([]);
+            },
 
-// ... 나머지 로직(handleMotion, updatePosition, onStart 등)은 기존 OppaRun 객체 참조하도록 유지 ...
-// (지면상 핵심 변경점 위주로 구성했습니다. 오빠가 가진 원본 로직을 이 구조에 맞춰 넣으면 완벽해요!)
+            handleLocationUpdate(pos) {
+                const { latitude, longitude } = pos.coords;
+                const currentCoord = [latitude, longitude];
 
-function formatPace(kmh) { if (!kmh || kmh < 0.5) return "--'--\""; let s = 3600 / kmh; return `${Math.floor(s/60)}'${String(Math.floor(s%60)).padStart(2,'0')}"`; }
-window.onload = initMap;
-</script>
+                if (this.lastCoord) {
+                    const dist = this.calculateDistance(
+                        this.lastCoord[0], this.lastCoord[1], 
+                        latitude, longitude
+                    );
+                    this.totalDistance += dist;
+                }
+
+                this.lastCoord = currentCoord;
+                this.path.push(currentCoord);
+                this.polyline.setLatLngs(this.path);
+                this.map.panTo(currentCoord);
+                this.updateDashboard();
+            },
+
+            // 하버사인 공식 (Miles 단위)
+            calculateDistance(lat1, lon1, lat2, lon2) {
+                const R = 3958.8; // 지구 반지름 (miles)
+                const dLat = (lat2 - lat1) * Math.PI / 180;
+                const dLon = (lon2 - lon1) * Math.PI / 180;
+                const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+                          Math.sin(dLon/2) * Math.sin(dLon/2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                return R * c;
+            },
+
+            updateDashboard() {
+                // 시간 포맷
+                const mins = Math.floor(this.seconds / 60);
+                const secs = this.seconds % 60;
+                document.getElementById('display-time').textContent = 
+                    `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+
+                // 거리 포맷
+                document.getElementById('display-dist').textContent = this.totalDistance.toFixed(2);
+
+                // 페이스 계산 (min/mile)
+                if (this.totalDistance > 0) {
+                    const paceMin = (this.seconds / 60) / this.totalDistance;
+                    const pM = Math.floor(paceMin);
+                    const pS = Math.round((paceMin - pM) * 60);
+                    document.getElementById('display-pace').textContent = `${pM}'${pS.toString().padStart(2, '0')}"`;
+                }
+            },
+
+            toggleUI(active) {
+                const btn = document.getElementById('main-btn');
+                const status = document.getElementById('gps-status');
+                if (active) {
+                    btn.textContent = "STOP";
+                    btn.classList.add('stop');
+                    status.textContent = "TRACKING ACTIVE";
+                    status.style.color = "#00ff88";
+                } else {
+                    btn.textContent = "START RUN";
+                    btn.classList.remove('stop');
+                    status.textContent = "RUN FINISHED";
+                    status.style.color = "#ff4444";
+                }
+            }
+        };
+
+        window.onload = () => OppaRunApp.init();
+    </script>
 </body>
 </html>
