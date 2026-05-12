@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.19</title>
+    <title>OppaRun Pro - v28.20</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -128,7 +128,7 @@
         <div id="sub-page-total" class="sub-page"><div id="total-stats-container" class="total-container"></div></div>
         <div id="sub-page-info" class="sub-page">
             <div class="placeholder-content" style="padding:40px 20px; text-align:center;">
-                <div style="color:var(--primary); margin-bottom:10px; font-weight:900;">OppaRun Pro v28.19</div>
+                <div style="color:var(--primary); margin-bottom:10px; font-weight:900;">OppaRun Pro v28.20</div>
                 <div id="dev-info" style="font-size:12px; color:#888; line-height:1.6; font-weight:800;">Developed for Musicians & Runners.</div>
             </div>
         </div>
@@ -171,7 +171,7 @@ const translations = {
         confirmClear: "Are you sure you want to delete all records?", alertCleared: "History cleared."
     },
     ko: { 
-        pace: "페이스", dist: "거리", time: "시간", avg: "평균", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", 
+        pace: "페이스", dist: "거리", time: "시간", avg: "평균", cadence: "케이던스", gct: "지면접접촉", flight: "체공시간", 
         start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료", run: "러닝", history: "기록",
         list: "목록", total: "통계", info: "정보", settings: "설정",
         selLang: "언어 설정", clear: "전체 기록 삭제", devInfo: "뮤지션과 러너를 위해 개발되었습니다.",
@@ -181,7 +181,6 @@ const translations = {
 
 function changeLanguage(lang) {
     const t = translations[lang];
-    // Main Dashboard
     document.getElementById('label-pace').textContent = t.pace;
     document.getElementById('label-dist').textContent = t.dist;
     document.getElementById('label-time').textContent = t.time;
@@ -189,29 +188,23 @@ function changeLanguage(lang) {
     document.getElementById('label-cadence').textContent = t.cadence;
     document.getElementById('label-gct').textContent = t.gct;
     document.getElementById('label-flight').textContent = t.flight;
-    // Buttons
     document.getElementById('btn-start').textContent = t.start;
     document.getElementById('btn-stop').textContent = t.stop;
     document.getElementById('btn-resume').textContent = t.resume;
     document.getElementById('btn-finish').textContent = t.finish;
-    // Main Tabs
     document.getElementById('tab-run').textContent = t.run;
     document.getElementById('tab-history').textContent = t.history;
-    // Sub Tabs (The ones in 952.jpg)
     document.getElementById('sub-tab-list').textContent = t.list;
     document.getElementById('sub-tab-total').textContent = t.total;
     document.getElementById('sub-tab-info').textContent = t.info;
     document.getElementById('sub-tab-settings').textContent = t.settings;
-    // Settings Page
     document.getElementById('label-select-lang').textContent = t.selLang;
     document.getElementById('btn-clear-history').textContent = t.clear;
     document.getElementById('dev-info').textContent = t.devInfo;
     document.getElementById('current-lang-text').textContent = (lang === 'ko' ? "한국어 (KR)" : "English (US)");
-    
     localStorage.setItem('oppaRunLang', lang);
 }
 
-// Custom Dropdown Logic
 function toggleDropdown() {
     const options = document.getElementById('dropdown-options');
     options.style.display = (options.style.display === 'block' ? 'none' : 'block');
@@ -261,6 +254,12 @@ function updatePosition(p) {
                 if (d > 0.001) { totalDist += d; document.getElementById('dist').textContent = totalDist.toFixed(2); lastPos = pos; pathCoords.push(pos); polyline.setLatLngs(pathCoords); }
             } else { lastPos = pos; }
             document.getElementById('curPace').textContent = formatPace(currentSpeedKmh);
+            
+            // 실시간 평균 페이스 업데이트
+            if (totalDist > 0 && seconds > 0) {
+                let avgKmh = (totalDist / (seconds / 3600));
+                document.getElementById('avgPace').textContent = formatPace(avgKmh);
+            }
         }
     } else { map.panTo(pos); }
 }
@@ -273,7 +272,13 @@ function handleMotion(e) {
     let now = Date.now();
     if (force > 12 && (now - lastStepTime) > 220) {
         steps++; lastStepTime = now;
-        document.getElementById('cadence').textContent = Math.round((steps/(seconds||1))*60);
+        let currentCadence = Math.round((steps/(seconds||1))*60);
+        let cadElem = document.getElementById('cadence');
+        cadElem.textContent = currentCadence;
+        
+        // 케이던스 170 미만 시 경고 색상 (노란색)
+        cadElem.style.color = (currentCadence > 0 && currentCadence < 170) ? "var(--warning)" : "var(--text-main)";
+
         let speed = currentSpeedKmh;
         document.getElementById('gct').textContent = speed > 0.5 ? Math.floor(450 - (speed * 10)) : "--";
         document.getElementById('flight').textContent = speed > 2.0 ? Math.floor(5 + (speed * 2.1)) : "--";
@@ -283,7 +288,18 @@ function handleMotion(e) {
 function onStart() {
     isRunning = true; isPaused = false; totalDist = 0; seconds = 0; steps = 0; pathCoords = [];
     document.getElementById('btn-start').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block';
-    timer = setInterval(() => { if(!isPaused && !isAutoPaused) { seconds++; document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; } }, 1000);
+    timer = setInterval(() => { 
+        if(!isPaused && !isAutoPaused) { 
+            seconds++; 
+            document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; 
+            
+            // 매 초마다 평균 페이스 다시 계산 (이동 중이 아닐 때도 시간은 흐르므로)
+            if (totalDist > 0) {
+                let avgKmh = (totalDist / (seconds / 3600));
+                document.getElementById('avgPace').textContent = formatPace(avgKmh);
+            }
+        } 
+    }, 1000);
 }
 function onStop() { isPaused = true; document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; }
 function onResume() { isPaused = false; document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; }
