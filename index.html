@@ -1,203 +1,168 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v29.50 (Full Fix)</title>
+    <title>OppaRun - v38.12 Recovery</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        :root { --primary: #00ff88; --bg: #000; --card: #121212; --text: #fff; --dim: #999; }
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body { margin: 0; background: var(--bg); color: var(--text); font-family: sans-serif; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
-        
-        #map-area { height: 15vh; border-bottom: 2px solid #222; flex-shrink: 0; }
-        #map { height: 100%; width: 100%; background: #111; }
-        .status { text-align: center; color: #ffcc00; font-size: 11px; padding: 5px; background: #0a0a0a; font-weight: 800; border-bottom: 1px solid #222; }
+        :root { --primary: #00ff88; --bg: #000; --card: #121212; --text: #fff; --dim: #999; --red: #ff4444; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; font-family: sans-serif; }
+        body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
 
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; padding-bottom: 80px; }
-        
-        /* 러닝 화면 대시보드 (834.jpg 스타일 복구) */
-        .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 10px; }
-        .card { background: var(--card); border-radius: 12px; padding: 15px 5px; display: flex; flex-direction: column; align-items: center; border: 1px solid #1f1f1f; }
-        .card-main { grid-column: span 3; border: 1.5px solid var(--primary); padding: 20px 0; }
-        .label { font-size: 10px; color: var(--dim); font-weight: 900; margin-bottom: 5px; text-transform: uppercase; }
-        .val { font-size: 22px; font-weight: 900; }
-        .val-lg { font-size: 48px; color: var(--primary); line-height: 1; }
+        /* [1단계] 메인 화면 레이아웃 (v38.12 기준) */
+        #map-area { height: 18vh; position: relative; border-bottom: 1px solid #222; }
+        #map { height: 100%; width: 100%; }
+        .status-bar { position: absolute; bottom: 0; width: 100%; z-index: 1000; background: rgba(0,0,0,0.7); color: #ffcc00; font-size: 11px; font-weight: 800; text-align: center; padding: 4px 0; }
 
-        .controls { padding: 0 20px; margin-top: 10px; }
-        .btn { height: 60px; border-radius: 30px; border: none; font-weight: 900; font-size: 20px; width: 100%; cursor: pointer; }
+        .main-content { flex: 1; display: flex; flex-direction: column; padding: 15px; overflow-y: auto; padding-bottom: 90px; }
+        .pace-card { background: var(--card); border: 1.5px solid var(--primary); border-radius: 15px; padding: 20px 0; text-align: center; margin-bottom: 10px; }
+        .grid-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .mini-card { background: var(--card); border-radius: 12px; padding: 15px 5px; display: flex; flex-direction: column; align-items: center; border: 1px solid #222; }
         
-        /* 기록 리스트 (822.jpg 원본 항목 완벽 재현) */
-        .h-item { background: var(--card); border-radius: 12px; padding: 15px; margin: 10px; border: 1px solid #1f1f1f; }
-        .h-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
-        .h-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; border-top: 1px solid #222; padding-top: 10px; margin-top: 5px; }
-        .h-data { text-align: center; }
-        .h-data div:first-child { font-size: 9px; color: var(--dim); margin-bottom: 3px; font-weight: 800; }
-        .h-data div:last-child { font-size: 12px; font-weight: 700; color: #eee; }
+        .label { font-size: 10px; color: var(--dim); font-weight: 900; margin-bottom: 4px; }
+        .val { font-size: 20px; font-weight: 900; }
+        .val-pace { font-size: 48px; color: var(--primary); font-weight: 900; line-height: 1; }
 
-        /* 반반 상세 화면 (840.jpg) */
+        .btn-main { width: 100%; height: 60px; border-radius: 30px; border: none; font-size: 20px; font-weight: 900; cursor: pointer; margin-top: 15px; }
+        .btn-start { background: var(--primary); color: #000; }
+        .btn-stop { background: var(--red); color: #fff; }
+
+        /* [2단계] 기록 페이지 레이아웃 (852.jpg/822.jpg 복구용) */
+        .h-item { background: var(--card); border-radius: 15px; padding: 15px; margin-bottom: 12px; border: 1px solid #222; }
+        .h-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .h-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; border-top: 1px solid #222; padding-top: 10px; }
+
+        /* [3단계] 상세 경로 레이아웃 (854.jpg/840.jpg 복구용) */
         #detail-view { position: fixed; inset: 0; background: #000; z-index: 9999; display: none; flex-direction: column; }
-        #det-map { height: 50%; border-bottom: 2px solid var(--primary); }
-        #det-info { height: 50%; padding: 20px; overflow-y: auto; }
-        .back-btn { position: absolute; top: 20px; right: 20px; z-index: 10000; background: var(--primary); color: #000; padding: 8px 20px; border-radius: 20px; font-weight: 900; border: none; }
+        #det-map { height: 45%; border-bottom: 2px solid var(--primary); }
+        #det-info { flex: 1; padding: 20px; overflow-y: auto; }
 
-        .tabs { position: fixed; bottom: 0; width: 100%; height: 75px; background: #000; display: flex; border-top: 1px solid #222; align-items: center; padding-bottom: env(safe-area-inset-bottom); }
-        .t-btn { flex: 1; background: none; border: none; color: #555; font-size: 14px; font-weight: 800; }
-        .t-btn.active { color: var(--primary); }
+        .tab-bar { position: fixed; bottom: 0; width: 100%; height: 70px; background: #000; display: flex; border-top: 1px solid #222; padding-bottom: env(safe-area-inset-bottom); }
+        .tab-item { flex: 1; display: flex; align-items: center; justify-content: center; color: #555; font-weight: 900; font-size: 15px; }
+        .tab-item.active { color: var(--primary); }
     </style>
 </head>
 <body>
     <div id="detail-view">
-        <button class="back-btn" onclick="closeDetail()">BACK</button>
+        <button style="position:fixed; top:20px; right:20px; z-index:10001; padding:10px 20px; border-radius:20px; background:var(--primary); font-weight:900;" onclick="closeDetail()">BACK</button>
         <div id="det-map"></div>
         <div id="det-info"></div>
     </div>
 
-    <div id="map-area"><div id="map"></div></div>
-    <div id="gps-status" class="status">GPS INITIALIZING...</div>
-
-    <div id="view-run" class="main-content">
-        <div class="dashboard">
-            <div class="card card-main"><div class="label" style="color:var(--primary)">PACE</div><div id="curPace" class="val-lg">--'--"</div></div>
-            <div class="card"><div class="label">DIST</div><div class="val"><span id="dist">0.00</span> <small style="font-size:10px;color:var(--primary)">KM</small></div></div>
-            <div class="card"><div class="label">TIME</div><div id="time" class="val">00:00</div></div>
-            <div class="card"><div class="label">AVG</div><div id="avgPace" class="val">--'--"</div></div>
-            <div class="card"><div class="label">CADENCE</div><div id="cadence" class="val">0</div></div>
-            <div class="card"><div class="label">KCAL</div><div id="kcal" class="val">0</div></div>
-            <div class="card"><div class="label">GCT/FLT</div><div id="gct-flt-main" class="val" style="font-size:16px;">-- / --%</div></div>
-        </div>
-        <div class="controls">
-            <button id="btn-start" class="btn" style="background:var(--primary);color:#000" onclick="startRun()">START RUNNING</button>
-            <div id="stop-group" style="display:none; gap:10px;">
-                <button class="btn" style="background:var(--primary);color:#000;flex:1" onclick="resumeRun()">RESUME</button>
-                <button class="btn" style="background:#ff4444;color:#fff;flex:1" onclick="finishRun()">FINISH</button>
+    <div id="view-run" style="display: flex; flex-direction: column; height: 100%;">
+        <div id="map-area"><div id="map"></div><div id="gps-status" class="status-bar">GPS INITIALIZING...</div></div>
+        <div class="main-content">
+            <div class="pace-card"><div class="label" style="color:var(--primary)">PACE</div><div id="curPace" class="val-pace">--'--"</div></div>
+            <div class="grid-container">
+                <div class="mini-card"><div class="label">DIST</div><div class="val"><span id="dist">0.00</span><small style="font-size:10px;color:var(--primary)">KM</small></div></div>
+                <div class="mini-card"><div class="label">TIME</div><div id="time" class="val">00:00</div></div>
+                <div class="mini-card"><div class="label">AVG</div><div id="avgPace" class="val">--'--"</div></div>
+                <div class="mini-card"><div class="label">CADENCE</div><div id="cadence" class="val">0</div></div>
+                <div class="mini-card"><div class="label">KCAL</div><div id="kcal" class="val">0</div></div>
+                <div class="mini-card"><div class="label">GCT/FLT</div><div id="gct-flt" class="val" style="font-size:14px;">--/--%</div></div>
             </div>
-            <button id="btn-stop" class="btn" style="background:#ff4444;color:#fff;display:none;" onclick="pauseRun()">STOP</button>
+            <button id="btn-ctrl" class="btn-main btn-start" onclick="toggleRun()">START RUNNING</button>
+            <div id="pause-group" style="display:none; gap:10px; margin-top:15px;">
+                <button class="btn-main btn-start" style="margin-top:0; flex:1;" onclick="toggleRun()">RESUME</button>
+                <button class="btn-main btn-stop" style="margin-top:0; flex:1;" onclick="finishRun()">FINISH</button>
+            </div>
         </div>
     </div>
 
     <div id="view-history" class="main-content" style="display:none;"><div id="h-list"></div></div>
 
-    <div class="tabs">
-        <button id="t-run" class="t-btn active" onclick="tab('run')">RUN</button>
-        <button id="t-history" class="t-btn" onclick="tab('history')">HISTORY</button>
+    <div class="tab-bar">
+        <div id="t-run" class="tab-item active" onclick="showTab('run')">RUN</div>
+        <div id="t-history" class="tab-item" onclick="showTab('history')">HISTORY</div>
     </div>
 
 <script>
-let map, marker, poly, path = [], isRun = false, isPause = false, sec = 0, timer, dist = 0, lastPos = null;
+let map, marker, poly, path=[], isRun=false, isPause=false, sec=0, timer, dist=0, lastPos=null;
 let dMap, dPoly;
 
-// GPS 엔진 강제 기동
 function init() {
-    try {
-        map = L.map('map', {zoomControl:false, attributionControl:false}).setView([37.56, 126.97], 17);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-        marker = L.circleMarker([0,0], {radius:6, color:'#fff', fillColor:'#007bff', fillOpacity:1, weight:2}).addTo(map);
-        poly = L.polyline([], {color:'#007bff', weight:5}).addTo(map);
-        
-        if (navigator.geolocation) {
-            navigator.geolocation.watchPosition(p => {
-                const pos = [p.coords.latitude, p.coords.longitude];
-                const acc = p.coords.accuracy;
-                document.getElementById('gps-status').textContent = isRun ? `RUNNING (±${acc.toFixed(1)}m)` : `READY (±${acc.toFixed(1)}m)`;
-                marker.setLatLng(pos);
-                if(isRun && !isPause && acc < 40) {
-                    if(lastPos) {
-                        let d = (function(l1,l2){
-                            const R=6371; const dLat=(l2[0]-l1[0])*Math.PI/180; const dLon=(l2[1]-l1[1])*Math.PI/180;
-                            const a=Math.sin(dLat/2)**2+Math.cos(l1[0]*Math.PI/180)*Math.cos(l2[0]*Math.PI/180)*Math.sin(dLon/2)**2;
-                            return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
-                        })(lastPos, pos);
-                        if(d > 0.002) { dist += d; document.getElementById('dist').textContent = dist.toFixed(2); path.push(pos); poly.setLatLngs(path); lastPos = pos; }
-                    } else lastPos = pos;
-                } else if(!isRun) map.panTo(pos);
-            }, e => { document.getElementById('gps-status').textContent = "SEARCHING GPS..."; }, {enableHighAccuracy:true});
-        }
-    } catch(e) { console.error(e); setTimeout(init, 500); }
+    map = L.map('map', {zoomControl:false, attributionControl:false}).setView([37.56, 126.97], 17);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    marker = L.circleMarker([0,0], {radius:6, color:'#fff', fillColor:'#007bff', fillOpacity:1, weight:2}).addTo(map);
+    poly = L.polyline([], {color:'#007bff', weight:5}).addTo(map);
+
+    if (navigator.geolocation) {
+        navigator.geolocation.watchPosition(p => {
+            const pos = [p.coords.latitude, p.coords.longitude];
+            marker.setLatLng(pos);
+            document.getElementById('gps-status').textContent = isRun ? `RUNNING (±${p.coords.accuracy.toFixed(1)}m)` : `READY (±${p.coords.accuracy.toFixed(1)}m)`;
+            if(isRun && !isPause) {
+                if(lastPos) {
+                    let d = calcDist(lastPos, pos);
+                    if(d > 0.002) { dist += d; path.push(pos); poly.setLatLngs(path); lastPos = pos; document.getElementById('dist').textContent = dist.toFixed(2); }
+                } else lastPos = pos;
+            } else if(!isRun) map.panTo(pos);
+        }, null, {enableHighAccuracy:true});
+    }
 }
 
-function startRun() { 
-    isRun = true; isPause = false; dist = 0; sec = 0; path = [];
-    document.getElementById('btn-start').style.display='none'; document.getElementById('btn-stop').style.display='block';
-    timer = setInterval(() => { if(!isPause) { sec++; document.getElementById('time').textContent = fTime(sec); } }, 1000);
+function calcDist(l1, l2) {
+    const R = 6371;
+    const dLat = (l2[0]-l1[0])*Math.PI/180, dLon = (l2[1]-l1[1])*Math.PI/180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(l1[0]*Math.PI/180)*Math.cos(l2[0]*Math.PI/180)*Math.sin(dLon/2)**2;
+    return R*2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
-function pauseRun() { isPause = true; document.getElementById('btn-stop').style.display='none'; document.getElementById('stop-group').style.display='flex'; }
-function resumeRun() { isPause = false; document.getElementById('btn-stop').style.display='block'; document.getElementById('stop-group').style.display='none'; }
+
+function toggleRun() {
+    if(!isRun) { // Start
+        isRun = true; isPause = false; dist = 0; sec = 0; path = []; poly.setLatLngs([]);
+        document.getElementById('btn-ctrl').textContent = "STOP";
+        document.getElementById('btn-ctrl').className = "btn-main btn-stop";
+        timer = setInterval(() => { if(!isPause) { sec++; document.getElementById('time').textContent = fTime(sec); } }, 1000);
+    } else { // Pause/Stop toggle
+        isPause = !isPause;
+        document.getElementById('btn-ctrl').style.display = isPause ? 'none' : 'block';
+        document.getElementById('pause-group').style.display = isPause ? 'flex' : 'none';
+    }
+}
 
 function finishRun() {
-    const rec = {
-        id: Date.now(),
-        date: new Date().toLocaleDateString('en-US', {month:'short', day:'numeric', weekday:'short'}),
-        dist: dist.toFixed(2), time: fTime(sec),
-        pace: document.getElementById('avgPace').textContent,
-        cad: document.getElementById('cadence').textContent,
-        kcal: document.getElementById('kcal').textContent,
-        gct: document.getElementById('gct-flt-main').textContent,
-        path: [...path]
-    };
-    let h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
-    h.unshift(rec);
-    localStorage.setItem('oppaRunHistory', JSON.stringify(h));
+    const rec = { id:Date.now(), date:new Date().toLocaleDateString(), dist:dist.toFixed(2), time:fTime(sec), path:[...path] };
+    let h = JSON.parse(localStorage.getItem('oppaRun') || "[]");
+    h.unshift(rec); localStorage.setItem('oppaRun', JSON.stringify(h));
     location.reload();
 }
 
-function openDetail(id) {
-    const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
-    const r = h.find(x => x.id === id);
-    if(!r) return;
-    document.getElementById('detail-view').style.display='flex';
-    document.getElementById('det-info').innerHTML = `
-        <h2 style="color:var(--primary);margin:0 0 20px 0">RUN SUMMARY</h2>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
-            <div class="h-data"><div class="label">DISTANCE</div><div class="val">${r.dist} KM</div></div>
-            <div class="h-data"><div class="label">TIME</div><div class="val">${r.time}</div></div>
-            <div class="h-data"><div class="label">AVG PACE</div><div class="val">${r.pace}</div></div>
-            <div class="h-data"><div class="label">CADENCE</div><div class="val">${r.cad}</div></div>
-            <div class="h-data"><div class="label">KCAL</div><div class="val">${r.kcal}</div></div>
-            <div class="h-data" style="grid-column:span 2"><div class="label">GCT / FLIGHT</div><div class="val" style="color:var(--primary)">${r.gct}</div></div>
-        </div>
-    `;
-    if(!dMap) {
-        dMap = L.map('det-map', {zoomControl:false, attributionControl:false});
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(dMap);
-        dPoly = L.polyline([], {color:'#00ff88', weight:6}).addTo(dMap);
-    }
-    if(r.path && r.path.length > 0) { dPoly.setLatLngs(r.path); dMap.fitBounds(dPoly.getBounds(), {padding:[30,30]}); }
-    setTimeout(() => dMap.invalidateSize(), 300);
-}
-
-function closeDetail() { document.getElementById('detail-view').style.display='none'; }
-
-function tab(t) {
+function showTab(t) {
     document.getElementById('view-run').style.display = t==='run'?'flex':'none';
-    document.getElementById('map-area').style.display = t==='run'?'block':'none';
-    document.getElementById('view-history').style.display = t==='history'?'flex':'none';
-    document.getElementById('t-run').classList.toggle('active', t==='run');
-    document.getElementById('t-history').classList.toggle('active', t==='history');
-    if(t==='history') {
-        const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
-        document.getElementById('h-list').innerHTML = h.map(r => `
-            <div class="h-item">
-                <div class="h-row">
-                    <span style="color:var(--primary);font-weight:800;font-size:12px">${r.date}</span>
-                    <span style="color:var(--primary);font-size:11px;font-weight:900" onclick="openDetail(${r.id})">경로지도 ></span>
-                </div>
-                <div class="h-row">
-                    <span style="font-size:22px;font-weight:900">${r.dist}KM</span>
-                    <span style="color:var(--dim);font-weight:800">${r.time}</span>
-                </div>
-                <div class="h-grid">
-                    <div class="h-data"><div>PACE</div><div>${r.pace}</div></div>
-                    <div class="h-data"><div>CAD</div><div>${r.cad}</div></div>
-                    <div class="h-data"><div>KCAL</div><div>${r.kcal}</div></div>
-                    <div class="h-data"><div>GCT/FLT</div><div>${r.gct}</div></div>
-                </div>
-            </div>`).join('');
-    }
-    if(t==='run') setTimeout(()=>map.invalidateSize(), 100);
+    document.getElementById('view-history').style.display = t==='history'?'block':'none';
+    document.getElementById('t-run').className = t==='run'?'tab-item active':'tab-item';
+    document.getElementById('t-history').className = t==='history'?'tab-item active':'tab-item';
+    if(t==='history') renderHistory();
 }
-function fTime(s) { return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; }
+
+function renderHistory() {
+    const h = JSON.parse(localStorage.getItem('oppaRun') || "[]");
+    document.getElementById('h-list').innerHTML = h.map(r => `
+        <div class="h-item">
+            <div class="h-header"><span style="color:var(--primary); font-weight:800;">${r.date}</span><span onclick="openDetail(${r.id})" style="color:var(--primary); font-size:12px;">경로지도 ></span></div>
+            <div style="font-size:24px; font-weight:900; margin-bottom:10px;">${r.dist}KM <small style="font-size:14px; color:var(--dim); font-weight:400;">${r.time}</small></div>
+            <div class="h-grid">
+                <div class="mini-card" style="padding:5px; border:none;"><div class="label">PACE</div><div style="font-size:12px;">--'--"</div></div>
+                <div class="mini-card" style="padding:5px; border:none;"><div class="label">CAD</div><div style="font-size:12px;">0</div></div>
+                <div class="mini-card" style="padding:5px; border:none;"><div class="label">KCAL</div><div style="font-size:12px;">0</div></div>
+                <div class="mini-card" style="padding:5px; border:none;"><div class="label">GCT</div><div style="font-size:10px;">--/--%</div></div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function openDetail(id) {
+    const r = JSON.parse(localStorage.getItem('oppaRun')).find(x => x.id === id);
+    document.getElementById('detail-view').style.display = 'flex';
+    if(!dMap) { dMap = L.map('det-map', {zoomControl:false, attributionControl:false}); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(dMap); dPoly = L.polyline([], {color: '#00ff88', weight:6}).addTo(dMap); }
+    if(r.path.length) { dPoly.setLatLngs(r.path); dMap.fitBounds(dPoly.getBounds(), {padding:[20,20]}); }
+    setTimeout(() => dMap.invalidateSize(), 200);
+}
+function closeDetail() { document.getElementById('detail-view').style.display = 'none'; }
+function fTime(s) { return `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`; }
 window.onload = init;
 </script>
 </body>
