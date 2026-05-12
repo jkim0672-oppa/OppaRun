@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.20</title>
+    <title>OppaRun Pro - v28.30</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -44,9 +44,9 @@
         .controls { padding: 0 15px; display: flex; justify-content: center; align-items: center; height: 80px; margin-bottom: 80px; }
         .btn-act { width: 100%; height: 55px; border-radius: 30px; border: none; font-weight: 900; font-size: 18px; cursor: pointer; }
         
-        /* 히스토리 상단 탭 스타일 */
-        .history-nav { display: flex; gap: 4px; padding: 8px; background: #000; border-bottom: 1px solid #111; }
-        .sub-btn { flex: 1; padding: 10px 0; border: none; background: #1a1a1a; color: #777; border-radius: 8px; font-size: 12px; font-weight: 900; }
+        /* 히스토리 상단 탭 4개 복구 */
+        .history-nav { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 8px; background: #000; border-bottom: 1px solid #111; }
+        .sub-btn { padding: 10px 0; border: none; background: #1a1a1a; color: #777; border-radius: 8px; font-size: 11px; font-weight: 900; }
         .sub-btn.active { background: var(--primary); color: #000; }
 
         .sub-page { display: none; flex-direction: column; flex: 1; overflow-y: auto; padding-bottom: 100px; }
@@ -126,20 +126,23 @@
 
     <div id="history-view" class="main-content" style="display:none;">
         <div class="history-nav">
-            <button id="sub-tab-list" class="sub-btn active" onclick="showSubTab('list')">LIST</button>
-            <button id="sub-tab-total" class="sub-btn" onclick="showSubTab('total')">TOTAL</button>
+            <button id="sub-tab-list" class="sub-btn active" onclick="showSubTab('list')">내역</button>
+            <button id="sub-tab-total" class="sub-btn" onclick="showSubTab('total')">통계</button>
+            <button id="sub-tab-info" class="sub-btn" onclick="showSubTab('info')">정보</button>
+            <button id="sub-tab-set" class="sub-btn" onclick="showSubTab('set')">설정</button>
         </div>
         <div id="sub-page-list" class="sub-page" style="display: flex;">
             <div id="history-list" class="history-list"></div>
         </div>
-        <div id="sub-page-total" class="sub-page">
-            <div id="total-stats" class="history-list"></div>
-        </div>
+        <div id="sub-page-total" class="sub-page"><div class="history-list" style="text-align:center; padding:50px; color:#555;">통계 준비 중</div></div>
+        <div id="sub-page-info" class="sub-page"><div class="history-list" style="text-align:center; padding:50px; color:#555;">정보 준비 중</div></div>
+        <div id="sub-page-set" class="sub-page"><div class="history-list" style="text-align:center; padding:50px; color:#555;">설정 준비 중</div></div>
     </div> 
 
     <div class="tab-bar">
-        <button id="tab-run" class="tab-btn active" onclick="showTab('run')">RUN</button>
-        <button id="tab-history" class="tab-btn" onclick="showTab('history')">HISTORY</button>
+        <button id="tab-run" class="tab-btn active" onclick="showTab('run')">러닝</button>
+        <button id="tab-form" class="tab-btn" onclick="showTab('form')">FORM</button>
+        <button id="tab-history" class="tab-btn" onclick="showTab('history')">기록</button>
     </div> 
 
 <script>
@@ -254,7 +257,6 @@ function onFinish() {
         time: document.getElementById('time').textContent, 
         pace: document.getElementById('avgPace').textContent, 
         cadence: document.getElementById('cadence').textContent, 
-        kcal: Math.round(parseFloat(document.getElementById('dist').textContent) * 65) || 0, 
         gct: document.getElementById('gct').textContent,
         flt: document.getElementById('flight').textContent,
         path: pathCoords 
@@ -263,11 +265,11 @@ function onFinish() {
     h.unshift(record); 
     localStorage.setItem('oppaRunHistory', JSON.stringify(h));
     
-    // 저장 후 즉시 리스트 갱신 및 탭 전환
+    // 저장 즉시 데이터 갱신
     updateHistoryStats();
     showTab('history');
     
-    // UI 초기화 (리로드 없이 자연스럽게)
+    // 초기화
     isRunning = false; isPaused = false; 
     document.getElementById('btn-start').style.display = 'block';
     document.getElementById('btn-stop').style.display = 'none';
@@ -280,7 +282,10 @@ function showTab(tab) {
     document.getElementById('map-area').style.display = (tab === 'run' ? 'block' : 'none');
     document.getElementById('history-view').style.display = (tab === 'history' ? 'flex' : 'none');
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    document.getElementById('tab-' + tab).classList.add('active');
+    
+    const targetTab = tab === 'history' ? 'tab-history' : (tab === 'run' ? 'tab-run' : 'tab-form');
+    document.getElementById(targetTab).classList.add('active');
+    
     if (tab === 'history') updateHistoryStats();
 }
 
@@ -296,7 +301,7 @@ function updateHistoryStats() {
     const listContainer = document.getElementById('history-list');
     
     if (h.length === 0) {
-        listContainer.innerHTML = '<div style="text-align:center; padding:50px; color:#555; font-weight:900;">NO RECORDS YET</div>';
+        listContainer.innerHTML = '<div style="text-align:center; padding:50px; color:#555; font-weight:900;">기록이 없습니다</div>';
         return;
     }
 
@@ -306,7 +311,7 @@ function updateHistoryStats() {
             <div class="h-main">
                 <span class="h-dist">${r.dist}KM</span>
                 <span class="h-time">${r.time}</span>
-                <div style="margin-left:auto;"><span class="text-route-link" onclick="viewRecordMap(${r.id})">ROUTE</span></div>
+                <div style="margin-left:auto;"><span class="text-route-link" onclick="viewRecordMap(${r.id})">경로지도</span></div>
             </div>
             <div class="h-details">
                 <div class="h-det-box"><span class="h-det-label">PACE</span><span class="h-det-val">${r.pace}</span></div>
@@ -326,10 +331,10 @@ function viewRecordMap(id) {
     document.getElementById('detail-main-info').innerText = `${r.dist} KM / ${r.time}`;
     const grid = document.getElementById('detail-grid-content');
     grid.innerHTML = `
-        <div class="detail-card"><div class="detail-label">Avg Pace</div><div class="detail-value">${r.pace}</div></div>
-        <div class="detail-card"><div class="detail-label">Avg Cadence</div><div class="detail-value">${r.cadence}</div></div>
-        <div class="detail-card"><div class="detail-label">GCT</div><div class="detail-value">${r.gct} ms</div></div>
-        <div class="detail-card"><div class="detail-label">Flight</div><div class="detail-value">${r.flt} %</div></div>
+        <div class="detail-card"><div class="detail-label">평균 페이스</div><div class="detail-value">${r.pace}</div></div>
+        <div class="detail-card"><div class="detail-label">평균 케이던스</div><div class="detail-value">${r.cadence}</div></div>
+        <div class="detail-card"><div class="detail-label">지면접촉시간</div><div class="detail-value">${r.gct} ms</div></div>
+        <div class="detail-card"><div class="detail-label">체공비율</div><div class="detail-value">${r.flt} %</div></div>
     `;
     if (detailMap) detailMap.remove();
     detailMap = L.map('detail-map', {zoomControl: false, attributionControl: false});
