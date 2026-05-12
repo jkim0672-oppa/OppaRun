@@ -2,11 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.12 (Full-Screen)</title>
+    <title>OppaRun Pro - v28.15</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="mobile-web-app-capable" content="yes" />
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -20,13 +19,13 @@
         body { 
             margin: 0; background: var(--bg); color: var(--text-main); 
             font-family: -apple-system, system-ui; height: 100vh; height: 100svh; 
-            display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none;
+            display: flex; flex-direction: column; overflow: hidden;
         }
         
         #map-area { flex-shrink: 0; width: 100%; }
         #map-container { height: 15vh; min-height: 110px; border-bottom: 2px solid #222; }
         #map { height: 100%; width: 100%; background: #222; }
-        .status-bar { text-align: center; color: var(--warning); font-size: 11px; padding: 4px; background: #0a0a0a; font-weight: 800; border-bottom: 1px solid #222; transition: 0.3s; }
+        .status-bar { text-align: center; color: var(--warning); font-size: 11px; padding: 4px; background: #0a0a0a; font-weight: 800; border-bottom: 1px solid #222; }
         
         .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
         .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px; flex-shrink: 0; }
@@ -62,7 +61,6 @@
         
         .text-route-link { color: var(--primary); font-size: 11px; font-weight: 700; cursor: pointer; text-transform: uppercase; background: none; border: none; padding: 0; }
 
-        /* 상세 뷰 레이어 */
         #detail-view { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 10000; display: none; flex-direction: column; }
         #detail-map { height: 50%; width: 100%; border-bottom: 2px solid var(--primary); }
         #detail-data { height: 50%; width: 100%; overflow-y: auto; padding: 20px; }
@@ -181,11 +179,9 @@ function updatePosition(p) {
 
     if (isRunning && !isPaused) {
         if (currentSpeedKmh < 0.8 && !isAutoPaused) { 
-            isAutoPaused = true; 
-            document.getElementById('pause-status').style.display = 'block'; 
+            isAutoPaused = true; document.getElementById('pause-status').style.display = 'block'; 
         } else if (currentSpeedKmh >= 0.8 && isAutoPaused) { 
-            isAutoPaused = false; 
-            document.getElementById('pause-status').style.display = 'none'; 
+            isAutoPaused = false; document.getElementById('pause-status').style.display = 'none'; 
         }
 
         if (!isAutoPaused && accuracy < 45) {
@@ -196,11 +192,8 @@ function updatePosition(p) {
                     return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
                 })(lastPos, pos);
                 if (d > 0.0015) { 
-                    totalDist += d; 
-                    document.getElementById('dist').textContent = totalDist.toFixed(2); 
-                    lastPos = pos; 
-                    pathCoords.push(pos); 
-                    polyline.setLatLngs(pathCoords); 
+                    totalDist += d; document.getElementById('dist').textContent = totalDist.toFixed(2); 
+                    lastPos = pos; pathCoords.push(pos); polyline.setLatLngs(pathCoords); 
                 }
             } else { lastPos = pos; }
             document.getElementById('curPace').textContent = formatPace(currentSpeedKmh);
@@ -215,14 +208,28 @@ function handleMotion(e) {
     if (!acc || acc.x === null) return; 
     let force = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
     let now = Date.now();
+
     if (force > 12 && (now - lastStepTime) > 220) { 
         steps++; lastStepTime = now;
         let gct = currentSpeedKmh > 0.5 ? Math.floor(450 - (currentSpeedKmh * 10)) : 0;
         let flt = currentSpeedKmh > 2.0 ? Math.floor(5 + (currentSpeedKmh * 2.1)) : 0;
         if(gct > 0) { gctSum += gct; flightSum += flt; dataCount++; }
-        document.getElementById('cadence').textContent = Math.round((steps/(seconds||1))*60);
-        document.getElementById('gct').textContent = gct || "--";
-        document.getElementById('flight').textContent = flt || "--";
+
+        const gDisplay = document.getElementById('gct'), fDisplay = document.getElementById('flight'), cDisplay = document.getElementById('cadence');
+        cDisplay.textContent = Math.round((steps / (seconds || 1)) * 60);
+        gDisplay.textContent = gct || "--"; fDisplay.textContent = flt || "--";
+
+        // 실시간 색상 변경 로직
+        if (gct > 0) {
+            if (gct <= 300) gDisplay.style.color = "var(--primary)";
+            else if (gct <= 380) gDisplay.style.color = "var(--warning)";
+            else gDisplay.style.color = "var(--danger)";
+        }
+        if (flt > 0) {
+            if (flt >= 15) fDisplay.style.color = "var(--primary)";
+            else if (flt >= 8) fDisplay.style.color = "var(--warning)";
+            else fDisplay.style.color = "var(--text-dim)";
+        }
     }
 }
 
@@ -231,7 +238,6 @@ function onStart() {
     document.getElementById('btn-start').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block';
     timer = setInterval(() => { if(!isPaused && !isAutoPaused) { seconds++; document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; } }, 1000);
 } 
-
 function onStop() { isPaused = true; document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; }
 function onResume() { isPaused = false; document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; } 
 
@@ -249,8 +255,7 @@ function onFinish() {
         path: pathCoords 
     };
     let h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]"); 
-    h.unshift(record); 
-    localStorage.setItem('oppaRunHistory', JSON.stringify(h));
+    h.unshift(record); localStorage.setItem('oppaRunHistory', JSON.stringify(h));
     location.reload();
 }
 
@@ -294,11 +299,9 @@ function viewRecordMap(id) {
     const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
     const r = h.find(item => item.id === id);
     if (!r) return;
-
     document.getElementById('detail-view').style.display = 'flex';
     document.getElementById('detail-date').innerText = r.date;
     document.getElementById('detail-main-info').innerText = `${r.dist} KM / ${r.time}`;
-
     const grid = document.getElementById('detail-grid-content');
     grid.innerHTML = `
         <div class="detail-card"><div class="detail-label">Avg Pace</div><div class="detail-value">${r.pace}</div></div>
@@ -306,11 +309,9 @@ function viewRecordMap(id) {
         <div class="detail-card"><div class="detail-label">GCT</div><div class="detail-value">${r.gct} ms</div></div>
         <div class="detail-card"><div class="detail-label">Flight</div><div class="detail-value">${r.flt} %</div></div>
     `;
-
     if (detailMap) detailMap.remove();
     detailMap = L.map('detail-map', {zoomControl: false, attributionControl: false});
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(detailMap);
-
     if (r.path && r.path.length > 0) {
         const poly = L.polyline(r.path, {color: '#00ff88', weight: 6}).addTo(detailMap);
         detailMap.fitBounds(poly.getBounds(), {padding: [20, 20]});
