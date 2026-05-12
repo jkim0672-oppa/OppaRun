@@ -161,7 +161,7 @@
         <div class="history-nav">
             <button id="sub-tab-list" class="sub-btn active" onclick="showSubTab('list')">LIST</button>
             <button id="sub-tab-total" class="sub-btn" onclick="showSubTab('total')">TOTAL</button>
-            <button id="sub-tab-info" class="sub-btn" onclick="showSubTab('info')">INFO</button>
+            <button id="sub-tab-info" class="sub-btn" onclick="showSubTab('info')) ">INFO</button>
             <button id="sub-tab-settings" class="sub-btn" onclick="showSubTab('settings')">SETTINGS</button>
         </div>
         <div id="sub-page-list" class="sub-page" style="display: flex;"><div id="history-list" class="history-list"></div></div>
@@ -336,11 +336,37 @@ function onStart() {
 } 
 function onStop() { isPaused = true; document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; }
 function onResume() { isPaused = false; document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; } 
+
 function onFinish() {
-    const avgGct = dataCount > 0 ? Math.round(gctSum / dataCount) : 0, avgFlt = dataCount > 0 ? Math.round(flightSum / dataCount) : 0, avgCad = Math.round((steps/(seconds||1))*60);
+    const curTime = document.getElementById('time').textContent;
+    const curDist = document.getElementById('dist').textContent;
+    const curAvgPace = document.getElementById('avgPace').textContent;
+    const curCadence = document.getElementById('cadence').textContent;
+    const curGct = document.getElementById('gct').textContent;
+    const curFlight = document.getElementById('flight').textContent;
+
     const now = new Date();
-    const record = { id: Date.now(), date: now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ", " + now.toLocaleDateString('en-US', { weekday: 'short' }), dist: totalDist.toFixed(2), time: document.getElementById('time').textContent, pace: document.getElementById('avgPace').textContent, cadence: avgCad, kcal: Math.round(totalDist * 65), gctflt: `${avgGct}/${avgFlt}%` };
-    let h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]"); h.unshift(record); localStorage.setItem('oppaRunHistory', JSON.stringify(h));
+    const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ", " + now.toLocaleDateString('en-US', { weekday: 'short' });
+
+    // GCT/FLT 텍스트 보정 (단위 포함)
+    const gctVal = curGct === "--" ? "--" : curGct + "ms";
+    const fltVal = curFlight === "--" ? "--" : curFlight + "%";
+
+    const record = { 
+        id: Date.now(), 
+        date: dateStr, 
+        dist: curDist, 
+        time: curTime, 
+        pace: (curAvgPace === "--'--\"" ? "0'00\"" : curAvgPace), 
+        cadence: (curCadence || "0"), 
+        kcal: Math.round(parseFloat(curDist) * 65) || 0, 
+        gctflt: `${gctVal} / ${fltVal}` 
+    };
+
+    let h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]"); 
+    h.unshift(record); 
+    localStorage.setItem('oppaRunHistory', JSON.stringify(h));
+    
     location.reload();
 }
 
@@ -350,8 +376,12 @@ function showTab(tab) {
     document.getElementById('history-view').style.display = (tab === 'history' ? 'flex' : 'none');
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
     if(document.getElementById('tab-' + tab)) document.getElementById('tab-' + tab).classList.add('active');
-    if(tab === 'run') setTimeout(() => map.invalidateSize(), 100);
-    else if(tab === 'history') showSubTab('list');
+    
+    if(tab === 'run') {
+        setTimeout(() => map.invalidateSize(), 100);
+    } else if(tab === 'history') {
+        showSubTab('list');
+    }
 }
 
 function showSubTab(sub) {
@@ -369,7 +399,13 @@ function updateHistoryStats() {
     const routeLabel = i18n[lang].route || "ROUTE";
     const diagLabel = i18n[lang].diag || "DIAG";
     
-    document.getElementById('history-list').innerHTML = h.map(r => `
+    const listContainer = document.getElementById('history-list');
+    if (h.length === 0) {
+        listContainer.innerHTML = `<div style="text-align:center; padding:40px; color:#555; font-weight:900;">NO DATA</div>`;
+        return;
+    }
+
+    listContainer.innerHTML = h.map(r => `
         <div class="history-item">
             <div class="h-date">${r.date}</div>
             <div class="h-main">
@@ -396,7 +432,12 @@ function viewDiag(id) { alert("DIAGNOSIS ID: " + id + " - 러닝 분석 준비�
 function updateTotalStats() {
     const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
     let tDist = 0, tKcal = 0, tSec = 0;
-    h.forEach(r => { tDist += parseFloat(r.dist); tKcal += parseInt(r.kcal); let p = r.time.split(':'); tSec += parseInt(p[0])*60 + parseInt(p[1]); });
+    h.forEach(r => { 
+        tDist += parseFloat(r.dist || 0); 
+        tKcal += parseInt(r.kcal || 0); 
+        let p = (r.time || "0:0").split(':'); 
+        tSec += parseInt(p[0])*60 + parseInt(p[1]); 
+    });
     document.getElementById('total-stats').innerHTML = `<div class="history-item" style="border:2px solid var(--primary);"><div class="h-date">TOTAL STATISTICS</div><div class="h-main"><span class="h-dist" style="font-size:28px; color:var(--primary);">${tDist.toFixed(2)} KM</span></div><div class="h-details" style="grid-template-columns:repeat(3,1fr);"><div class="h-det-box"><span class="h-det-label">TIME</span><span class="h-det-val">${Math.floor(tSec/3600)}h ${Math.floor((tSec%3600)/60)}m</span></div><div class="h-det-box"><span class="h-det-label">KCAL</span><span class="h-det-val">${tKcal}</span></div><div class="h-det-box"><span class="h-det-label">RUNS</span><span class="h-det-val">${h.length}</span></div></div></div>`;
 }
 
