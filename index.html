@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.18</title>
+    <title>OppaRun Pro - v28.19</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -55,15 +55,25 @@
         .history-item { background: var(--card-bg); border-radius: 15px; padding: 15px; margin: 10px 12px; border: 1px solid #1f1f1f; }
         .h-date { font-size: 12px; color: var(--primary); font-weight: 700; margin-bottom: 4px; }
         
-        /* Settings Styles */
+        /* Custom Dropdown Styles */
         .settings-container { padding: 20px; }
         .settings-group { margin-bottom: 25px; }
-        .settings-label { font-size: 11px; color: var(--primary); font-weight: 900; margin-bottom: 10px; letter-spacing: 1px; }
-        .custom-select {
-            width: 100%; background: #1a1a1a; color: #fff; border: 1.5px solid #333;
-            padding: 15px; border-radius: 12px; font-size: 16px; font-weight: 800;
-            appearance: none; outline: none; cursor: pointer;
+        .settings-label { font-size: 11px; color: var(--primary); font-weight: 900; margin-bottom: 10px; letter-spacing: 1px; text-transform: uppercase; }
+        
+        .dropdown { position: relative; width: 100%; }
+        .dropdown-select { 
+            background: #1a1a1a; color: #fff; border: 1.5px solid #333; padding: 18px; 
+            border-radius: 12px; font-size: 16px; font-weight: 800; display: flex; 
+            justify-content: space-between; align-items: center; cursor: pointer;
         }
+        .dropdown-options { 
+            display: none; position: absolute; top: 105%; left: 0; width: 100%; 
+            background: #1a1a1a; border: 1.5px solid #333; border-radius: 12px; 
+            z-index: 1000; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .dropdown-option { padding: 18px; font-size: 16px; font-weight: 800; border-bottom: 1px solid #222; cursor: pointer; }
+        .dropdown-option:last-child { border-bottom: none; }
+        .dropdown-option:active { background: #333; color: var(--primary); }
 
         /* Tabs */
         .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #000; display: flex; border-top: 1px solid #222; align-items: center; padding-bottom: env(safe-area-inset-bottom); z-index: 999; }
@@ -118,21 +128,27 @@
         <div id="sub-page-total" class="sub-page"><div id="total-stats-container" class="total-container"></div></div>
         <div id="sub-page-info" class="sub-page">
             <div class="placeholder-content" style="padding:40px 20px; text-align:center;">
-                <div style="color:var(--primary); margin-bottom:10px; font-weight:900;">OppaRun Pro v28.18</div>
-                <div style="font-size:12px; color:#888; line-height:1.6; font-weight:800;">Developed for Musicians & Runners.</div>
+                <div style="color:var(--primary); margin-bottom:10px; font-weight:900;">OppaRun Pro v28.19</div>
+                <div id="dev-info" style="font-size:12px; color:#888; line-height:1.6; font-weight:800;">Developed for Musicians & Runners.</div>
             </div>
         </div>
         
         <div id="sub-page-settings" class="sub-page">
             <div class="settings-container">
                 <div class="settings-group">
-                    <div class="settings-label">SELECT LANGUAGE</div>
-                    <select id="lang-select" class="custom-select" onchange="changeLanguage(this.value)">
-                        <option value="en">English (US)</option>
-                        <option value="ko">한국어 (KR)</option>
-                    </select>
+                    <div id="label-select-lang" class="settings-label">SELECT LANGUAGE</div>
+                    <div class="dropdown">
+                        <div class="dropdown-select" onclick="toggleDropdown()">
+                            <span id="current-lang-text">English (US)</span>
+                            <span style="font-size:10px; color:var(--primary);">▼</span>
+                        </div>
+                        <div id="dropdown-options" class="dropdown-options">
+                            <div class="dropdown-option" onclick="selectLang('en')">English (US)</div>
+                            <div class="dropdown-option" onclick="selectLang('ko')">한국어 (KR)</div>
+                        </div>
+                    </div>
                 </div>
-                <button style="background:#1a1a1a; color:var(--danger); border:1.5px solid #333; padding:18px; border-radius:12px; width:100%; font-weight:900; font-size:14px; margin-top:20px;" onclick="clearHistory()">CLEAR ALL HISTORY</button>
+                <button id="btn-clear-history" style="background:#1a1a1a; color:var(--danger); border:1.5px solid #333; padding:18px; border-radius:12px; width:100%; font-weight:900; font-size:14px; margin-top:20px;" onclick="clearHistory()">CLEAR ALL HISTORY</button>
             </div>
         </div>
     </div> 
@@ -147,12 +163,25 @@ let map, marker, polyline, timer, isRunning = false, isPaused = false, isAutoPau
 let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0, currentSpeedKmh = 0, pathCoords = [];
 
 const translations = {
-    en: { pace: "PACE", dist: "DIST", time: "TIME", avg: "AVG", cadence: "CADENCE", gct: "GCT", flight: "FLIGHT", start: "START RUNNING", stop: "STOP", resume: "RESUME", finish: "FINISH", run: "RUN", history: "HISTORY" },
-    ko: { pace: "페이스", dist: "거리", time: "시간", avg: "평균", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료", run: "러닝", history: "기록" }
+    en: { 
+        pace: "PACE", dist: "DIST", time: "TIME", avg: "AVG", cadence: "CADENCE", gct: "GCT", flight: "FLIGHT", 
+        start: "START RUNNING", stop: "STOP", resume: "RESUME", finish: "FINISH", run: "RUN", history: "HISTORY",
+        list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS",
+        selLang: "SELECT LANGUAGE", clear: "CLEAR ALL HISTORY", devInfo: "Developed for Musicians & Runners.",
+        confirmClear: "Are you sure you want to delete all records?", alertCleared: "History cleared."
+    },
+    ko: { 
+        pace: "페이스", dist: "거리", time: "시간", avg: "평균", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", 
+        start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료", run: "러닝", history: "기록",
+        list: "목록", total: "통계", info: "정보", settings: "설정",
+        selLang: "언어 설정", clear: "전체 기록 삭제", devInfo: "뮤지션과 러너를 위해 개발되었습니다.",
+        confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다."
+    }
 };
 
 function changeLanguage(lang) {
     const t = translations[lang];
+    // Main Dashboard
     document.getElementById('label-pace').textContent = t.pace;
     document.getElementById('label-dist').textContent = t.dist;
     document.getElementById('label-time').textContent = t.time;
@@ -160,13 +189,36 @@ function changeLanguage(lang) {
     document.getElementById('label-cadence').textContent = t.cadence;
     document.getElementById('label-gct').textContent = t.gct;
     document.getElementById('label-flight').textContent = t.flight;
+    // Buttons
     document.getElementById('btn-start').textContent = t.start;
     document.getElementById('btn-stop').textContent = t.stop;
     document.getElementById('btn-resume').textContent = t.resume;
     document.getElementById('btn-finish').textContent = t.finish;
+    // Main Tabs
     document.getElementById('tab-run').textContent = t.run;
     document.getElementById('tab-history').textContent = t.history;
+    // Sub Tabs (The ones in 952.jpg)
+    document.getElementById('sub-tab-list').textContent = t.list;
+    document.getElementById('sub-tab-total').textContent = t.total;
+    document.getElementById('sub-tab-info').textContent = t.info;
+    document.getElementById('sub-tab-settings').textContent = t.settings;
+    // Settings Page
+    document.getElementById('label-select-lang').textContent = t.selLang;
+    document.getElementById('btn-clear-history').textContent = t.clear;
+    document.getElementById('dev-info').textContent = t.devInfo;
+    document.getElementById('current-lang-text').textContent = (lang === 'ko' ? "한국어 (KR)" : "English (US)");
+    
     localStorage.setItem('oppaRunLang', lang);
+}
+
+// Custom Dropdown Logic
+function toggleDropdown() {
+    const options = document.getElementById('dropdown-options');
+    options.style.display = (options.style.display === 'block' ? 'none' : 'block');
+}
+function selectLang(lang) {
+    changeLanguage(lang);
+    toggleDropdown();
 }
 
 function initMap() {
@@ -183,7 +235,6 @@ function initMap() {
     window.addEventListener('devicemotion', handleMotion);
 
     const savedLang = localStorage.getItem('oppaRunLang') || 'en';
-    document.getElementById('lang-select').value = savedLang;
     changeLanguage(savedLang);
 }
 
@@ -310,11 +361,12 @@ function updateTotalStats() {
 }
 
 function clearHistory() {
-    if(confirm("정말로 모든 기록을 삭제할까요?")) {
+    const lang = localStorage.getItem('oppaRunLang') || 'en';
+    if(confirm(translations[lang].confirmClear)) {
         localStorage.removeItem('oppaRunHistory');
         updateHistoryList();
         updateTotalStats();
-        alert("기록이 삭제되었습니다.");
+        alert(translations[lang].alertCleared);
     }
 }
 
