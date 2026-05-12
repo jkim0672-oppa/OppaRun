@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.17</title>
+    <title>OppaRun Pro - v28.18</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -64,12 +64,13 @@
             padding: 15px; border-radius: 12px; font-size: 16px; font-weight: 800;
             appearance: none; outline: none; cursor: pointer;
         }
-        .custom-select:focus { border-color: var(--primary); }
 
         /* Tabs */
         .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #000; display: flex; border-top: 1px solid #222; align-items: center; padding-bottom: env(safe-area-inset-bottom); z-index: 999; }
         .tab-btn { flex: 1; background: none; border: none; color: #444; font-size: 13px; font-weight: 900; }
         .tab-btn.active { color: var(--primary); }
+        
+        .total-container { padding: 20px; display: flex; flex-direction: column; gap: 15px; }
     </style>
 </head>
 <body> 
@@ -117,7 +118,7 @@
         <div id="sub-page-total" class="sub-page"><div id="total-stats-container" class="total-container"></div></div>
         <div id="sub-page-info" class="sub-page">
             <div class="placeholder-content" style="padding:40px 20px; text-align:center;">
-                <div style="color:var(--primary); margin-bottom:10px; font-weight:900;">OppaRun Pro v28.17</div>
+                <div style="color:var(--primary); margin-bottom:10px; font-weight:900;">OppaRun Pro v28.18</div>
                 <div style="font-size:12px; color:#888; line-height:1.6; font-weight:800;">Developed for Musicians & Runners.</div>
             </div>
         </div>
@@ -222,6 +223,9 @@ function handleMotion(e) {
     if (force > 12 && (now - lastStepTime) > 220) {
         steps++; lastStepTime = now;
         document.getElementById('cadence').textContent = Math.round((steps/(seconds||1))*60);
+        let speed = currentSpeedKmh;
+        document.getElementById('gct').textContent = speed > 0.5 ? Math.floor(450 - (speed * 10)) : "--";
+        document.getElementById('flight').textContent = speed > 2.0 ? Math.floor(5 + (speed * 2.1)) : "--";
     }
 }
 
@@ -232,7 +236,23 @@ function onStart() {
 }
 function onStop() { isPaused = true; document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; }
 function onResume() { isPaused = false; document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; }
-function onFinish() { location.reload(); }
+
+function onFinish() {
+    const record = {
+        id: Date.now(),
+        date: new Date().toLocaleString(),
+        dist: document.getElementById('dist').textContent,
+        time: document.getElementById('time').textContent,
+        pace: document.getElementById('avgPace').textContent || "--'--\"",
+        cadence: document.getElementById('cadence').textContent,
+        kcal: Math.round(totalDist * 65) || 0,
+        gct: document.getElementById('gct').textContent,
+        flight: document.getElementById('flight').textContent
+    };
+    let h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
+    h.unshift(record); localStorage.setItem('oppaRunHistory', JSON.stringify(h));
+    location.reload();
+}
 
 function showTab(tab) {
     document.getElementById('run-view').style.display = (tab === 'run' ? 'flex' : 'none');
@@ -240,6 +260,7 @@ function showTab(tab) {
     document.getElementById('history-view').style.display = (tab === 'history' ? 'flex' : 'none');
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
     document.getElementById('tab-' + tab).classList.add('active');
+    if(tab === 'history') updateHistoryList();
 }
 
 function showSubTab(sub) {
@@ -247,6 +268,54 @@ function showSubTab(sub) {
     document.getElementById('sub-tab-' + sub).classList.add('active');
     document.querySelectorAll('.sub-page').forEach(p => p.style.display = 'none');
     document.getElementById('sub-page-' + sub).style.display = 'flex';
+    if(sub === 'list') updateHistoryList();
+    if(sub === 'total') updateTotalStats();
+}
+
+function updateHistoryList() {
+    const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
+    const listDiv = document.getElementById('history-list');
+    if (h.length === 0) {
+        listDiv.innerHTML = '<div style="text-align:center; padding:50px; color:#444; font-weight:900;">NO RECORDS YET</div>';
+        return;
+    }
+    listDiv.innerHTML = h.map(r => `
+        <div class="history-item">
+            <div class="h-date">${r.date}</div>
+            <div style="font-size:18px; font-weight:900;">${r.dist}KM <span style="color:var(--primary); font-size:14px; margin-left:10px;">${r.time}</span></div>
+            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:5px; margin-top:10px; border-top:1px solid #222; padding-top:10px;">
+                <div style="font-size:10px; color:#555;">PACE<div style="color:#ccc; font-size:12px;">${r.pace}</div></div>
+                <div style="font-size:10px; color:#555;">CAD<div style="color:#ccc; font-size:12px;">${r.cadence}</div></div>
+                <div style="font-size:10px; color:#555;">KCAL<div style="color:#ccc; font-size:12px;">${r.kcal}</div></div>
+                <div style="font-size:10px; color:#555;">GCT/FLT<div style="color:#ccc; font-size:10px;">${r.gct}/${r.flight}%</div></div>
+            </div>
+        </div>`).join('');
+}
+
+function updateTotalStats() {
+    const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
+    let tDist = 0, tKcal = 0, tRuns = h.length;
+    h.forEach(r => {
+        tDist += parseFloat(r.dist) || 0;
+        tKcal += parseInt(r.kcal) || 0;
+    });
+    document.getElementById('total-stats-container').innerHTML = `
+        <div style="font-size:20px; font-weight:900; color:var(--primary); margin-bottom:20px; text-align:center;">TOTAL STATS</div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+            <div class="card"><div class="label">DISTANCE</div><div class="value">${tDist.toFixed(2)} KM</div></div>
+            <div class="card"><div class="label">TOTAL RUNS</div><div class="value">${tRuns}</div></div>
+            <div class="card"><div class="label">CALORIES</div><div class="value">${tKcal} KCAL</div></div>
+        </div>
+    `;
+}
+
+function clearHistory() {
+    if(confirm("정말로 모든 기록을 삭제할까요?")) {
+        localStorage.removeItem('oppaRunHistory');
+        updateHistoryList();
+        updateTotalStats();
+        alert("기록이 삭제되었습니다.");
+    }
 }
 
 function toggleDim(show) { document.getElementById('dimmer-overlay').style.display = show ? 'flex' : 'none'; }
