@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.15</title>
+    <title>OppaRun Pro - v28.20</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -46,7 +46,7 @@
         .controls { padding: 0 15px; display: flex; justify-content: center; align-items: center; height: 80px; margin-bottom: 80px; }
         .btn-act { width: 100%; height: 60px; border-radius: 30px; border: none; font-weight: 900; font-size: 20px; cursor: pointer; }
         
-        /* History Nav (4개로 확장) */
+        /* History Nav */
         .history-nav { display: flex; gap: 4px; padding: 10px 8px; background: #000; border-bottom: 1px solid #111; }
         .sub-btn { flex: 1; padding: 12px 0; border: 1px solid #333; background: #1a1a1a; color: #777; border-radius: 8px; font-size: 11px; font-weight: 900; text-align: center; }
         .sub-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
@@ -64,6 +64,11 @@
         .h-det-label { font-size: 8px; color: #555; font-weight: 900; }
         .h-det-val { font-size: 12px; font-weight: 900; color: #ccc; }
 
+        /* Total Page Stats Style */
+        .total-summary { padding: 20px 12px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+        .total-card { background: linear-gradient(145deg, #1a1a1a, #0a0a0a); border: 1px solid #222; border-radius: 15px; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        .total-val { font-size: 24px; font-weight: 900; color: var(--primary); margin-top: 5px; }
+
         /* Tabs */
         .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #000; display: flex; border-top: 1px solid #222; align-items: center; padding-bottom: env(safe-area-inset-bottom); z-index: 999; }
         .tab-btn { flex: 1; background: none; border: none; color: #444; font-size: 13px; font-weight: 900; }
@@ -73,7 +78,6 @@
         .my-location { background: #007bff; border: 2px solid #fff; border-radius: 50%; width: 12px; height: 12px; }
         #dimmer-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 99999; display: none; justify-content: center; align-items: center; color: #444; font-weight: 900; }
         
-        /* Placeholder Content Style */
         .placeholder-content { padding: 40px 20px; text-align: center; color: #555; font-size: 14px; font-weight: 800; }
     </style>
 </head>
@@ -122,12 +126,12 @@
         </div>
         
         <div id="sub-page-total" class="sub-page">
-            <div class="placeholder-content">TOTAL STATS COMING SOON</div>
+            <div id="total-stats-area"></div>
         </div>
         
         <div id="sub-page-info" class="sub-page">
             <div class="placeholder-content">
-                <div style="color:var(--primary); margin-bottom:10px;">OppaRun Pro v28.15</div>
+                <div style="color:var(--primary); margin-bottom:10px;">OppaRun Pro v28.20</div>
                 <div style="font-size:12px; color:#888; line-height:1.6;">
                     Developed for Musicians & Runners.<br>
                     Focus on Cadence and Soleus health.
@@ -235,10 +239,11 @@ function onFinish() {
     const record = {
         id: Date.now(),
         date: new Date().toLocaleString(),
-        dist: document.getElementById('dist').textContent,
+        dist: parseFloat(document.getElementById('dist').textContent),
         time: document.getElementById('time').textContent,
+        rawSeconds: seconds,
         pace: document.getElementById('avgPace').textContent,
-        cadence: document.getElementById('cadence').textContent,
+        cadence: parseInt(document.getElementById('cadence').textContent) || 0,
         kcal: Math.round(totalDist * 65) || 0,
         gct: document.getElementById('gct').textContent || "--",
         flight: document.getElementById('flight').textContent || "--"
@@ -262,6 +267,7 @@ function showSubTab(sub) {
     document.getElementById('sub-tab-' + sub).classList.add('active');
     document.querySelectorAll('.sub-page').forEach(p => p.style.display = 'none');
     document.getElementById('sub-page-' + sub).style.display = 'flex';
+    if(sub === 'total') updateTotalStats();
 }
 
 function updateHistoryList() {
@@ -279,10 +285,39 @@ function updateHistoryList() {
         </div>`).join('');
 }
 
+function updateTotalStats() {
+    const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
+    let tDist = 0, tSec = 0, tKcal = 0, tCad = 0;
+    
+    h.forEach(r => {
+        tDist += parseFloat(r.dist) || 0;
+        tSec += r.rawSeconds || 0;
+        tKcal += r.kcal || 0;
+        tCad += r.cadence || 0;
+    });
+
+    const avgCad = h.length > 0 ? Math.round(tCad / h.length) : 0;
+    const hStr = Math.floor(tSec / 3600);
+    const mStr = Math.floor((tSec % 3600) / 60);
+    
+    document.getElementById('total-stats-area').innerHTML = `
+        <div class="total-summary">
+            <div class="total-card"><span class="label">TOTAL DIST</span><div class="total-val">${tDist.toFixed(2)} KM</div></div>
+            <div class="total-card"><span class="label">TOTAL TIME</span><div class="total-val">${hStr}h ${mStr}m</div></div>
+            <div class="total-card"><span class="label">TOTAL KCAL</span><div class="total-val">${tKcal}</div></div>
+            <div class="total-card"><span class="label">AVG CADENCE</span><div class="total-val">${avgCad}</div></div>
+            <div class="total-card" style="grid-column: span 2;"><span class="label">TOTAL RUNS</span><div class="total-val">${h.length} TIMES</div></div>
+        </div>
+        <div style="padding: 0 12px 20px; text-align: center; color: #333; font-size: 11px; font-weight: 900;">
+            KEEP RUNNING, OPPA!
+        </div>`;
+}
+
 function clearHistory() {
     if(confirm("정말로 모든 기록을 삭제할까요?")) {
         localStorage.removeItem('oppaRunHistory');
         updateHistoryList();
+        updateTotalStats();
         alert("기록이 삭제되었습니다.");
     }
 }
