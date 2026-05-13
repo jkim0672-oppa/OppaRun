@@ -1,9 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
-<!-- [CSS/HTML 레이아웃은 원본과 100% 동일하게 유지됩니다] -->
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.28 (Performance Build)</title>
+    <title>OppaRun Pro - v28.29 (GPS Accuracy Build)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -61,9 +60,10 @@
         .tab-btn.active { color: var(--primary); }
         .settings-container { padding: 20px; }
         .dropdown { position: relative; width: 100%; margin-top: 10px; }
-        .dropdown-select { background: #1a1a1a; color: #fff; border: 1.5px solid #333; padding: 18px; border-radius: 12px; font-size: 16px; font-weight: 800; display: flex; justify-content: space-between; align-items: center; }
-        .dropdown-options { display: none; position: absolute; top: 105%; left: 0; width: 100%; background: #1a1a1a; border: 1.5px solid #333; border-radius: 12px; z-index: 1000; }
-        .dropdown-option { padding: 18px; font-size: 16px; font-weight: 800; border-bottom: 1px solid #222; }
+        .dropdown-select { background: #1a1a1a; color: #fff; border: 1.5px solid #333; padding: 18px; border-radius: 12px; font-size: 16px; font-weight: 800; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+        .dropdown-options { display: none; position: absolute; top: 105%; left: 0; width: 100%; background: #1a1a1a; border: 1.5px solid #333; border-radius: 12px; z-index: 1000; overflow: hidden; }
+        .dropdown-option { padding: 18px; font-size: 16px; font-weight: 800; border-bottom: 1px solid #222; cursor: pointer; }
+        .dropdown-option:active { background: #333; }
     </style>
 </head>
 <body> 
@@ -120,9 +120,9 @@
         <div id="sub-page-list" class="sub-page" style="display: flex;"><div id="history-list"></div></div>
         <div id="sub-page-total" class="sub-page"><div id="total-stats-container" style="padding:20px;"></div></div>
         <div id="sub-page-info" class="sub-page">
-            <div class="info-card"><div class="info-title">⏱️ CADENCE</div><div class="info-body">170~185 BPM 권장. 보폭보다 리듬에 집중하세요.</div></div>
-            <div class="info-card"><div class="info-title">👟 SOLEUS (가자미근)</div><div class="info-body">지면을 박차지 말고 가자미근의 탄성을 이용해 발을 '가져오세요'.</div></div>
-            <div class="info-card"><div class="info-title">🔄 ROLLING</div><div class="info-body">부드러운 무게 중심의 이동이 에너지 효율을 결정합니다.</div></div>
+            <div class="info-card"><div class="info-title">⏱️ CADENCE</div><div class="info-body">권장 170~185 BPM. 리듬에 집중하세요.</div></div>
+            <div class="info-card"><div class="info-title">👟 SOLEUS</div><div class="info-body">가자미근의 탄성을 이용해 발을 가볍게 회수하세요.</div></div>
+            <div class="info-card"><div class="info-title">🔄 ROLLING</div><div class="info-body">부드러운 무게 중심의 이동이 핵심입니다.</div></div>
         </div>
         <div id="sub-page-settings" class="sub-page">
             <div class="settings-container">
@@ -147,7 +147,7 @@
     </div> 
 
 <script>
-let map, marker, polyline, timer, isRunning = false, isPaused = false, isAutoPaused = false, seconds = 0;
+let map, marker, polyline, accuracyCircle, timer, isRunning = false, isPaused = false, isAutoPaused = false, seconds = 0;
 let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0, currentSpeedKmh = 0, pathCoords = [];
 let detailMap = null, detailPolyline = null, wakeLock = null, lowSpeedStartTime = null;
 
@@ -169,15 +169,11 @@ const control = {
         const r = storage.loadHistory().find(item => item.id === id); if (!r) return;
         const lang = localStorage.getItem('oppaRunLang') || 'en', isKo = lang === 'ko';
         const cad = parseInt(r.cadence) || 0, gct = parseInt(r.gct) || 0, flt = parseInt(r.flight) || 0;
-        
         let cadStat = cad >= 175 ? (isKo?"최상":"EXCELLENT") : (cad >= 165 ? (isKo?"보통":"GOOD") : (isKo?"주의":"LOW"));
         let cadColor = cad >= 175 ? "var(--primary)" : (cad >= 165 ? "var(--warning)" : "var(--danger)");
         let gctStat = gct <= 240 && gct > 0 ? (isKo?"엘리트":"ELITE") : (gct <= 280 ? (isKo?"보통":"GOOD") : (isKo?"헤비":"HEAVY"));
         let gctColor = gct <= 240 ? "var(--primary)" : (gct <= 280 ? "var(--warning)" : "var(--danger)");
-        
         let advice = isKo ? "가자미근의 탄력을 이용해 발을 가볍게 회수하세요." : "Use soleus elasticity for quick leg recovery.";
-        if (cad < 170) advice = isKo ? "피치를 올려 케이던스를 175 이상으로 유지해보세요." : "Try increasing cadence above 175.";
-        
         return { r, cad, cadStat, cadColor, gct, gctStat, gctColor, flt, advice, isKo };
     }
 };
@@ -202,7 +198,10 @@ const ui = {
     changeLanguage: (lang) => {
         const t = translations[lang];
         ['pace','dist','time','avg','cadence','gct','flight'].forEach(id => document.getElementById('label-'+id).textContent = t[id]);
-        ['start','stop','resume','finish','run','history'].forEach(id => document.getElementById('btn-'+id || 'tab-'+id).textContent = t[id]);
+        document.getElementById('btn-start').textContent = t.start;
+        document.getElementById('btn-stop').textContent = t.stop;
+        document.getElementById('btn-resume').textContent = t.resume;
+        document.getElementById('btn-finish').textContent = t.finish;
         document.getElementById('tab-run').textContent = t.run;
         document.getElementById('tab-history').textContent = t.history;
         ['list','total','info','settings'].forEach(id => document.getElementById('sub-tab-'+id).textContent = t[id]);
@@ -236,9 +235,10 @@ const ui = {
         detailMap = L.map('detail-map', {zoomControl: false, attributionControl: false});
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(detailMap);
         if (r.path && r.path.length > 0) {
-            detailPolyline = L.polyline(r.path, {color: '#00ff88', weight: 5}).addTo(detailMap);
-            detailMap.fitBounds(detailPolyline.getBounds());
+            L.polyline(r.path, {color: '#00ff88', weight: 5}).addTo(detailMap);
+            detailMap.fitBounds(L.polyline(r.path).getBounds());
         }
+        setTimeout(() => { detailMap.invalidateSize(); }, 300);
     },
     closeDetail: () => document.getElementById('detail-view').style.display = 'none',
     openDiag: (id) => {
@@ -247,7 +247,7 @@ const ui = {
         document.getElementById('diag-content-area').innerHTML = `
             <div class="diag-header"><div style="font-size:22px; font-weight:900; color:var(--primary);">${d.isKo?"정밀 진단":"DIAGNOSIS"}</div></div>
             <div class="diag-card"><div class="diag-score-label">CADENCE</div><div class="diag-status" style="color:${d.cadColor}">${d.cad} BPM - ${d.cadStat}</div></div>
-            <div class="diag-card"><div class="diag-score-label">GCT (Ground Contact)</div><div class="diag-status" style="color:${d.gctColor}">${d.gct} MS - ${d.gctStat}</div></div>
+            <div class="diag-card"><div class="diag-score-label">GCT</div><div class="diag-status" style="color:${d.gctColor}">${d.gct} MS - ${d.gctStat}</div></div>
             <div class="diag-card" style="border:1px solid var(--primary);"><div class="diag-score-label" style="color:var(--primary)">PRESCRIPTION</div><div style="font-size:13px; font-weight:700;">${d.advice}</div></div>`;
     },
     closeDiag: () => document.getElementById('diag-view').style.display = 'none'
@@ -256,11 +256,34 @@ const ui = {
 async function requestWakeLock() { try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {} }
 
 function updatePosition(p) {
-    const pos = [p.coords.latitude, p.coords.longitude]; currentSpeedKmh = (p.coords.speed || 0) * 3.6; marker.setLatLng(pos);
+    const pos = [p.coords.latitude, p.coords.longitude];
+    const acc = Math.round(p.coords.accuracy);
+    currentSpeedKmh = (p.coords.speed || 0) * 3.6;
+    
+    // 상태바에 정확도 표시
+    const statusEl = document.getElementById('status');
+    statusEl.innerHTML = `GPS ACTIVE (±${acc}m)`;
+    statusEl.style.color = acc < 20 ? "var(--primary)" : "var(--warning)";
+
+    marker.setLatLng(pos);
+    
+    // 오차 범위 Circle 업데이트
+    if (!accuracyCircle) {
+        accuracyCircle = L.circle(pos, { radius: acc, color: '#007bff', fillColor: '#007bff', fillOpacity: 0.15, weight: 1 }).addTo(map);
+    } else {
+        accuracyCircle.setLatLng(pos);
+        accuracyCircle.setRadius(acc);
+    }
+
     if (isRunning && !isPaused) {
-        if (currentSpeedKmh < 2.0) { if(!lowSpeedStartTime) lowSpeedStartTime=Date.now(); if(Date.now()-lowSpeedStartTime>1500) { isAutoPaused=true; document.getElementById('pause-status').style.display='block'; }}
-        else { lowSpeedStartTime=null; isAutoPaused=false; document.getElementById('pause-status').style.display='none'; }
-        if (!isAutoPaused && p.coords.accuracy < 50) {
+        if (currentSpeedKmh < 2.0) { 
+            if(!lowSpeedStartTime) lowSpeedStartTime=Date.now(); 
+            if(Date.now()-lowSpeedStartTime>1500 && !isAutoPaused) { 
+                isAutoPaused=true; document.getElementById('pause-status').style.display='block'; 
+            }
+        } else { lowSpeedStartTime=null; isAutoPaused=false; document.getElementById('pause-status').style.display='none'; }
+        
+        if (!isAutoPaused && acc < 50) {
             if (lastPos) {
                 let d = (function(p1,p2){ const R=6371; const dLat=(p2[0]-p1[0])*Math.PI/180; const dLon=(p2[1]-p1[1])*Math.PI/180; const a=Math.sin(dLat/2)**2 + Math.cos(p1[0]*Math.PI/180)*Math.cos(p2[0]*Math.PI/180)*Math.sin(dLon/2)**2; return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)); })(lastPos, pos);
                 if (d > 0.002) { totalDist += d; document.getElementById('dist').textContent = totalDist.toFixed(2); lastPos = pos; pathCoords.push(pos); polyline.setLatLngs(pathCoords); }
@@ -278,10 +301,9 @@ function handleMotion(e) {
     if (force > 12.5 && (now - lastStepTime) > 230) {
         steps++; lastStepTime = now;
         let cad = Math.round((steps/(seconds||1))*60);
-        let speed = currentSpeedKmh;
         document.getElementById('cadence').textContent = cad;
-        document.getElementById('gct').textContent = speed > 0.5 ? Math.floor(400 - (speed * 12)) : "--";
-        document.getElementById('flight').textContent = speed > 2.0 ? Math.floor(5 + (speed * 2.5)) : "--";
+        document.getElementById('gct').textContent = currentSpeedKmh > 0.5 ? Math.floor(400 - (currentSpeedKmh * 12)) : "--";
+        document.getElementById('flight').textContent = currentSpeedKmh > 2.0 ? Math.floor(5 + (currentSpeedKmh * 2.5)) : "--";
     }
 }
 
@@ -291,7 +313,6 @@ function onStart() {
     timer = setInterval(() => { if(!isPaused && !isAutoPaused) { seconds++; document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; } }, 1000);
 }
 function onStop() { isPaused = true; document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; }
-function onResume() { isPaused = false; document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; }
 function onFinish() {
     if (wakeLock) wakeLock.release();
     storage.saveRecord({ id: Date.now(), date: new Date().toLocaleString(), dist: document.getElementById('dist').textContent, time: document.getElementById('time').textContent, pace: document.getElementById('avgPace').textContent, cadence: document.getElementById('cadence').textContent, gct: document.getElementById('gct').textContent, flight: document.getElementById('flight').textContent, path: pathCoords });
@@ -299,11 +320,21 @@ function onFinish() {
 }
 
 window.onload = () => {
-    map = L.map('map', {zoomControl: false, attributionControl: false}).setView([37.5665, 126.9780], 17);
+    // 캘리포니아 오렌지카운티 기본 좌표 설정
+    map = L.map('map', {zoomControl: false, attributionControl: false}).setView([33.7743, -117.9390], 17);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
     marker = L.marker([0,0], {icon: L.divIcon({className:'loc', html:'<div style="background:#007bff; border:2px solid #fff; border-radius:50%; width:12px; height:12px;"></div>'})}).addTo(map);
     polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(map);
-    if ("geolocation" in navigator) navigator.geolocation.watchPosition(updatePosition, null, {enableHighAccuracy: true});
+    
+    // 지도 렌더링 안정화
+    setTimeout(() => { map.invalidateSize(); }, 500);
+
+    if ("geolocation" in navigator) {
+        navigator.geolocation.watchPosition(updatePosition, 
+            (err) => { document.getElementById('status').textContent = "GPS ERROR: " + err.message; }, 
+            {enableHighAccuracy: true, maximumAge: 0, timeout: 10000}
+        );
+    }
     window.addEventListener('devicemotion', handleMotion);
     ui.changeLanguage(localStorage.getItem('oppaRunLang') || 'en');
 };
