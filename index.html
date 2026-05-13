@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.24</title>
+    <title>OppaRun Pro - v28.25</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -143,7 +143,7 @@
         <div id="sub-page-total" class="sub-page"><div id="total-stats-container" class="total-container"></div></div>
         <div id="sub-page-info" class="sub-page">
             <div class="placeholder-content" style="padding:40px 20px; text-align:center;">
-                <div style="color:var(--primary); margin-bottom:10px; font-weight:900;">OppaRun Pro v28.24</div>
+                <div style="color:var(--primary); margin-bottom:10px; font-weight:900;">OppaRun Pro v28.25</div>
                 <div id="dev-info" style="font-size:12px; color:#888; line-height:1.6; font-weight:800;">Developed for Musicians & Runners.</div>
             </div>
         </div>
@@ -177,9 +177,9 @@
 let map, marker, polyline, timer, isRunning = false, isPaused = false, isAutoPaused = false, seconds = 0;
 let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0, currentSpeedKmh = 0, pathCoords = [];
 let detailMap = null, detailPolyline = null;
-let wakeLock = null; // Wake Lock 변수 추가
+let wakeLock = null;
 
-// 자동 멈춤 관리를 위한 지연 타이머
+// 자동 멈춤 관리를 위한 타이머 변수
 let lowSpeedStartTime = null;
 
 const translations = {
@@ -273,20 +273,22 @@ function updatePosition(p) {
     document.getElementById('status').style.color = "#00ff88";
 
     if (isRunning && !isPaused) {
-        // 자동 멈춤 로직
-        if (currentSpeedKmh < 0.8) {
-            if (!lowSpeedStartTime) lowSpeedStartTime = Date.now();
-            if (totalDist >= 0.01 && (Date.now() - lowSpeedStartTime) > 3000) {
-                if (!isAutoPaused) {
-                    isAutoPaused = true;
-                    document.getElementById('pause-status').style.display = 'block';
+        // 자동 멈춤 체크 로직 (10미터 이상 이동 후 적용)
+        if (totalDist >= 0.01) { // 10미터 체크
+            if (currentSpeedKmh < 0.8) { // 저속 상태
+                if (!lowSpeedStartTime) lowSpeedStartTime = Date.now();
+                if ((Date.now() - lowSpeedStartTime) > 3000) { // 3초 지속 체크
+                    if (!isAutoPaused) {
+                        isAutoPaused = true;
+                        document.getElementById('pause-status').style.display = 'block';
+                    }
                 }
-            }
-        } else {
-            lowSpeedStartTime = null;
-            if (isAutoPaused) {
-                isAutoPaused = false;
-                document.getElementById('pause-status').style.display = 'none';
+            } else { // 이동 중
+                lowSpeedStartTime = null;
+                if (isAutoPaused) {
+                    isAutoPaused = false;
+                    document.getElementById('pause-status').style.display = 'none';
+                }
             }
         }
 
@@ -333,7 +335,7 @@ function handleMotion(e) {
 }
 
 function onStart() {
-    requestWakeLock(); // 시작 시 화면 꺼짐 방지 활성화
+    requestWakeLock();
     isRunning = true; isPaused = false; isAutoPaused = false;
     totalDist = 0; seconds = 0; steps = 0; pathCoords = [];
     lowSpeedStartTime = null;
@@ -355,7 +357,6 @@ function onStop() { isPaused = true; document.getElementById('btn-stop').style.d
 function onResume() { isPaused = false; document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; }
 
 function onFinish() {
-    // 종료 시 화면 꺼짐 방지 해제
     if (wakeLock !== null) {
         wakeLock.release().then(() => { wakeLock = null; });
     }
