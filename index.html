@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.20</title>
+    <title>OppaRun Pro - v28.22</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -52,9 +52,26 @@
         .sub-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
         
         .sub-page { display: none; flex-direction: column; flex: 1; overflow-y: auto; padding-bottom: 100px; }
-        .history-item { background: var(--card-bg); border-radius: 15px; padding: 15px; margin: 10px 12px; border: 1px solid #1f1f1f; }
+        .history-item { background: var(--card-bg); border-radius: 15px; padding: 15px; margin: 10px 12px; border: 1px solid #1f1f1f; position: relative; }
         .h-date { font-size: 12px; color: var(--primary); font-weight: 700; margin-bottom: 4px; }
         
+        /* History Item Action Buttons */
+        .h-actions { position: absolute; top: 15px; right: 15px; display: flex; gap: 6px; }
+        .btn-h-sub { background: #1a1a1a; border: 1px solid #333; color: var(--primary); font-size: 9px; padding: 4px 8px; border-radius: 4px; font-weight: 900; cursor: pointer; }
+
+        /* Detail View Modal */
+        #detail-view { 
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: var(--bg); z-index: 10000; display: none; flex-direction: column; 
+        }
+        #detail-map { height: 50%; width: 100%; border-bottom: 1px solid #222; }
+        #detail-data { height: 50%; width: 100%; padding: 20px; overflow-y: auto; }
+        .close-detail { 
+            position: absolute; top: 20px; right: 20px; z-index: 10001; 
+            background: var(--primary); color: #000; border: none; 
+            padding: 10px 20px; border-radius: 20px; font-weight: 900; 
+        }
+
         /* Custom Dropdown Styles */
         .settings-container { padding: 20px; }
         .settings-group { margin-bottom: 25px; }
@@ -90,6 +107,13 @@
         <div id="map-container"><div id="map"></div></div>
         <div id="status" class="status-bar">GPS INITIALIZING...</div>
     </div> 
+
+    <!-- Detail View Modal -->
+    <div id="detail-view">
+        <button class="close-detail" onclick="closeDetail()">CLOSE</button>
+        <div id="detail-map"></div>
+        <div id="detail-data"></div>
+    </div>
 
     <div id="run-view" class="main-content">
         <div class="dashboard">
@@ -128,7 +152,7 @@
         <div id="sub-page-total" class="sub-page"><div id="total-stats-container" class="total-container"></div></div>
         <div id="sub-page-info" class="sub-page">
             <div class="placeholder-content" style="padding:40px 20px; text-align:center;">
-                <div style="color:var(--primary); margin-bottom:10px; font-weight:900;">OppaRun Pro v28.20</div>
+                <div style="color:var(--primary); margin-bottom:10px; font-weight:900;">OppaRun Pro v28.22</div>
                 <div id="dev-info" style="font-size:12px; color:#888; line-height:1.6; font-weight:800;">Developed for Musicians & Runners.</div>
             </div>
         </div>
@@ -161,6 +185,7 @@
 <script>
 let map, marker, polyline, timer, isRunning = false, isPaused = false, isAutoPaused = false, seconds = 0;
 let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0, currentSpeedKmh = 0, pathCoords = [];
+let detailMap = null, detailPolyline = null;
 
 const translations = {
     en: { 
@@ -168,14 +193,16 @@ const translations = {
         start: "START RUNNING", stop: "STOP", resume: "RESUME", finish: "FINISH", run: "RUN", history: "HISTORY",
         list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS",
         selLang: "SELECT LANGUAGE", clear: "CLEAR ALL HISTORY", devInfo: "Developed for Musicians & Runners.",
-        confirmClear: "Are you sure you want to delete all records?", alertCleared: "History cleared."
+        confirmClear: "Are you sure you want to delete all records?", alertCleared: "History cleared.",
+        route: "ROUTE", diag: "DIAG", close: "CLOSE"
     },
     ko: { 
-        pace: "페이스", dist: "거리", time: "시간", avg: "평균", cadence: "케이던스", gct: "지면접접촉", flight: "체공시간", 
+        pace: "페이스", dist: "거리", time: "시간", avg: "평균", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", 
         start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료", run: "러닝", history: "기록",
         list: "목록", total: "통계", info: "정보", settings: "설정",
         selLang: "언어 설정", clear: "전체 기록 삭제", devInfo: "뮤지션과 러너를 위해 개발되었습니다.",
-        confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다."
+        confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.",
+        route: "경로", diag: "진단", close: "닫기"
     }
 };
 
@@ -202,7 +229,9 @@ function changeLanguage(lang) {
     document.getElementById('btn-clear-history').textContent = t.clear;
     document.getElementById('dev-info').textContent = t.devInfo;
     document.getElementById('current-lang-text').textContent = (lang === 'ko' ? "한국어 (KR)" : "English (US)");
+    document.querySelector('.close-detail').textContent = t.close;
     localStorage.setItem('oppaRunLang', lang);
+    if (document.getElementById('history-view').style.display === 'flex') updateHistoryList();
 }
 
 function toggleDropdown() {
@@ -242,7 +271,7 @@ function updatePosition(p) {
         if (currentSpeedKmh < 0.8 && !isAutoPaused) { 
             isAutoPaused = true; document.getElementById('pause-status').style.display = 'block'; 
         } else if (currentSpeedKmh >= 0.8 && isAutoPaused) { 
-            isAutoPaused = false; document.getElementById('pause-status').style.display = 'none'; 
+            isAutoPaused = false; document.getElementById('pause-status').style.none = 'none'; 
         }
         if (!isAutoPaused && p.coords.accuracy < 50) {
             if (lastPos) {
@@ -254,8 +283,6 @@ function updatePosition(p) {
                 if (d > 0.001) { totalDist += d; document.getElementById('dist').textContent = totalDist.toFixed(2); lastPos = pos; pathCoords.push(pos); polyline.setLatLngs(pathCoords); }
             } else { lastPos = pos; }
             document.getElementById('curPace').textContent = formatPace(currentSpeedKmh);
-            
-            // 실시간 평균 페이스 업데이트
             if (totalDist > 0 && seconds > 0) {
                 let avgKmh = (totalDist / (seconds / 3600));
                 document.getElementById('avgPace').textContent = formatPace(avgKmh);
@@ -275,10 +302,7 @@ function handleMotion(e) {
         let currentCadence = Math.round((steps/(seconds||1))*60);
         let cadElem = document.getElementById('cadence');
         cadElem.textContent = currentCadence;
-        
-        // 케이던스 170 미만 시 경고 색상 (노란색)
         cadElem.style.color = (currentCadence > 0 && currentCadence < 170) ? "var(--warning)" : "var(--text-main)";
-
         let speed = currentSpeedKmh;
         document.getElementById('gct').textContent = speed > 0.5 ? Math.floor(450 - (speed * 10)) : "--";
         document.getElementById('flight').textContent = speed > 2.0 ? Math.floor(5 + (speed * 2.1)) : "--";
@@ -292,8 +316,6 @@ function onStart() {
         if(!isPaused && !isAutoPaused) { 
             seconds++; 
             document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; 
-            
-            // 매 초마다 평균 페이스 다시 계산 (이동 중이 아닐 때도 시간은 흐르므로)
             if (totalDist > 0) {
                 let avgKmh = (totalDist / (seconds / 3600));
                 document.getElementById('avgPace').textContent = formatPace(avgKmh);
@@ -314,11 +336,53 @@ function onFinish() {
         cadence: document.getElementById('cadence').textContent,
         kcal: Math.round(totalDist * 65) || 0,
         gct: document.getElementById('gct').textContent,
-        flight: document.getElementById('flight').textContent
+        flight: document.getElementById('flight').textContent,
+        path: pathCoords // 좌표 데이터 저장
     };
     let h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
     h.unshift(record); localStorage.setItem('oppaRunHistory', JSON.stringify(h));
     location.reload();
+}
+
+function openDetail(id) {
+    const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
+    const record = h.find(r => r.id === id);
+    if (!record) return;
+
+    document.getElementById('detail-view').style.display = 'flex';
+
+    // 지도 초기화 및 경로 그리기
+    if (detailMap) { detailMap.remove(); }
+    detailMap = L.map('detail-map', {zoomControl: false, attributionControl: false});
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(detailMap);
+
+    if (record.path && record.path.length > 0) {
+        detailPolyline = L.polyline(record.path, {color: '#007bff', weight: 5}).addTo(detailMap);
+        detailMap.fitBounds(detailPolyline.getBounds());
+    } else {
+        detailMap.setView([37.5665, 126.9780], 15);
+    }
+
+    // 상세 데이터 표시
+    document.getElementById('detail-data').innerHTML = `
+        <div style="color:var(--primary); font-size:18px; font-weight:900; margin-bottom:20px; border-bottom:1px solid #333; padding-bottom:10px;">RUN DIAGNOSIS</div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
+            <div class="card"><div class="label">DISTANCE</div><div class="value">${record.dist} KM</div></div>
+            <div class="card"><div class="label">TIME</div><div class="value">${record.time}</div></div>
+            <div class="card"><div class="label">PACE</div><div class="value">${record.pace}</div></div>
+            <div class="card"><div class="label">CADENCE</div><div class="value">${record.cadence}</div></div>
+            <div class="card"><div class="label">GCT</div><div class="value">${record.gct} MS</div></div>
+            <div class="card"><div class="label">FLIGHT</div><div class="value">${record.flight}%</div></div>
+        </div>
+        <div style="margin-top:20px; font-size:12px; color:#555; font-weight:800; line-height:1.6;">
+            * Diagnosis: Cadence is ${record.cadence > 170 ? 'Optimal' : 'Low'}. <br>
+            * GCT and Flight time reflect your musical rhythm in running.
+        </div>
+    `;
+}
+
+function closeDetail() {
+    document.getElementById('detail-view').style.display = 'none';
 }
 
 function showTab(tab) {
@@ -341,6 +405,8 @@ function showSubTab(sub) {
 
 function updateHistoryList() {
     const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
+    const lang = localStorage.getItem('oppaRunLang') || 'en';
+    const t = translations[lang];
     const listDiv = document.getElementById('history-list');
     if (h.length === 0) {
         listDiv.innerHTML = '<div style="text-align:center; padding:50px; color:#444; font-weight:900;">NO RECORDS YET</div>';
@@ -349,6 +415,10 @@ function updateHistoryList() {
     listDiv.innerHTML = h.map(r => `
         <div class="history-item">
             <div class="h-date">${r.date}</div>
+            <div class="h-actions">
+                <button class="btn-h-sub" onclick="openDetail(${r.id})">${t.route}</button>
+                <button class="btn-h-sub" onclick="openDetail(${r.id})">${t.diag}</button>
+            </div>
             <div style="font-size:18px; font-weight:900;">${r.dist}KM <span style="color:var(--primary); font-size:14px; margin-left:10px;">${r.time}</span></div>
             <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:5px; margin-top:10px; border-top:1px solid #222; padding-top:10px;">
                 <div style="font-size:10px; color:#555;">PACE<div style="color:#ccc; font-size:12px;">${r.pace}</div></div>
