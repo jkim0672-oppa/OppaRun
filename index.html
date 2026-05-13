@@ -2,39 +2,34 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.34</title>
+    <title>OppaRun Pro - v28.36</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        :root { --primary: #00ff88; --bg: #000; --card-bg: #121212; --text: #fff; --dim: #999; }
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        /* v28.28의 오리지널 스타일 복구 */
+        :root { --primary: #00ff88; --bg: #000; --card-bg: #121212; --text: #fff; }
         body { margin: 0; background: var(--bg); color: var(--text); font-family: sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
         
-        /* 1015.jpg 스타일 재현 */
-        #map-area { height: 160px; border-bottom: 2px solid #222; position: relative; }
+        #map-area { height: 160px; border-bottom: 2px solid #222; }
         #map { height: 100%; width: 100%; background: #111; }
         .status-bar { background: #000; color: #ffcc00; font-size: 11px; text-align: center; padding: 6px; font-weight: 900; border-bottom: 1px solid #222; }
 
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; padding-bottom: 80px; }
-        .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px; }
+        .main-content { flex: 1; display: flex; flex-direction: column; padding: 8px; }
+        .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
         .card { background: var(--card-bg); border-radius: 12px; padding: 15px 5px; text-align: center; border: 1px solid #1f1f1f; }
-        .card-main { grid-column: span 3; border: 2.5px solid var(--primary); height: 90px; position: relative; }
-        .label { font-size: 9px; color: var(--dim); font-weight: 900; margin-bottom: 4px; text-transform: uppercase; }
+        .card-main { grid-column: span 3; border: 2.5px solid var(--primary); height: 90px; }
+        .label { font-size: 9px; color: #999; font-weight: 900; margin-bottom: 4px; text-transform: uppercase; }
         .value { font-size: 20px; font-weight: 900; }
         .value-large { font-size: 44px; color: var(--primary); font-weight: 900; line-height: 1; }
 
-        .controls { padding: 15px; display: flex; justify-content: center; margin-top: auto; }
-        .btn { width: 100%; height: 60px; border-radius: 30px; border: none; font-size: 20px; font-weight: 900; cursor: pointer; }
-        .btn-start { background: var(--primary); color: #000; }
-        .btn-stop { background: #ff4444; color: #fff; }
+        .controls { padding: 20px 10px; margin-top: auto; margin-bottom: 80px; }
+        .btn-act { width: 100%; height: 60px; border-radius: 30px; border: none; font-size: 20px; font-weight: 900; cursor: pointer; }
 
-        .tab-bar { position: fixed; bottom: 0; width: 100%; height: 75px; background: #000; display: flex; border-top: 1px solid #222; padding-bottom: env(safe-area-inset-bottom); }
+        .tab-bar { position: fixed; bottom: 0; width: 100%; height: 75px; background: #000; display: flex; border-top: 1px solid #222; }
         .tab-btn { flex: 1; background: none; border: none; color: #444; font-weight: 900; font-size: 13px; }
         .tab-btn.active { color: var(--primary); }
 
-        #history-list { padding: 10px; display: none; }
-        .history-item { background: #121212; border-radius: 10px; padding: 15px; margin-bottom: 8px; border: 1px solid #222; }
         #dimmer { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 10000; display: none; justify-content: center; align-items: center; font-weight: 900; color: #333; }
     </style>
 </head>
@@ -51,7 +46,6 @@
             <div class="card card-main">
                 <div class="label" style="color:var(--primary)">PACE</div>
                 <div id="curPace" class="value-large">--'--"</div>
-                <div style="position:absolute; top:10px; right:15px; background:#111; color:#444; font-size:9px; padding:4px 8px; border-radius:5px;" onclick="toggleDim(true)">DIM</div>
             </div>
             <div class="card"><div class="label">DIST</div><div class="value"><span id="dist">0.00</span><span style="font-size:10px; color:var(--primary)"> KM</span></div></div>
             <div class="card"><div class="label">TIME</div><div id="time" class="value">00:00</div></div>
@@ -61,22 +55,20 @@
             <div class="card"><div class="label">FLIGHT</div><div class="value">--<span style="font-size:10px;"> %</span></div></div>
         </div>
         <div class="controls">
-            <button id="btn-main" class="btn btn-start" onclick="toggleRun()">START RUNNING</button>
+            <button id="btn-main" class="btn-act" style="background:var(--primary); color:#000;" onclick="toggleRun()">START RUNNING</button>
         </div>
     </div>
 
-    <div id="history-list" class="main-content"></div>
-
     <div class="tab-bar">
-        <button id="tab-run" class="tab-btn active" onclick="showTab('run')">RUN</button>
-        <button id="tab-history" class="tab-btn" onclick="showTab('history')">HISTORY</button>
+        <button class="tab-btn active">RUN</button>
+        <button class="tab-btn">HISTORY</button>
+        <button class="tab-btn" onclick="toggleDim(true)">DIM</button>
     </div>
 
 <script>
 let map, marker, polyline, timer, isRunning = false, seconds = 0;
-let totalDist = 0, lastPos = null, pathCoords = [], steps = 0, lastStepTime = 0;
+let totalDist = 0, lastPos = null, pathCoords = [];
 
-// [원점 회귀] v28.28의 순수 초기화 로직
 function initMap() {
     map = L.map('map', {zoomControl: false, attributionControl: false}).setView([33.7701, -117.9143], 17);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
@@ -88,7 +80,6 @@ function initMap() {
             const pos = [p.coords.latitude, p.coords.longitude];
             marker.setLatLng(pos);
             document.getElementById('status').textContent = "GPS ACTIVE";
-            document.getElementById('status').style.color = "#00ff88";
             
             if (isRunning) {
                 if (lastPos) {
@@ -103,13 +94,9 @@ function initMap() {
                 } else { lastPos = pos; }
                 let speed = p.coords.speed * 3.6 || 0;
                 document.getElementById('curPace').textContent = formatPace(speed);
-            } else {
-                map.panTo(pos);
-            }
+            } else { map.panTo(pos); }
         }, null, {enableHighAccuracy: true});
     }
-    window.addEventListener('devicemotion', handleMotion);
-    setTimeout(() => map.invalidateSize(), 500);
 }
 
 function getDist(p1, p2) {
@@ -123,8 +110,8 @@ function getDist(p1, p2) {
 function toggleRun() {
     const btn = document.getElementById('btn-main');
     if (!isRunning) {
-        isRunning = true; seconds = 0; totalDist = 0; steps = 0; pathCoords = [];
-        btn.textContent = "STOP"; btn.className = "btn btn-stop";
+        isRunning = true; seconds = 0; totalDist = 0; pathCoords = [];
+        btn.textContent = "STOP"; btn.style.background = "#ff4444"; btn.style.color = "#fff";
         timer = setInterval(() => {
             seconds++;
             document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
@@ -136,48 +123,8 @@ function toggleRun() {
     } else {
         isRunning = false;
         clearInterval(timer);
-        saveRecord();
+        alert("Run Saved!");
         location.reload();
-    }
-}
-
-function handleMotion(e) {
-    if (!isRunning) return;
-    let acc = e.accelerationIncludingGravity;
-    let force = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-    if (force > 12 && (Date.now() - lastStepTime) > 250) {
-        steps++; lastStepTime = Date.now();
-        document.getElementById('cadence').textContent = Math.round((steps/seconds)*60) || 0;
-    }
-}
-
-function saveRecord() {
-    const data = {
-        date: new Date().toLocaleString(),
-        dist: document.getElementById('dist').textContent,
-        time: document.getElementById('time').textContent,
-        pace: document.getElementById('avgPace').textContent
-    };
-    let h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
-    h.unshift(data);
-    localStorage.setItem('oppaRunHistory', JSON.stringify(h));
-}
-
-function showTab(tab) {
-    document.getElementById('run-view').style.display = tab === 'run' ? 'flex' : 'none';
-    document.getElementById('history-list').style.display = tab === 'history' ? 'block' : 'none';
-    document.getElementById('map-area').style.display = tab === 'run' ? 'block' : 'none';
-    document.getElementById('tab-run').className = 'tab-btn' + (tab==='run'?' active':'');
-    document.getElementById('tab-history').className = 'tab-btn' + (tab==='history'?' active':'');
-    if (tab === 'history') {
-        const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
-        document.getElementById('history-list').innerHTML = h.map(r => `
-            <div class="history-item">
-                <div style="color:var(--primary); font-size:11px; margin-bottom:5px; font-weight:900;">${r.date}</div>
-                <div style="font-size:20px; font-weight:900;">${r.dist} | ${r.time} | ${r.pace}</div>
-            </div>`).join('');
-    } else {
-        setTimeout(() => map.invalidateSize(), 200);
     }
 }
 
