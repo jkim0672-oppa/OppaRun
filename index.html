@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.25</title>
+    <title>OppaRun Pro - v28.25 (Color Logic Updated)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -178,8 +178,6 @@ let map, marker, polyline, timer, isRunning = false, isPaused = false, isAutoPau
 let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0, currentSpeedKmh = 0, pathCoords = [];
 let detailMap = null, detailPolyline = null;
 let wakeLock = null;
-
-// 자동 멈춤 관리를 위한 타이머 변수
 let lowSpeedStartTime = null;
 
 const translations = {
@@ -273,17 +271,16 @@ function updatePosition(p) {
     document.getElementById('status').style.color = "#00ff88";
 
     if (isRunning && !isPaused) {
-        // 자동 멈춤 체크 로직 (10미터 이상 이동 후 적용)
-        if (totalDist >= 0.01) { // 10미터 체크
-            if (currentSpeedKmh < 0.8) { // 저속 상태
+        if (totalDist >= 0.01) { 
+            if (currentSpeedKmh < 0.8) { 
                 if (!lowSpeedStartTime) lowSpeedStartTime = Date.now();
-                if ((Date.now() - lowSpeedStartTime) > 3000) { // 3초 지속 체크
+                if ((Date.now() - lowSpeedStartTime) > 3000) { 
                     if (!isAutoPaused) {
                         isAutoPaused = true;
                         document.getElementById('pause-status').style.display = 'block';
                     }
                 }
-            } else { // 이동 중
+            } else { 
                 lowSpeedStartTime = null;
                 if (isAutoPaused) {
                     isAutoPaused = false;
@@ -322,15 +319,58 @@ function handleMotion(e) {
     if (!acc || acc.x === null) return;
     let force = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
     let now = Date.now();
+
     if (force > 12 && (now - lastStepTime) > 220) {
-        steps++; lastStepTime = now;
+        steps++; 
+        lastStepTime = now;
+        
         let currentCadence = Math.round((steps/(seconds||1))*60);
-        let cadElem = document.getElementById('cadence');
-        cadElem.textContent = currentCadence;
-        cadElem.style.color = (currentCadence > 0 && currentCadence < 170) ? "var(--warning)" : "var(--text-main)";
         let speed = currentSpeedKmh;
-        document.getElementById('gct').textContent = speed > 0.5 ? Math.floor(450 - (speed * 10)) : "--";
-        document.getElementById('flight').textContent = speed > 2.0 ? Math.floor(5 + (speed * 2.1)) : "--";
+        let currentGCT = speed > 0.5 ? Math.floor(450 - (speed * 10)) : 0;
+        let currentFlight = speed > 2.0 ? Math.floor(5 + (speed * 2.1)) : 0;
+
+        // 1. 케이던스 색상 업데이트 (목표: 170-185)
+        const cadElem = document.getElementById('cadence');
+        cadElem.textContent = currentCadence;
+        if (currentCadence >= 170) {
+            cadElem.style.color = "var(--primary)"; // 좋음 (초록)
+        } else if (currentCadence >= 160) {
+            cadElem.style.color = "var(--warning)"; // 낮음 (노랑)
+        } else {
+            cadElem.style.color = "var(--danger)";  // 위험 (빨강)
+        }
+
+        // 2. GCT 색상 업데이트 (낮을수록 좋음)
+        const gctElem = document.getElementById('gct');
+        if (currentGCT > 0) {
+            gctElem.textContent = currentGCT;
+            if (currentGCT <= 240) {
+                gctElem.style.color = "var(--primary)"; // 좋음
+            } else if (currentGCT <= 280) {
+                gctElem.style.color = "var(--warning)"; // 보통
+            } else {
+                gctElem.style.color = "var(--danger)";  // 높음
+            }
+        } else {
+            gctElem.textContent = "--";
+            gctElem.style.color = "var(--text-main)";
+        }
+
+        // 3. 체공시간 색상 업데이트 (높을수록 좋음)
+        const flightElem = document.getElementById('flight');
+        if (currentFlight > 0) {
+            flightElem.textContent = currentFlight;
+            if (currentFlight >= 15) {
+                flightElem.style.color = "var(--primary)"; // 좋음
+            } else if (currentFlight >= 8) {
+                flightElem.style.color = "var(--warning)"; // 보통
+            } else {
+                flightElem.style.color = "var(--danger)";  // 낮음
+            }
+        } else {
+            flightElem.textContent = "--";
+            flightElem.style.color = "var(--text-main)";
+        }
     }
 }
 
