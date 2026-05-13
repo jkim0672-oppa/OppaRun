@@ -1,294 +1,194 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.32 (Stable Recovery)</title>
+    <title>OppaRun Pro - v28.34</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        :root { 
-            --primary: #00ff88; --bg: #000000; --card-bg: #121212; 
-            --text-main: #ffffff; --text-dim: #999999; --danger: #ff4444; 
-            --warning: #ffcc00;
-        }
+        :root { --primary: #00ff88; --bg: #000; --card-bg: #121212; --text: #fff; --dim: #999; }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body { 
-            margin: 0; background: var(--bg); color: var(--text-main); 
-            font-family: -apple-system, system-ui; height: 100vh; height: 100svh; 
-            display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none;
-        }
+        body { margin: 0; background: var(--bg); color: var(--text); font-family: sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
         
-        #map-area { flex-shrink: 0; width: 100%; }
-        #map-container { height: 15vh; min-height: 110px; border-bottom: 2px solid #222; }
-        #map { height: 100%; width: 100%; background: #222; }
-        .status-bar { 
-            text-align: center; color: var(--warning); font-size: 11px; padding: 8px; 
-            background: #0a0a0a; font-weight: 900; border-bottom: 1px solid #222;
-            letter-spacing: 0.5px;
-        }
-        
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
-        .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px; flex-shrink: 0; }
-        .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #1f1f1f; padding: 12px 0; }
-        .card-main { grid-column: span 3; border: 2.5px solid var(--primary); height: 85px; position: relative; margin-bottom: 2px; }
-        .label { font-size: 9px; color: var(--text-dim); font-weight: 900; margin-bottom: 3px; text-transform: uppercase; }
+        /* 1015.jpg 스타일 재현 */
+        #map-area { height: 160px; border-bottom: 2px solid #222; position: relative; }
+        #map { height: 100%; width: 100%; background: #111; }
+        .status-bar { background: #000; color: #ffcc00; font-size: 11px; text-align: center; padding: 6px; font-weight: 900; border-bottom: 1px solid #222; }
+
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; padding-bottom: 80px; }
+        .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px; }
+        .card { background: var(--card-bg); border-radius: 12px; padding: 15px 5px; text-align: center; border: 1px solid #1f1f1f; }
+        .card-main { grid-column: span 3; border: 2.5px solid var(--primary); height: 90px; position: relative; }
+        .label { font-size: 9px; color: var(--dim); font-weight: 900; margin-bottom: 4px; text-transform: uppercase; }
         .value { font-size: 20px; font-weight: 900; }
-        .value-large { font-size: 42px; color: var(--primary); font-weight: 900; line-height: 1; }
-        .auto-pause-label { position: absolute; top: 10px; left: 10px; font-size: 10px; color: var(--danger); font-weight: 900; background: rgba(255,68,68,0.2); padding: 4px 8px; border-radius: 6px; display: none; z-index: 10; border: 1px solid var(--danger); }
-        
-        .controls { padding: 0 15px; display: flex; justify-content: center; align-items: center; height: 80px; margin-bottom: 80px; }
-        .btn-act { width: 100%; height: 60px; border-radius: 30px; border: none; font-weight: 900; font-size: 20px; cursor: pointer; }
-        
-        .history-nav { display: flex; gap: 4px; padding: 10px 8px; background: #000; border-bottom: 1px solid #111; }
-        .sub-btn { flex: 1; padding: 12px 0; border: 1px solid #333; background: #1a1a1a; color: #777; border-radius: 8px; font-size: 11px; font-weight: 900; text-align: center; }
-        .sub-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
-        
-        .sub-page { display: none; flex-direction: column; flex: 1; overflow-y: auto; padding-bottom: 100px; }
-        .history-item { background: var(--card-bg); border-radius: 15px; padding: 15px; margin: 10px 12px; border: 1px solid #333; position: relative; }
-        .h-date { font-size: 13px; color: var(--primary); font-weight: 900; margin-bottom: 8px; letter-spacing: 0.5px; }
-        
-        .h-actions { position: absolute; top: 15px; right: 15px; display: flex; gap: 6px; }
-        .btn-h-sub { background: #1a1a1a; border: 1px solid #444; color: var(--primary); font-size: 10px; padding: 6px 10px; border-radius: 6px; font-weight: 900; cursor: pointer; }
+        .value-large { font-size: 44px; color: var(--primary); font-weight: 900; line-height: 1; }
 
-        #detail-view { 
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-            background: var(--bg); z-index: 10000; display: none; flex-direction: column; 
-        }
-        #detail-map { height: 50%; width: 100%; border-bottom: 1px solid #222; }
-        #detail-data { height: 50%; width: 100%; padding: 20px; overflow-y: auto; }
-        .close-detail { 
-            position: absolute; top: 20px; right: 20px; z-index: 10001; 
-            background: var(--primary); color: #000; border: none; 
-            padding: 10px 20px; border-radius: 20px; font-weight: 900; 
-        }
+        .controls { padding: 15px; display: flex; justify-content: center; margin-top: auto; }
+        .btn { width: 100%; height: 60px; border-radius: 30px; border: none; font-size: 20px; font-weight: 900; cursor: pointer; }
+        .btn-start { background: var(--primary); color: #000; }
+        .btn-stop { background: #ff4444; color: #fff; }
 
-        .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #000; display: flex; border-top: 1px solid #222; align-items: center; padding-bottom: env(safe-area-inset-bottom); z-index: 999; }
-        .tab-btn { flex: 1; background: none; border: none; color: #444; font-size: 13px; font-weight: 900; }
+        .tab-bar { position: fixed; bottom: 0; width: 100%; height: 75px; background: #000; display: flex; border-top: 1px solid #222; padding-bottom: env(safe-area-inset-bottom); }
+        .tab-btn { flex: 1; background: none; border: none; color: #444; font-weight: 900; font-size: 13px; }
         .tab-btn.active { color: var(--primary); }
+
+        #history-list { padding: 10px; display: none; }
+        .history-item { background: #121212; border-radius: 10px; padding: 15px; margin-bottom: 8px; border: 1px solid #222; }
+        #dimmer { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 10000; display: none; justify-content: center; align-items: center; font-weight: 900; color: #333; }
     </style>
 </head>
-<body> 
-    <div id="dimmer-overlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 99999; display: none; justify-content: center; align-items: center; color: #444; font-weight: 900;">TAP TO WAKE</div>
-    
-    <div id="map-area">
-        <div id="map-container"><div id="map"></div></div>
-        <div id="status" class="status-bar">GPS INITIALIZING...</div>
-    </div> 
+<body>
+    <div id="dimmer" onclick="toggleDim(false)">TAP TO WAKE</div>
 
-    <div id="detail-view">
-        <button class="close-detail" onclick="closeDetail()">CLOSE</button>
-        <div id="detail-map"></div>
-        <div id="detail-data"></div>
+    <div id="map-area">
+        <div id="map"></div>
     </div>
+    <div id="status" class="status-bar">GPS INITIALIZING...</div>
 
     <div id="run-view" class="main-content">
         <div class="dashboard">
             <div class="card card-main">
-                <div id="pause-status" class="auto-pause-label">AUTO PAUSED</div>
                 <div class="label" style="color:var(--primary)">PACE</div>
                 <div id="curPace" class="value-large">--'--"</div>
-                <button style="position:absolute; top:12px; right:12px; background:#111; border:1px solid #333; color:#555; font-size:9px; padding:5px 8px; border-radius:5px; font-weight:900;" onclick="toggleDim(true)">DIM</button>
+                <div style="position:absolute; top:10px; right:15px; background:#111; color:#444; font-size:9px; padding:4px 8px; border-radius:5px;" onclick="toggleDim(true)">DIM</div>
             </div>
             <div class="card"><div class="label">DIST</div><div class="value"><span id="dist">0.00</span><span style="font-size:10px; color:var(--primary)"> KM</span></div></div>
             <div class="card"><div class="label">TIME</div><div id="time" class="value">00:00</div></div>
             <div class="card"><div class="label">AVG</div><div id="avgPace" class="value">--'--"</div></div>
             <div class="card"><div class="label">CADENCE</div><div id="cadence" class="value">0</div></div>
-            <div class="card"><div class="label">GCT</div><div class="value"><span id="gct">--</span><span style="font-size:10px;"> MS</span></div></div>
-            <div class="card"><div class="label">FLIGHT</div><div class="value"><span id="flight">--</span><span style="font-size:10px;"> %</span></div></div>
+            <div class="card"><div class="label">GCT</div><div class="value">--<span style="font-size:10px;"> MS</span></div></div>
+            <div class="card"><div class="label">FLIGHT</div><div class="value">--<span style="font-size:10px;"> %</span></div></div>
         </div>
         <div class="controls">
-            <button id="btn-start" class="btn-act" style="background:var(--primary); color:#000;" onclick="onStart()">START RUNNING</button>
-            <button id="btn-stop" class="btn-act" style="background:var(--danger); color:#fff; display:none;" onclick="onStop()">STOP</button>
-            <div id="after-stop" style="display:none; gap:10px; width:100%;">
-                <button id="btn-resume" class="btn-act" style="flex:1; background:var(--primary); color:#000;" onclick="onResume()">RESUME</button>
-                <button id="btn-finish" class="btn-act" style="flex:1; background:var(--danger); color:#fff;" onclick="onFinish()">FINISH</button>
-            </div>
+            <button id="btn-main" class="btn btn-start" onclick="toggleRun()">START RUNNING</button>
         </div>
     </div>
 
-    <div id="history-view" class="main-content" style="display:none;">
-        <div class="history-nav">
-            <button id="sub-tab-list" class="sub-btn active" onclick="showSubTab('list')">LIST</button>
-            <button id="sub-tab-total" class="sub-btn" onclick="showSubTab('total')">TOTAL</button>
-        </div>
-        <div id="sub-page-list" class="sub-page" style="display: flex;"><div id="history-list"></div></div>
-        <div id="sub-page-total" class="sub-page"><div id="total-stats-container" style="padding:20px;"></div></div>
-    </div> 
+    <div id="history-list" class="main-content"></div>
 
     <div class="tab-bar">
         <button id="tab-run" class="tab-btn active" onclick="showTab('run')">RUN</button>
         <button id="tab-history" class="tab-btn" onclick="showTab('history')">HISTORY</button>
-    </div> 
+    </div>
 
 <script>
-// v28.28 기반의 전역 변수 구조
-let map, marker, polyline, timer, isRunning = false, isPaused = false, isAutoPaused = false, seconds = 0;
-let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0, currentSpeedKmh = 0, pathCoords = [];
-let detailMap = null, detailPolyline = null;
+let map, marker, polyline, timer, isRunning = false, seconds = 0;
+let totalDist = 0, lastPos = null, pathCoords = [], steps = 0, lastStepTime = 0;
 
+// [원점 회귀] v28.28의 순수 초기화 로직
 function initMap() {
-    // 28.28의 기본 초기화 방식 유지
     map = L.map('map', {zoomControl: false, attributionControl: false}).setView([33.7701, -117.9143], 17);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-    marker = L.marker([0,0], {icon: L.divIcon({className:'my-location', html:'<div style="background:#007bff; border:2px solid #fff; border-radius:50%; width:12px; height:12px;"></div>', iconSize:[12,12]})}).addTo(map);
+    marker = L.marker([0,0], {icon: L.divIcon({className:'loc', html:'<div style="background:#007bff; border:2px solid #fff; border-radius:50%; width:12px; height:12px;"></div>', iconSize:[12,12]})}).addTo(map);
     polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(map);
-    
+
     if ("geolocation" in navigator) {
-        navigator.geolocation.watchPosition(updatePosition, (e) => {
-            document.getElementById('status').textContent = "GPS ERROR: " + e.message;
-        }, {enableHighAccuracy: true, maximumAge: 0, timeout: 5000});
+        navigator.geolocation.watchPosition(p => {
+            const pos = [p.coords.latitude, p.coords.longitude];
+            marker.setLatLng(pos);
+            document.getElementById('status').textContent = "GPS ACTIVE";
+            document.getElementById('status').style.color = "#00ff88";
+            
+            if (isRunning) {
+                if (lastPos) {
+                    let d = getDist(lastPos, pos);
+                    if (d > 0.002) { 
+                        totalDist += d;
+                        document.getElementById('dist').textContent = totalDist.toFixed(2);
+                        pathCoords.push(pos);
+                        polyline.setLatLngs(pathCoords);
+                        lastPos = pos;
+                    }
+                } else { lastPos = pos; }
+                let speed = p.coords.speed * 3.6 || 0;
+                document.getElementById('curPace').textContent = formatPace(speed);
+            } else {
+                map.panTo(pos);
+            }
+        }, null, {enableHighAccuracy: true});
     }
     window.addEventListener('devicemotion', handleMotion);
-    // 지도가 깨지는 현상 방지
-    setTimeout(() => { map.invalidateSize(); }, 400);
+    setTimeout(() => map.invalidateSize(), 500);
 }
 
-function updatePosition(p) {
-    const pos = [p.coords.latitude, p.coords.longitude];
-    currentSpeedKmh = (p.coords.speed || 0) * 3.6;
-    marker.setLatLng(pos);
-    
-    const statusEl = document.getElementById('status');
-    statusEl.textContent = isRunning ? "RECORDING ACTIVE" : "GPS ACTIVE";
-    statusEl.style.color = "#00ff88";
+function getDist(p1, p2) {
+    const R = 6371;
+    const dLat = (p2[0]-p1[0])*Math.PI/180;
+    const dLon = (p2[1]-p1[1])*Math.PI/180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(p1[0]*Math.PI/180)*Math.cos(p2[0]*Math.PI/180)*Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
 
-    if (isRunning && !isPaused && !isAutoPaused) {
-        if (lastPos) {
-            let d = (function(p1,p2){
-                const R=6371; const dLat=(p2[0]-p1[0])*Math.PI/180; const dLon=(p2[1]-p1[1])*Math.PI/180;
-                const a=Math.sin(dLat/2)**2 + Math.cos(p1[0]*Math.PI/180)*Math.cos(p2[0]*Math.PI/180)*Math.sin(dLon/2)**2;
-                return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
-            })(lastPos, pos);
-            if (d > 0.001) { 
-                totalDist += d; 
-                document.getElementById('dist').textContent = totalDist.toFixed(2); 
-                lastPos = pos; pathCoords.push(pos); polyline.setLatLngs(pathCoords); 
+function toggleRun() {
+    const btn = document.getElementById('btn-main');
+    if (!isRunning) {
+        isRunning = true; seconds = 0; totalDist = 0; steps = 0; pathCoords = [];
+        btn.textContent = "STOP"; btn.className = "btn btn-stop";
+        timer = setInterval(() => {
+            seconds++;
+            document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
+            if (totalDist > 0) {
+                let avgKmh = totalDist / (seconds / 3600);
+                document.getElementById('avgPace').textContent = formatPace(avgKmh);
             }
-        } else { lastPos = pos; }
-        document.getElementById('curPace').textContent = formatPace(currentSpeedKmh);
-    } else if (!isRunning) { 
-        map.panTo(pos); 
+        }, 1000);
+    } else {
+        isRunning = false;
+        clearInterval(timer);
+        saveRecord();
+        location.reload();
     }
 }
 
 function handleMotion(e) {
-    if (!isRunning || isPaused || isAutoPaused) return;
+    if (!isRunning) return;
     let acc = e.accelerationIncludingGravity;
-    if (!acc || acc.x === null) return;
     let force = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-    if (force > 12 && (Date.now() - lastStepTime) > 220) {
+    if (force > 12 && (Date.now() - lastStepTime) > 250) {
         steps++; lastStepTime = Date.now();
-        document.getElementById('cadence').textContent = Math.round((steps/(seconds||1))*60);
+        document.getElementById('cadence').textContent = Math.round((steps/seconds)*60) || 0;
     }
 }
 
-function onStart() {
-    isRunning = true; isPaused = false; totalDist = 0; seconds = 0; steps = 0; pathCoords = [];
-    document.getElementById('btn-start').style.display = 'none'; 
-    document.getElementById('btn-stop').style.display = 'block';
-    timer = setInterval(() => { 
-        if(!isPaused && !isAutoPaused) { 
-            seconds++; 
-            document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; 
-            if (totalDist > 0) {
-                let avgKmh = (totalDist / (seconds / 3600));
-                document.getElementById('avgPace').textContent = formatPace(avgKmh);
-            }
-        } 
-    }, 1000);
-}
-
-function onStop() { isPaused = true; document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; }
-function onResume() { isPaused = false; document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; }
-function onFinish() {
-    const record = {
-        id: Date.now(), date: new Date().toLocaleString(),
+function saveRecord() {
+    const data = {
+        date: new Date().toLocaleString(),
         dist: document.getElementById('dist').textContent,
         time: document.getElementById('time').textContent,
-        pace: document.getElementById('avgPace').textContent,
-        cadence: document.getElementById('cadence').textContent,
-        gct: document.getElementById('gct').textContent,
-        flight: document.getElementById('flight').textContent,
-        path: [...pathCoords] 
+        pace: document.getElementById('avgPace').textContent
     };
     let h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
-    h.unshift(record); localStorage.setItem('oppaRunHistory', JSON.stringify(h));
-    location.reload();
+    h.unshift(data);
+    localStorage.setItem('oppaRunHistory', JSON.stringify(h));
 }
 
-function openDetail(id, mode = 'route') {
-    const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
-    const record = h.find(r => r.id === id);
-    if (!record) return;
-
-    document.getElementById('detail-view').style.display = 'flex';
-    const mapDom = document.getElementById('detail-map');
-    const dataDom = document.getElementById('detail-data');
-
-    if (mode === 'diag') {
-        // [진단: 빈 페이지]
-        mapDom.style.display = 'none';
-        dataDom.style.height = '100%';
-        dataDom.innerHTML = `
-            <div style="color:var(--primary); font-size:18px; font-weight:900; margin-bottom:20px; border-bottom:1px solid #333; padding-bottom:10px;">DIAGNOSIS</div>
-            <div style="text-align:center; padding:100px 20px; color:#444;">진단 데이터를 준비 중입니다.</div>
-        `;
+function showTab(tab) {
+    document.getElementById('run-view').style.display = tab === 'run' ? 'flex' : 'none';
+    document.getElementById('history-list').style.display = tab === 'history' ? 'block' : 'none';
+    document.getElementById('map-area').style.display = tab === 'run' ? 'block' : 'none';
+    document.getElementById('tab-run').className = 'tab-btn' + (tab==='run'?' active':'');
+    document.getElementById('tab-history').className = 'tab-btn' + (tab==='history'?' active':'');
+    if (tab === 'history') {
+        const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
+        document.getElementById('history-list').innerHTML = h.map(r => `
+            <div class="history-item">
+                <div style="color:var(--primary); font-size:11px; margin-bottom:5px; font-weight:900;">${r.date}</div>
+                <div style="font-size:20px; font-weight:900;">${r.dist} | ${r.time} | ${r.pace}</div>
+            </div>`).join('');
     } else {
-        // [루트: 28.28 방식 복구]
-        mapDom.style.display = 'block';
-        dataDom.style.height = '50%';
-        if (detailMap) detailMap.remove();
-        detailMap = L.map('detail-map', {zoomControl: false, attributionControl: false});
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(detailMap);
-
-        if (record.path && record.path.length > 0) {
-            L.polyline(record.path, {color: '#007bff', weight: 5}).addTo(detailMap);
-            detailMap.fitBounds(L.polyline(record.path).getBounds());
-        }
-        dataDom.innerHTML = `
-            <div style="color:var(--primary); font-size:18px; font-weight:900; margin-bottom:20px; border-bottom:1px solid #333; padding-bottom:10px;">RUN SUMMARY</div>
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
-                <div class="card"><div class="label">DISTANCE</div><div class="value">${record.dist} KM</div></div>
-                <div class="card"><div class="label">TIME</div><div class="value">${record.time}</div></div>
-                <div class="card"><div class="label">PACE</div><div class="value">${record.pace}</div></div>
-                <div class="card"><div class="label">CADENCE</div><div class="value">${record.cadence}</div></div>
-            </div>
-        `;
+        setTimeout(() => map.invalidateSize(), 200);
     }
 }
 
-function closeDetail() { document.getElementById('detail-view').style.display = 'none'; }
-function showTab(tab) {
-    document.getElementById('run-view').style.display = (tab === 'run' ? 'flex' : 'none');
-    document.getElementById('map-area').style.display = (tab === 'run' ? 'block' : 'none');
-    document.getElementById('history-view').style.display = (tab === 'history' ? 'flex' : 'none');
-    if (tab === 'history') updateHistoryList();
-    setTimeout(() => { map.invalidateSize(); }, 300);
+function formatPace(kmh) {
+    if (kmh < 0.5) return "--'--\"";
+    let s = 3600 / kmh;
+    return `${Math.floor(s/60)}'${String(Math.floor(s%60)).padStart(2,'0')}"`;
 }
-function showSubTab(sub) {
-    document.getElementById('sub-page-list').style.display = (sub === 'list' ? 'flex' : 'none');
-    document.getElementById('sub-page-total').style.display = (sub === 'total' ? 'flex' : 'none');
-    document.querySelectorAll('.sub-btn').forEach(b => b.classList.toggle('active', b.id.includes(sub)));
-}
-function updateHistoryList() {
-    const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
-    document.getElementById('history-list').innerHTML = h.map(r => `
-        <div class="history-item">
-            <div class="h-date">${r.date}</div>
-            <div class="h-actions">
-                <button class="btn-h-sub" onclick="openDetail(${r.id}, 'route')">ROUTE</button>
-                <button class="btn-h-sub" onclick="openDetail(${r.id}, 'diag')">DIAG</button>
-            </div>
-            <div style="font-size:24px; font-weight:900;">${r.dist}KM <span style="color:var(--primary); font-size:18px;">${r.time}</span></div>
-        </div>`).join('');
-}
-function toggleDim(show) { document.getElementById('dimmer-overlay').style.display = show ? 'flex' : 'none'; }
-document.getElementById('dimmer-overlay').onclick = () => toggleDim(false);
-function formatPace(kmh) { if (!kmh || kmh < 0.5) return "--'--\""; let s = 3600 / kmh; return `${Math.floor(s/60)}'${String(Math.floor(s%60)).padStart(2,'0')}"`; } 
+
+function toggleDim(show) { document.getElementById('dimmer').style.display = show ? 'flex' : 'none'; }
+
 window.onload = initMap;
 </script>
 </body>
