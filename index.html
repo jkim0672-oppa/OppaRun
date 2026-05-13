@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>OppaRun Pro v30 (Modular Core)</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OppaRun Pro v31 (Stable Architecture)</title>
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -14,23 +15,40 @@
     --bg:#000;
     --card:#121212;
     --text:#fff;
-    --dim:#777;
+    --dim:#888;
     --danger:#ff4444;
     --warning:#ffcc00;
 }
 
-*{box-sizing:border-box;}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+
 body{
     margin:0;
     background:var(--bg);
     color:var(--text);
     font-family:-apple-system,system-ui;
+    height:100vh;
     overflow:hidden;
+    display:flex;
+    flex-direction:column;
 }
 
-#map{height:18vh;min-height:120px;}
-.status{padding:6px;text-align:center;font-size:11px;color:var(--warning);}
+/* MAP */
+#map-area{flex-shrink:0;}
+#map-container{height:15vh;min-height:110px;border-bottom:2px solid #222;}
+#map{height:100%;}
 
+/* STATUS */
+.status-bar{
+    text-align:center;
+    font-size:11px;
+    padding:8px;
+    font-weight:900;
+    color:var(--warning);
+    background:#0a0a0a;
+}
+
+/* DASHBOARD */
 .dashboard{
     display:grid;
     grid-template-columns:repeat(3,1fr);
@@ -41,104 +59,201 @@ body{
 .card{
     background:var(--card);
     border-radius:12px;
-    padding:12px;
-    text-align:center;
     border:1px solid #222;
+    padding:10px;
+    text-align:center;
 }
 
-.main{
+.card-main{
     grid-column:span 3;
+    height:85px;
+    border:2px solid var(--primary);
+    position:relative;
+}
+
+.value-large{
     font-size:40px;
-    color:var(--primary);
     font-weight:900;
+    color:var(--primary);
+}
+
+.label{font-size:10px;color:var(--dim);font-weight:900;}
+
+/* CONTROLS */
+.controls{
+    padding:10px;
+    display:flex;
+    gap:10px;
 }
 
 .btn{
-    width:100%;
-    height:60px;
+    flex:1;
+    height:55px;
     border:none;
-    font-weight:900;
+    border-radius:30px;
     font-size:18px;
+    font-weight:900;
 }
 
 #start{background:var(--primary);}
 #stop{background:var(--danger);display:none;}
+
+/* TABS */
+.tab-bar{
+    position:fixed;
+    bottom:0;
+    width:100%;
+    height:70px;
+    display:flex;
+    background:#000;
+    border-top:1px solid #222;
+}
+
+.tab-btn{
+    flex:1;
+    background:none;
+    border:none;
+    color:#444;
+    font-weight:900;
+}
+
+.tab-btn.active{color:var(--primary);}
+
+/* SUB PAGES */
+.main-content{flex:1;overflow:hidden;display:none;flex-direction:column;}
+.main-content.active{display:flex;}
+
+.sub-page{flex:1;overflow-y:auto;padding-bottom:90px;display:none;}
+.sub-page.active{display:block;}
+
+.history-item{
+    margin:10px;
+    padding:12px;
+    background:#111;
+    border-radius:12px;
+    border:1px solid #333;
+}
+
+.h-actions{
+    display:flex;
+    gap:6px;
+    margin-top:10px;
+}
+
+.small-btn{
+    flex:1;
+    font-size:10px;
+    padding:6px;
+    background:#1a1a1a;
+    border:1px solid #333;
+    color:var(--primary);
+    font-weight:900;
+}
+
+/* OVERLAYS */
+#detail-view,#diag-view{
+    position:fixed;
+    top:0;left:0;
+    width:100%;height:100%;
+    background:#000;
+    display:none;
+    flex-direction:column;
+    z-index:9999;
+}
+
+.close{
+    position:absolute;
+    top:15px;
+    right:15px;
+    z-index:10000;
+    background:var(--primary);
+    border:none;
+    padding:10px 15px;
+    font-weight:900;
+}
 </style>
 </head>
 
 <body>
 
-<div id="map"></div>
-<div id="status">INIT</div>
+<!-- MAP -->
+<div id="map-area">
+    <div id="map-container"><div id="map"></div></div>
+    <div class="status-bar" id="status">INIT</div>
+</div>
 
-<div class="dashboard">
+<!-- DETAIL -->
+<div id="detail-view">
+    <button class="close" onclick="closeDetail()">CLOSE</button>
+    <div id="detail-map" style="height:50%"></div>
+    <div id="detail-data"></div>
+</div>
 
-    <div class="card main" id="pace">--'--"</div>
+<!-- DIAG -->
+<div id="diag-view">
+    <button class="close" onclick="closeDiag()">CLOSE</button>
+    <div id="diag-content"></div>
+</div>
 
-    <div class="card">
-        <div>DIST</div>
-        <div id="dist">0.00</div>
+<!-- RUN VIEW -->
+<div id="run-view" class="main-content active">
+
+    <div class="dashboard">
+
+        <div class="card card-main">
+            <div class="label">PACE</div>
+            <div id="pace" class="value-large">--'--"</div>
+        </div>
+
+        <div class="card"><div class="label">DIST</div><div id="dist">0.00</div></div>
+        <div class="card"><div class="label">TIME</div><div id="time">00:00</div></div>
+        <div class="card"><div class="label">AVG</div><div id="avg">--</div></div>
+        <div class="card"><div class="label">CAD</div><div id="cad">0</div></div>
+        <div class="card"><div class="label">GCT</div><div id="gct">--</div></div>
+        <div class="card"><div class="label">FLIGHT</div><div id="flt">--</div></div>
+
     </div>
 
-    <div class="card">
-        <div>TIME</div>
-        <div id="time">00:00</div>
-    </div>
-
-    <div class="card">
-        <div>CAD</div>
-        <div id="cadence">0</div>
-    </div>
-
-    <div class="card">
-        <div>EFF</div>
-        <div id="eff">--</div>
-    </div>
-
-    <div class="card">
-        <div>BAL</div>
-        <div id="bal">--</div>
+    <div class="controls">
+        <button id="start" class="btn" onclick="run.start()">START</button>
+        <button id="stop" class="btn" onclick="run.stop()">STOP</button>
     </div>
 
 </div>
 
-<div>
-    <button id="start" class="btn" onclick="run.start()">START</button>
-    <button id="stop" class="btn" onclick="run.stop()">STOP</button>
+<!-- HISTORY -->
+<div id="history-view" class="main-content">
+
+    <div id="history-list" class="sub-page active"></div>
+
+</div>
+
+<!-- TAB -->
+<div class="tab-bar">
+    <button class="tab-btn active" onclick="ui.tab('run')">RUN</button>
+    <button class="tab-btn" onclick="ui.tab('history')">HISTORY</button>
 </div>
 
 <script>
 
-/* =========================
-   STATE (ONLY SOURCE OF TRUTH)
-========================= */
+/* ================= STATE ================= */
 
 const state = {
-
     running:false,
-
     time:0,
-    distance:0,
-
+    dist:0,
     speed:0,
-
     steps:0,
-    stepTimes:[],
-
-    path:[],
-
+    stepT:[],
     lastPos:null,
-
     smoothLat:null,
     smoothLng:null,
-
+    path:[],
     autoPause:false,
-    lowSpeedAt:null
+    lowSpeed:null
 };
 
-/* =========================
-   GPS MODULE
-========================= */
+/* ================= GPS ================= */
 
 const gps = {
 
@@ -148,9 +263,8 @@ const gps = {
 
     init(){
 
-        this.map = L.map('map',{
-            zoomControl:false
-        }).setView([33.77,-117.91],17);
+        this.map = L.map('map',{zoomControl:false})
+            .setView([33.77,-117.91],16);
 
         L.tileLayer(
             'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
@@ -164,7 +278,7 @@ const gps = {
 
         navigator.geolocation.watchPosition(
             gps.update,
-            ()=>document.getElementById('status').textContent="GPS ERROR",
+            e=>status('GPS ERROR'),
             {enableHighAccuracy:true}
         );
     },
@@ -174,193 +288,161 @@ const gps = {
         let lat = p.coords.latitude;
         let lng = p.coords.longitude;
 
-        if(state.smoothLat === null){
-
-            state.smoothLat = lat;
-            state.smoothLng = lng;
-
+        if(!state.smoothLat){
+            state.smoothLat=lat;
+            state.smoothLng=lng;
         }else{
-
-            state.smoothLat =
-                state.smoothLat * 0.7 + lat * 0.3;
-
-            state.smoothLng =
-                state.smoothLng * 0.7 + lng * 0.3;
+            state.smoothLat=state.smoothLat*0.7+lat*0.3;
+            state.smoothLng=state.smoothLng*0.7+lng*0.3;
         }
 
-        const pos = [state.smoothLat,state.smoothLng];
+        let pos=[state.smoothLat,state.smoothLng];
 
         gps.marker.setLatLng(pos);
 
-        state.speed = (p.coords.speed||0)*3.6;
+        state.speed=(p.coords.speed||0)*3.6;
 
         if(!state.running) return;
 
-        if(p.coords.accuracy > 20) return;
+        if(p.coords.accuracy>20) return;
 
         if(state.lastPos){
 
-            let d = util.distance(state.lastPos,pos);
+            let d=util.dist(state.lastPos,pos);
 
-            // auto pause
-            if(state.speed < 2 && d < 0.003){
-
-                if(!state.lowSpeedAt)
-                    state.lowSpeedAt = Date.now();
-
-                if(Date.now()-state.lowSpeedAt > 1500)
-                    state.autoPause = true;
-
+            if(state.speed<2 && d<0.003){
+                if(!state.lowSpeed) state.lowSpeed=Date.now();
+                if(Date.now()-state.lowSpeed>1500)
+                    state.autoPause=true;
             }else{
-                state.lowSpeedAt = null;
-                state.autoPause = false;
+                state.lowSpeed=null;
+                state.autoPause=false;
             }
 
-            if(!state.autoPause && d > 0.001 && d < 0.05){
+            if(!state.autoPause && d>0.001 && d<0.05){
 
-                state.distance += d;
-
+                state.dist+=d;
                 state.path.push(pos);
-
                 gps.line.setLatLngs(state.path);
             }
         }
 
-        state.lastPos = pos;
+        state.lastPos=pos;
 
         ui.render();
     }
 };
 
-/* =========================
-   MOTION MODULE
-========================= */
+/* ================= MOTION ================= */
 
-const motion = {
+window.addEventListener("devicemotion",e=>{
 
-    init(){
-        window.addEventListener(
-            "devicemotion",
-            motion.update
-        );
-    },
+    if(!state.running||state.autoPause) return;
 
-    update(e){
+    let a=e.accelerationIncludingGravity;
+    if(!a) return;
 
-        if(!state.running || state.autoPause) return;
+    let f=Math.sqrt(a.x*a.x+a.y*a.y+a.z*a.z);
 
-        const a = e.accelerationIncludingGravity;
-        if(!a) return;
+    let now=Date.now();
 
-        let force = Math.sqrt(a.x*a.x + a.y*a.y + a.z*a.z);
+    if(f>12){
 
-        let now = Date.now();
+        state.steps++;
 
-        if(force > 12){
+        state.stepT.push(now);
 
-            state.steps++;
-
-            state.stepTimes.push(now);
-
-            state.stepTimes =
-                state.stepTimes.filter(
-                    t => now - t < 10000
-                );
-        }
+        state.stepT=state.stepT.filter(t=>now-t<10000);
     }
-};
+});
 
-/* =========================
-   ANALYSIS MODULE
-========================= */
+/* ================= ANALYSIS ================= */
 
-const analysis = {
+const analysis={
 
     cadence(){
-
-        return Math.round(state.stepTimes.length * 6);
+        return Math.round(state.stepT.length*6);
     },
 
-    efficiency(cad){
-
-        if(cad >= 178) return "ELITE";
-        if(cad >= 170) return "GOOD";
-        if(cad >= 160) return "MID";
-        return "LOW";
+    gct(){
+        let sp=state.speed;
+        return sp>0?Math.floor(450-sp*10):0;
     },
 
-    balance(speed){
-
-        if(speed >= 10) return "FLOW";
-        if(speed >= 7) return "STABLE";
-        return "SOFT";
+    flight(){
+        let sp=state.speed;
+        return sp>2?Math.floor(5+sp*2):0;
     }
 };
 
-/* =========================
-   UI MODULE
-========================= */
+/* ================= UI ================= */
 
-const ui = {
+const ui={
+
+    tab(t){
+
+        document.querySelectorAll('.main-content')
+            .forEach(v=>v.classList.remove('active'));
+
+        document.getElementById(t+'-view')
+            .classList.add('active');
+
+        document.querySelectorAll('.tab-btn')
+            .forEach(b=>b.classList.remove('active'));
+
+        event.target.classList.add('active');
+
+        if(t==='history') renderHistory();
+    },
 
     render(){
 
-        document.getElementById("dist")
-            .textContent = state.distance.toFixed(2);
+        pace.textContent=util.pace(state.speed);
+        dist.textContent=state.dist.toFixed(2);
 
-        document.getElementById("pace")
-            .textContent = util.pace(state.speed);
+        let c=analysis.cadence();
 
-        document.getElementById("cadence")
-            .textContent = analysis.cadence();
+        cad.textContent=c;
+        gct.textContent=analysis.gct();
+        flt.textContent=analysis.flight();
 
-        document.getElementById("eff")
-            .textContent =
-            analysis.efficiency(analysis.cadence());
+        avg.textContent=util.pace(
+            state.dist/(state.time/3600||1)
+        );
 
-        document.getElementById("bal")
-            .textContent =
-            analysis.balance(state.speed);
-
-        document.getElementById("status")
-            .textContent =
-            state.autoPause ? "AUTO PAUSED" : "RUNNING";
+        status(state.autoPause?"AUTO PAUSE":"RUN");
     }
 };
 
-/* =========================
-   RUN CONTROLLER
-========================= */
+/* ================= RUN ================= */
 
-const run = {
+const run={
 
     timer:null,
 
     start(){
 
-        state.running = true;
+        state.running=true;
 
-        state.time = 0;
-        state.distance = 0;
-        state.steps = 0;
+        state.time=0;
+        state.dist=0;
+        state.steps=0;
+        state.stepT=[];
+        state.path=[];
 
-        state.path = [];
-        state.stepTimes = [];
+        start.style.display="none";
+        stop.style.display="block";
 
-        document.getElementById("start").style.display="none";
-        document.getElementById("stop").style.display="block";
-
-        this.timer = setInterval(()=>{
+        this.timer=setInterval(()=>{
 
             if(!state.autoPause){
 
                 state.time++;
 
-                let m = String(Math.floor(state.time/60)).padStart(2,'0');
-                let s = String(state.time%60).padStart(2,'0');
+                let m=String(Math.floor(state.time/60)).padStart(2,'0');
+                let s=String(state.time%60).padStart(2,'0');
 
-                document.getElementById("time")
-                    .textContent = `${m}:${s}`;
+                time.textContent=`${m}:${s}`;
             }
 
         },1000);
@@ -370,56 +452,111 @@ const run = {
 
         clearInterval(this.timer);
 
-        state.running = false;
+        state.running=false;
 
-        alert(
-            "DONE\n" +
-            state.distance.toFixed(2) + " KM"
-        );
+        save();
 
-        document.getElementById("start").style.display="block";
-        document.getElementById("stop").style.display="none";
+        start.style.display="block";
+        stop.style.display="none";
     }
 };
 
-/* =========================
-   UTIL
-========================= */
+/* ================= STORAGE ================= */
 
-const util = {
+function save(){
 
-    distance(p1,p2){
+    let h=JSON.parse(localStorage.getItem("run")||"[]");
 
-        const R=6371;
+    h.unshift({
+        id:Date.now(),
+        dist:state.dist.toFixed(2),
+        time:time.textContent,
+        cad:analysis.cadence()
+    });
 
-        let dLat=(p2[0]-p1[0])*Math.PI/180;
-        let dLon=(p2[1]-p1[1])*Math.PI/180;
+    localStorage.setItem("run",JSON.stringify(h));
 
-        let a =
-            Math.sin(dLat/2)**2 +
-            Math.cos(p1[0]*Math.PI/180) *
-            Math.cos(p2[0]*Math.PI/180) *
-            Math.sin(dLon/2)**2;
+    renderHistory();
+}
 
-        return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+function renderHistory(){
+
+    let h=JSON.parse(localStorage.getItem("run")||"[]");
+
+    historyList.innerHTML=h.map(r=>`
+        <div class="history-item">
+            <b>${r.dist} KM</b> ${r.time}
+            <div class="h-actions">
+                <button class="small-btn" onclick="openDiag(${r.id})">DIAG</button>
+                <button class="small-btn" onclick="openDetail(${r.id})">ROUTE</button>
+            </div>
+        </div>
+    `).join("");
+}
+
+/* ================= DETAIL ================= */
+
+function openDetail(id){
+    detailView.style.display="flex";
+}
+
+function closeDetail(){
+    detailView.style.display="none";
+}
+
+/* ================= DIAG ================= */
+
+function openDiag(id){
+    diagView.style.display="flex";
+
+    diagContent.innerHTML=`
+        <div style="padding:20px">
+            <h2 style="color:#00ff88">RUN ANALYSIS</h2>
+            <p>Cadence: ${analysis.cadence()}</p>
+        </div>
+    `;
+}
+
+function closeDiag(){
+    diagView.style.display="none";
+}
+
+/* ================= UTIL ================= */
+
+const util={
+
+    dist(a,b){
+
+        let R=6371;
+
+        let dLat=(b[0]-a[0])*Math.PI/180;
+        let dLon=(b[1]-a[1])*Math.PI/180;
+
+        let x=Math.sin(dLat/2)**2+
+        Math.cos(a[0]*Math.PI/180)*
+        Math.cos(b[0]*Math.PI/180)*
+        Math.sin(dLon/2)**2;
+
+        return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
     },
 
     pace(kmh){
 
         if(!kmh||kmh<0.5) return "--'--\"";
 
-        let sec = 3600/kmh;
+        let s=3600/kmh;
 
-        return `${Math.floor(sec/60)}'${String(Math.floor(sec%60)).padStart(2,'0')}"`;
+        return `${Math.floor(s/60)}'${String(Math.floor(s%60)).padStart(2,'0')}"`;
     }
 };
 
-/* =========================
-   INIT
-========================= */
+/* ================= INIT ================= */
+
+function status(t){
+    document.getElementById("status").textContent=t;
+}
 
 gps.init();
-motion.init();
 
 </script>
 </body>
