@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.28 (Info Updated)</title>
+    <title>OppaRun Pro - v28.29 (AI Diagnosis Updated)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -63,8 +63,8 @@
             position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
             background: var(--bg); z-index: 10000; display: none; flex-direction: column; 
         }
-        #detail-map { height: 50%; width: 100%; border-bottom: 1px solid #222; }
-        #detail-data { height: 50%; width: 100%; padding: 20px; overflow-y: auto; }
+        #detail-map { height: 40%; width: 100%; border-bottom: 1px solid #222; }
+        #detail-data { height: 60%; width: 100%; padding: 20px; overflow-y: auto; }
         .close-detail { 
             position: absolute; top: 20px; right: 20px; z-index: 10001; 
             background: var(--primary); color: #000; border: none; 
@@ -147,7 +147,6 @@
         <div id="sub-page-list" class="sub-page" style="display: flex;"><div id="history-list"></div></div>
         <div id="sub-page-total" class="sub-page"><div id="total-stats-container" class="total-container"></div></div>
         
-        <!-- 이 부분만 요청하신 내용으로 교체했습니다 -->
         <div id="sub-page-info" class="sub-page">
             <div class="info-card">
                 <div class="info-title"><span>⏱️</span> CADENCE: 무릎을 보호하는 리듬</div>
@@ -174,7 +173,7 @@
                 </div>
             </div>
             <div style="text-align:center; padding:20px; color:#444; font-size:11px; font-weight:800;">
-                CORE MECHANISM GUIDE | VERSION 28.28
+                CORE MECHANISM GUIDE | VERSION 28.29
             </div>
         </div>
         
@@ -230,92 +229,44 @@ const translations = {
 };
 
 async function requestWakeLock() {
-    try {
-        if ('wakeLock' in navigator) {
-            wakeLock = await navigator.wakeLock.request('screen');
-        }
-    } catch (err) {
-        console.error(`${err.name}, ${err.message}`);
-    }
+    try { if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); } } catch (err) {}
 }
 
 function changeLanguage(lang) {
     const t = translations[lang];
-    document.getElementById('label-pace').textContent = t.pace;
-    document.getElementById('label-dist').textContent = t.dist;
-    document.getElementById('label-time').textContent = t.time;
-    document.getElementById('label-avg').textContent = t.avg;
-    document.getElementById('label-cadence').textContent = t.cadence;
-    document.getElementById('label-gct').textContent = t.gct;
-    document.getElementById('label-flight').textContent = t.flight;
-    document.getElementById('btn-start').textContent = t.start;
-    document.getElementById('btn-stop').textContent = t.stop;
-    document.getElementById('btn-resume').textContent = t.resume;
-    document.getElementById('btn-finish').textContent = t.finish;
-    document.getElementById('tab-run').textContent = t.run;
-    document.getElementById('tab-history').textContent = t.history;
-    document.getElementById('sub-tab-list').textContent = t.list;
-    document.getElementById('sub-tab-total').textContent = t.total;
-    document.getElementById('sub-tab-info').textContent = t.info;
-    document.getElementById('sub-tab-settings').textContent = t.settings;
-    document.getElementById('label-select-lang').textContent = t.selLang;
-    document.getElementById('btn-clear-history').textContent = t.clear;
+    const ids = ['label-pace','label-dist','label-time','label-avg','label-cadence','label-gct','label-flight','btn-start','btn-stop','btn-resume','btn-finish','tab-run','tab-history','sub-tab-list','sub-tab-total','sub-tab-info','sub-tab-settings','label-select-lang','btn-clear-history'];
+    ids.forEach(id => { if(document.getElementById(id)) document.getElementById(id).textContent = t[id.replace('label-','').replace('btn-','').replace('tab-','').replace('sub-tab-','')]; });
     document.getElementById('current-lang-text').textContent = (lang === 'ko' ? "한국어 (KR)" : "English (US)");
     document.querySelector('.close-detail').textContent = t.close;
     localStorage.setItem('oppaRunLang', lang);
     if (document.getElementById('history-view').style.display === 'flex') updateHistoryList();
 }
 
-function toggleDropdown() {
-    const options = document.getElementById('dropdown-options');
-    options.style.display = (options.style.display === 'block' ? 'none' : 'block');
-}
-function selectLang(lang) {
-    changeLanguage(lang);
-    toggleDropdown();
-}
+function toggleDropdown() { const o = document.getElementById('dropdown-options'); o.style.display = (o.style.display === 'block' ? 'none' : 'block'); }
+function selectLang(l) { changeLanguage(l); toggleDropdown(); }
 
 function initMap() {
     map = L.map('map', {zoomControl: false, attributionControl: false}).setView([33.7701, -117.9143], 17);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
     marker = L.marker([0,0], {icon: L.divIcon({className:'my-location', html:'<div style="background:#007bff; border:2px solid #fff; border-radius:50%; width:12px; height:12px;"></div>', iconSize:[12,12]})}).addTo(map);
     polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(map);
-    
-    if ("geolocation" in navigator) {
-        navigator.geolocation.watchPosition(updatePosition, (e) => {
-            document.getElementById('status').textContent = "GPS ERROR: " + e.message;
-        }, {enableHighAccuracy: true, maximumAge: 0, timeout: 5000});
-    }
+    if ("geolocation" in navigator) { navigator.geolocation.watchPosition(updatePosition, (e) => { document.getElementById('status').textContent = "GPS ERROR: " + e.message; }, {enableHighAccuracy: true, maximumAge: 0, timeout: 5000}); }
     window.addEventListener('devicemotion', handleMotion);
-
-    const savedLang = localStorage.getItem('oppaRunLang') || 'en';
-    changeLanguage(savedLang);
+    changeLanguage(localStorage.getItem('oppaRunLang') || 'en');
 }
 
 function updatePosition(p) {
     const pos = [p.coords.latitude, p.coords.longitude];
     currentSpeedKmh = (p.coords.speed || 0) * 3.6;
     marker.setLatLng(pos);
-    document.getElementById('status').textContent = isRunning ? "RECORDING ACTIVE" : "GPS ACTIVE";
-    document.getElementById('status').style.color = "#00ff88";
-
     if (isRunning && !isPaused) {
         if (currentSpeedKmh < 2.0) { 
             if (!lowSpeedStartTime) lowSpeedStartTime = Date.now();
-            if ((Date.now() - lowSpeedStartTime) > 1000) { 
-                if (!isAutoPaused) {
-                    isAutoPaused = true;
-                    document.getElementById('pause-status').style.display = 'block';
-                }
-            }
+            if ((Date.now() - lowSpeedStartTime) > 1000 && !isAutoPaused) { isAutoPaused = true; document.getElementById('pause-status').style.display = 'block'; }
         } else { 
             lowSpeedStartTime = null;
-            if (isAutoPaused) {
-                isAutoPaused = false;
-                document.getElementById('pause-status').style.display = 'none';
-            }
+            if (isAutoPaused) { isAutoPaused = false; document.getElementById('pause-status').style.display = 'none'; }
         }
-
         if (!isAutoPaused && p.coords.accuracy < 50) {
             if (lastPos) {
                 let d = (function(p1,p2){
@@ -323,19 +274,10 @@ function updatePosition(p) {
                     const a=Math.sin(dLat/2)**2 + Math.cos(p1[0]*Math.PI/180)*Math.cos(p2[0]*Math.PI/180)*Math.sin(dLon/2)**2;
                     return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
                 })(lastPos, pos);
-                if (d > 0.001) { 
-                    totalDist += d; 
-                    document.getElementById('dist').textContent = totalDist.toFixed(2); 
-                    lastPos = pos; 
-                    pathCoords.push(pos); 
-                    polyline.setLatLngs(pathCoords); 
-                }
+                if (d > 0.001) { totalDist += d; document.getElementById('dist').textContent = totalDist.toFixed(2); lastPos = pos; pathCoords.push(pos); polyline.setLatLngs(pathCoords); }
             } else { lastPos = pos; }
             document.getElementById('curPace').textContent = formatPace(currentSpeedKmh);
-            if (totalDist > 0 && seconds > 0) {
-                let avgKmh = (totalDist / (seconds / 3600));
-                document.getElementById('avgPace').textContent = formatPace(avgKmh);
-            }
+            if (totalDist > 0 && seconds > 0) document.getElementById('avgPace').textContent = formatPace(totalDist / (seconds / 3600));
         }
     } else { map.panTo(pos); }
 }
@@ -346,216 +288,102 @@ function handleMotion(e) {
     if (!acc || acc.x === null) return;
     let force = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
     let now = Date.now();
-
     if (force > 12 && (now - lastStepTime) > 220) {
-        steps++; 
-        lastStepTime = now;
-        
-        let currentCadence = Math.round((steps/(seconds||1))*60);
-        let speed = currentSpeedKmh;
-        let currentGCT = speed > 0.5 ? Math.floor(450 - (speed * 10)) : 0;
-        let currentFlight = speed > 2.0 ? Math.floor(5 + (speed * 2.1)) : 0;
-
-        const cadElem = document.getElementById('cadence');
-        cadElem.textContent = currentCadence;
-        if (currentCadence >= 170) cadElem.style.color = "var(--primary)";
-        else if (currentCadence >= 160) cadElem.style.color = "var(--warning)";
-        else cadElem.style.color = "var(--danger)";
-
-        const gctElem = document.getElementById('gct');
-        if (currentGCT > 0) {
-            gctElem.textContent = currentGCT;
-            if (currentGCT <= 240) gctElem.style.color = "var(--primary)";
-            else if (currentGCT <= 280) gctElem.style.color = "var(--warning)";
-            else gctElem.style.color = "var(--danger)";
-        } else {
-            gctElem.textContent = "--";
-            gctElem.style.color = "var(--text-main)";
-        }
-
-        const flightElem = document.getElementById('flight');
-        if (currentFlight > 0) {
-            flightElem.textContent = currentFlight;
-            if (currentFlight >= 15) flightElem.style.color = "var(--primary)";
-            else if (currentFlight >= 8) flightElem.style.color = "var(--warning)";
-            else flightElem.style.color = "var(--danger)";
-        } else {
-            flightElem.textContent = "--";
-            flightElem.style.color = "var(--text-main)";
-        }
+        steps++; lastStepTime = now;
+        let cad = Math.round((steps/(seconds||1))*60);
+        let gct = currentSpeedKmh > 0.5 ? Math.floor(450 - (currentSpeedKmh * 10)) : 0;
+        let flt = currentSpeedKmh > 2.0 ? Math.floor(5 + (currentSpeedKmh * 2.1)) : 0;
+        document.getElementById('cadence').textContent = cad;
+        document.getElementById('cadence').style.color = cad >= 170 ? "var(--primary)" : (cad >= 160 ? "var(--warning)" : "var(--danger)");
+        document.getElementById('gct').textContent = gct || "--";
+        document.getElementById('flight').textContent = flt || "--";
     }
 }
 
-function onStart() {
-    requestWakeLock();
-    isRunning = true; isPaused = false; isAutoPaused = false;
-    totalDist = 0; seconds = 0; steps = 0; pathCoords = [];
-    lowSpeedStartTime = null;
-    document.getElementById('pause-status').style.display = 'none';
-    document.getElementById('btn-start').style.display = 'none'; 
-    document.getElementById('btn-stop').style.display = 'block';
-    timer = setInterval(() => { 
-        if(!isPaused && !isAutoPaused) { 
-            seconds++; 
-            document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; 
-            if (totalDist > 0) {
-                let avgKmh = (totalDist / (seconds / 3600));
-                document.getElementById('avgPace').textContent = formatPace(avgKmh);
-            }
-        } 
-    }, 1000);
-}
+function onStart() { requestWakeLock(); isRunning = true; isPaused = false; totalDist = 0; seconds = 0; steps = 0; pathCoords = []; document.getElementById('btn-start').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; timer = setInterval(() => { if(!isPaused && !isAutoPaused) { seconds++; document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; } }, 1000); }
 function onStop() { isPaused = true; document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; }
 function onResume() { isPaused = false; document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; }
+function onFinish() { if (wakeLock) wakeLock.release(); const r = { id: Date.now(), date: new Date().toLocaleString(), dist: document.getElementById('dist').textContent, time: document.getElementById('time').textContent, pace: document.getElementById('avgPace').textContent, cadence: document.getElementById('cadence').textContent, kcal: Math.round(totalDist * 65), gct: document.getElementById('gct').textContent, flight: document.getElementById('flight').textContent, path: pathCoords }; let h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]"); h.unshift(r); localStorage.setItem('oppaRunHistory', JSON.stringify(h)); location.reload(); }
 
-function onFinish() {
-    if (wakeLock !== null) {
-        wakeLock.release().then(() => { wakeLock = null; });
-    }
-    const record = {
-        id: Date.now(),
-        date: new Date().toLocaleString(),
-        dist: document.getElementById('dist').textContent,
-        time: document.getElementById('time').textContent,
-        pace: document.getElementById('avgPace').textContent || "--'--\"",
-        cadence: document.getElementById('cadence').textContent,
-        kcal: Math.round(totalDist * 65) || 0,
-        gct: document.getElementById('gct').textContent,
-        flight: document.getElementById('flight').textContent,
-        path: pathCoords 
-    };
-    let h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
-    h.unshift(record); localStorage.setItem('oppaRunHistory', JSON.stringify(h));
-    location.reload();
-}
-
+// --- UPDATED openDetail: Evaluation & Recommendation Logic ---
 function openDetail(id) {
     const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
-    const record = h.find(r => r.id === id);
-    if (!record) return;
+    const r = h.find(item => item.id === id);
+    if (!r) return;
 
     document.getElementById('detail-view').style.display = 'flex';
-
-    if (detailMap) { detailMap.remove(); }
+    if (detailMap) detailMap.remove();
     detailMap = L.map('detail-map', {zoomControl: false, attributionControl: false});
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(detailMap);
+    if (r.path && r.path.length > 0) { detailPolyline = L.polyline(r.path, {color: '#007bff', weight: 5}).addTo(detailMap); detailMap.fitBounds(detailPolyline.getBounds()); }
 
-    if (record.path && record.path.length > 0) {
-        detailPolyline = L.polyline(record.path, {color: '#007bff', weight: 5}).addTo(detailMap);
-        detailMap.fitBounds(detailPolyline.getBounds());
+    const cad = parseInt(r.cadence) || 0;
+    let evalStr = "", recoStr = "";
+    const isKo = localStorage.getItem('oppaRunLang') === 'ko';
+
+    if (cad >= 170) {
+        evalStr = isKo ? "✅ <span style='color:var(--primary)'>훌륭한 리듬입니다!</span> 이상적인 케이던스를 유지하여 무릎 부담을 최소화하셨습니다." : "✅ <span style='color:var(--primary)'>Excellent Rhythm!</span> You maintained an ideal cadence, minimizing knee impact.";
+        recoStr = isKo ? "지금의 리듬을 베이스로 삼고, 고관절과 대둔근의 개입을 높여 지면을 더 강하게 미는 연습을 해보세요." : "Keep this rhythm. Focus on engaging your hips and glutes more to push off the ground with more power.";
+    } else if (cad >= 160) {
+        evalStr = isKo ? "⚠️ <span style='color:var(--warning)'>리듬 보완 필요.</span> 보폭이 다소 넓어 지면 충격이 무릎으로 전달될 수 있는 수치입니다." : "⚠️ <span style='color:var(--warning)'>Improve Rhythm.</span> Your stride might be too long, causing impact to travel to your knees.";
+        recoStr = isKo ? "보폭을 줄이고 발 회전수를 높여 170 BPM 이상을 목표로 하세요. 짧고 가벼운 발걸음이 부상을 예방합니다." : "Shorten your stride and increase turnover to reach 170+ BPM. Light, quick steps prevent injuries.";
     } else {
-        detailMap.setView([33.7701, -117.9143], 15);
+        evalStr = isKo ? "🚨 <span style='color:var(--danger)'>오버스트라이드 경고!</span> 낮은 케이던스는 발이 몸보다 앞에서 착지하여 브레이크를 거는 주범입니다." : "🚨 <span style='color:var(--danger)'>Overstride Warning!</span> Low cadence often means landing too far in front, acting as a brake.";
+        recoStr = isKo ? "미드풋 착지와 롤링 드릴이 시급합니다. 발이 무게중심 바로 아래에 닿도록 신경 쓰며 제자리 뛰기부터 연습하세요." : "Midfoot strike and rolling drills are urgent. Focus on landing directly under your center of gravity.";
     }
 
     document.getElementById('detail-data').innerHTML = `
-        <div style="color:var(--primary); font-size:18px; font-weight:900; margin-bottom:20px; border-bottom:1px solid #333; padding-bottom:10px;">RUN DIAGNOSIS</div>
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
-            <div class="card"><div class="label">DISTANCE</div><div class="value">${record.dist} KM</div></div>
-            <div class="card"><div class="label">TIME</div><div class="value">${record.time}</div></div>
-            <div class="card"><div class="label">PACE</div><div class="value">${record.pace}</div></div>
-            <div class="card"><div class="label">CADENCE</div><div class="value">${record.cadence}</div></div>
-            <div class="card"><div class="label">GCT</div><div class="value">${record.gct} MS</div></div>
-            <div class="card"><div class="label">FLIGHT</div><div class="value">${record.flight}%</div></div>
+        <div style="color:var(--primary); font-size:18px; font-weight:900; margin-bottom:15px; border-bottom:1px solid #333; padding-bottom:10px;">RUN DIAGNOSIS</div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:20px;">
+            <div class="card" style="padding:8px 0;"><div class="label">PACE</div><div class="value" style="font-size:16px;">${r.pace}</div></div>
+            <div class="card" style="padding:8px 0;"><div class="label">CADENCE</div><div class="value" style="font-size:16px;">${r.cadence}</div></div>
         </div>
+        <div style="background:#1a1a1a; border-radius:12px; padding:15px; border:1px solid #333;">
+            <div style="font-size:12px; color:var(--primary); font-weight:900; margin-bottom:8px;">[${isKo ? '종합 평가' : 'EVALUATION'}]</div>
+            <div style="font-size:14px; line-height:1.5; color:#fff; font-weight:600; margin-bottom:15px;">${evalStr}</div>
+            <div style="font-size:12px; color:var(--primary); font-weight:900; margin-bottom:8px;">[${isKo ? '향후 권장사항' : 'RECOMMENDATION'}]</div>
+            <div style="font-size:14px; line-height:1.5; color:#ccc; font-weight:600;">${recoStr}</div>
+        </div>
+        <div style="margin-top:15px; font-size:10px; color:#444; text-align:center; font-weight:800;">OPPARUN INTELLIGENCE SYSTEM</div>
     `;
 }
 
-function closeDetail() {
-    document.getElementById('detail-view').style.display = 'none';
-}
-
-function showTab(tab) {
-    document.getElementById('run-view').style.display = (tab === 'run' ? 'flex' : 'none');
-    document.getElementById('map-area').style.display = (tab === 'run' ? 'block' : 'none');
-    document.getElementById('history-view').style.display = (tab === 'history' ? 'flex' : 'none');
-    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    document.getElementById('tab-' + tab).classList.add('active');
-    if(tab === 'history') updateHistoryList();
-}
-
-function showSubTab(sub) {
-    document.querySelectorAll('.sub-btn').forEach(b => b.classList.remove('active'));
-    document.getElementById('sub-tab-' + sub).classList.add('active');
-    document.querySelectorAll('.sub-page').forEach(p => p.style.display = 'none');
-    document.getElementById('sub-page-' + sub).style.display = 'flex';
-    if(sub === 'list') updateHistoryList();
-    if(sub === 'total') updateTotalStats();
-}
+function closeDetail() { document.getElementById('detail-view').style.display = 'none'; }
+function showTab(t) { document.getElementById('run-view').style.display = (t==='run'?'flex':'none'); document.getElementById('map-area').style.display = (t==='run'?'block':'none'); document.getElementById('history-view').style.display = (t==='history'?'flex':'none'); document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active')); document.getElementById('tab-'+t).classList.add('active'); if(t==='history') updateHistoryList(); }
+function showSubTab(s) { document.querySelectorAll('.sub-btn').forEach(b => b.classList.remove('active')); document.getElementById('sub-tab-'+s).classList.add('active'); document.querySelectorAll('.sub-page').forEach(p => p.style.display = 'none'); document.getElementById('sub-page-'+s).style.display = 'flex'; if(s==='list') updateHistoryList(); if(s==='total') updateTotalStats(); }
 
 function updateHistoryList() {
     const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
-    const lang = localStorage.getItem('oppaRunLang') || 'en';
-    const t = translations[lang];
+    const l = localStorage.getItem('oppaRunLang') || 'en';
     const listDiv = document.getElementById('history-list');
-    
-    if (h.length === 0) {
-        listDiv.innerHTML = '<div style="text-align:center; padding:50px; color:#444; font-weight:900;">NO RECORDS YET</div>';
-        return;
-    }
-
+    if (h.length === 0) { listDiv.innerHTML = '<div style="text-align:center; padding:50px; color:#444; font-weight:900;">NO RECORDS YET</div>'; return; }
     listDiv.innerHTML = h.map(r => `
         <div class="history-item">
             <div class="h-date">${r.date}</div>
             <div class="h-actions">
-                <button class="btn-h-sub" onclick="openDetail(${r.id})">${t.route}</button>
-                <button class="btn-h-sub" onclick="openDetail(${r.id})">${t.diag}</button>
+                <button class="btn-h-sub" onclick="openDetail(${r.id})">${translations[l].route}</button>
+                <button class="btn-h-sub" onclick="openDetail(${r.id})">${translations[l].diag}</button>
             </div>
-            
-            <div style="font-size:24px; font-weight:900; margin-bottom:12px;">
-                ${r.dist}KM <span style="color:var(--primary); font-size:18px; margin-left:12px;">${r.time}</span>
-            </div>
-
+            <div style="font-size:24px; font-weight:900; margin-bottom:12px;">${r.dist}KM <span style="color:var(--primary); font-size:18px; margin-left:12px;">${r.time}</span></div>
             <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; margin-top:10px; border-top:1.5px solid #444; padding-top:12px;">
-                <div style="text-align:center;">
-                    <div style="font-size:11px; color:#aaa; font-weight:900; margin-bottom:4px; letter-spacing:0.5px;">PACE</div>
-                    <div style="color:#fff; font-size:16px; font-weight:900;">${r.pace}</div>
-                </div>
-                <div style="text-align:center;">
-                    <div style="font-size:11px; color:#aaa; font-weight:900; margin-bottom:4px; letter-spacing:0.5px;">CAD</div>
-                    <div style="color:#fff; font-size:16px; font-weight:900;">${r.cadence}</div>
-                </div>
-                <div style="text-align:center;">
-                    <div style="font-size:11px; color:#aaa; font-weight:900; margin-bottom:4px; letter-spacing:0.5px;">KCAL</div>
-                    <div style="color:#fff; font-size:16px; font-weight:900;">${r.kcal}</div>
-                </div>
-                <div style="text-align:center;">
-                    <div style="font-size:11px; color:#aaa; font-weight:900; margin-bottom:4px; letter-spacing:0.5px;">GCT/FLT</div>
-                    <div style="color:#fff; font-size:13px; font-weight:900;">${r.gct}/${r.flight}%</div>
-                </div>
+                <div style="text-align:center;"><div style="font-size:11px; color:#aaa; font-weight:900;">PACE</div><div style="color:#fff; font-size:16px; font-weight:900;">${r.pace}</div></div>
+                <div style="text-align:center;"><div style="font-size:11px; color:#aaa; font-weight:900;">CAD</div><div style="color:#fff; font-size:16px; font-weight:900;">${r.cadence}</div></div>
+                <div style="text-align:center;"><div style="font-size:11px; color:#aaa; font-weight:900;">KCAL</div><div style="color:#fff; font-size:16px; font-weight:900;">${r.kcal}</div></div>
+                <div style="text-align:center;"><div style="font-size:11px; color:#aaa; font-weight:900;">GCT/FLT</div><div style="color:#fff; font-size:13px; font-weight:900;">${r.gct}/${r.flight}%</div></div>
             </div>
         </div>`).join('');
 }
 
 function updateTotalStats() {
     const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
-    let tDist = 0, tKcal = 0, tRuns = h.length;
-    h.forEach(r => {
-        tDist += parseFloat(r.dist) || 0;
-        tKcal += parseInt(r.kcal) || 0;
-    });
-    document.getElementById('total-stats-container').innerHTML = `
-        <div style="font-size:20px; font-weight:900; color:var(--primary); margin-bottom:20px; text-align:center;">TOTAL STATS</div>
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
-            <div class="card"><div class="label">DISTANCE</div><div class="value">${tDist.toFixed(2)} KM</div></div>
-            <div class="card"><div class="label">TOTAL RUNS</div><div class="value">${tRuns}</div></div>
-            <div class="card"><div class="label">CALORIES</div><div class="value">${tKcal} KCAL</div></div>
-        </div>
-    `;
+    let d=0, k=0; h.forEach(r=>{d+=parseFloat(r.dist)||0; k+=parseInt(r.kcal)||0;});
+    document.getElementById('total-stats-container').innerHTML = `<div style="font-size:20px; font-weight:900; color:var(--primary); margin-bottom:20px; text-align:center;">TOTAL STATS</div><div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;"><div class="card"><div class="label">DISTANCE</div><div class="value">${d.toFixed(2)} KM</div></div><div class="card"><div class="label">RUNS</div><div class="value">${h.length}</div></div><div class="card" style="grid-column: span 2;"><div class="label">TOTAL CALORIES</div><div class="value">${k} KCAL</div></div></div>`;
 }
 
-function clearHistory() {
-    const lang = localStorage.getItem('oppaRunLang') || 'en';
-    if(confirm(translations[lang].confirmClear)) {
-        localStorage.removeItem('oppaRunHistory');
-        updateHistoryList();
-        updateTotalStats();
-        alert(translations[lang].alertCleared);
-    }
-}
-
-function toggleDim(show) { document.getElementById('dimmer-overlay').style.display = show ? 'flex' : 'none'; }
+function clearHistory() { const l=localStorage.getItem('oppaRunLang')||'en'; if(confirm(translations[l].confirmClear)) { localStorage.removeItem('oppaRunHistory'); updateHistoryList(); updateTotalStats(); alert(translations[l].alertCleared); } }
+function toggleDim(s) { document.getElementById('dimmer-overlay').style.display = s ? 'flex' : 'none'; }
 document.getElementById('dimmer-overlay').onclick = () => toggleDim(false);
-function formatPace(kmh) { if (!kmh || kmh < 0.5) return "--'--\""; let s = 3600 / kmh; return `${Math.floor(s/60)}'${String(Math.floor(s%60)).padStart(2,'0')}"`; } 
+function formatPace(k) { if (!k || k < 0.5) return "--'--\""; let s = 3600 / k; return `${Math.floor(s/60)}'${String(Math.floor(s%60)).padStart(2,'0')}"`; } 
 
 window.onload = initMap;
 </script>
