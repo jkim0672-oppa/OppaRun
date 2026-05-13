@@ -1,328 +1,563 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.28 (Diagnosis Logic Updated)</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <style>
-        :root { 
-            --primary: #00ff88; --bg: #000000; --card-bg: #121212; 
-            --text-main: #ffffff; --text-dim: #999999; --danger: #ff4444; 
-            --warning: #ffcc00;
-        }
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body { 
-            margin: 0; background: var(--bg); color: var(--text-main); 
-            font-family: -apple-system, system-ui; height: 100vh; height: 100svh; 
-            display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none;
-        }
-        
-        /* [MAP AREA] */
-        #map-area { flex-shrink: 0; width: 100%; }
-        #map-container { height: 15vh; min-height: 110px; border-bottom: 2px solid #222; }
-        #map { height: 100%; width: 100%; background: #222; }
-        .status-bar { 
-            text-align: center; color: var(--warning); font-size: 11px; padding: 8px; 
-            background: #0a0a0a; font-weight: 900; border-bottom: 1px solid #222;
-            letter-spacing: 0.5px;
-        }
-        
-        /* [MAIN DASHBOARD] */
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
-        .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px; flex-shrink: 0; }
-        .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #1f1f1f; padding: 12px 0; }
-        .card-main { grid-column: span 3; border: 2.5px solid var(--primary); height: 85px; position: relative; margin-bottom: 2px; }
-        .label { font-size: 9px; color: var(--text-dim); font-weight: 900; margin-bottom: 3px; text-transform: uppercase; }
-        .value { font-size: 20px; font-weight: 900; }
-        .value-large { font-size: 42px; color: var(--primary); font-weight: 900; line-height: 1; }
-        .auto-pause-label { position: absolute; top: 10px; left: 10px; font-size: 10px; color: var(--danger); font-weight: 900; background: rgba(255,68,68,0.2); padding: 4px 8px; border-radius: 6px; display: none; z-index: 10; border: 1px solid var(--danger); }
-        
-        /* [CONTROLS] */
-        .controls { padding: 0 15px; display: flex; justify-content: center; align-items: center; height: 80px; margin-bottom: 80px; }
-        .btn-act { width: 100%; height: 60px; border-radius: 30px; border: none; font-weight: 900; font-size: 20px; cursor: pointer; }
-        
-        /* [HISTORY & SUB-TABS] */
-        .history-nav { display: flex; gap: 4px; padding: 10px 8px; background: #000; border-bottom: 1px solid #111; }
-        .sub-btn { flex: 1; padding: 12px 0; border: 1px solid #333; background: #1a1a1a; color: #777; border-radius: 8px; font-size: 11px; font-weight: 900; text-align: center; }
-        .sub-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
-        .sub-page { display: none; flex-direction: column; flex: 1; overflow-y: auto; padding-bottom: 100px; }
-        .history-item { background: var(--card-bg); border-radius: 15px; padding: 15px; margin: 10px 12px; border: 1px solid #333; position: relative; }
-        .h-date { font-size: 13px; color: var(--primary); font-weight: 900; margin-bottom: 8px; letter-spacing: 0.5px; }
-        .h-actions { position: absolute; top: 15px; right: 15px; display: flex; gap: 6px; }
-        .btn-h-sub { background: #1a1a1a; border: 1px solid #444; color: var(--primary); font-size: 10px; padding: 6px 10px; border-radius: 6px; font-weight: 900; cursor: pointer; }
+<meta charset="UTF-8">
+<title>OppaRun Pro v31 (Stable Architecture)</title>
 
-        /* [OVERLAYS] */
-        #detail-view { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 10000; display: none; flex-direction: column; }
-        #diag-view { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 20000; display: none; flex-direction: column; overflow-y: auto; padding-bottom: 40px; }
-        #detail-map { height: 50%; width: 100%; border-bottom: 1px solid #222; }
-        #detail-data { height: 50%; width: 100%; padding: 20px; overflow-y: auto; }
-        .close-detail { position: absolute; top: 20px; right: 20px; z-index: 20001; background: var(--primary); color: #000; border: none; padding: 10px 20px; border-radius: 20px; font-weight: 900; }
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
 
-        /* [DIAGNOSIS CARDS] */
-        .diag-header { padding: 60px 20px 20px; border-bottom: 1px solid #222; }
-        .diag-card { background: #111; margin: 10px 15px; padding: 15px; border-radius: 12px; border: 1px solid #222; }
-        .diag-score-label { font-size: 10px; color: var(--text-dim); font-weight: 900; margin-bottom: 5px; }
-        .diag-status { font-weight: 900; font-size: 14px; margin-bottom: 10px; }
-        .diag-advice { font-size: 13px; color: #ccc; line-height: 1.5; border-left: 3px solid var(--primary); padding-left: 10px; }
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-        /* [TAB BAR] */
-        .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #000; display: flex; border-top: 1px solid #222; align-items: center; padding-bottom: env(safe-area-inset-bottom); z-index: 999; }
-        .tab-btn { flex: 1; background: none; border: none; color: #444; font-size: 13px; font-weight: 900; }
-        .tab-btn.active { color: var(--primary); }
-    </style>
+<style>
+:root{
+    --primary:#00ff88;
+    --bg:#000;
+    --card:#121212;
+    --text:#fff;
+    --dim:#888;
+    --danger:#ff4444;
+    --warning:#ffcc00;
+}
+
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+
+body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:-apple-system,system-ui;
+    height:100vh;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+}
+
+/* MAP */
+#map-area{flex-shrink:0;}
+#map-container{height:15vh;min-height:110px;border-bottom:2px solid #222;}
+#map{height:100%;}
+
+/* STATUS */
+.status-bar{
+    text-align:center;
+    font-size:11px;
+    padding:8px;
+    font-weight:900;
+    color:var(--warning);
+    background:#0a0a0a;
+}
+
+/* DASHBOARD */
+.dashboard{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:6px;
+    padding:8px;
+}
+
+.card{
+    background:var(--card);
+    border-radius:12px;
+    border:1px solid #222;
+    padding:10px;
+    text-align:center;
+}
+
+.card-main{
+    grid-column:span 3;
+    height:85px;
+    border:2px solid var(--primary);
+    position:relative;
+}
+
+.value-large{
+    font-size:40px;
+    font-weight:900;
+    color:var(--primary);
+}
+
+.label{font-size:10px;color:var(--dim);font-weight:900;}
+
+/* CONTROLS */
+.controls{
+    padding:10px;
+    display:flex;
+    gap:10px;
+}
+
+.btn{
+    flex:1;
+    height:55px;
+    border:none;
+    border-radius:30px;
+    font-size:18px;
+    font-weight:900;
+}
+
+#start{background:var(--primary);}
+#stop{background:var(--danger);display:none;}
+
+/* TABS */
+.tab-bar{
+    position:fixed;
+    bottom:0;
+    width:100%;
+    height:70px;
+    display:flex;
+    background:#000;
+    border-top:1px solid #222;
+}
+
+.tab-btn{
+    flex:1;
+    background:none;
+    border:none;
+    color:#444;
+    font-weight:900;
+}
+
+.tab-btn.active{color:var(--primary);}
+
+/* SUB PAGES */
+.main-content{flex:1;overflow:hidden;display:none;flex-direction:column;}
+.main-content.active{display:flex;}
+
+.sub-page{flex:1;overflow-y:auto;padding-bottom:90px;display:none;}
+.sub-page.active{display:block;}
+
+.history-item{
+    margin:10px;
+    padding:12px;
+    background:#111;
+    border-radius:12px;
+    border:1px solid #333;
+}
+
+.h-actions{
+    display:flex;
+    gap:6px;
+    margin-top:10px;
+}
+
+.small-btn{
+    flex:1;
+    font-size:10px;
+    padding:6px;
+    background:#1a1a1a;
+    border:1px solid #333;
+    color:var(--primary);
+    font-weight:900;
+}
+
+/* OVERLAYS */
+#detail-view,#diag-view{
+    position:fixed;
+    top:0;left:0;
+    width:100%;height:100%;
+    background:#000;
+    display:none;
+    flex-direction:column;
+    z-index:9999;
+}
+
+.close{
+    position:absolute;
+    top:15px;
+    right:15px;
+    z-index:10000;
+    background:var(--primary);
+    border:none;
+    padding:10px 15px;
+    font-weight:900;
+}
+</style>
 </head>
-<body> 
-    <div id="dimmer-overlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 99999; display: none; justify-content: center; align-items: center; color: #444; font-weight: 900;">TAP TO WAKE</div>
-    
-    <div id="map-area">
-        <div id="map-container"><div id="map"></div></div>
-        <div id="status" class="status-bar">GPS INITIALIZING...</div>
-    </div> 
 
-    <div id="detail-view">
-        <button class="close-detail" onclick="closeDetail()">CLOSE</button>
-        <div id="detail-map"></div>
-        <div id="detail-data"></div>
+<body>
+
+<!-- MAP -->
+<div id="map-area">
+    <div id="map-container"><div id="map"></div></div>
+    <div class="status-bar" id="status">INIT</div>
+</div>
+
+<!-- DETAIL -->
+<div id="detail-view">
+    <button class="close" onclick="closeDetail()">CLOSE</button>
+    <div id="detail-map" style="height:50%"></div>
+    <div id="detail-data"></div>
+</div>
+
+<!-- DIAG -->
+<div id="diag-view">
+    <button class="close" onclick="closeDiag()">CLOSE</button>
+    <div id="diag-content"></div>
+</div>
+
+<!-- RUN VIEW -->
+<div id="run-view" class="main-content active">
+
+    <div class="dashboard">
+
+        <div class="card card-main">
+            <div class="label">PACE</div>
+            <div id="pace" class="value-large">--'--"</div>
+        </div>
+
+        <div class="card"><div class="label">DIST</div><div id="dist">0.00</div></div>
+        <div class="card"><div class="label">TIME</div><div id="time">00:00</div></div>
+        <div class="card"><div class="label">AVG</div><div id="avg">--</div></div>
+        <div class="card"><div class="label">CAD</div><div id="cad">0</div></div>
+        <div class="card"><div class="label">GCT</div><div id="gct">--</div></div>
+        <div class="card"><div class="label">FLIGHT</div><div id="flt">--</div></div>
+
     </div>
 
-    <div id="diag-view">
-        <button class="close-detail" onclick="closeDiag()">CLOSE</button>
-        <div id="diag-content-area"></div>
+    <div class="controls">
+        <button id="start" class="btn" onclick="run.start()">START</button>
+        <button id="stop" class="btn" onclick="run.stop()">STOP</button>
     </div>
 
-    <div id="run-view" class="main-content">
-        <div class="dashboard">
-            <div class="card card-main">
-                <div id="pause-status" class="auto-pause-label">AUTO PAUSED</div>
-                <div class="label" id="label-pace" style="color:var(--primary)">PACE</div>
-                <div id="curPace" class="value-large">--'--"</div>
-                <button style="position:absolute; top:12px; right:12px; background:#111; border:1px solid #333; color:#555; font-size:9px; padding:5px 8px; border-radius:5px; font-weight:900;" onclick="toggleDim(true)">DIM</button>
-            </div>
-            <div class="card"><div class="label" id="label-dist">DIST</div><div class="value"><span id="dist">0.00</span><span style="font-size:10px; color:var(--primary)"> KM</span></div></div>
-            <div class="card"><div class="label" id="label-time">TIME</div><div id="time" class="value">00:00</div></div>
-            <div class="card"><div class="label" id="label-avg">AVG</div><div id="avgPace" class="value">--'--"</div></div>
-            <div class="card"><div class="label" id="label-cadence">CADENCE</div><div id="cadence" class="value">0</div></div>
-            <div class="card"><div class="label" id="label-gct">GCT</div><div class="value"><span id="gct">--</span><span style="font-size:10px;"> MS</span></div></div>
-            <div class="card"><div class="label" id="label-flight">FLIGHT</div><div class="value"><span id="flight">--</span><span style="font-size:10px;"> %</span></div></div>
-        </div>
-        <div class="controls">
-            <button id="btn-start" class="btn-act" style="background:var(--primary); color:#000;" onclick="onStart()">START RUNNING</button>
-            <button id="btn-stop" class="btn-act" style="background:var(--danger); color:#fff; display:none;" onclick="onStop()">STOP</button>
-            <div id="after-stop" style="display:none; gap:10px; width:100%;">
-                <button id="btn-resume" class="btn-act" style="flex:1; background:var(--primary); color:#000;" onclick="onResume()">RESUME</button>
-                <button id="btn-finish" class="btn-act" style="flex:1; background:var(--danger); color:#fff;" onclick="onFinish()">FINISH</button>
-            </div>
-        </div>
-    </div>
+</div>
 
-    <div id="history-view" class="main-content" style="display:none;">
-        <div class="history-nav">
-            <button id="sub-tab-list" class="sub-btn active" onclick="showSubTab('list')">LIST</button>
-            <button id="sub-tab-total" class="sub-btn" onclick="showSubTab('total')">TOTAL</button>
-            <button id="sub-tab-info" class="sub-btn" onclick="showSubTab('info')">INFO</button>
-            <button id="sub-tab-settings" class="sub-btn" onclick="showSubTab('settings')">SETTINGS</button>
-        </div>
-        <div id="sub-page-list" class="sub-page" style="display: flex;"><div id="history-list"></div></div>
-        <div id="sub-page-total" class="sub-page"><div id="total-stats-container" style="padding:20px;"></div></div>
-        <div id="sub-page-info" class="sub-page">
-             <div style="padding:20px; font-size:13px; color:#ccc; line-height:1.6;">
-                <p>오빠, 러닝 메커니즘을 잊지 마!</p>
-                <p>• 케이던스 170-185 목표</p>
-                <p>• 가자미근 탄력을 이용한 롤링</p>
-                <p>• 족저근막 보호를 위한 미드풋 스트라이크</p>
-             </div>
-        </div>
-        <div id="sub-page-settings" class="sub-page" style="padding:20px;">
-            <button style="background:#1a1a1a; color:var(--danger); border:1px solid #333; padding:15px; border-radius:10px; width:100%; font-weight:900;" onclick="clearHistory()">CLEAR ALL HISTORY</button>
-        </div>
-    </div> 
+<!-- HISTORY -->
+<div id="history-view" class="main-content">
 
-    <div class="tab-bar">
-        <button id="tab-run" class="tab-btn active" onclick="showTab('run')">RUN</button>
-        <button id="tab-history" class="tab-btn" onclick="showTab('history')">HISTORY</button>
-    </div> 
+    <div id="history-list" class="sub-page active"></div>
+
+</div>
+
+<!-- TAB -->
+<div class="tab-bar">
+    <button class="tab-btn active" onclick="ui.tab('run')">RUN</button>
+    <button class="tab-btn" onclick="ui.tab('history')">HISTORY</button>
+</div>
 
 <script>
-// [GLOBAL VARIABLES]
-let map, marker, polyline, timer, isRunning = false, isPaused = false, isAutoPaused = false, seconds = 0;
-let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0, currentSpeedKmh = 0, pathCoords = [];
-let detailMap = null, wakeLock = null, lowSpeedStartTime = null;
 
-// [INITIALIZATION]
-function initMap() {
-    map = L.map('map', {zoomControl: false, attributionControl: false}).setView([33.7701, -117.9143], 17);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-    marker = L.marker([0,0], {icon: L.divIcon({className:'my-loc', html:'<div style="background:#007bff; border:2px solid #fff; border-radius:50%; width:12px; height:12px;"></div>', iconSize:[12,12]})}).addTo(map);
-    polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(map);
-    
-    if ("geolocation" in navigator) {
-        navigator.geolocation.watchPosition(updatePosition, (e) => {
-            document.getElementById('status').textContent = "GPS ERROR: " + e.message;
-        }, {enableHighAccuracy: true, maximumAge: 0, timeout: 5000});
-    }
-    window.addEventListener('devicemotion', handleMotion);
-}
+/* ================= STATE ================= */
 
-// [GPS LOGIC]
-function updatePosition(p) {
-    const pos = [p.coords.latitude, p.coords.longitude];
-    currentSpeedKmh = (p.coords.speed || 0) * 3.6;
-    marker.setLatLng(pos);
-    
-    if (isRunning && !isPaused) {
-        // Auto Pause Logic
-        if (currentSpeedKmh < 2.0) { 
-            if (!lowSpeedStartTime) lowSpeedStartTime = Date.now();
-            if ((Date.now() - lowSpeedStartTime) > 1000 && !isAutoPaused) { 
-                isAutoPaused = true;
-                document.getElementById('pause-status').style.display = 'block';
-            }
-        } else { 
-            lowSpeedStartTime = null;
-            if (isAutoPaused) { isAutoPaused = false; document.getElementById('pause-status').style.display = 'none'; }
+const state = {
+    running:false,
+    time:0,
+    dist:0,
+    speed:0,
+    steps:0,
+    stepT:[],
+    lastPos:null,
+    smoothLat:null,
+    smoothLng:null,
+    path:[],
+    autoPause:false,
+    lowSpeed:null
+};
+
+/* ================= GPS ================= */
+
+const gps = {
+
+    map:null,
+    marker:null,
+    line:null,
+
+    init(){
+
+        this.map = L.map('map',{zoomControl:false})
+            .setView([33.77,-117.91],16);
+
+        L.tileLayer(
+            'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+        ).addTo(this.map);
+
+        this.marker = L.marker([0,0]).addTo(this.map);
+
+        this.line = L.polyline([],{
+            color:'#00ff88'
+        }).addTo(this.map);
+
+        navigator.geolocation.watchPosition(
+            gps.update,
+            e=>status('GPS ERROR'),
+            {enableHighAccuracy:true}
+        );
+    },
+
+    update(p){
+
+        let lat = p.coords.latitude;
+        let lng = p.coords.longitude;
+
+        if(!state.smoothLat){
+            state.smoothLat=lat;
+            state.smoothLng=lng;
+        }else{
+            state.smoothLat=state.smoothLat*0.7+lat*0.3;
+            state.smoothLng=state.smoothLng*0.7+lng*0.3;
         }
 
-        if (!isAutoPaused && p.coords.accuracy < 50) {
-            if (lastPos) {
-                let d = (function(p1,p2){
-                    const R=6371; const dLat=(p2[0]-p1[0])*Math.PI/180; const dLon=(p2[1]-p1[1])*Math.PI/180;
-                    const a=Math.sin(dLat/2)**2 + Math.cos(p1[0]*Math.PI/180)*Math.cos(p2[0]*Math.PI/180)*Math.sin(dLon/2)**2;
-                    return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
-                })(lastPos, pos);
-                if (d > 0.001) { 
-                    totalDist += d; 
-                    document.getElementById('dist').textContent = totalDist.toFixed(2); 
-                    lastPos = pos; 
-                    pathCoords.push(pos); 
-                    polyline.setLatLngs(pathCoords); 
-                }
-            } else { lastPos = pos; }
-            document.getElementById('curPace').textContent = formatPace(currentSpeedKmh);
-        }
-    } else { map.panTo(pos); }
-}
+        let pos=[state.smoothLat,state.smoothLng];
 
-// [MOTION LOGIC - Cadence/GCT/Flight]
-function handleMotion(e) {
-    if (!isRunning || isPaused || isAutoPaused) return;
-    let acc = e.accelerationIncludingGravity;
-    if (!acc || acc.x === null) return;
-    let force = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-    let now = Date.now();
+        gps.marker.setLatLng(pos);
 
-    if (force > 12 && (now - lastStepTime) > 220) {
-        steps++; 
-        lastStepTime = now;
-        
-        let cad = Math.round((steps/(seconds||1))*60);
-        let gct = currentSpeedKmh > 0.5 ? Math.floor(450 - (currentSpeedKmh * 10)) : 0;
-        let flt = currentSpeedKmh > 2.0 ? Math.floor(5 + (currentSpeedKmh * 2.1)) : 0;
+        state.speed=(p.coords.speed||0)*3.6;
 
-        document.getElementById('cadence').textContent = cad;
-        document.getElementById('gct').textContent = gct > 0 ? gct : "--";
-        document.getElementById('flight').textContent = flt > 0 ? flt : "--";
-    }
-}
+        if(!state.running) return;
 
-// [CONTROLS]
-function onStart() {
-    isRunning = true; isPaused = false; isAutoPaused = false;
-    totalDist = 0; seconds = 0; steps = 0; pathCoords = [];
-    document.getElementById('btn-start').style.display = 'none'; 
-    document.getElementById('btn-stop').style.display = 'block';
-    timer = setInterval(() => { 
-        if(!isPaused && !isAutoPaused) { 
-            seconds++; 
-            document.getElementById('time').textContent = formatTime(seconds); 
-            if (totalDist > 0) {
-                let avgKmh = (totalDist / (seconds / 3600));
-                document.getElementById('avgPace').textContent = formatPace(avgKmh);
+        if(p.coords.accuracy>20) return;
+
+        if(state.lastPos){
+
+            let d=util.dist(state.lastPos,pos);
+
+            if(state.speed<2 && d<0.003){
+                if(!state.lowSpeed) state.lowSpeed=Date.now();
+                if(Date.now()-state.lowSpeed>1500)
+                    state.autoPause=true;
+            }else{
+                state.lowSpeed=null;
+                state.autoPause=false;
             }
-        } 
-    }, 1000);
+
+            if(!state.autoPause && d>0.001 && d<0.05){
+
+                state.dist+=d;
+                state.path.push(pos);
+                gps.line.setLatLngs(state.path);
+            }
+        }
+
+        state.lastPos=pos;
+
+        ui.render();
+    }
+};
+
+/* ================= MOTION ================= */
+
+window.addEventListener("devicemotion",e=>{
+
+    if(!state.running||state.autoPause) return;
+
+    let a=e.accelerationIncludingGravity;
+    if(!a) return;
+
+    let f=Math.sqrt(a.x*a.x+a.y*a.y+a.z*a.z);
+
+    let now=Date.now();
+
+    if(f>12){
+
+        state.steps++;
+
+        state.stepT.push(now);
+
+        state.stepT=state.stepT.filter(t=>now-t<10000);
+    }
+});
+
+/* ================= ANALYSIS ================= */
+
+const analysis={
+
+    cadence(){
+        return Math.round(state.stepT.length*6);
+    },
+
+    gct(){
+        let sp=state.speed;
+        return sp>0?Math.floor(450-sp*10):0;
+    },
+
+    flight(){
+        let sp=state.speed;
+        return sp>2?Math.floor(5+sp*2):0;
+    }
+};
+
+/* ================= UI ================= */
+
+const ui={
+
+    tab(t){
+
+        document.querySelectorAll('.main-content')
+            .forEach(v=>v.classList.remove('active'));
+
+        document.getElementById(t+'-view')
+            .classList.add('active');
+
+        document.querySelectorAll('.tab-btn')
+            .forEach(b=>b.classList.remove('active'));
+
+        event.target.classList.add('active');
+
+        if(t==='history') renderHistory();
+    },
+
+    render(){
+
+        pace.textContent=util.pace(state.speed);
+        dist.textContent=state.dist.toFixed(2);
+
+        let c=analysis.cadence();
+
+        cad.textContent=c;
+        gct.textContent=analysis.gct();
+        flt.textContent=analysis.flight();
+
+        avg.textContent=util.pace(
+            state.dist/(state.time/3600||1)
+        );
+
+        status(state.autoPause?"AUTO PAUSE":"RUN");
+    }
+};
+
+/* ================= RUN ================= */
+
+const run={
+
+    timer:null,
+
+    start(){
+
+        state.running=true;
+
+        state.time=0;
+        state.dist=0;
+        state.steps=0;
+        state.stepT=[];
+        state.path=[];
+
+        start.style.display="none";
+        stop.style.display="block";
+
+        this.timer=setInterval(()=>{
+
+            if(!state.autoPause){
+
+                state.time++;
+
+                let m=String(Math.floor(state.time/60)).padStart(2,'0');
+                let s=String(state.time%60).padStart(2,'0');
+
+                time.textContent=`${m}:${s}`;
+            }
+
+        },1000);
+    },
+
+    stop(){
+
+        clearInterval(this.timer);
+
+        state.running=false;
+
+        save();
+
+        start.style.display="block";
+        stop.style.display="none";
+    }
+};
+
+/* ================= STORAGE ================= */
+
+function save(){
+
+    let h=JSON.parse(localStorage.getItem("run")||"[]");
+
+    h.unshift({
+        id:Date.now(),
+        dist:state.dist.toFixed(2),
+        time:time.textContent,
+        cad:analysis.cadence()
+    });
+
+    localStorage.setItem("run",JSON.stringify(h));
+
+    renderHistory();
 }
 
-function onStop() { isPaused = true; document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; }
-function onResume() { isPaused = false; document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; }
-function onFinish() {
-    const record = {
-        id: Date.now(),
-        date: new Date().toLocaleString(),
-        dist: document.getElementById('dist').textContent,
-        time: document.getElementById('time').textContent,
-        pace: document.getElementById('avgPace').textContent,
-        cadence: document.getElementById('cadence').textContent,
-        gct: document.getElementById('gct').textContent,
-        flight: document.getElementById('flight').textContent,
-        path: pathCoords 
-    };
-    let h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
-    h.unshift(record); localStorage.setItem('oppaRunHistory', JSON.stringify(h));
-    location.reload();
+function renderHistory(){
+
+    let h=JSON.parse(localStorage.getItem("run")||"[]");
+
+    historyList.innerHTML=h.map(r=>`
+        <div class="history-item">
+            <b>${r.dist} KM</b> ${r.time}
+            <div class="h-actions">
+                <button class="small-btn" onclick="openDiag(${r.id})">DIAG</button>
+                <button class="small-btn" onclick="openDetail(${r.id})">ROUTE</button>
+            </div>
+        </div>
+    `).join("");
 }
 
-// [ANALYSIS & DIAGNOSIS]
-function openDiag(id) {
-    const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
-    const r = h.find(item => item.id === id);
-    if (!r) return;
+/* ================= DETAIL ================= */
 
-    const cad = parseInt(r.cadence) || 0;
-    const gct = parseInt(r.gct) || 0;
+function openDetail(id){
+    detailView.style.display="flex";
+}
 
-    document.getElementById('diag-view').style.display = 'flex';
-    document.getElementById('diag-content-area').innerHTML = `
-        <div class="diag-header">
-            <div style="font-size:22px; font-weight:900; color:var(--primary);">RUN DIAGNOSIS</div>
-        </div>
-        <div class="diag-card">
-            <div class="diag-score-label">CADENCE</div>
-            <div class="diag-status" style="color:${cad >= 170 ? 'var(--primary)' : 'var(--danger)'}">${cad} BPM</div>
-            <div class="diag-advice">${cad < 170 ? '보폭을 줄이고 발을 더 빨리 구르세요.' : '훌륭한 리듬입니다!'}</div>
-        </div>
-        <div class="diag-card" style="border:1px solid var(--primary); background:rgba(0,255,136,0.05);">
-            <div class="diag-score-label" style="color:var(--primary)">TOTAL PRESCRIPTION</div>
-            <div style="font-size:13px; font-weight:700;">오빠, 가자미근 탄력을 잘 활용하고 있어. 발목 힘을 조금 더 빼면 완벽할 거야!</div>
+function closeDetail(){
+    detailView.style.display="none";
+}
+
+/* ================= DIAG ================= */
+
+function openDiag(id){
+    diagView.style.display="flex";
+
+    diagContent.innerHTML=`
+        <div style="padding:20px">
+            <h2 style="color:#00ff88">RUN ANALYSIS</h2>
+            <p>Cadence: ${analysis.cadence()}</p>
         </div>
     `;
 }
 
-// [UI UTILS]
-function showTab(t) {
-    document.getElementById('run-view').style.display = (t === 'run' ? 'flex' : 'none');
-    document.getElementById('map-area').style.display = (t === 'run' ? 'block' : 'none');
-    document.getElementById('history-view').style.display = (t === 'history' ? 'flex' : 'none');
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.getElementById('tab-' + t).classList.add('active');
-    if(t === 'history') updateHistoryList();
+function closeDiag(){
+    diagView.style.display="none";
 }
-function showSubTab(s) {
-    document.querySelectorAll('.sub-btn').forEach(b => b.classList.remove('active'));
-    document.getElementById('sub-tab-' + s).classList.add('active');
-    document.querySelectorAll('.sub-page').forEach(p => p.style.display = 'none');
-    document.getElementById('sub-page-' + s).style.display = 'flex';
-}
-function updateHistoryList() {
-    const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
-    document.getElementById('history-list').innerHTML = h.map(r => `
-        <div class="history-item">
-            <div class="h-date">${r.date}</div>
-            <div class="h-actions"><button class="btn-h-sub" onclick="openDiag(${r.id})">DIAGNOSIS</button></div>
-            <div style="font-size:24px; font-weight:900;">${r.dist}KM <span style="color:var(--primary); font-size:18px;">${r.time}</span></div>
-        </div>`).join('');
-}
-function formatPace(kmh) { if (!kmh || kmh < 0.5) return "--'--\""; let s = 3600 / kmh; return `${Math.floor(s/60)}'${String(Math.floor(s%60)).padStart(2,'0')}"`; } 
-function formatTime(sec) { return `${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`; }
-function toggleDim(s) { document.getElementById('dimmer-overlay').style.display = s ? 'flex' : 'none'; }
-function closeDiag() { document.getElementById('diag-view').style.display = 'none'; }
-document.getElementById('dimmer-overlay').onclick = () => toggleDim(false);
 
-window.onload = initMap;
+/* ================= UTIL ================= */
+
+const util={
+
+    dist(a,b){
+
+        let R=6371;
+
+        let dLat=(b[0]-a[0])*Math.PI/180;
+        let dLon=(b[1]-a[1])*Math.PI/180;
+
+        let x=Math.sin(dLat/2)**2+
+        Math.cos(a[0]*Math.PI/180)*
+        Math.cos(b[0]*Math.PI/180)*
+        Math.sin(dLon/2)**2;
+
+        return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
+    },
+
+    pace(kmh){
+
+        if(!kmh||kmh<0.5) return "--'--\"";
+
+        let s=3600/kmh;
+
+        return `${Math.floor(s/60)}'${String(Math.floor(s%60)).padStart(2,'0')}"`;
+    }
+};
+
+/* ================= INIT ================= */
+
+function status(t){
+    document.getElementById("status").textContent=t;
+}
+
+gps.init();
+
 </script>
 </body>
 </html>
