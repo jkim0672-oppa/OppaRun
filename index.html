@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.28 (Diagnosis Updated)</title>
+    <title>OppaRun Pro - v28.28 (Diagnosis Logic Updated)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -59,38 +59,26 @@
         .info-body { color: #ccc; font-size: 13px; line-height: 1.6; font-weight: 600; }
         .info-highlight { color: #fff; font-weight: 800; border-bottom: 1px solid var(--primary); }
 
-        #detail-view { 
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-            background: var(--bg); z-index: 10000; display: none; flex-direction: column; 
-        }
-        /* 진단 전용 빈 페이지 레이어 */
-        #diag-view { 
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-            background: var(--bg); z-index: 20000; display: none; flex-direction: column; 
-        }
+        #detail-view { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 10000; display: none; flex-direction: column; }
+        #diag-view { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 20000; display: none; flex-direction: column; overflow-y: auto; padding-bottom: 40px; }
         #detail-map { height: 50%; width: 100%; border-bottom: 1px solid #222; }
         #detail-data { height: 50%; width: 100%; padding: 20px; overflow-y: auto; }
-        .close-detail { 
-            position: absolute; top: 20px; right: 20px; z-index: 10001; 
-            background: var(--primary); color: #000; border: none; 
-            padding: 10px 20px; border-radius: 20px; font-weight: 900; 
-        }
+        .close-detail { position: absolute; top: 20px; right: 20px; z-index: 20001; background: var(--primary); color: #000; border: none; padding: 10px 20px; border-radius: 20px; font-weight: 900; }
+
+        /* 진단용 스타일 */
+        .diag-header { padding: 60px 20px 20px; border-bottom: 1px solid #222; }
+        .diag-card { background: #111; margin: 10px 15px; padding: 15px; border-radius: 12px; border: 1px solid #222; }
+        .diag-score-label { font-size: 10px; color: var(--text-dim); font-weight: 900; margin-bottom: 5px; }
+        .diag-status { font-weight: 900; font-size: 14px; margin-bottom: 10px; }
+        .diag-advice { font-size: 13px; color: #ccc; line-height: 1.5; border-left: 3px solid var(--primary); padding-left: 10px; }
 
         .settings-container { padding: 20px; }
         .settings-group { margin-bottom: 25px; }
         .settings-label { font-size: 11px; color: var(--primary); font-weight: 900; margin-bottom: 10px; letter-spacing: 1px; text-transform: uppercase; }
         
         .dropdown { position: relative; width: 100%; }
-        .dropdown-select { 
-            background: #1a1a1a; color: #fff; border: 1.5px solid #333; padding: 18px; 
-            border-radius: 12px; font-size: 16px; font-weight: 800; display: flex; 
-            justify-content: space-between; align-items: center; cursor: pointer;
-        }
-        .dropdown-options { 
-            display: none; position: absolute; top: 105%; left: 0; width: 100%; 
-            background: #1a1a1a; border: 1.5px solid #333; border-radius: 12px; 
-            z-index: 1000; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-        }
+        .dropdown-select { background: #1a1a1a; color: #fff; border: 1.5px solid #333; padding: 18px; border-radius: 12px; font-size: 16px; font-weight: 800; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+        .dropdown-options { display: none; position: absolute; top: 105%; left: 0; width: 100%; background: #1a1a1a; border: 1.5px solid #333; border-radius: 12px; z-index: 1000; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
         .dropdown-option { padding: 18px; font-size: 16px; font-weight: 800; border-bottom: 1px solid #222; cursor: pointer; }
         .dropdown-option:last-child { border-bottom: none; }
         .dropdown-option:active { background: #333; color: var(--primary); }
@@ -116,12 +104,10 @@
         <div id="detail-data"></div>
     </div>
 
-    <!-- 진단 전용 빈 페이지 -->
+    <!-- 진단 전용 페이지 (데이터 분석 포함) -->
     <div id="diag-view">
         <button class="close-detail" onclick="closeDiag()">CLOSE</button>
-        <div id="diag-content" style="flex: 1; display: flex; align-items: center; justify-content: center; color: #444; font-weight: 900; font-size: 14px;">
-            DIAGNOSIS PAGE (EMPTY)
-        </div>
+        <div id="diag-content-area"></div>
     </div>
 
     <div id="run-view" class="main-content">
@@ -474,9 +460,65 @@ function closeDetail() {
     document.getElementById('detail-view').style.display = 'none';
 }
 
-/* 진단 전용 함수 */
+/* 진단 전용 함수 (분석 로직 포함) */
 function openDiag(id) {
+    const h = JSON.parse(localStorage.getItem('oppaRunHistory') || "[]");
+    const r = h.find(item => item.id === id);
+    if (!r) return;
+
+    const lang = localStorage.getItem('oppaRunLang') || 'en';
+    const isKo = lang === 'ko';
+
+    // 분석 데이터 추출
+    const cad = parseInt(r.cadence) || 0;
+    const gct = parseInt(r.gct) || 0;
+    const flt = parseInt(r.flight) || 0;
+
+    // 진단 로직
+    let cadStat = cad >= 170 ? (isKo ? "최상" : "EXCELLENT") : (cad >= 160 ? (isKo ? "보통" : "GOOD") : (isKo ? "주의" : "LOW"));
+    let cadColor = cad >= 170 ? "var(--primary)" : (cad >= 160 ? "var(--warning)" : "var(--danger)");
+    let cadAdvice = cad < 170 ? (isKo ? "보폭을 줄이고 발을 더 빨리 구르세요. 무릎 충격이 줄어듭니다." : "Shorten your stride and increase step frequency to reduce knee impact.") : (isKo ? "아주 훌륭한 리듬입니다! 이 페이스를 유지하세요." : "Perfect rhythm! Maintain this cadence.");
+
+    let gctStat = gct <= 240 && gct > 0 ? (isKo ? "우수" : "ELITE") : (gct <= 280 ? (isKo ? "보통" : "GOOD") : (isKo ? "느림" : "HEAVY"));
+    let gctColor = gct <= 240 ? "var(--primary)" : (gct <= 280 ? "var(--warning)" : "var(--danger)");
+    let gctAdvice = gct > 240 ? (isKo ? "지면에 머무는 시간이 깁니다. 둔근을 사용해 빠르게 밀어내세요." : "Long ground contact. Use glutes to push off the ground faster.") : (isKo ? "발이 지면에 닿는 시간이 짧아 에너지 효율이 높습니다." : "Short ground contact indicates high energy efficiency.");
+
+    let fltStat = flt >= 15 ? (isKo ? "높음" : "HIGH") : (flt >= 8 ? (isKo ? "보통" : "MID") : (isKo ? "낮음" : "LOW"));
+    let fltAdvice = flt < 15 ? (isKo ? "탄력이 부족합니다. 아킬레스건의 탄성을 이용해 롤링에 집중하세요." : "Lack of springiness. Focus on rolling and Achilles elasticity.") : (isKo ? "충분한 공중 체공 시간을 확보하고 있습니다." : "Good flight time achieved.");
+
     document.getElementById('diag-view').style.display = 'flex';
+    document.getElementById('diag-content-area').innerHTML = `
+        <div class="diag-header">
+            <div style="font-size:22px; font-weight:900; color:var(--primary);">${isKo ? "러닝 정밀 진단" : "RUN DIAGNOSIS"}</div>
+            <div style="font-size:12px; color:#666; margin-top:5px;">${r.date} | ${r.dist}KM</div>
+        </div>
+
+        <div class="diag-card">
+            <div class="diag-score-label">${isKo ? "케이던스 분석" : "CADENCE ANALYSIS"}</div>
+            <div class="diag-status" style="color:${cadColor}">${cad} BPM - ${cadStat}</div>
+            <div class="diag-advice">${cadAdvice}</div>
+        </div>
+
+        <div class="diag-card">
+            <div class="diag-score-label">${isKo ? "지면 접촉 시간" : "GROUND CONTACT TIME"}</div>
+            <div class="diag-status" style="color:${gctColor}">${gct} MS - ${gctStat}</div>
+            <div class="diag-advice">${gctAdvice}</div>
+        </div>
+
+        <div class="diag-card">
+            <div class="diag-score-label">${isKo ? "체공 시간 비율" : "FLIGHT RATIO"}</div>
+            <div class="diag-status" style="color:var(--text-main)">${flt}% - ${fltStat}</div>
+            <div class="diag-advice">${fltAdvice}</div>
+        </div>
+
+        <div class="diag-card" style="border:1px solid var(--primary); background:rgba(0,255,136,0.05);">
+            <div class="diag-score-label" style="color:var(--primary)">${isKo ? "종합 처방전" : "TOTAL PRESCRIPTION"}</div>
+            <div style="font-size:13px; line-height:1.6; font-weight:700;">
+                ${isKo ? "전체적으로 " : "Overall, your "} <span style="color:var(--primary)">${cadStat}</span> ${isKo ? "수준의 러닝입니다." : "running style."} 
+                ${isKo ? "족저근막 보호를 위해 롤링 시 발목의 힘을 빼고, 가자미근의 탄력을 활용하는 연습을 추천합니다." : "To protect your fascia, relax your ankles during rolling and utilize soleus elasticity."}
+            </div>
+        </div>
+    `;
 }
 function closeDiag() {
     document.getElementById('diag-view').style.display = 'none';
