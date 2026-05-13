@@ -177,6 +177,7 @@
 let map, marker, polyline, timer, isRunning = false, isPaused = false, isAutoPaused = false, seconds = 0;
 let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0, currentSpeedKmh = 0, pathCoords = [];
 let detailMap = null, detailPolyline = null;
+let wakeLock = null; // Wake Lock 변수 추가
 
 // 자동 멈춤 관리를 위한 지연 타이머
 let lowSpeedStartTime = null;
@@ -199,6 +200,16 @@ const translations = {
         route: "경로", diag: "진단", close: "닫기"
     }
 };
+
+async function requestWakeLock() {
+    try {
+        if ('wakeLock' in navigator) {
+            wakeLock = await navigator.wakeLock.request('screen');
+        }
+    } catch (err) {
+        console.error(`${err.name}, ${err.message}`);
+    }
+}
 
 function changeLanguage(lang) {
     const t = translations[lang];
@@ -262,11 +273,9 @@ function updatePosition(p) {
     document.getElementById('status').style.color = "#00ff88";
 
     if (isRunning && !isPaused) {
-        // 자동 멈춤 로직: 10미터 이동 이후 + 속도 0.8km/h 미만이 3초 유지될 때만 작동
+        // 자동 멈춤 로직
         if (currentSpeedKmh < 0.8) {
             if (!lowSpeedStartTime) lowSpeedStartTime = Date.now();
-            
-            // 10미터 이상 이동했고, 저속 상태가 3초(3000ms) 이상 지속될 때
             if (totalDist >= 0.01 && (Date.now() - lowSpeedStartTime) > 3000) {
                 if (!isAutoPaused) {
                     isAutoPaused = true;
@@ -274,7 +283,6 @@ function updatePosition(p) {
                 }
             }
         } else {
-            // 다시 움직이면 즉시 해제
             lowSpeedStartTime = null;
             if (isAutoPaused) {
                 isAutoPaused = false;
@@ -325,6 +333,7 @@ function handleMotion(e) {
 }
 
 function onStart() {
+    requestWakeLock(); // 시작 시 화면 꺼짐 방지 활성화
     isRunning = true; isPaused = false; isAutoPaused = false;
     totalDist = 0; seconds = 0; steps = 0; pathCoords = [];
     lowSpeedStartTime = null;
@@ -346,6 +355,10 @@ function onStop() { isPaused = true; document.getElementById('btn-stop').style.d
 function onResume() { isPaused = false; document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; }
 
 function onFinish() {
+    // 종료 시 화면 꺼짐 방지 해제
+    if (wakeLock !== null) {
+        wakeLock.release().then(() => { wakeLock = null; });
+    }
     const record = {
         id: Date.now(),
         date: new Date().toLocaleString(),
