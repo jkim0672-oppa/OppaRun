@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.30 (Real-time Color Feedback)</title>
+    <title>OppaRun Pro - v28.31 (Compact Total Stats)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -273,9 +273,38 @@ const ui = {
     },
     updateTotalStats: () => {
         const h = storage.loadHistory();
-        let tDist = 0;
-        h.forEach(r => { tDist += parseFloat(r.dist)||0; });
-        document.getElementById('total-stats-container').innerHTML = `<div style="font-size:20px; font-weight:900; color:var(--primary); margin-bottom:20px; text-align:center;">TOTAL STATS</div><div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;"><div class="card"><div class="label">DISTANCE</div><div class="value">${tDist.toFixed(2)} KM</div></div><div class="card"><div class="label">RUNS</div><div class="value">${h.length}</div></div></div>`;
+        const totalRuns = h.length;
+        if (totalRuns === 0) {
+            document.getElementById('total-stats-container').innerHTML = '<div style="text-align:center; padding:50px; color:#444; font-weight:900;">NO DATA</div>';
+            return;
+        }
+        let tDist = 0, tSeconds = 0, tKcal = 0, tCad = 0, cadCount = 0;
+        h.forEach(r => {
+            tDist += parseFloat(r.dist) || 0;
+            tKcal += parseInt(r.kcal) || 0;
+            const timeParts = r.time.split(':');
+            if(timeParts.length === 2) tSeconds += parseInt(timeParts[0]) * 60 + parseInt(timeParts[1]);
+            const cad = parseInt(r.cadence);
+            if(cad > 0) { tCad += cad; cadCount++; }
+        });
+        const avgPaceRaw = tDist > 0 ? tSeconds / tDist : 0;
+        const avgPaceStr = control.formatPace(avgPaceRaw > 0 ? (3600 / avgPaceRaw) : 0);
+        const avgCadence = cadCount > 0 ? Math.round(tCad / cadCount) : 0;
+
+        // 3분의 1 공간만 활용하도록 콤팩트하게 구성
+        document.getElementById('total-stats-container').innerHTML = `
+            <div style="padding: 10px 0;">
+                <div style="font-size:16px; font-weight:900; color:var(--primary); margin-bottom:12px; text-align:center; letter-spacing:1px;">LIFETIME STATS</div>
+                <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:6px; margin-bottom:6px;">
+                    <div class="card" style="padding:8px 0;"><div class="label" style="font-size:8px;">DIST</div><div class="value" style="font-size:15px;">${tDist.toFixed(1)}<span style="font-size:8px;">K</span></div></div>
+                    <div class="card" style="padding:8px 0;"><div class="label" style="font-size:8px;">RUNS</div><div class="value" style="font-size:15px;">${totalRuns}</div></div>
+                    <div class="card" style="padding:8px 0;"><div class="label" style="font-size:8px;">PACE</div><div class="value" style="font-size:15px;">${avgPaceStr.replace('"', '')}</div></div>
+                </div>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
+                    <div class="card" style="padding:8px 0;"><div class="label" style="font-size:8px;">AVG CAD</div><div class="value" style="font-size:15px;">${avgCadence}</div></div>
+                    <div class="card" style="padding:8px 0;"><div class="label" style="font-size:8px;">CALORIES</div><div class="value" style="font-size:15px; color:var(--danger);">${tKcal.toLocaleString()}</div></div>
+                </div>
+            </div>`;
     },
     openDetail: (id) => {
         const h = storage.loadHistory(); const record = h.find(r => r.id === id); if (!record) return;
@@ -361,7 +390,6 @@ function handleMotion(e) {
         let currentGCT = speed > 0.5 ? Math.floor(450 - (speed * 10)) : 0;
         let currentFlight = speed > 2.0 ? Math.floor(5 + (speed * 2.1)) : 0;
         
-        // [실시간 색상 업데이트 로직 추가]
         const cadEl = document.getElementById('cadence');
         const gctEl = document.getElementById('gct');
         const fltEl = document.getElementById('flight');
