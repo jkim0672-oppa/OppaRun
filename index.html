@@ -308,7 +308,6 @@ const control = {
     calculateCalories: (dist) => {
         const p = storage.loadProfile();
         let weightKg = p.wu === 'lb' ? p.w * 0.453592 : p.w;
-        // Accurate Calorie formula: dist(km) * weight(kg) * 1.036
         return (dist * weightKg * 1.036).toFixed(0);
     },
     runDiagnosis: (id) => {
@@ -409,7 +408,7 @@ const ui = {
         const p = storage.loadProfile();
         if (type === 'height') { p.h = val; p.hu = unit; } else { p.w = val; p.wu = unit; }
         storage.saveProfile(p); ui.initProfileDropdowns(); ui.toggleDropdown(`${type}-options`);
-        ui.updateTotalStats(); // Recalculate total calories based on new weight
+        ui.updateTotalStats();
     },
     openMetronome: () => document.getElementById('metronome-view').style.display = 'flex',
     closeMetronome: () => document.getElementById('metronome-view').style.display = 'none',
@@ -446,7 +445,6 @@ const ui = {
         h.forEach(r => {
             const d = parseFloat(r.dist) || 0; const c = parseInt(r.cadence) || 0; const runDate = new Date(r.id);
             totalDist += d; if (c > 0) { totalCadence += c; cadCount++; }
-            // Recalculate using current weight profile for dynamic update
             totalCalories += parseInt(control.calculateCalories(d));
             if (runDate >= oneWeekAgo) weeklyDist += d; if (runDate >= firstDayOfMonth) monthlyDist += d;
         });
@@ -530,14 +528,30 @@ function handleMotion(e) {
     if (!isRunning || isPaused || isAutoPaused) return;
     let acc = e.accelerationIncludingGravity; if (!acc || acc.z === null) return;
     let force = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2); let now = Date.now();
+    
     if (force > 12.5 && (now - lastStepTime) > 230) {
         let cycleTime = now - lastStepTime; steps++; lastStepTime = now;
         let cadVal = Math.round((steps / (seconds || 1)) * 60);
-        const cadEl = document.getElementById('cadence'); cadEl.textContent = cadVal;
+        
+        // Cadence Dynamic Color
+        const cadEl = document.getElementById('cadence'); 
+        cadEl.textContent = cadVal;
+        cadEl.style.color = cadVal >= 175 ? "var(--primary)" : (cadVal >= 160 ? "var(--warning)" : "var(--danger)");
+
         if (isFeetOnGround) {
             let currentGCT = Math.round(cycleTime * 0.35); gctAccumulator += currentGCT; gctCount++;
-            let avgGCT = Math.round(gctAccumulator / gctCount); let flightRatio = Math.round(((cycleTime - avgGCT) / cycleTime) * 100);
-            document.getElementById('gct').textContent = avgGCT; document.getElementById('flight').textContent = flightRatio;
+            let avgGCT = Math.round(gctAccumulator / gctCount); 
+            let flightRatio = Math.round(((cycleTime - avgGCT) / cycleTime) * 100);
+
+            // GCT Dynamic Color
+            const gctEl = document.getElementById('gct');
+            gctEl.textContent = avgGCT;
+            gctEl.style.color = avgGCT <= 200 ? "var(--primary)" : (avgGCT <= 240 ? "var(--warning)" : "var(--danger)");
+
+            // Flight Dynamic Color
+            const flightEl = document.getElementById('flight');
+            flightEl.textContent = flightRatio;
+            flightEl.style.color = flightRatio >= 35 ? "var(--primary)" : (flightRatio >= 25 ? "var(--warning)" : "var(--danger)");
         }
         isFeetOnGround = true;
     }
