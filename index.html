@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.50 (Pro Diagnosis)</title>
+    <title>OppaRun Pro - v28.60 (Metronome Edition)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -54,8 +54,7 @@
         .info-title { color: var(--primary); font-weight: 900; font-size: 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
         .info-body { color: #ccc; font-size: 13px; line-height: 1.6; font-weight: 600; word-break: keep-all; }
 
-        /* 진단 뷰 전용 스타일 */
-        #diag-view { position: fixed; top: 0; left: 0; width: 100%; height: calc(100% - 75px); background: var(--bg); z-index: 5000; display: none; flex-direction: column; overflow-y: auto; }
+        #diag-view, #metronome-view { position: fixed; top: 0; left: 0; width: 100%; height: calc(100% - 75px); background: var(--bg); z-index: 5000; display: none; flex-direction: column; overflow-y: auto; }
         .diag-header { padding: 60px 20px 20px; border-bottom: 1px solid #222; }
         .diag-card { background: #1a1a1a; border-radius: 15px; padding: 20px; margin: 10px 15px; border-left: 4px solid var(--primary); }
         .diag-label { font-size: 10px; color: var(--text-dim); font-weight: 900; margin-bottom: 5px; }
@@ -81,6 +80,9 @@
         .dropdown-options { display: none; position: absolute; top: 105%; left: 0; width: 100%; background: #2a2a2a; border: 1.5px solid #444; border-radius: 12px; z-index: 1000; overflow: hidden; }
         .dropdown-option { padding: 18px; font-size: 16px; font-weight: 800; border-bottom: 1px solid #333; cursor: pointer; }
         .total-container { padding: 20px; display: flex; flex-direction: column; gap: 15px; }
+
+        /* Metronome Slider Style */
+        .metro-slider { width: 100%; accent-color: var(--primary); margin: 15px 0; }
     </style>
 </head>
 <body> 
@@ -100,6 +102,34 @@
     <div id="diag-view">
         <button class="close-detail" onclick="ui.closeDiag()">CLOSE</button>
         <div id="diag-content-area"></div>
+    </div>
+
+    <!-- Metronome Layer -->
+    <div id="metronome-view">
+        <button class="close-detail" onclick="ui.closeMetronome()">CLOSE</button>
+        <div class="diag-header">
+            <div style="font-size:24px; font-weight:900; color:var(--primary);">METRONOME</div>
+            <div style="color:#666; font-size:12px; margin-top:5px;">Perfect your cadence.</div>
+        </div>
+        <div class="diag-card">
+            <div class="diag-label">TEMPO (BPM)</div>
+            <div id="metro-bpm-val" style="font-size:48px; font-weight:900; text-align:center; color:var(--primary);">175</div>
+            <input type="range" id="metro-bpm" class="metro-slider" min="140" max="200" value="175" oninput="metro.updateDisplay()">
+        </div>
+        <div class="diag-card">
+            <div class="diag-label">VOLUME & ACCENT</div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                <span style="font-size:12px; font-weight:700;">LEVEL</span>
+                <input type="range" id="metro-vol" class="metro-slider" style="width:60%; margin:0;" min="0" max="1" step="0.1" value="0.5">
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid #333; padding-top:15px;">
+                <span style="font-size:12px; font-weight:700;">ACCENT FIRST BEAT</span>
+                <input type="checkbox" id="metro-accent" checked style="width:22px; height:22px; accent-color:var(--primary);">
+            </div>
+        </div>
+        <div style="padding:15px;">
+            <button id="btn-metro-toggle" class="btn-act" style="background:var(--primary); color:#000;" onclick="metro.toggle()">START</button>
+        </div>
     </div>
 
     <div id="run-view" class="main-content">
@@ -156,6 +186,15 @@
                         </div>
                     </div>
                 </div>
+                
+                <!-- Metronome Menu Trigger -->
+                <div class="settings-group">
+                    <div id="label-metronome" class="settings-label">RHYTHM ASSISTANT</div>
+                    <div class="dropdown-select" onclick="ui.openMetronome()">
+                        <span>Metronome</span><span id="menu-bpm-display" style="font-size:12px; color:var(--primary);">OFF</span>
+                    </div>
+                </div>
+
                 <button id="btn-clear-history" style="background:#2a2a2a; color:var(--danger); border:1.5px solid #444; padding:18px; border-radius:12px; width:100%; font-weight:900; font-size:14px; margin-top:20px;" onclick="storage.clearHistory()">CLEAR ALL HISTORY</button>
             </div>
         </div>
@@ -176,7 +215,7 @@ const translations = {
         pace: "PACE", dist: "DIST", time: "TIME", avg: "AVG", cadence: "CADENCE", gct: "GCT", flight: "FLIGHT", 
         start: "START RUNNING", stop: "STOP", resume: "RESUME", finish: "FINISH", 
         run: "RUN", history: "HISTORY", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", 
-        selLang: "SELECT LANGUAGE", clear: "CLEAR ALL HISTORY", confirmClear: "Are you sure?", alertCleared: "History cleared.", 
+        selLang: "SELECT LANGUAGE", metro: "RHYTHM ASSISTANT", clear: "CLEAR ALL HISTORY", confirmClear: "Are you sure?", alertCleared: "History cleared.", 
         route: "ROUTE", diag: "DIAG", close: "CLOSE",
         infoT: ["CADENCE", "POWER", "STRIKE", "ROLLING"],
         infoB: ["Recommended 170~185 BPM.", "Use hips and glutes.", "Midfoot and center of gravity.", "Smooth power transition."]
@@ -185,7 +224,7 @@ const translations = {
         pace: "페이스", dist: "거리", time: "시간", avg: "평균", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", 
         start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료", 
         run: "러닝", history: "기록", list: "목록", total: "통계", info: "정보", settings: "설정", 
-        selLang: "언어 설정", clear: "전체 기록 삭제", confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.", 
+        selLang: "언어 설정", metro: "리듬 어시스턴트", clear: "전체 기록 삭제", confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.", 
         route: "경로", diag: "진단", close: "닫기",
         infoT: ["케이던스", "파워", "스트라이크", "롤링"],
         infoB: ["권장 170~185 BPM.", "고관절과 둔근 활용.", "미드풋과 무게중심.", "부드러운 힘의 전환."]
@@ -211,6 +250,74 @@ const storage = {
     }
 };
 
+const metro = {
+    audioCtx: null,
+    nextTickTime: 0,
+    timerID: null,
+    isPlaying: false,
+    currentBeat: 0,
+    
+    init() {
+        if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    },
+
+    playClick() {
+        const osc = this.audioCtx.createOscillator();
+        const envelope = this.audioCtx.createGain();
+        const isAccent = document.getElementById('metro-accent').checked && this.currentBeat === 0;
+
+        // Woodblock-like sound using Triangle wave
+        osc.type = 'triangle'; 
+        osc.frequency.value = isAccent ? 1200 : 800;
+
+        const vol = document.getElementById('metro-vol').value;
+        envelope.gain.value = vol;
+        envelope.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.1);
+
+        osc.connect(envelope);
+        envelope.connect(this.audioCtx.destination);
+
+        osc.start(this.audioCtx.currentTime);
+        osc.stop(this.audioCtx.currentTime + 0.1);
+
+        this.currentBeat = (this.currentBeat + 1) % 4;
+    },
+
+    scheduler() {
+        while (this.nextTickTime < this.audioCtx.currentTime + 0.1) {
+            this.playClick();
+            const bpm = document.getElementById('metro-bpm').value;
+            this.nextTickTime += 60.0 / bpm;
+        }
+        this.timerID = setTimeout(() => this.scheduler(), 25);
+    },
+
+    toggle() {
+        this.init();
+        if (this.isPlaying) {
+            clearTimeout(this.timerID);
+            this.isPlaying = false;
+            document.getElementById('btn-metro-toggle').textContent = "START";
+            document.getElementById('btn-metro-toggle').style.background = "var(--primary)";
+            document.getElementById('menu-bpm-display').textContent = "OFF";
+        } else {
+            this.currentBeat = 0;
+            this.nextTickTime = this.audioCtx.currentTime;
+            this.scheduler();
+            this.isPlaying = true;
+            document.getElementById('btn-metro-toggle').textContent = "STOP";
+            document.getElementById('btn-metro-toggle').style.background = "var(--danger)";
+            document.getElementById('menu-bpm-display').textContent = document.getElementById('metro-bpm').value + " BPM";
+        }
+    },
+
+    updateDisplay() {
+        const val = document.getElementById('metro-bpm').value;
+        document.getElementById('metro-bpm-val').textContent = val;
+        if(this.isPlaying) document.getElementById('menu-bpm-display').textContent = val + " BPM";
+    }
+};
+
 const control = {
     formatPace: (kmh) => { 
         if (!kmh || kmh < 0.5) return "--'--\""; 
@@ -225,25 +332,20 @@ const control = {
         const lang = localStorage.getItem('oppaRunLang') || 'en';
         const isKo = lang === 'ko';
         
-        // 1. Cadence
         const cad = parseInt(r.cadence) || 0;
-        let cadTip = cad < 170 ? (isKo ? "보폭을 줄이고 피치를 높여 무릎 부하를 줄이세요." : "Shorten stride and increase pitch to reduce knee load.") : (isKo ? "훌륭한 리듬입니다. 에너지를 잘 보존하고 있습니다." : "Excellent rhythm. Conserving energy well.");
+        let cadTip = cad < 170 ? (isKo ? "보폭을 줄이고 피치를 높여 무릎 부하를 줄이세요." : "Shorten stride and increase pitch.") : (isKo ? "훌륭한 리듬입니다." : "Excellent rhythm.");
 
-        // 2. GCT
         const gct = parseInt(r.gct) || 0;
-        let gctTip = gct > 240 ? (isKo ? "발이 지면에 머무는 시간이 깁니다. 족저 부하에 주의하세요." : "GCT is long. Watch out for plantar fascia load.") : (isKo ? "발이 지면에 닿는 시간이 짧아 탄력이 좋습니다." : "Short contact time indicates good elasticity.");
+        let gctTip = gct > 240 ? (isKo ? "발이 지면에 머무는 시간이 깁니다." : "GCT is long.") : (isKo ? "탄력이 좋습니다." : "Good elasticity.");
 
-        // 3. Flight Time
         const flt = parseInt(r.flight) || 0;
-        let fltTip = flt < 30 ? (isKo ? "지면을 더 밀어내어 탄력 있는 롤링을 시도해보세요." : "Push off more for elastic rolling.") : (isKo ? "안정적인 공중 체류로 효율적인 러닝을 하고 있습니다." : "Efficient running with stable flight time.");
+        let fltTip = flt < 30 ? (isKo ? "지면을 더 밀어내 보세요." : "Push off more.") : (isKo ? "효율적인 러닝입니다." : "Efficient running.");
 
-        // 4. Training Load
         const dist = parseFloat(r.dist) || 0;
-        const paceVal = parseFloat(r.pace.split("'")[0]) + (parseFloat(r.pace.split("'")[1])/60);
+        const paceParts = r.pace.split("'");
+        const paceVal = (parseFloat(paceParts[0]) || 10) + ((parseFloat(paceParts[1]) || 0)/60);
         let loadScore = (dist * (10 / paceVal)).toFixed(1);
         let loadLevel = loadScore > 15 ? (isKo ? "높음" : "HIGH") : (loadScore > 7 ? (isKo ? "보통" : "MODERATE") : (isKo ? "낮음" : "LOW"));
-
-        // 5. Recovery Time
         let recTime = loadScore > 15 ? 48 : (loadScore > 7 ? 24 : 12);
 
         return { r, cad, cadTip, gct, gctTip, flt, fltTip, loadScore, loadLevel, recTime, isKo };
@@ -252,7 +354,7 @@ const control = {
 
 const ui = {
     showTab: (tab) => {
-        ui.closeDetail(); ui.closeDiag();
+        ui.closeDetail(); ui.closeDiag(); ui.closeMetronome();
         document.getElementById('run-view').style.display = (tab === 'run' ? 'flex' : 'none');
         document.getElementById('map-area').style.display = (tab === 'run' ? 'block' : 'none');
         document.getElementById('history-view').style.display = (tab === 'history' ? 'flex' : 'none');
@@ -285,20 +387,21 @@ const ui = {
         document.getElementById('sub-tab-info').textContent = t.info;
         document.getElementById('sub-tab-settings').textContent = t.settings;
         document.getElementById('label-select-lang').textContent = t.selLang;
+        document.getElementById('label-metronome').textContent = t.metro;
         document.getElementById('btn-clear-history').textContent = t.clear;
         document.getElementById('current-lang-text').textContent = (lang === 'ko' ? "한국어 (KR)" : "English (US)");
-
         for(let i=1; i<=4; i++) {
             document.getElementById(`info-t${i}`).textContent = t.infoT[i-1];
             document.getElementById(`info-b${i}`).textContent = t.infoB[i-1];
         }
-
         localStorage.setItem('oppaRunLang', lang);
         ui.updateHistoryList(); 
     },
     toggleDim: (show) => { document.getElementById('dimmer-overlay').style.display = show ? 'flex' : 'none'; },
     toggleDropdown: () => { const opt = document.getElementById('dropdown-options'); opt.style.display = (opt.style.display==='block'?'none':'block'); },
     selectLang: (lang) => { ui.changeLanguage(lang); ui.toggleDropdown(); },
+    openMetronome: () => document.getElementById('metronome-view').style.display = 'flex',
+    closeMetronome: () => document.getElementById('metronome-view').style.display = 'none',
     updateHistoryList: () => {
         const h = storage.loadHistory();
         const lang = localStorage.getItem('oppaRunLang') || 'en';
@@ -323,10 +426,9 @@ const ui = {
     },
     updateTotalStats: () => {
         const h = storage.loadHistory(); if (h.length === 0) return;
-        let tDist = 0, tSeconds = 0, tKcal = 0;
+        let tDist = 0, tSeconds = 0;
         h.forEach(r => {
             tDist += parseFloat(r.dist) || 0;
-            tKcal += parseInt(r.kcal) || 0;
             const p = r.time.split(':'); if(p.length === 2) tSeconds += parseInt(p[0]) * 60 + parseInt(p[1]);
         });
         const avgPace = tDist > 0 ? control.formatPace(3600 / (tSeconds / tDist)) : "--'--\"";
@@ -361,8 +463,8 @@ const ui = {
             <div class="diag-card"><div class="diag-label">CADENCE</div><div class="diag-val-group"><span class="diag-main-val">${d.cad} BPM</span><span class="diag-ref">REF: 170~185</span></div><div class="diag-tip">${d.cadTip}</div></div>
             <div class="diag-card"><div class="diag-label">GROUND CONTACT TIME (GCT)</div><div class="diag-val-group"><span class="diag-main-val">${d.gct} MS</span><span class="diag-ref">REF: < 240</span></div><div class="diag-tip">${d.gctTip}</div></div>
             <div class="diag-card"><div class="diag-label">FLIGHT TIME RATIO</div><div class="diag-val-group"><span class="diag-main-val">${d.flt}%</span><span class="diag-ref">REF: > 30%</span></div><div class="diag-tip">${d.fltTip}</div></div>
-            <div class="diag-card" style="border-left-color:var(--warning);"><div class="diag-label">TRAINING LOAD</div><div class="diag-val-group"><span class="diag-main-val">${d.loadScore} pts</span><span class="diag-ref">LVL: ${d.loadLevel}</span></div><div class="diag-tip">${d.isKo?"신체에 전달된 전체적인 훈련 강도 점수입니다.":"Overall intensity score delivered to your body."}</div></div>
-            <div class="diag-card" style="border-left-color:var(--danger);"><div class="diag-label">RECOVERY TIME</div><div class="diag-val-group"><span class="diag-main-val">${d.recTime} HOURS</span></div><div class="diag-tip">${d.isKo?"다음 고강도 훈련까지 권장되는 최소 휴식 시간입니다.":"Recommended minimum rest before next intense session."}</div></div>
+            <div class="diag-card" style="border-left-color:var(--warning);"><div class="diag-label">TRAINING LOAD</div><div class="diag-val-group"><span class="diag-main-val">${d.loadScore} pts</span><span class="diag-ref">LVL: ${d.loadLevel}</span></div><div class="diag-tip">${d.isKo?"신체에 전달된 전체적인 훈련 강도 점수입니다.":"Overall intensity score."}</div></div>
+            <div class="diag-card" style="border-left-color:var(--danger);"><div class="diag-label">RECOVERY TIME</div><div class="diag-val-group"><span class="diag-main-val">${d.recTime} HOURS</span></div><div class="diag-tip">${d.isKo?"다음 고강도 훈련까지 권장되는 최소 휴식 시간입니다.":"Recommended rest time."}</div></div>
             <div style="height:100px;"></div>`;
     },
     closeDiag: () => document.getElementById('diag-view').style.display = 'none'
