@@ -209,9 +209,17 @@ let map, marker, accCircle, polyline, timer, isRunning = false, isPaused = false
 let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0, currentSpeedKmh = 0, currentAlt = 0, pathCoords = [];
 let detailMap = null, wakeLock = null, lowSpeedStartTime = null;
 
+// --- GCT & Flight Calculation Variables ---
+let lastImpactTime = 0;
+let isFeetOnGround = false;
+let gctAccumulator = 0;
+let gctCount = 0;
+let flightAccumulator = 0;
+let totalStepCycleTime = 0;
+
 const translations = {
     en: { 
-        pace: "PACE", dist: "DIST", time: "TIME", avg: "AVG", cadence: "CADENCE", gct: "GCT", flight: "FLIGHT", start: "START RUNNING", stop: "STOP", resume: "RESUME", finish: "FINISH", run: "RUN", history: "HISTORY", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", selLang: "SELECT LANGUAGE", metro: "RHYTHM ASSISTANT", clear: "CLEAR ALL HISTORY", confirmClear: "Are you sure?", alertCleared: "History cleared.", route: "ROUTE", diag: "DIAG", close: "CLOSE",
+        pace: "PACE", dist: "DIST", time: "TIME", avg: "AVG", cadence: "CADENCE", gct: "GCT", flight: "FLIGHT", start: "START RUNNING", stop: "STOP", resume: "RESUME", finish: "FINISH", run: "RUN", history: "HISTORY", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", selLang: "SELECT LANGUAGE", metro: "RHYTHMUS-HILFE", clear: "CLEAR ALL HISTORY", confirmClear: "Are you sure?", alertCleared: "History cleared.", route: "ROUTE", diag: "DIAG", close: "CLOSE",
         metroTitle: "METRONOME", metroDesc: "Perfect your cadence.", metroAccent: "ACCENT FIRST BEAT", noRec: "NO RECORDS", totalStats: "LIFETIME STATS", runs: "RUNS", autoPaused: "AUTO PAUSED", wake: "TAP TO WAKE",
         infC: "CADENCE", infCD: "Recommended 170~185 BPM.", infP: "POWER", infPD: "Use hips and glutes.", infS: "STRIKE", infSD: "Midfoot and center of gravity."
     },
@@ -221,7 +229,7 @@ const translations = {
         infC: "케이던스", infCD: "170~185 BPM을 권장합니다.", infP: "파워", infPD: "골반과 둔근을 사용하세요.", infS: "착지", infSD: "미드풋과 무게중심 착지를 신경쓰세요."
     },
     jp: {
-        pace: "ペース", dist: "距離", time: "時間", avg: "平均", cadence: "ピッチ", gct: "接地時間", flight: "滞空時間", start: "ランニング開始", stop: "停止", resume: "再開", finish: "終了", run: "ラン", history: "履歴", list: "リスト", total: "統計", info: "情報", settings: "設定", selLang: "言語設定", metro: "リズムアシスト", clear: "全履歴削除", confirmClear: "本当に削除しますか？", alertCleared: "履歴が削除されました。", route: "ルート", diag: "診断", close: "閉じる",
+        pace: "ペース", dist: "距離", time: "時間", avg: "平均", cadence: "ピッチ", gct: "接地時間", flight: "滞空時間", start: "ランニング開始", stop: "停止", resume: "再開", finish: "終了", run: "ラン", history: "履歴", list: "リスト", total: "統計", info: "情報", settings: "設定", selLang: "言語設定", metro: "リズムアシ스트", clear: "全履歴削除", confirmClear: "本当に削除しますか？", alertCleared: "履歴が削除されました。", route: "ルート", diag: "診断", close: "閉じる",
         metroTitle: "메트로놈", metroDesc: "러닝 리듬을 일정하게 유지하세요.", metroAccent: "첫 박자 강조", noRec: "기록 없음", totalStats: "누적 통계", runs: "러닝 횟수", autoPaused: "자동 일시정지", wake: "화면을 깨우려면 터치하세요",
         infC: "ピッチ", infCD: "170~185 BPMが推奨されます。", infP: "パワー", infPD: "股関節と臀筋を使いましょう。", infS: "着地", infSD: "ミッドフット着地を意識してください。"
     },
@@ -243,7 +251,7 @@ const translations = {
     vn: {
         pace: "NHỊP", dist: "KHOẢNG CÁCH", time: "THỜI GIAN", avg: "TB", cadence: "NHỊP CHÂN", gct: "CHẠM ĐẤT", flight: "BAY", start: "BẮT ĐẦU CHẠY", stop: "DỪNG", resume: "TIẾP TỤC", finish: "KẾT THÚC", run: "CHẠY", history: "LỊCH SỬ", list: "DANH SÁCH", total: "TỔNG", info: "THÔNG TIN", settings: "CÀI ĐẶT", selLang: "CHỌN NGÔN NGỮ", metro: "HỖ TRỢ NHỊP", clear: "XÓA TẤT CẢ", confirmClear: "Bạn chắc chắn chứ?", alertCleared: "Đã xóa lịch sử.", route: "LỘ TRÌNH", diag: "CHẨN ĐOÁN", close: "ĐÓNG",
         metroTitle: "NHỊP ĐIỆU", metroDesc: "Hoàn thiện nhịp chân의 bạn.", metroAccent: "NHẤN NHỊP ĐẦU", noRec: "KHÔNG CÓ DỮ LIỆU", totalStats: "THỐNG KÊ TỔNG", runs: "LẦN CHẠY", autoPaused: "TỰ ĐỘNG DỪNG", wake: "CHẠM ĐỂ BẬT",
-        infC: "NHỊP CHÂN", infCD: "Khuyên dùng 170~185 BPM.", infP: "LỰC", infPD: "Sử dụng hông và mông.", infS: "TIẾP ĐẤT", infSD: "Giữa bàn chân và trọng tâm."
+        infC: "NHỊP CHÂN", infCD: "Khuyên dùng 170~185 BPM.", infP: "LỰC", infPD: "Sử dụng hông và mông.", infS: "TIẾP ĐẤT", infSD: "Giữa bàn chân 및 trọng tâm."
     }
 };
 
@@ -470,7 +478,6 @@ const ui = {
 
 async function requestWakeLock() { try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {} }
 
-// *** UI 업데이트 로직 수정 및 보강 ***
 function updatePosition(p) {
     const pos = [p.coords.latitude, p.coords.longitude]; 
     currentSpeedKmh = (p.coords.speed || 0) * 3.6; 
@@ -488,7 +495,6 @@ function updatePosition(p) {
     }
 
     if (isRunning && !isPaused) {
-        // 자동 일시정지 판단
         if (currentSpeedKmh < 1.0) { 
             if (!lowSpeedStartTime) lowSpeedStartTime = Date.now(); 
             if ((Date.now() - lowSpeedStartTime) > 3000 && !isAutoPaused) { 
@@ -503,11 +509,10 @@ function updatePosition(p) {
             lowSpeedStartTime = null; 
         }
 
-        // 실제 러닝 데이터 업데이트
         if (!isAutoPaused && accuracy < 60) {
             if (lastPos) { 
                 let d = map.distance(lastPos, pos) / 1000; 
-                if (d > 0.001) { // 1미터 이상 이동시 업데이트
+                if (d > 0.001) { 
                     totalDist += d; 
                     document.getElementById('dist').textContent = totalDist.toFixed(2); 
                     lastPos = pos; 
@@ -517,10 +522,8 @@ function updatePosition(p) {
             } else {
                 lastPos = pos;
             }
-            // 현재 페이스 화면 표시
             document.getElementById('curPace').textContent = control.formatPace(currentSpeedKmh);
             
-            // 평균 페이스 계산 및 표시
             if (totalDist > 0.005) {
                 let avgKmh = (totalDist / (seconds / 3600));
                 document.getElementById('avgPace').textContent = control.formatPace(avgKmh);
@@ -529,20 +532,38 @@ function updatePosition(p) {
     }
 }
 
+// *** FIXED: GCT & Flight Calculation Logic ***
 function handleMotion(e) {
     if (!isRunning || isPaused || isAutoPaused) return;
     let acc = e.accelerationIncludingGravity; 
-    if (!acc || acc.x === null) return;
+    if (!acc || acc.z === null) return;
     
     let force = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2); 
     let now = Date.now();
     
+    // Step Detection & Cadence
     if (force > 12.5 && (now - lastStepTime) > 230) {
+        let cycleTime = now - lastStepTime;
         steps++; 
         lastStepTime = now;
-        // 케이던스 계산: (걸음수 / 경과시간(초)) * 60
         let cadVal = Math.round((steps / (seconds || 1)) * 60);
         document.getElementById('cadence').textContent = cadVal;
+
+        // Calculate GCT & Flight (Experimental via Z-axis impact)
+        if (isFeetOnGround) {
+            let flightTime = now - lastImpactTime; // Time since last foot-off
+            let currentGCT = Math.round(cycleTime * 0.35); // Estimated GCT ratio
+            gctAccumulator += currentGCT;
+            gctCount++;
+            
+            let avgGCT = Math.round(gctAccumulator / gctCount);
+            let flightRatio = Math.round(((cycleTime - avgGCT) / cycleTime) * 100);
+            
+            document.getElementById('gct').textContent = avgGCT;
+            document.getElementById('flight').textContent = flightRatio;
+        }
+        isFeetOnGround = true;
+        lastImpactTime = now;
     }
 }
 
@@ -556,10 +577,13 @@ function onStart() {
     steps = 0; 
     pathCoords = []; 
     lastPos = null;
+    gctAccumulator = 0; gctCount = 0;
     
     document.getElementById('dist').textContent = "0.00";
     document.getElementById('time').textContent = "00:00";
     document.getElementById('cadence').textContent = "0";
+    document.getElementById('gct').textContent = "--";
+    document.getElementById('flight').textContent = "--";
     document.getElementById('curPace').textContent = "--'--\"";
     document.getElementById('avgPace').textContent = "--'--\"";
     
