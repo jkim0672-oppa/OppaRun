@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.75 (Vibration & Multi-Lang)</title>
+    <title>OppaRun Pro - v28.80 (Elevation Support)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -142,7 +142,7 @@
             <div class="card"><div class="label" id="label-time">TIME</div><div id="time" class="value">00:00</div></div>
             <div class="card"><div class="label" id="label-avg">AVG</div><div id="avgPace" class="value">--'--"</div></div>
             <div class="card"><div class="label" id="label-cadence">CADENCE</div><div id="cadence" class="value">0</div></div>
-            <div class="card"><div class="label" id="label-gct">GCT</div><div class="value"><span id="gct">--</span><span style="font-size:10px;"> MS</span></div></div>
+            <div class="card"><div class="label" id="label-gain">GAIN</div><div class="value"><span id="elevation-gain">0</span><span style="font-size:10px; color:var(--primary)"> M</span></div></div>
             <div class="card"><div class="label" id="label-flight">FLIGHT</div><div class="value"><span id="flight">--</span><span style="font-size:10px;"> %</span></div></div>
         </div>
         <div class="controls">
@@ -208,43 +208,26 @@
 let map, marker, accCircle, polyline, timer, isRunning = false, isPaused = false, isAutoPaused = false, seconds = 0;
 let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0, currentSpeedKmh = 0, pathCoords = [];
 let detailMap = null, wakeLock = null, lowSpeedStartTime = null;
+// Elevation Variables
+let totalGain = 0, lastAlt = null;
 
 const translations = {
     en: { 
-        pace: "PACE", dist: "DIST", time: "TIME", avg: "AVG", cadence: "CADENCE", gct: "GCT", flight: "FLIGHT", start: "START RUNNING", stop: "STOP", resume: "RESUME", finish: "FINISH", run: "RUN", history: "HISTORY", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", selLang: "SELECT LANGUAGE", metro: "RHYTHM ASSISTANT", clear: "CLEAR ALL HISTORY", confirmClear: "Are you sure?", alertCleared: "History cleared.", route: "ROUTE", diag: "DIAG", close: "CLOSE",
+        pace: "PACE", dist: "DIST", time: "TIME", avg: "AVG", cadence: "CADENCE", gain: "GAIN", flight: "FLIGHT", start: "START RUNNING", stop: "STOP", resume: "RESUME", finish: "FINISH", run: "RUN", history: "HISTORY", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", selLang: "SELECT LANGUAGE", metro: "RHYTHM ASSISTANT", clear: "CLEAR ALL HISTORY", confirmClear: "Are you sure?", alertCleared: "History cleared.", route: "ROUTE", diag: "DIAG", close: "CLOSE",
         metroTitle: "METRONOME", metroDesc: "Perfect your cadence.", metroAccent: "ACCENT FIRST BEAT", noRec: "NO RECORDS", totalStats: "LIFETIME STATS", runs: "RUNS", autoPaused: "AUTO PAUSED", wake: "TAP TO WAKE",
         infC: "CADENCE", infCD: "Recommended 170~185 BPM.", infP: "POWER", infPD: "Use hips and glutes.", infS: "STRIKE", infSD: "Midfoot and center of gravity."
     },
     ko: { 
-        pace: "페이스", dist: "거리", time: "시간", avg: "평균", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료", run: "러닝", history: "기록", list: "목록", total: "통계", info: "정보", settings: "설정", selLang: "언어 설정", metro: "리듬 어시스턴트", clear: "전체 기록 삭제", confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.", route: "경로", diag: "진단", close: "닫기",
+        pace: "페이스", dist: "거리", time: "시간", avg: "평균", cadence: "케이던스", gain: "고도 상승", flight: "체공시간", start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료", run: "러닝", history: "기록", list: "목록", total: "통계", info: "정보", settings: "설정", selLang: "언어 설정", metro: "리듬 어시스턴트", clear: "전체 기록 삭제", confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.", route: "경로", diag: "진단", close: "닫기",
         metroTitle: "메트로놈", metroDesc: "러닝 리듬을 일정하게 유지하세요.", metroAccent: "첫 박자 강조", noRec: "기록 없음", totalStats: "누적 통계", runs: "러닝 횟수", autoPaused: "자동 일시정지", wake: "화면을 깨우려면 터치하세요",
         infC: "케이던스", infCD: "170~185 BPM을 권장합니다.", infP: "파워", infPD: "골반과 둔근을 사용하세요.", infS: "착지", infSD: "미드풋과 무게중심 착지를 신경쓰세요."
     },
-    jp: {
-        pace: "ペース", dist: "距離", time: "時間", avg: "平均", cadence: "ピッチ", gct: "接地時間", flight: "滞空時間", start: "ランニング開始", stop: "停止", resume: "再開", finish: "終了", run: "ラン", history: "履歴", list: "リスト", total: "統計", info: "情報", settings: "設定", selLang: "言語設定", metro: "リズムアシ스트", clear: "全履歴削除", confirmClear: "本当に削除しますか？", alertCleared: "履歴が削除されました。", route: "ルート", diag: "診断", close: "閉じる",
-        metroTitle: "メトロノーム", metroDesc: "リズムを整えましょう。", metroAccent: "一拍目を強調", noRec: "履歴なし", totalStats: "生涯統計", runs: "走数", autoPaused: "自動一時停止", wake: "タップして解除",
-        infC: "ピッチ", infCD: "170~185 BPMが推奨されます。", infP: "パワー", infPD: "股関節と臀筋を使いましょう。", infS: "着地", infSD: "ミッドフット着地を意識してください。"
-    },
-    es: {
-        pace: "RITMO", dist: "DIST", time: "TIEMPO", avg: "PROM", cadence: "CADENCIA", gct: "TCB", flight: "VUELO", start: "EMPEZAR CORRER", stop: "PARAR", resume: "RESUMIR", finish: "TERMINAR", run: "CORRER", history: "HISTORIAL", list: "LISTA", total: "TOTAL", info: "INFO", settings: "AJUSTES", selLang: "SELECCIONAR IDIOMA", metro: "RITMO ASISTENTE", clear: "BORRAR TODO", confirmClear: "¿Estás seguro?", alertCleared: "Historial borrado.", route: "RUTA", diag: "DIAG", close: "CERRAR",
-        metroTitle: "METRÓNOMO", metroDesc: "Perfecciona tu cadencia.", metroAccent: "ACENTO PRIMER PULSO", noRec: "SIN REGISTROS", totalStats: "ESTADÍSTICAS TOTALES", runs: "CARRERAS", autoPaused: "PAUSA AUTO", wake: "TOCA PARA ACTIVAR",
-        infC: "CADENCIA", infCD: "Recomendado 170~185 BPM.", infP: "POTENCIA", infPD: "Usa caderas y glúteos.", infS: "PISADA", infSD: "Mediopié y centro de gravedad."
-    },
-    de: {
-        pace: "PACE", dist: "DIST", time: "ZEIT", avg: "DURCHS", cadence: "KADENZ", gct: "BODEN", flight: "FLUG", start: "LAUFEN STARTEN", stop: "STOPP", resume: "WEITER", finish: "BEENDEN", run: "LAUF", history: "VERLAUF", list: "LISTE", total: "GESAMT", info: "INFO", settings: "SETUP", selLang: "SPRACHE WÄHLEN", metro: "RHYTHMUS-HILFE", clear: "ALLES LÖSCHEN", confirmClear: "Bist du sicher?", alertCleared: "Verlauf gelöscht.", route: "ROUTE", diag: "DIAG", close: "ZU",
-        metroTitle: "METRONOM", metroDesc: "Optimiere deine Kadenz.", metroAccent: "ERSTEN SCHLAG BETONEN", noRec: "KEINE DATEN", totalStats: "GESAMTSTATISTIK", runs: "LÄUFE", autoPaused: "AUTO-PAUSE", wake: "ZUM AUFWACHEN TIPPEN",
-        infC: "KADENZ", infCD: "Empfohlen: 170~185 BPM.", infP: "KRAFT", infPD: "Hüften und Gesäß nutzen.", infS: "AUFTRITT", infSD: "Mittelfuß und Schwerpunkt."
-    },
-    cn: {
-        pace: "配速", dist: "距离", time: "时间", avg: "平均", cadence: "步频", gct: "触地时间", flight: "腾空时间", start: "开始跑步", stop: "停止", resume: "继续", finish: "结束", run: "跑步", history: "历史", list: "列表", total: "统计", info: "信息", settings: "设置", selLang: "选择语言", metro: "节奏助手", clear: "清除所有历史", confirmClear: "确定吗？", alertCleared: "历史记录已清除。", route: "路线", diag: "诊断", close: "关闭",
-        metroTitle: "节拍器", metroDesc: "优化你的步频节奏。", metroAccent: "强调第一拍", noRec: "暂无记录", totalStats: "终身统计", runs: "运行次数", autoPaused: "自动暂停", wake: "点击唤醒",
-        infC: "步频", infCD: "建议 170~185 BPM。", infP: "力量", infPD: "使用臀部和大腿力量。", infS: "着地", infSD: "足中着地并保持重心。"
-    },
-    vn: {
-        pace: "NHỊP", dist: "KHOẢNG CÁCH", time: "THỜI GIAN", avg: "TB", cadence: "NHỊP CHÂN", gct: "CHẠM ĐẤT", flight: "BAY", start: "BẮT ĐẦU CHẠY", stop: "DỪNG", resume: "TIẾP TỤC", finish: "KẾT THÚC", run: "CHẠY", history: "LỊCH SỬ", list: "DANH SÁCH", total: "TỔNG", info: "THÔNG TIN", settings: "CÀI ĐẶT", selLang: "CHỌN NGÔN NGỮ", metro: "HỖ TRỢ NHỊP", clear: "XÓA TẤT CẢ", confirmClear: "Bạn chắc chắn chứ?", alertCleared: "Đã xóa lịch sử.", route: "LỘ TRÌNH", diag: "CHẨN ĐOÁN", close: "ĐÓNG",
-        metroTitle: "NHỊP ĐIỆU", metroDesc: "Hoàn thiện nhịp chân của bạn.", metroAccent: "NHẤN NHỊP ĐẦU", noRec: "KHÔNG CÓ DỮ LIỆU", totalStats: "THỐNG KÊ TỔNG", runs: "LẦN CHẠY", autoPaused: "TỰ ĐỘNG DỪNG", wake: "CHẠM ĐỂ BẬT",
-        infC: "NHỊP CHÂN", infCD: "Khuyên dùng 170~185 BPM.", infP: "LỰC", infPD: "Sử dụng hông và mông.", infS: "TIẾP ĐẤT", infSD: "Giữa bàn chân và trọng tâm."
-    }
+    // ... Other translations (jp, es, de, cn, vn) follow the same 'gain' key mapping ...
+    jp: { pace: "ペース", dist: "距離", time: "時間", avg: "平均", cadence: "ピッチ", gain: "獲得高度", flight: "滞空時間", start: "ランニング開始", stop: "停止", resume: "再開", finish: "終了", run: "ラン", history: "履歴", list: "リスト", total: "統計", info: "情報", settings: "設定", selLang: "言語設定", metro: "リズムアシ스트", clear: "全履歴削除", confirmClear: "本当に削除しますか？", alertCleared: "履歴が削除されました。", route: "ルート", diag: "診断", close: "閉じる", metroTitle: "メトロノーム", metroDesc: "リズムを整えましょう。", metroAccent: "一拍目を強調", noRec: "履歴なし", totalStats: "生涯統計", runs: "走数", autoPaused: "自動一時停止", wake: "タップして解除", infC: "ピッチ", infCD: "170~185 BPMが推奨されます。", infP: "パワー", infPD: "股関節と臀筋を使いましょう。", infS: "着地", infSD: "ミッドフット着地を意識してください。" },
+    es: { pace: "RITMO", dist: "DIST", time: "TIEMPO", avg: "PROM", cadence: "CADENCIA", gain: "DESNIVEL", flight: "VUELO", start: "EMPEZAR CORRER", stop: "PARAR", resume: "RESUMIR", finish: "TERMINAR", run: "CORRER", history: "HISTORIAL", list: "LISTA", total: "TOTAL", info: "INFO", settings: "AJUSTES", selLang: "SELECCIONAR IDIOMA", metro: "RITMO ASISTENTE", clear: "BORRAR TODO", confirmClear: "¿Estás seguro?", alertCleared: "Historial borrado.", route: "RUTA", diag: "DIAG", close: "CERRAR", metroTitle: "METRÓNOMO", metroDesc: "Perfecciona tu cadencia.", metroAccent: "ACENTO PRIMER PULSO", noRec: "SIN REGISTROS", totalStats: "ESTADÍSTICAS TOTALES", runs: "CARRERAS", autoPaused: "PAUSA AUTO", wake: "TOCA PARA ACTIVAR", infC: "CADENCIA", infCD: "Recomendado 170~185 BPM.", infP: "POTENCIA", infPD: "Usa caderas y glúteos.", infS: "PISADA", infSD: "Mediopié y centro de gravedad." },
+    de: { pace: "PACE", dist: "DIST", time: "ZEIT", avg: "DURCHS", cadence: "KADENZ", gain: "ANSTIEG", flight: "FLUG", start: "LAUFEN STARTEN", stop: "STOPP", resume: "WEITER", finish: "BEENDEN", run: "LAUF", history: "VERLAUF", list: "LISTE", total: "GESAMT", info: "INFO", settings: "SETUP", selLang: "SPRACHE WÄHLEN", metro: "RHYTHMUS-HILFE", clear: "ALLES LÖSCHEN", confirmClear: "Bist du sicher?", alertCleared: "Verlauf gelöscht.", route: "ROUTE", diag: "DIAG", close: "ZU", metroTitle: "METRONOM", metroDesc: "Optimiere deine Kadenz.", metroAccent: "ERSTEN SCHLAG BETONEN", noRec: "KEINE DATEN", totalStats: "GESAMTSTATISTIK", runs: "LÄUFE", autoPaused: "AUTO-PAUSE", wake: "ZUM AUFWACHEN TIPPEN", infC: "KADENZ", infCD: "Empfohlen: 170~185 BPM.", infP: "KRAFT", infPD: "Hüften und Gesäß nutzen.", infS: "AUFTRITT", infSD: "Mittelfuß und Schwerpunkt." },
+    cn: { pace: "配速", dist: "距离", time: "时间", avg: "平均", cadence: "步频", gain: "爬升", flight: "腾空时间", start: "开始跑步", stop: "停止", resume: "继续", finish: "结束", run: "跑步", history: "历史", list: "列表", total: "统计", info: "信息", settings: "设置", selLang: "选择语言", metro: "节奏助手", clear: "清除所有历史", confirmClear: "确定吗？", alertCleared: "历史记录已清除。", route: "路线", diag: "诊断", close: "关闭", metroTitle: "节拍器", metroDesc: "优化你的步频节奏。", metroAccent: "强调第一拍", noRec: "暂无记录", totalStats: "终身统计", runs: "运行次数", autoPaused: "自动暂停", wake: "点击唤醒", infC: "步频", infCD: "建议 170~185 BPM。", infP: "力量", infPD: "使用臀部和大腿力量。", infS: "着地", infSD: "足中着地并保持重心。" },
+    vn: { pace: "NHỊP", dist: "KHOẢNG CÁCH", time: "THỜI GIAN", avg: "TB", cadence: "NHỊP CHÂN", gain: "ĐỘ CAO", flight: "BAY", start: "BẮT ĐẦU CHẠY", stop: "DỪNG", resume: "TIẾP TỤC", finish: "KẾT THÚC", run: "CHẠY", history: "LỊCH SỬ", list: "DANH SÁCH", total: "TỔNG", info: "THÔNG TIN", settings: "CÀI ĐẶT", selLang: "CHỌN NGÔN NGỮ", metro: "HỖ TRỢ NHỊP", clear: "XÓA TẤT CẢ", confirmClear: "Bạn chắc chắn chứ?", alertCleared: "Đã xóa lịch sử.", route: "LỘ TRÌNH", diag: "CHẨN ĐOÁN", close: "ĐÓNG", metroTitle: "NHỊP ĐIỆU", metroDesc: "Hoàn thiện nhịp chân của bạn.", metroAccent: "NHẤN NHỊP ĐẦU", noRec: "KHÔNG CÓ DỮ LIỆU", totalStats: "THỐNG KÊ TỔNG", runs: "LẦN CHẠY", autoPaused: "TỰ ĐỘNG DỪNG", wake: "CHẠM ĐỂ BẬT", infC: "NHỊP CHÂN", infCD: "Khuyên dùng 170~185 BPM.", infP: "LỰC", infPD: "Sử dụng hông và mông.", infS: "TIẾP ĐẤT", infSD: "Giữa bàn chân và trọng tâm." }
 };
 
 const storage = {
@@ -308,16 +291,12 @@ const control = {
         const lang = localStorage.getItem('oppaRunLang') || 'en'; const isKo = lang === 'ko';
         const cad = parseInt(r.cadence) || 0;
         let cadTip = cad < 170 ? (isKo ? "보폭을 줄이고 피치를 높여 무릎 부하를 줄이세요." : "Shorten stride.") : (isKo ? "훌륭한 리듬입니다." : "Great rhythm.");
-        const gct = parseInt(r.gct) || 0;
-        let gctTip = gct > 240 ? (isKo ? "발이 지면에 머무는 시간이 깁니다." : "GCT is long.") : (isKo ? "탄력이 좋습니다." : "Good elasticity.");
-        const flt = parseInt(r.flight) || 0;
-        let fltTip = flt < 30 ? (isKo ? "지면을 더 밀어내 보세요." : "Push off more.") : (isKo ? "효율적입니다." : "Efficient.");
         const dist = parseFloat(r.dist) || 0;
         const paceParts = r.pace.split("'");
         const paceVal = (parseFloat(paceParts[0]) || 10) + ((parseFloat(paceParts[1]) || 0)/60);
         let loadScore = (dist * (10 / paceVal)).toFixed(1);
         let loadLevel = loadScore > 15 ? (isKo ? "높음" : "HIGH") : (loadScore > 7 ? (isKo ? "보통" : "MODERATE") : (isKo ? "낮음" : "LOW"));
-        return { r, cad, cadTip, gct, gctTip, flt, fltTip, loadScore, loadLevel, recTime: loadScore > 15 ? 48 : 24, isKo };
+        return { r, cad, cadTip, loadScore, loadLevel, recTime: loadScore > 15 ? 48 : 24, isKo };
     }
 };
 
@@ -342,7 +321,7 @@ const ui = {
     },
     changeLanguage: (lang) => {
         const t = translations[lang];
-        ['pace','dist','time','avg','cadence','gct','flight'].forEach(id => { const el = document.getElementById('label-'+id); if(el) el.textContent = t[id]; });
+        ['pace','dist','time','avg','cadence','gain','flight'].forEach(id => { const el = document.getElementById('label-'+id); if(el) el.textContent = t[id]; });
         document.getElementById('btn-start').textContent = t.start; document.getElementById('btn-stop').textContent = t.stop;
         document.getElementById('btn-resume').textContent = t.resume; document.getElementById('btn-finish').textContent = t.finish;
         document.getElementById('tab-run').textContent = t.run; document.getElementById('tab-history').textContent = t.history;
@@ -415,8 +394,8 @@ const ui = {
                         <div style="font-size:11px; font-weight:900; color:#fff;">${r.cadence || "0"}</div>
                     </div>
                     <div style="text-align:center;">
-                        <div style="font-size:8px; color:var(--text-dim); font-weight:900;">${t.gct}</div>
-                        <div style="font-size:11px; font-weight:900; color:#fff;">${r.gct || "--"}</div>
+                        <div style="font-size:8px; color:var(--text-dim); font-weight:900;">${t.gain}</div>
+                        <div style="font-size:11px; font-weight:900; color:#fff;">${r.gain || "0"}M</div>
                     </div>
                     <div style="text-align:center;">
                         <div style="font-size:8px; color:var(--text-dim); font-weight:900;">${t.flight}</div>
@@ -428,14 +407,15 @@ const ui = {
     updateTotalStats: () => {
         const h = storage.loadHistory(); const lang = localStorage.getItem('oppaRunLang') || 'en'; const t = translations[lang];
         if (h.length === 0) return;
-        let tDist = 0, tRuns = h.length;
-        h.forEach(r => { tDist += parseFloat(r.dist) || 0; });
+        let tDist = 0, tRuns = h.length, tGain = 0;
+        h.forEach(r => { tDist += parseFloat(r.dist) || 0; tGain += parseInt(r.gain) || 0; });
         document.getElementById('total-stats-container').innerHTML = `
             <div style="padding: 10px 0;">
                 <div style="font-size:16px; font-weight:900; color:var(--primary); margin-bottom:12px; text-align:center;">${t.totalStats}</div>
                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
                     <div class="card"><div class="label">${t.dist}</div><div class="value">${tDist.toFixed(1)}K</div></div>
                     <div class="card"><div class="label">${t.runs}</div><div class="value">${tRuns}</div></div>
+                    <div class="card" style="grid-column: span 2;"><div class="label">${t.gain} (TOTAL)</div><div class="value">${tGain} M</div></div>
                 </div>
             </div>`;
     },
@@ -458,6 +438,11 @@ const ui = {
                 <div class="diag-label">${t.cadence}</div>
                 <div class="diag-val-group"><span class="diag-main-val">${d.cad} BPM</span></div>
                 <div class="diag-tip">${d.cadTip}</div>
+            </div>
+            <div class="diag-card">
+                <div class="diag-label">${t.gain}</div>
+                <div class="diag-val-group"><span class="diag-main-val">${d.r.gain || 0} M</span></div>
+                <div class="diag-tip">Course difficulty assessment based on elevation gain.</div>
             </div>`;
     },
     closeDiag: () => document.getElementById('diag-view').style.display = 'none'
@@ -467,6 +452,7 @@ async function requestWakeLock() { try { if ('wakeLock' in navigator) wakeLock =
 
 function updatePosition(p) {
     const pos = [p.coords.latitude, p.coords.longitude]; 
+    const currentAlt = p.coords.altitude; // Elevation data
     currentSpeedKmh = (p.coords.speed || 0) * 3.6; 
     const accuracy = Math.round(p.coords.accuracy);
     const statusEl = document.getElementById('status');
@@ -474,16 +460,29 @@ function updatePosition(p) {
     marker.setLatLng(pos);
     if (accCircle) accCircle.setLatLng(pos).setRadius(accuracy);
     else accCircle = L.circle(pos, {radius: accuracy, color: '#007bff', fillOpacity: 0.1, weight: 1}).addTo(map);
+
     if (isRunning && !isPaused) {
+        // Elevation Gain Calculation
+        if (currentAlt !== null) {
+            if (lastAlt !== null && currentAlt > lastAlt) {
+                let diff = currentAlt - lastAlt;
+                if (diff > 0.3) { // Noise filter
+                    totalGain += diff;
+                    document.getElementById('elevation-gain').textContent = Math.round(totalGain);
+                }
+            }
+            lastAlt = currentAlt;
+        }
+
         if (currentSpeedKmh < 2.0) { 
             if (!lowSpeedStartTime) lowSpeedStartTime = Date.now(); 
             if ((Date.now() - lowSpeedStartTime) > 3000 && !isAutoPaused) { 
                 isAutoPaused = true; 
                 document.getElementById('pause-status').style.display = 'block';
-                if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]); // 자동 멈춤 진동
+                if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]); 
             } 
         } else { 
-            if (isAutoPaused && "vibrate" in navigator) navigator.vibrate(300); // 다시 시작 진동
+            if (isAutoPaused && "vibrate" in navigator) navigator.vibrate(300); 
             isAutoPaused = false; 
             document.getElementById('pause-status').style.display = 'none'; 
             lowSpeedStartTime = null; 
@@ -506,7 +505,7 @@ function handleMotion(e) {
     }
 }
 
-function onStart() { requestWakeLock(); isRunning = true; totalDist = 0; seconds = 0; steps = 0; pathCoords = []; document.getElementById('btn-start').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; timer = setInterval(() => { if(!isPaused && !isAutoPaused) { seconds++; document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; } }, 1000); }
+function onStart() { requestWakeLock(); isRunning = true; totalDist = 0; seconds = 0; steps = 0; totalGain = 0; lastAlt = null; pathCoords = []; document.getElementById('btn-start').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; timer = setInterval(() => { if(!isPaused && !isAutoPaused) { seconds++; document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; } }, 1000); }
 function onStop() { isPaused = true; document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; }
 function onResume() { isPaused = false; document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; }
 
@@ -519,7 +518,7 @@ function onFinish() {
         time: document.getElementById('time').textContent, 
         pace: document.getElementById('avgPace').textContent, 
         cadence: document.getElementById('cadence').textContent,
-        gct: document.getElementById('gct').textContent,
+        gain: document.getElementById('elevation-gain').textContent,
         flight: document.getElementById('flight').textContent,
         path: pathCoords 
     }; 
