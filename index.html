@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.77 (Detail Grid Update)</title>
+    <title>OppaRun Pro - v28.77 (Total Stats Update)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -230,7 +230,7 @@ const translations = {
     jp: {
         pace: "ペース", dist: "距離", time: "時間", avg: "平均", cadence: "ピッチ", gct: "接地時間", flight: "滞空時間", start: "ランニング開始", stop: "停止", resume: "再開", finish: "終了", run: "ラン", history: "履歴", list: "リスト", total: "統計", info: "情報", settings: "設定", selLang: "言語設定", metro: "リズムアシ스트", clear: "全履歴削除", confirmClear: "本当に削除しますか？", alertCleared: "履歴が削除されました。", route: "ルート", diag: "診断", close: "閉じる", alt: "高度",
         metroTitle: "メトロノーム", metroDesc: "ランニングリズムを一定に保ちましょう。", metroAccent: "最初の拍を強調", noRec: "履歴なし", totalStats: "累計統計", runs: "ラン回数", autoPaused: "自動一時停止", wake: "画面를タップして解除",
-        infC: "ピッチ", infCD: "170~185 BPMが推奨されます。", infP: "パワー", infPD: "股関節と臀筋を使いましょう。", infS: "着地", infSD: "ミッドフット着地を意識してください。"
+        infC: "ピッチ", infCD: "170~185 BPM가推奨されます。", infP: "パワー", infPD: "股関節と臀筋を使いましょう。", infS: "着地", infSD: "ミッドフット着地を意識してください。"
     },
     es: {
         pace: "RITMO", dist: "DIST", time: "TIEMPO", avg: "PROM", cadence: "CADENCIA", gct: "TCB", flight: "VUELO", start: "EMPEZAR CORRER", stop: "PARAR", resume: "RESUMIR", finish: "TERMINAR", run: "CORRER", history: "HISTORIAL", list: "LISTA", total: "TOTAL", info: "INFO", settings: "AJUSTES", selLang: "SELECCIONAR IDIOMA", metro: "RITMO ASISTENTE", clear: "BORRAR TODO", confirmClear: "¿Estás seguro?", alertCleared: "Historial borrado.", route: "RUTA", diag: "DIAG", close: "CERRAR", alt: "ALT",
@@ -250,7 +250,7 @@ const translations = {
     vn: {
         pace: "NHỊP", dist: "KHOẢNG CÁCH", time: "THỜI GIAN", avg: "TB", cadence: "NHỊP CHÂN", gct: "CHẠM ĐẤT", flight: "BAY", start: "BẮT ĐẦU CHẠY", stop: "DỪNG", resume: "TIẾP TỤC", finish: "KẾT THÚC", run: "CHẠY", history: "LỊCH SỬ", list: "DANH SÁCH", total: "TỔNG", info: "THÔNG TIN", settings: "CÀI ĐẶT", selLang: "CHỌN NGÔN NGỮ", metro: "HỖ TRỢ NHỊP", clear: "XÓA TẤT CẢ", confirmClear: "Bạn chắc chắn chứ?", alertCleared: "Đã xóa lịch sử.", route: "LỘ TRÌNH", diag: "CHẨN ĐOÁN", close: "ĐÓNG", alt: "ĐỘ CAO",
         metroTitle: "NHỊP ĐIỆU", metroDesc: "Hoàn thiện nhịp chân의 bạn.", metroAccent: "NHẤN NHỊP ĐẦU", noRec: "KHÔNG CÓ DỮ LIỆU", totalStats: "THỐNG KÊ TỔNG", runs: "LẦN CHẠY", autoPaused: "TỰ ĐỘNG DỪNG", wake: "CHẠM ĐỂ BẬT",
-        infC: "NHỊP CHÂN", infCD: "Khuyên dùng 170~185 BPM.", infP: "LỰC", infPD: "Sử dụng hông và mông.", infS: "TIẾP ĐẤT", infSD: "Giữa bàn chân 및 trọng tâm."
+        infC: "NHỊP CHÂN", infCD: "Khuyên dùng 170~185 BPM.", infP: "LỰC", infPD: "Sử dụng hông 및 mông.", infS: "TIẾP ĐẤT", infSD: "Giữa bàn chân 및 trọng tâm."
     }
 };
 
@@ -438,16 +438,72 @@ const ui = {
             </div>`).join('');
     },
     updateTotalStats: () => {
-        const h = storage.loadHistory(); const lang = localStorage.getItem('oppaRunLang') || 'en'; const t = translations[lang];
+        const h = storage.loadHistory(); 
+        const lang = localStorage.getItem('oppaRunLang') || 'en'; 
+        const t = translations[lang];
+        
         if (h.length === 0) return;
-        let tDist = 0, tRuns = h.length;
-        h.forEach(r => { tDist += parseFloat(r.dist) || 0; });
+
+        let totalDist = 0, totalRuns = h.length, totalCalories = 0, totalCadence = 0, cadCount = 0;
+        let weeklyDist = 0, monthlyDist = 0;
+        
+        const now = new Date();
+        const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+        h.forEach(r => {
+            const d = parseFloat(r.dist) || 0;
+            const c = parseInt(r.cadence) || 0;
+            const runDate = new Date(r.id); // r.id가 Date.now() 기반임
+
+            totalDist += d;
+            if (c > 0) { totalCadence += c; cadCount++; }
+            totalCalories += (d * 70); // 체중 70kg 기준 km당 약 70kcal
+
+            if (runDate >= oneWeekAgo) weeklyDist += d;
+            if (runDate >= firstDayOfMonth) monthlyDist += d;
+        });
+
+        const avgCadence = cadCount > 0 ? Math.round(totalCadence / cadCount) : 0;
+
         document.getElementById('total-stats-container').innerHTML = `
-            <div style="padding: 10px 0;">
-                <div style="font-size:16px; font-weight:900; color:var(--primary); margin-bottom:12px; text-align:center;">${t.totalStats}</div>
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
-                    <div class="card"><div class="label">${t.dist}</div><div class="value">${tDist.toFixed(1)}K</div></div>
-                    <div class="card"><div class="label">${t.runs}</div><div class="value">${tRuns}</div></div>
+            <div style="padding: 10px 8px;">
+                <div style="font-size:16px; font-weight:900; color:var(--primary); margin-bottom:15px; text-align:center; letter-spacing:1px;">
+                    ${t.totalStats}
+                </div>
+                
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:8px;">
+                    <div class="card">
+                        <div class="label">${t.dist} (TOT)</div>
+                        <div class="value">${totalDist.toFixed(1)}<span style="font-size:10px; color:var(--primary)"> KM</span></div>
+                    </div>
+                    <div class="card">
+                        <div class="label">${t.runs}</div>
+                        <div class="value">${totalRuns}</div>
+                    </div>
+                </div>
+
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:8px;">
+                    <div class="card">
+                        <div class="label">WEEKLY</div>
+                        <div class="value" style="font-size:16px;">${weeklyDist.toFixed(1)}<span style="font-size:9px;"> KM</span></div>
+                    </div>
+                    <div class="card">
+                        <div class="label">MONTHLY</div>
+                        <div class="value" style="font-size:16px;">${monthlyDist.toFixed(1)}<span style="font-size:9px;"> KM</span></div>
+                    </div>
+                    <div class="card">
+                        <div class="label">CALORIES</div>
+                        <div class="value" style="font-size:16px;">${Math.round(totalCalories)}<span style="font-size:9px; color:var(--primary)"> KCAL</span></div>
+                    </div>
+                    <div class="card">
+                        <div class="label">AVG CAD</div>
+                        <div class="value" style="font-size:16px; color:${avgCadence >= 170 ? 'var(--primary)' : '#fff'}">${avgCadence}</div>
+                    </div>
+                </div>
+                
+                <div style="margin-top:15px; text-align:center; font-size:10px; color:#444; font-weight:800;">
+                    KEEP ROLLING, OPPA! 🏃‍♂️
                 </div>
             </div>`;
     },
