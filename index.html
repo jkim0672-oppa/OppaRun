@@ -54,10 +54,9 @@
         .info-title { color: var(--primary); font-weight: 900; font-size: 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
         .info-body { color: #ccc; font-size: 13px; line-height: 1.6; font-weight: 600; word-break: keep-all; }
 
-        /* 진단 & 메트로놈 뷰 레이아웃 최적화 */
         #diag-view, #metronome-view { position: fixed; top: 0; left: 0; width: 100%; height: calc(100% - 75px); background: var(--bg); z-index: 5000; display: none; flex-direction: column; overflow-y: auto; }
         .diag-header { padding: 50px 20px 15px; border-bottom: 1px solid #222; }
-        .diag-card { background: #1a1a1a; border-radius: 12px; padding: 15px; margin: 8px 15px; border: 1px solid #333; } /* 세로줄 제거 및 여백 축소 */
+        .diag-card { background: #1a1a1a; border-radius: 12px; padding: 15px; margin: 8px 15px; border: 1px solid #333; }
         .diag-label { font-size: 9px; color: var(--text-dim); font-weight: 900; margin-bottom: 5px; }
         .diag-val-group { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
         .diag-main-val { font-size: 18px; font-weight: 900; color: #fff; }
@@ -82,7 +81,6 @@
         .dropdown-option { padding: 18px; font-size: 16px; font-weight: 800; border-bottom: 1px solid #333; cursor: pointer; }
         .total-container { padding: 20px; display: flex; flex-direction: column; gap: 15px; }
 
-        /* 메트로놈 전용 - 사이즈 축소 및 스타일 */
         #metro-bpm-val { font-size: 40px; font-weight: 900; text-align: center; color: var(--primary); margin: 5px 0; }
         .metro-slider { width: 100%; accent-color: var(--primary); margin: 10px 0; height: 4px; }
         #btn-metro-toggle { height: 50px; font-size: 18px; margin-top: 10px; }
@@ -107,7 +105,6 @@
         <div id="diag-content-area"></div>
     </div>
 
-    <!-- Metronome Layer -->
     <div id="metronome-view">
         <button class="close-detail" onclick="ui.closeMetronome()">CLOSE</button>
         <div class="diag-header">
@@ -136,7 +133,6 @@
     </div>
 
     <div id="run-view" class="main-content">
-        <!-- 대시보드 및 컨트롤 생략 (이전과 동일) -->
         <div class="dashboard">
             <div class="card card-main">
                 <div id="pause-status" class="auto-pause-label">AUTO PAUSED</div>
@@ -190,14 +186,12 @@
                         </div>
                     </div>
                 </div>
-                
                 <div class="settings-group">
                     <div id="label-metronome" class="settings-label">RHYTHM ASSISTANT</div>
                     <div class="dropdown-select" onclick="ui.openMetronome()">
                         <span>Metronome</span><span id="menu-bpm-display" style="font-size:12px; color:var(--primary);">OFF</span>
                     </div>
                 </div>
-
                 <button id="btn-clear-history" style="background:#2a2a2a; color:var(--danger); border:1.5px solid #444; padding:18px; border-radius:12px; width:100%; font-weight:900; font-size:14px; margin-top:20px;" onclick="storage.clearHistory()">CLEAR ALL HISTORY</button>
             </div>
         </div>
@@ -209,7 +203,6 @@
     </div> 
 
 <script>
-// JS 로직은 이전과 동일 (storage, metro, control, ui, map 관련 함수들)
 let map, marker, accCircle, polyline, timer, isRunning = false, isPaused = false, isAutoPaused = false, seconds = 0;
 let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0, currentSpeedKmh = 0, pathCoords = [];
 let detailMap = null, wakeLock = null, lowSpeedStartTime = null;
@@ -393,8 +386,19 @@ function updatePosition(p) {
     if (isRunning && !isPaused) {
         if (currentSpeedKmh < 2.0) { 
             if (!lowSpeedStartTime) lowSpeedStartTime = Date.now(); 
-            if ((Date.now() - lowSpeedStartTime) > 3000 && !isAutoPaused) { isAutoPaused = true; document.getElementById('pause-status').style.display = 'block'; } 
-        } else { lowSpeedStartTime = null; if (isAutoPaused) { isAutoPaused = false; document.getElementById('pause-status').style.display = 'none'; } }
+            if ((Date.now() - lowSpeedStartTime) > 3000 && !isAutoPaused) { 
+                isAutoPaused = true; 
+                document.getElementById('pause-status').style.display = 'block'; 
+                if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+            } 
+        } else { 
+            if (isAutoPaused) { 
+                isAutoPaused = false; 
+                document.getElementById('pause-status').style.display = 'none'; 
+                if (navigator.vibrate) navigator.vibrate(500);
+            }
+            lowSpeedStartTime = null; 
+        }
         if (!isAutoPaused && accuracy < 50) {
             if (lastPos) { let d = map.distance(lastPos, pos) / 1000; if (d > 0.002) { totalDist += d; document.getElementById('dist').textContent = totalDist.toFixed(2); lastPos = pos; pathCoords.push(pos); polyline.setLatLngs(pathCoords); } } else lastPos = pos;
             document.getElementById('curPace').textContent = control.formatPace(currentSpeedKmh);
@@ -419,7 +423,7 @@ function handleMotion(e) {
 
 function onStart() { requestWakeLock(); isRunning = true; totalDist = 0; seconds = 0; steps = 0; pathCoords = []; document.getElementById('btn-start').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; timer = setInterval(() => { if(!isPaused && !isAutoPaused) { seconds++; document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; } }, 1000); }
 function onStop() { isPaused = true; document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; }
-function onResume() { isPaused = false; document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; }
+function onResume() { isPaused = false; document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; if (navigator.vibrate) navigator.vibrate(500); }
 function onFinish() { if (wakeLock) wakeLock.release(); const record = { id: Date.now(), date: new Date().toLocaleString(), dist: document.getElementById('dist').textContent, time: document.getElementById('time').textContent, pace: document.getElementById('avgPace').textContent, cadence: document.getElementById('cadence').textContent, kcal: Math.round(totalDist * 65), gct: document.getElementById('gct').textContent, flight: document.getElementById('flight').textContent, path: pathCoords }; storage.saveRecord(record); location.reload(); }
 
 window.onload = () => {
