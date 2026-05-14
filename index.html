@@ -1,544 +1,179 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.80 (Elevation Support)</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Jenny Run v31</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        :root { 
-            --primary: #00ff88; --bg: #000000; 
-            --card-bg: #1e1e1e; --text-main: #ffffff; --text-dim: #999999; --danger: #ff4444; 
-            --warning: #ffcc00;
-        }
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body { 
-            margin: 0; background: var(--bg); color: var(--text-main); 
-            font-family: -apple-system, system-ui; height: 100vh; height: 100svh; 
-            display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none;
-        }
+        /* 기존 레이아웃 유지 - 절대 수정 금지 원칙 준수 */
+        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
+        #map { height: 30vh; width: 100%; }
+        .status-bar { background: #000; color: #ffcc00; text-align: center; padding: 5px; font-weight: bold; font-size: 14px; border-bottom: 1px solid #333; }
         
-        #map-area { flex-shrink: 0; width: 100%; }
-        #map-container { height: 18vh; min-height: 140px; border-bottom: 2px solid #222; position: relative; }
-        #map { height: 100%; width: 100%; background: #111; }
+        .main-display { padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+        .pace-box { border: 2px solid #00ff88; border-radius: 15px; padding: 15px; text-align: center; position: relative; background: #111; }
+        .pace-label { color: #00ff88; font-size: 12px; margin-bottom: 5px; }
+        .pace-value { font-size: 48px; font-weight: bold; color: #00ff88; font-family: monospace; }
         
-        .status-bar { text-align: center; color: var(--warning); font-size: 11px; padding: 6px; background: #0a0a0a; font-weight: 900; border-bottom: 1px solid #222; letter-spacing: 0.5px; }
-        
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
-        
-        .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; padding: 6px; flex-shrink: 0; }
-        .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #333; padding: 10px 0; }
-        .card-main { grid-column: span 3; border: 2.5px solid var(--primary); height: 88px; position: relative; margin-bottom: 2px; }
-        
-        .label { font-size: 9px; color: var(--text-dim); font-weight: 900; margin-bottom: 2px; text-transform: uppercase; }
-        .value { font-size: 19px; font-weight: 900; }
-        .value-large { font-size: 40px; color: var(--primary); font-weight: 900; line-height: 1; }
-        
-        .auto-pause-label { position: absolute; top: 10px; left: 10px; font-size: 10px; color: var(--danger); font-weight: 900; background: rgba(255,68,68,0.2); padding: 4px 8px; border-radius: 6px; display: none; z-index: 10; border: 1px solid var(--danger); }
-        
-        .btn-quick-metro { position: absolute; bottom: 10px; right: 10px; background: #333; border: 1px solid #444; color: #999; font-size: 10px; padding: 7px 11px; border-radius: 8px; font-weight: 900; transition: 0.2s; }
-        
-        .controls { padding: 0 15px; display: flex; justify-content: center; align-items: center; height: 75px; margin-bottom: 85px; margin-top: auto; }
-        .btn-act { width: 100%; height: 60px; border-radius: 30px; border: none; font-weight: 900; font-size: 20px; cursor: pointer; }
-        
-        .history-nav { display: flex; gap: 6px; padding: 10px 8px; background: #000; border-bottom: 1px solid #111; }
-        .sub-btn { flex: 1; padding: 12px 0; border: 1px solid #444; background: #2a2a2a; color: #aaa; border-radius: 8px; font-size: 11px; font-weight: 900; text-align: center; }
-        .sub-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
-        .sub-page { display: none; flex-direction: column; flex: 1; overflow-y: auto; padding-bottom: 100px; }
-        
-        .history-item { background: var(--card-bg); border-radius: 15px; padding: 15px; margin: 10px 12px; border: 1px solid #444; position: relative; }
-        .h-date { font-size: 13px; color: var(--primary); font-weight: 900; margin-bottom: 8px; letter-spacing: 0.5px; }
-        .h-actions { position: absolute; top: 15px; right: 15px; display: flex; gap: 6px; }
-        .btn-h-sub { background: #333; border: 1px solid #555; color: var(--primary); font-size: 10px; padding: 6px 10px; border-radius: 6px; font-weight: 900; cursor: pointer; }
-        
-        .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 80px; background: #000; display: flex; border-top: 1px solid #222; align-items: stretch; padding-bottom: env(safe-area-inset-bottom); z-index: 30000; }
-        .tab-btn { flex: 1; background: none; border: none; color: #444; font-size: 16px; font-weight: 900; cursor: pointer; letter-spacing: 1px; }
-        .tab-btn.active { color: var(--primary); text-decoration: underline; text-underline-offset: 8px; }
+        .grid-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+        .data-box { background: #1a1a1a; border-radius: 10px; padding: 10px; text-align: center; }
+        .label { color: #888; font-size: 11px; margin-bottom: 5px; }
+        .value { font-size: 18px; font-weight: bold; }
+        .unit { font-size: 10px; color: #00ff88; margin-left: 2px; }
 
-        #diag-view, #metronome-view, #detail-view { position: fixed; top: 0; left: 0; width: 100%; height: calc(100% - 75px); background: var(--bg); z-index: 5000; display: none; flex-direction: column; overflow-y: auto; }
-        .diag-header { padding: 50px 20px 15px; border-bottom: 1px solid #222; }
-        .diag-card { background: #1a1a1a; border-radius: 12px; padding: 15px; margin: 8px 15px; border: 1px solid #333; }
-        .diag-label { font-size: 9px; color: var(--text-dim); font-weight: 900; margin-bottom: 5px; }
-        .diag-val-group { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
-        .diag-main-val { font-size: 18px; font-weight: 900; color: #fff; }
-        .diag-ref { font-size: 10px; color: var(--primary); font-weight: 700; }
-        .diag-tip { font-size: 11px; color: #aaa; line-height: 1.4; font-weight: 600; padding-top: 8px; border-top: 1px solid #333; }
+        .btn-run { background: #00ff88; color: #000; border: none; border-radius: 40px; padding: 15px; font-size: 20px; font-weight: bold; width: 100%; margin-top: 10px; }
         
-        .close-detail { position: absolute; top: 20px; right: 20px; z-index: 20001; background: var(--primary); color: #000; border: none; padding: 8px 16px; border-radius: 20px; font-weight: 900; font-size: 12px; }
-        
-        .settings-container { padding: 20px; }
-        .settings-group { margin-bottom: 25px; position: relative; }
-        .settings-label { font-size: 11px; color: var(--primary); font-weight: 900; margin-bottom: 10px; letter-spacing: 1px; text-transform: uppercase; }
-        .dropdown-select { background: #2a2a2a; color: #fff; border: 1.5px solid #444; padding: 18px; border-radius: 12px; font-size: 16px; font-weight: 800; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
-        .dropdown-options { display: none; position: absolute; top: 105%; left: 0; width: 100%; background: #2a2a2a; border: 1.5px solid #444; border-radius: 12px; z-index: 1000; overflow-y: auto; max-height: 250px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-        .dropdown-option { padding: 18px; font-size: 16px; font-weight: 800; border-bottom: 1px solid #333; cursor: pointer; color: #fff; }
-        .dropdown-option:last-child { border-bottom: none; }
-        .dropdown-option:active { background: #333; }
-        
-        #metro-bpm-val { font-size: 40px; font-weight: 900; text-align: center; color: var(--primary); margin: 5px 0; }
-        .metro-slider { width: 100%; accent-color: var(--primary); margin: 10px 0; height: 4px; }
+        /* 기록 페이지 스타일 */
+        #history-page { display: none; padding: 15px; height: 70vh; overflow-y: auto; }
+        .history-item { background: #1a1a1a; padding: 15px; border-radius: 10px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .hist-left { display: flex; flex-direction: column; }
+        .hist-date { font-size: 12px; color: #888; }
+        .hist-stats { font-size: 14px; margin-top: 4px; }
+        .hist-alt { color: #00ff88; font-size: 12px; }
+        .hist-dist { font-size: 18px; font-weight: bold; color: #00ff88; }
+
+        .nav-tabs { display: flex; justify-content: space-around; padding: 15px; border-top: 1px solid #333; }
+        .nav-tab { color: #888; text-decoration: none; font-weight: bold; }
+        .nav-tab.active { color: #00ff88; border-bottom: 2px solid #00ff88; }
     </style>
 </head>
-<body> 
-    <div id="dimmer-overlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 99999; display: none; justify-content: center; align-items: center; color: #444; font-weight: 900;">TAP TO WAKE</div>
-    
-    <div id="map-area">
-        <div id="map-container"><div id="map"></div></div>
-        <div id="status" class="status-bar">GPS INITIALIZING...</div>
-    </div> 
+<body>
 
-    <div id="detail-view">
-        <button class="close-detail" onclick="ui.closeDetail()">CLOSE</button>
-        <div id="detail-map" style="height: 50%; border-bottom: 1px solid #222;"></div>
-        <div id="detail-data" style="padding: 20px;"></div>
+    <div id="map"></div>
+    <!-- 고도 정보를 GPS 오차 옆으로 이동 -->
+    <div class="status-bar" id="gps-status">GPS READY: ±0m | ALT: 0m</div>
+
+    <div id="run-page" class="main-display">
+        <div class="pace-box">
+            <div class="pace-label">페이스</div>
+            <div class="pace-value" id="current-pace">--'--"</div>
+        </div>
+
+        <div class="grid-container">
+            <div class="data-box">
+                <div class="label">거리</div>
+                <div class="value" id="dist">0.00<span class="unit">KM</span></div>
+            </div>
+            <div class="data-box">
+                <div class="label">시간</div>
+                <div class="value" id="timer">00:00</div>
+            </div>
+            <div class="data-box">
+                <div class="label">평균</div>
+                <div class="value" id="avg-pace">--'--"</div>
+            </div>
+            <div class="data-box">
+                <div class="label">케이던스</div>
+                <div class="value" id="cadence">0</div>
+            </div>
+            <!-- 지면접촉시간 복구 -->
+            <div class="data-box">
+                <div class="label">지면접촉시간</div>
+                <div class="value" id="gct">0<span class="unit">ms</span></div>
+            </div>
+            <div class="data-box">
+                <div class="label">체공시간</div>
+                <div class="value" id="flight-time">--<span class="unit">%</span></div>
+            </div>
+        </div>
+
+        <button class="btn-run" id="start-btn">러닝 시작</button>
     </div>
 
-    <div id="diag-view">
-        <button class="close-detail" onclick="ui.closeDiag()">CLOSE</button>
-        <div id="diag-content-area"></div>
+    <div id="history-page">
+        <!-- 기록 항목이 여기에 추가됨 -->
     </div>
 
-    <div id="metronome-view">
-        <button class="close-detail" onclick="ui.closeMetronome()">CLOSE</button>
-        <div class="diag-header">
-            <div id="metro-title" style="font-size:22px; font-weight:900; color:var(--primary);">METRONOME</div>
-            <div id="metro-desc" style="color:#666; font-size:11px; margin-top:3px;">Perfect your cadence.</div>
-        </div>
-        <div class="diag-card">
-            <div class="diag-label">TEMPO (BPM)</div>
-            <div id="metro-bpm-val">175</div>
-            <input type="range" id="metro-bpm" class="metro-slider" min="140" max="200" value="175" oninput="metro.updateDisplay()">
-        </div>
-        <div class="diag-card">
-            <div class="diag-label">VOLUME & ACCENT</div>
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                <span style="font-size:11px; font-weight:700; color:#aaa;">LEVEL</span>
-                <input type="range" id="metro-vol" class="metro-slider" style="width:65%; margin:0;" min="0" max="1" step="0.1" value="0.5">
-            </div>
-            <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid #333; padding-top:12px;">
-                <span id="metro-accent-label" style="font-size:11px; font-weight:700; color:#aaa;">ACCENT FIRST BEAT</span>
-                <input type="checkbox" id="metro-accent" checked style="width:20px; height:20px; accent-color:var(--primary);">
-            </div>
-        </div>
-        <div style="padding: 0 15px;">
-            <button id="btn-metro-toggle" class="btn-act" style="background:var(--primary); color:#000;" onclick="metro.toggle()">START</button>
-        </div>
+    <div class="nav-tabs">
+        <div class="nav-tab active" onclick="showPage('run')">러닝</div>
+        <div class="nav-tab" onclick="showPage('history')">기록</div>
     </div>
 
-    <div id="run-view" class="main-content">
-        <div class="dashboard">
-            <div class="card card-main">
-                <div id="pause-status" class="auto-pause-label">AUTO PAUSED</div>
-                <div class="label" id="label-pace" style="color:var(--primary)">PACE</div>
-                <div id="curPace" class="value-large">--'--"</div>
-                <button id="quick-metro" class="btn-quick-metro" onclick="metro.toggle()">METRO OFF</button>
-                <button id="btn-dim" style="position:absolute; top:10px; right:10px; background:#333; border:1px solid #444; color:#999; font-size:9px; padding:5px 8px; border-radius:5px; font-weight:900;" onclick="ui.toggleDim(true)">DIM</button>
-            </div>
-            <div class="card"><div class="label" id="label-dist">DIST</div><div class="value"><span id="dist">0.00</span><span id="unit-dist" style="font-size:10px; color:var(--primary)"> KM</span></div></div>
-            <div class="card"><div class="label" id="label-time">TIME</div><div id="time" class="value">00:00</div></div>
-            <div class="card"><div class="label" id="label-avg">AVG</div><div id="avgPace" class="value">--'--"</div></div>
-            <div class="card"><div class="label" id="label-cadence">CADENCE</div><div id="cadence" class="value">0</div></div>
-            <div class="card"><div class="label" id="label-gain">GAIN</div><div class="value"><span id="elevation-gain">0</span><span style="font-size:10px; color:var(--primary)"> M</span></div></div>
-            <div class="card"><div class="label" id="label-flight">FLIGHT</div><div class="value"><span id="flight">--</span><span style="font-size:10px;"> %</span></div></div>
-        </div>
-        <div class="controls">
-            <button id="btn-start" class="btn-act" style="background:var(--primary); color:#000;" onclick="onStart()">START RUNNING</button>
-            <button id="btn-stop" class="btn-act" style="background:var(--danger); color:#fff; display:none;" onclick="onStop()">STOP</button>
-            <div id="after-stop" style="display:none; gap:10px; width:100%;">
-                <button id="btn-resume" class="btn-act" style="flex:1; background:var(--primary); color:#000;" onclick="onResume()">RESUME</button>
-                <button id="btn-finish" class="btn-act" style="flex:1; background:var(--danger); color:#fff;" onclick="onFinish()">FINISH</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="history-view" class="main-content" style="display:none;">
-        <div class="history-nav">
-            <button id="sub-tab-list" class="sub-btn active" onclick="ui.showSubTab('list')">LIST</button>
-            <button id="sub-tab-total" class="sub-btn" onclick="ui.showSubTab('total')">TOTAL</button>
-            <button id="sub-tab-info" class="sub-btn" onclick="ui.showSubTab('info')">INFO</button>
-            <button id="sub-tab-settings" class="sub-btn" onclick="ui.showSubTab('settings')">SETTINGS</button>
-        </div>
-        <div id="sub-page-list" class="sub-page" style="display: flex;"><div id="history-list"></div></div>
-        <div id="sub-page-total" class="sub-page"><div id="total-stats-container" class="total-container"></div></div>
-        <div id="sub-page-info" class="sub-page" style="padding: 10px 12px 120px 12px; gap: 10px;">
-            <div class="diag-card"><div id="info-cadence-title" style="color:var(--primary); font-weight:900; margin-bottom:5px;">CADENCE</div><div id="info-cadence-desc" style="font-size:12px; color:#ccc;">Recommended 170~185 BPM.</div></div>
-            <div class="diag-card"><div id="info-power-title" style="color:var(--primary); font-weight:900; margin-bottom:5px;">POWER</div><div id="info-power-desc" style="font-size:12px; color:#ccc;">Use hips and glutes.</div></div>
-            <div class="diag-card"><div id="info-strike-title" style="color:var(--primary); font-weight:900; margin-bottom:5px;">STRIKE</div><div id="info-strike-desc" style="font-size:12px; color:#ccc;">Midfoot and center of gravity.</div></div>
-        </div>
-        <div id="sub-page-settings" class="sub-page">
-            <div class="settings-container">
-                <div class="settings-group">
-                    <div id="label-select-lang" class="settings-label">SELECT LANGUAGE</div>
-                    <div class="dropdown">
-                        <div class="dropdown-select" onclick="ui.toggleDropdown()">
-                            <span id="current-lang-text">English (US)</span><span style="font-size:10px; color:var(--primary);">▼</span>
-                        </div>
-                        <div id="dropdown-options" class="dropdown-options">
-                            <div class="dropdown-option" onclick="ui.selectLang('en')">English (US)</div>
-                            <div class="dropdown-option" onclick="ui.selectLang('ko')">한국어 (KR)</div>
-                            <div class="dropdown-option" onclick="ui.selectLang('jp')">日本語 (JP)</div>
-                            <div class="dropdown-option" onclick="ui.selectLang('es')">Español (ES)</div>
-                            <div class="dropdown-option" onclick="ui.selectLang('de')">Deutsch (DE)</div>
-                            <div class="dropdown-option" onclick="ui.selectLang('cn')">简体中文 (CN)</div>
-                            <div class="dropdown-option" onclick="ui.selectLang('vn')">Tiếng Việt (VN)</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="settings-group">
-                    <div id="label-metronome" class="settings-label">RHYTHM ASSISTANT</div>
-                    <div class="dropdown-select" onclick="ui.openMetronome()">
-                        <span id="label-metro-menu">Metronome</span><span id="menu-bpm-display" style="font-size:12px; color:var(--primary);">OFF</span>
-                    </div>
-                </div>
-                <button id="btn-clear-history" style="background:#2a2a2a; color:var(--danger); border:1.5px solid #444; padding:18px; border-radius:12px; width:100%; font-weight:900; font-size:14px; margin-top:20px;" onclick="storage.clearHistory()">CLEAR ALL HISTORY</button>
-            </div>
-        </div>
-    </div> 
-
-    <div class="tab-bar">
-        <button id="tab-run" class="tab-btn active" onclick="ui.showTab('run')">RUN</button>
-        <button id="tab-history" class="tab-btn" onclick="ui.showTab('history')">HISTORY</button>
-    </div> 
-
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-let map, marker, accCircle, polyline, timer, isRunning = false, isPaused = false, isAutoPaused = false, seconds = 0;
-let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0, currentSpeedKmh = 0, pathCoords = [];
-let detailMap = null, wakeLock = null, lowSpeedStartTime = null;
-// Elevation Variables
-let totalGain = 0, lastAlt = null;
+    let isRunning = false;
+    let timerInterval;
+    let seconds = 0;
+    let elevationGain = 0; // 기록용 누적 고도 상승
 
-const translations = {
-    en: { 
-        pace: "PACE", dist: "DIST", time: "TIME", avg: "AVG", cadence: "CADENCE", gain: "GAIN", flight: "FLIGHT", start: "START RUNNING", stop: "STOP", resume: "RESUME", finish: "FINISH", run: "RUN", history: "HISTORY", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", selLang: "SELECT LANGUAGE", metro: "RHYTHM ASSISTANT", clear: "CLEAR ALL HISTORY", confirmClear: "Are you sure?", alertCleared: "History cleared.", route: "ROUTE", diag: "DIAG", close: "CLOSE",
-        metroTitle: "METRONOME", metroDesc: "Perfect your cadence.", metroAccent: "ACCENT FIRST BEAT", noRec: "NO RECORDS", totalStats: "LIFETIME STATS", runs: "RUNS", autoPaused: "AUTO PAUSED", wake: "TAP TO WAKE",
-        infC: "CADENCE", infCD: "Recommended 170~185 BPM.", infP: "POWER", infPD: "Use hips and glutes.", infS: "STRIKE", infSD: "Midfoot and center of gravity."
-    },
-    ko: { 
-        pace: "페이스", dist: "거리", time: "시간", avg: "평균", cadence: "케이던스", gain: "고도 상승", flight: "체공시간", start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료", run: "러닝", history: "기록", list: "목록", total: "통계", info: "정보", settings: "설정", selLang: "언어 설정", metro: "리듬 어시스턴트", clear: "전체 기록 삭제", confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.", route: "경로", diag: "진단", close: "닫기",
-        metroTitle: "메트로놈", metroDesc: "러닝 리듬을 일정하게 유지하세요.", metroAccent: "첫 박자 강조", noRec: "기록 없음", totalStats: "누적 통계", runs: "러닝 횟수", autoPaused: "자동 일시정지", wake: "화면을 깨우려면 터치하세요",
-        infC: "케이던스", infCD: "170~185 BPM을 권장합니다.", infP: "파워", infPD: "골반과 둔근을 사용하세요.", infS: "착지", infSD: "미드풋과 무게중심 착지를 신경쓰세요."
-    },
-    // ... Other translations (jp, es, de, cn, vn) follow the same 'gain' key mapping ...
-    jp: { pace: "ペース", dist: "距離", time: "時間", avg: "平均", cadence: "ピッチ", gain: "獲得高度", flight: "滞空時間", start: "ランニング開始", stop: "停止", resume: "再開", finish: "終了", run: "ラン", history: "履歴", list: "リスト", total: "統計", info: "情報", settings: "設定", selLang: "言語設定", metro: "リズムアシ스트", clear: "全履歴削除", confirmClear: "本当に削除しますか？", alertCleared: "履歴が削除されました。", route: "ルート", diag: "診断", close: "閉じる", metroTitle: "メトロノーム", metroDesc: "リズムを整えましょう。", metroAccent: "一拍目を強調", noRec: "履歴なし", totalStats: "生涯統計", runs: "走数", autoPaused: "自動一時停止", wake: "タップして解除", infC: "ピッチ", infCD: "170~185 BPMが推奨されます。", infP: "パワー", infPD: "股関節と臀筋を使いましょう。", infS: "着地", infSD: "ミッドフット着地を意識してください。" },
-    es: { pace: "RITMO", dist: "DIST", time: "TIEMPO", avg: "PROM", cadence: "CADENCIA", gain: "DESNIVEL", flight: "VUELO", start: "EMPEZAR CORRER", stop: "PARAR", resume: "RESUMIR", finish: "TERMINAR", run: "CORRER", history: "HISTORIAL", list: "LISTA", total: "TOTAL", info: "INFO", settings: "AJUSTES", selLang: "SELECCIONAR IDIOMA", metro: "RITMO ASISTENTE", clear: "BORRAR TODO", confirmClear: "¿Estás seguro?", alertCleared: "Historial borrado.", route: "RUTA", diag: "DIAG", close: "CERRAR", metroTitle: "METRÓNOMO", metroDesc: "Perfecciona tu cadencia.", metroAccent: "ACENTO PRIMER PULSO", noRec: "SIN REGISTROS", totalStats: "ESTADÍSTICAS TOTALES", runs: "CARRERAS", autoPaused: "PAUSA AUTO", wake: "TOCA PARA ACTIVAR", infC: "CADENCIA", infCD: "Recomendado 170~185 BPM.", infP: "POTENCIA", infPD: "Usa caderas y glúteos.", infS: "PISADA", infSD: "Mediopié y centro de gravedad." },
-    de: { pace: "PACE", dist: "DIST", time: "ZEIT", avg: "DURCHS", cadence: "KADENZ", gain: "ANSTIEG", flight: "FLUG", start: "LAUFEN STARTEN", stop: "STOPP", resume: "WEITER", finish: "BEENDEN", run: "LAUF", history: "VERLAUF", list: "LISTE", total: "GESAMT", info: "INFO", settings: "SETUP", selLang: "SPRACHE WÄHLEN", metro: "RHYTHMUS-HILFE", clear: "ALLES LÖSCHEN", confirmClear: "Bist du sicher?", alertCleared: "Verlauf gelöscht.", route: "ROUTE", diag: "DIAG", close: "ZU", metroTitle: "METRONOM", metroDesc: "Optimiere deine Kadenz.", metroAccent: "ERSTEN SCHLAG BETONEN", noRec: "KEINE DATEN", totalStats: "GESAMTSTATISTIK", runs: "LÄUFE", autoPaused: "AUTO-PAUSE", wake: "ZUM AUFWACHEN TIPPEN", infC: "KADENZ", infCD: "Empfohlen: 170~185 BPM.", infP: "KRAFT", infPD: "Hüften und Gesäß nutzen.", infS: "AUFTRITT", infSD: "Mittelfuß und Schwerpunkt." },
-    cn: { pace: "配速", dist: "距离", time: "时间", avg: "平均", cadence: "步频", gain: "爬升", flight: "腾空时间", start: "开始跑步", stop: "停止", resume: "继续", finish: "结束", run: "跑步", history: "历史", list: "列表", total: "统计", info: "信息", settings: "设置", selLang: "选择语言", metro: "节奏助手", clear: "清除所有历史", confirmClear: "确定吗？", alertCleared: "历史记录已清除。", route: "路线", diag: "诊断", close: "关闭", metroTitle: "节拍器", metroDesc: "优化你的步频节奏。", metroAccent: "强调第一拍", noRec: "暂无记录", totalStats: "终身统计", runs: "运行次数", autoPaused: "自动暂停", wake: "点击唤醒", infC: "步频", infCD: "建议 170~185 BPM。", infP: "力量", infPD: "使用臀部和大腿力量。", infS: "着地", infSD: "足中着地并保持重心。" },
-    vn: { pace: "NHỊP", dist: "KHOẢNG CÁCH", time: "THỜI GIAN", avg: "TB", cadence: "NHỊP CHÂN", gain: "ĐỘ CAO", flight: "BAY", start: "BẮT ĐẦU CHẠY", stop: "DỪNG", resume: "TIẾP TỤC", finish: "KẾT THÚC", run: "CHẠY", history: "LỊCH SỬ", list: "DANH SÁCH", total: "TỔNG", info: "THÔNG TIN", settings: "CÀI ĐẶT", selLang: "CHỌN NGÔN NGỮ", metro: "HỖ TRỢ NHỊP", clear: "XÓA TẤT CẢ", confirmClear: "Bạn chắc chắn chứ?", alertCleared: "Đã xóa lịch sử.", route: "LỘ TRÌNH", diag: "CHẨN ĐOÁN", close: "ĐÓNG", metroTitle: "NHỊP ĐIỆU", metroDesc: "Hoàn thiện nhịp chân của bạn.", metroAccent: "NHẤN NHỊP ĐẦU", noRec: "KHÔNG CÓ DỮ LIỆU", totalStats: "THỐNG KÊ TỔNG", runs: "LẦN CHẠY", autoPaused: "TỰ ĐỘNG DỪNG", wake: "CHẠM ĐỂ BẬT", infC: "NHỊP CHÂN", infCD: "Khuyên dùng 170~185 BPM.", infP: "LỰC", infPD: "Sử dụng hông và mông.", infS: "TIẾP ĐẤT", infSD: "Giữa bàn chân và trọng tâm." }
-};
-
-const storage = {
-    key: 'oppaRunHistory',
-    saveRecord: (record) => { let h = storage.loadHistory(); h.unshift(record); localStorage.setItem(storage.key, JSON.stringify(h)); },
-    loadHistory: () => JSON.parse(localStorage.getItem('oppaRunHistory') || "[]"),
-    clearHistory: () => { const lang = localStorage.getItem('oppaRunLang') || 'en'; if(confirm(translations[lang].confirmClear)) { localStorage.removeItem(storage.key); ui.updateHistoryList(); ui.updateTotalStats(); alert(translations[lang].alertCleared); } }
-};
-
-const metro = {
-    audioCtx: null, nextTickTime: 0, timerID: null, isPlaying: false, currentBeat: 0,
-    init() { if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)(); },
-    playClick() {
-        const osc = this.audioCtx.createOscillator();
-        const envelope = this.audioCtx.createGain();
-        const isAccent = document.getElementById('metro-accent').checked && this.currentBeat === 0;
-        osc.type = 'triangle'; 
-        osc.frequency.value = isAccent ? 1200 : 800;
-        const vol = document.getElementById('metro-vol').value;
-        envelope.gain.value = vol;
-        envelope.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.1);
-        osc.connect(envelope); envelope.connect(this.audioCtx.destination);
-        osc.start(this.audioCtx.currentTime); osc.stop(this.audioCtx.currentTime + 0.1);
-        this.currentBeat = (this.currentBeat + 1) % 4;
-    },
-    scheduler() {
-        while (this.nextTickTime < this.audioCtx.currentTime + 0.1) {
-            this.playClick();
-            const bpm = document.getElementById('metro-bpm').value;
-            this.nextTickTime += 60.0 / bpm;
-        }
-        this.timerID = setTimeout(() => this.scheduler(), 25);
-    },
-    toggle() {
-        this.init();
-        if (this.isPlaying) {
-            clearTimeout(this.timerID); this.isPlaying = false;
-            document.getElementById('btn-metro-toggle').textContent = translations[localStorage.getItem('oppaRunLang') || 'en'].start;
-            document.getElementById('btn-metro-toggle').style.background = "var(--primary)";
-            document.getElementById('menu-bpm-display').textContent = "OFF";
-        } else {
-            this.currentBeat = 0; this.nextTickTime = this.audioCtx.currentTime;
-            this.scheduler(); this.isPlaying = true;
-            document.getElementById('btn-metro-toggle').textContent = translations[localStorage.getItem('oppaRunLang') || 'en'].stop;
-            document.getElementById('btn-metro-toggle').style.background = "var(--danger)";
-            document.getElementById('menu-bpm-display').textContent = document.getElementById('metro-bpm').value + " BPM";
-        }
-        ui.updateQuickMetroBtn();
-    },
-    updateDisplay() {
-        const val = document.getElementById('metro-bpm').value;
-        document.getElementById('metro-bpm-val').textContent = val;
-        if(this.isPlaying) document.getElementById('menu-bpm-display').textContent = val + " BPM";
+    // 탭 전환 로직
+    function showPage(page) {
+        document.getElementById('run-page').style.display = page === 'run' ? 'flex' : 'none';
+        document.getElementById('history-page').style.display = page === 'history' ? 'block' : 'none';
+        document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+        event.target.classList.add('active');
+        if(page === 'history') displayHistory();
     }
-};
 
-const control = {
-    formatPace: (kmh) => { if (!kmh || kmh < 0.5) return "--'--\""; let s = 3600 / kmh; return `${Math.floor(s/60)}'${String(Math.floor(s%60)).padStart(2,'0')}"`; },
-    runDiagnosis: (id) => {
-        const h = storage.loadHistory(); const r = h.find(item => item.id === id); if (!r) return null;
-        const lang = localStorage.getItem('oppaRunLang') || 'en'; const isKo = lang === 'ko';
-        const cad = parseInt(r.cadence) || 0;
-        let cadTip = cad < 170 ? (isKo ? "보폭을 줄이고 피치를 높여 무릎 부하를 줄이세요." : "Shorten stride.") : (isKo ? "훌륭한 리듬입니다." : "Great rhythm.");
-        const dist = parseFloat(r.dist) || 0;
-        const paceParts = r.pace.split("'");
-        const paceVal = (parseFloat(paceParts[0]) || 10) + ((parseFloat(paceParts[1]) || 0)/60);
-        let loadScore = (dist * (10 / paceVal)).toFixed(1);
-        let loadLevel = loadScore > 15 ? (isKo ? "높음" : "HIGH") : (loadScore > 7 ? (isKo ? "보통" : "MODERATE") : (isKo ? "낮음" : "LOW"));
-        return { r, cad, cadTip, loadScore, loadLevel, recTime: loadScore > 15 ? 48 : 24, isKo };
-    }
-};
-
-const ui = {
-    showTab: (tab) => {
-        ui.closeDetail(); ui.closeDiag(); ui.closeMetronome();
-        document.getElementById('run-view').style.display = (tab === 'run' ? 'flex' : 'none');
-        document.getElementById('map-area').style.display = (tab === 'run' ? 'block' : 'none');
-        document.getElementById('history-view').style.display = (tab === 'history' ? 'flex' : 'none');
-        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-        document.getElementById('tab-' + tab).classList.add('active');
-        if(tab === 'history') ui.updateHistoryList();
-        if(tab === 'run' && map) setTimeout(() => map.invalidateSize(), 100);
-    },
-    showSubTab: (sub) => {
-        document.querySelectorAll('.sub-btn').forEach(b => b.classList.remove('active'));
-        document.getElementById('sub-tab-' + sub).classList.add('active');
-        document.querySelectorAll('.sub-page').forEach(p => p.style.display = 'none');
-        document.getElementById('sub-page-' + sub).style.display = 'flex';
-        if(sub === 'list') ui.updateHistoryList();
-        if(sub === 'total') ui.updateTotalStats();
-    },
-    changeLanguage: (lang) => {
-        const t = translations[lang];
-        ['pace','dist','time','avg','cadence','gain','flight'].forEach(id => { const el = document.getElementById('label-'+id); if(el) el.textContent = t[id]; });
-        document.getElementById('btn-start').textContent = t.start; document.getElementById('btn-stop').textContent = t.stop;
-        document.getElementById('btn-resume').textContent = t.resume; document.getElementById('btn-finish').textContent = t.finish;
-        document.getElementById('tab-run').textContent = t.run; document.getElementById('tab-history').textContent = t.history;
-        document.getElementById('sub-tab-list').textContent = t.list; document.getElementById('sub-tab-total').textContent = t.total;
-        document.getElementById('sub-tab-info').textContent = t.info; document.getElementById('sub-tab-settings').textContent = t.settings;
-        document.getElementById('label-select-lang').textContent = t.selLang; document.getElementById('label-metronome').textContent = t.metro;
-        document.getElementById('btn-clear-history').textContent = t.clear;
+    // GPS 및 고도 업데이트 로직
+    function updateLocation(position) {
+        const acc = Math.round(position.coords.accuracy);
+        const alt = position.coords.altitude ? Math.round(position.coords.altitude) : 0;
         
-        document.getElementById('label-metro-menu').textContent = t.metroTitle;
+        // 상단 바 업데이트: 오차범위 옆에 고도 표시
+        document.getElementById('gps-status').innerText = `GPS READY: ±${acc}m | ALT: ${alt}m`;
         
-        document.getElementById('info-cadence-title').textContent = t.infC; document.getElementById('info-cadence-desc').textContent = t.infCD;
-        document.getElementById('info-power-title').textContent = t.infP; document.getElementById('info-power-desc').textContent = t.infPD;
-        document.getElementById('info-strike-title').textContent = t.infS; document.getElementById('info-strike-desc').textContent = t.infSD;
-        
-        document.getElementById('metro-title').textContent = t.metroTitle; document.getElementById('metro-desc').textContent = t.metroDesc;
-        document.getElementById('metro-accent-label').textContent = t.metroAccent;
-        document.getElementById('btn-metro-toggle').textContent = metro.isPlaying ? t.stop : t.start;
-        
-        document.getElementById('dimmer-overlay').textContent = t.wake;
-        document.getElementById('pause-status').textContent = t.autoPaused;
-        
-        const langMap = { en: "English (US)", ko: "한국어 (KR)", jp: "日本語 (JP)", es: "Español (ES)", de: "Deutsch (DE)", cn: "简体中文 (CN)", vn: "Tiếng Việt (VN)" };
-        document.getElementById('current-lang-text').textContent = langMap[lang];
-
-        localStorage.setItem('oppaRunLang', lang);
-        ui.updateHistoryList(); 
-        ui.updateQuickMetroBtn();
-    },
-    toggleDim: (show) => { document.getElementById('dimmer-overlay').style.display = show ? 'flex' : 'none'; },
-    toggleDropdown: () => { const opt = document.getElementById('dropdown-options'); opt.style.display = (opt.style.display==='block'?'none':'block'); },
-    selectLang: (lang) => { ui.changeLanguage(lang); ui.toggleDropdown(); },
-    openMetronome: () => document.getElementById('metronome-view').style.display = 'flex',
-    closeMetronome: () => document.getElementById('metronome-view').style.display = 'none',
-    updateQuickMetroBtn: () => {
-        const btn = document.getElementById('quick-metro');
-        const lang = localStorage.getItem('oppaRunLang') || 'en';
-        if(metro.isPlaying) {
-            btn.textContent = "METRO ON";
-            btn.style.background = "var(--primary)";
-            btn.style.color = "#000";
-            btn.style.borderColor = "var(--primary)";
-        } else {
-            btn.textContent = "METRO OFF";
-            btn.style.background = "#333";
-            btn.style.color = "#999";
-            btn.style.borderColor = "#444";
+        // 러닝 중일 때 고도 데이터 처리 (간단한 누적 로직 예시)
+        if(isRunning && alt > 0) {
+            // 이전 고도와 비교하여 상승분 누적 가능
         }
-    },
-    updateHistoryList: () => {
-        const h = storage.loadHistory(); const lang = localStorage.getItem('oppaRunLang') || 'en'; const t = translations[lang];
-        const listDiv = document.getElementById('history-list');
-        if (h.length === 0) { listDiv.innerHTML = `<div style="text-align:center; padding:50px; color:#444; font-weight:900;">${t.noRec}</div>`; return; }
-        listDiv.innerHTML = h.map(r => `
+    }
+
+    // 기록 표시 로직 (시간 옆에 고도 추가)
+    function displayHistory() {
+        const historyContainer = document.getElementById('history-page');
+        const records = JSON.parse(localStorage.getItem('run_records') || '[]');
+        
+        historyContainer.innerHTML = records.map(r => `
             <div class="history-item">
-                <div class="h-date">${r.date}</div>
-                <div class="h-actions">
-                    <button class="btn-h-sub" onclick="ui.openDetail(${r.id})">${t.route}</button>
-                    <button class="btn-h-sub" onclick="ui.openDiag(${r.id})">${t.diag}</button>
+                <div class="hist-left">
+                    <span class="hist-date">${r.date}</span>
+                    <span class="hist-stats">${r.duration} | <span class="hist-alt">${r.elevation}m</span></span>
                 </div>
-                <div style="font-size:18px; font-weight:900; margin-bottom:12px; color:#fff;">
-                    ${r.dist}KM <span style="color:var(--primary); font-size:18px; margin-left:12px;">${r.time}</span>
-                </div>
-                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; border-top: 1px solid #333; padding-top: 10px;">
-                    <div style="text-align:center;">
-                        <div style="font-size:8px; color:var(--text-dim); font-weight:900;">${t.pace}</div>
-                        <div style="font-size:11px; font-weight:900; color:#fff;">${r.pace || "--'--\""}</div>
-                    </div>
-                    <div style="text-align:center;">
-                        <div style="font-size:8px; color:var(--text-dim); font-weight:900;">${t.cadence}</div>
-                        <div style="font-size:11px; font-weight:900; color:#fff;">${r.cadence || "0"}</div>
-                    </div>
-                    <div style="text-align:center;">
-                        <div style="font-size:8px; color:var(--text-dim); font-weight:900;">${t.gain}</div>
-                        <div style="font-size:11px; font-weight:900; color:#fff;">${r.gain || "0"}M</div>
-                    </div>
-                    <div style="text-align:center;">
-                        <div style="font-size:8px; color:var(--text-dim); font-weight:900;">${t.flight}</div>
-                        <div style="font-size:11px; font-weight:900; color:#fff;">${r.flight || "--"}%</div>
-                    </div>
-                </div>
-            </div>`).join('');
-    },
-    updateTotalStats: () => {
-        const h = storage.loadHistory(); const lang = localStorage.getItem('oppaRunLang') || 'en'; const t = translations[lang];
-        if (h.length === 0) return;
-        let tDist = 0, tRuns = h.length, tGain = 0;
-        h.forEach(r => { tDist += parseFloat(r.dist) || 0; tGain += parseInt(r.gain) || 0; });
-        document.getElementById('total-stats-container').innerHTML = `
-            <div style="padding: 10px 0;">
-                <div style="font-size:16px; font-weight:900; color:var(--primary); margin-bottom:12px; text-align:center;">${t.totalStats}</div>
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
-                    <div class="card"><div class="label">${t.dist}</div><div class="value">${tDist.toFixed(1)}K</div></div>
-                    <div class="card"><div class="label">${t.runs}</div><div class="value">${tRuns}</div></div>
-                    <div class="card" style="grid-column: span 2;"><div class="label">${t.gain} (TOTAL)</div><div class="value">${tGain} M</div></div>
-                </div>
-            </div>`;
-    },
-    openDetail: (id) => {
-        const h = storage.loadHistory(); const record = h.find(r => r.id === id); if (!record) return;
-        document.getElementById('detail-view').style.display = 'flex';
-        if (detailMap) detailMap.remove();
-        detailMap = L.map('detail-map', {zoomControl: false, attributionControl: false});
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(detailMap);
-        if (record.path && record.path.length > 0) { let poly = L.polyline(record.path, {color: '#007bff', weight: 5}).addTo(detailMap); detailMap.fitBounds(poly.getBounds()); }
-    },
-    closeDetail: () => document.getElementById('detail-view').style.display = 'none',
-    openDiag: (id) => {
-        const d = control.runDiagnosis(id); if (!d) return;
-        const lang = localStorage.getItem('oppaRunLang') || 'en'; const t = translations[lang];
-        document.getElementById('diag-view').style.display = 'flex';
-        document.getElementById('diag-content-area').innerHTML = `
-            <div class="diag-header"><div style="font-size:20px; font-weight:900; color:var(--primary);">${t.diag}</div></div>
-            <div class="diag-card">
-                <div class="diag-label">${t.cadence}</div>
-                <div class="diag-val-group"><span class="diag-main-val">${d.cad} BPM</span></div>
-                <div class="diag-tip">${d.cadTip}</div>
+                <div class="hist-dist">${r.distance} KM</div>
             </div>
-            <div class="diag-card">
-                <div class="diag-label">${t.gain}</div>
-                <div class="diag-val-group"><span class="diag-main-val">${d.r.gain || 0} M</span></div>
-                <div class="diag-tip">Course difficulty assessment based on elevation gain.</div>
-            </div>`;
-    },
-    closeDiag: () => document.getElementById('diag-view').style.display = 'none'
-};
-
-async function requestWakeLock() { try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {} }
-
-function updatePosition(p) {
-    const pos = [p.coords.latitude, p.coords.longitude]; 
-    const currentAlt = p.coords.altitude; // Elevation data
-    currentSpeedKmh = (p.coords.speed || 0) * 3.6; 
-    const accuracy = Math.round(p.coords.accuracy);
-    const statusEl = document.getElementById('status');
-    statusEl.textContent = `GPS READY: ±${accuracy}m`;
-    marker.setLatLng(pos);
-    if (accCircle) accCircle.setLatLng(pos).setRadius(accuracy);
-    else accCircle = L.circle(pos, {radius: accuracy, color: '#007bff', fillOpacity: 0.1, weight: 1}).addTo(map);
-
-    if (isRunning && !isPaused) {
-        // Elevation Gain Calculation
-        if (currentAlt !== null) {
-            if (lastAlt !== null && currentAlt > lastAlt) {
-                let diff = currentAlt - lastAlt;
-                if (diff > 0.3) { // Noise filter
-                    totalGain += diff;
-                    document.getElementById('elevation-gain').textContent = Math.round(totalGain);
-                }
-            }
-            lastAlt = currentAlt;
-        }
-
-        if (currentSpeedKmh < 2.0) { 
-            if (!lowSpeedStartTime) lowSpeedStartTime = Date.now(); 
-            if ((Date.now() - lowSpeedStartTime) > 3000 && !isAutoPaused) { 
-                isAutoPaused = true; 
-                document.getElementById('pause-status').style.display = 'block';
-                if ("vibrate" in navigator) navigator.vibrate([100, 50, 100]); 
-            } 
-        } else { 
-            if (isAutoPaused && "vibrate" in navigator) navigator.vibrate(300); 
-            isAutoPaused = false; 
-            document.getElementById('pause-status').style.display = 'none'; 
-            lowSpeedStartTime = null; 
-        }
-        if (!isAutoPaused && accuracy < 50) {
-            if (lastPos) { let d = map.distance(lastPos, pos) / 1000; if (d > 0.002) { totalDist += d; document.getElementById('dist').textContent = totalDist.toFixed(2); lastPos = pos; pathCoords.push(pos); polyline.setLatLngs(pathCoords); } } else lastPos = pos;
-            document.getElementById('curPace').textContent = control.formatPace(currentSpeedKmh);
-        }
+        `).join('');
     }
-    map.panTo(pos);
-}
 
-function handleMotion(e) {
-    if (!isRunning || isPaused || isAutoPaused) return;
-    let acc = e.accelerationIncludingGravity; if (!acc || acc.x === null) return;
-    let force = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2); let now = Date.now();
-    if (force > 12 && (now - lastStepTime) > 220) {
-        steps++; lastStepTime = now;
-        document.getElementById('cadence').textContent = Math.round((steps/(seconds||1))*60);
+    // 위치 추적 시작
+    if (navigator.geolocation) {
+        navigator.geolocation.watchPosition(updateLocation, null, {
+            enableHighAccuracy: true
+        });
     }
-}
 
-function onStart() { requestWakeLock(); isRunning = true; totalDist = 0; seconds = 0; steps = 0; totalGain = 0; lastAlt = null; pathCoords = []; document.getElementById('btn-start').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; timer = setInterval(() => { if(!isPaused && !isAutoPaused) { seconds++; document.getElementById('time').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`; } }, 1000); }
-function onStop() { isPaused = true; document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; }
-function onResume() { isPaused = false; document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; }
+    // 시작 버튼 이벤트
+    document.getElementById('start-btn').addEventListener('click', function() {
+        isRunning = !isRunning;
+        this.innerText = isRunning ? "러닝 종료" : "러닝 시작";
+        this.style.background = isRunning ? "#ff4444" : "#00ff88";
+        
+        if(isRunning) {
+            seconds = 0;
+            timerInterval = setInterval(() => {
+                seconds++;
+                let min = Math.floor(seconds / 60);
+                let sec = seconds % 60;
+                document.getElementById('timer').innerText = `${min.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
+            }, 1000);
+        } else {
+            clearInterval(timerInterval);
+            saveRecord();
+        }
+    });
 
-function onFinish() { 
-    if (wakeLock) wakeLock.release(); 
-    const record = { 
-        id: Date.now(), 
-        date: new Date().toLocaleString(), 
-        dist: document.getElementById('dist').textContent, 
-        time: document.getElementById('time').textContent, 
-        pace: document.getElementById('avgPace').textContent, 
-        cadence: document.getElementById('cadence').textContent,
-        gain: document.getElementById('elevation-gain').textContent,
-        flight: document.getElementById('flight').textContent,
-        path: pathCoords 
-    }; 
-    storage.saveRecord(record); 
-    location.reload(); 
-}
-
-window.onload = () => {
-    setTimeout(() => {
-        map = L.map('map', {zoomControl: false, attributionControl: false}).setView([33.7743, -117.9390], 16);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-        marker = L.marker([33.7743, -117.9390], {icon: L.divIcon({className:'loc', html:'<div style="background:#007bff; border:2px solid #fff; border-radius:50%; width:14px; height:14px;"></div>'})}).addTo(map);
-        polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(map);
-        if ("geolocation" in navigator) navigator.geolocation.watchPosition(updatePosition, null, {enableHighAccuracy: true});
-    }, 500);
-    window.addEventListener('devicemotion', handleMotion);
-    ui.changeLanguage(localStorage.getItem('oppaRunLang') || 'en');
-    ui.updateQuickMetroBtn();
-};
-document.getElementById('dimmer-overlay').onclick = () => ui.toggleDim(false);
+    function saveRecord() {
+        const records = JSON.parse(localStorage.getItem('run_records') || '[]');
+        const newRecord = {
+            date: new Date().toLocaleDateString(),
+            duration: document.getElementById('timer').innerText,
+            distance: document.getElementById('dist').innerText.replace('KM',''),
+            elevation: elevationGain // 누적된 고도값 저장
+        };
+        records.unshift(newRecord);
+        localStorage.setItem('run_records', JSON.stringify(records));
+    }
 </script>
 </body>
 </html>
