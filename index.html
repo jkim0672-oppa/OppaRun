@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v29.3.1 (Diagnosis Updated)</title>
+    <title>OppaRun Pro - v29.3.2 (Logic & Filtering Updated)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -237,7 +237,7 @@
 
 <script>
 /**
- * [OppaRun Pro - v29.3.1 Visual Feedback] - Diagnosis Logic Embedded
+ * [OppaRun Pro - v29.3.2 Visual Feedback] - Diagnosis Logic & Filtering Embedded
  */
 
 const translations = {
@@ -543,7 +543,7 @@ class UIManager {
     }
     closeDetail() { document.getElementById('detail-view').style.display = 'none'; }
     
-    // ================= [ 신규: 진단 오픈 로직 ] =================
+    // ================= [ 진단 오픈 로직 - 필터링 및 분석 설정 업데이트 ] =================
     openDiag(id) {
         const h = storage.loadHistory(); 
         const r = h.find(rec => rec.id === id);
@@ -554,24 +554,40 @@ class UIManager {
         document.getElementById('diag-view-date').textContent = r.date;
         document.getElementById('diag-view').style.display = 'flex';
 
-        // 1. 데이터 분석 및 멘트 생성
-        // 지면접촉시간 진단
+        const runDistance = parseFloat(r.dist) || 0;
+
+        // 100미터(0.10km) 미만 데이터 필터링 기준 적용
+        if (runDistance < 0.10) {
+            let filterMessage = (lang === 'ko')
+                ? "정밀 분석을 위한 최소 주행 거리(100m)가 부족합니다. 데이터 수집을 위해 조금 더 뛰어보세요."
+                : "Insufficient data for detailed analysis (minimum 100m required). Try running a longer distance to gather metrics.";
+
+            document.getElementById('diag-content-area').innerHTML = `
+                <div class="diag-card" style="text-align:center; padding:40px 15px;">
+                    <div class="diag-label" style="color:var(--danger); font-size:11px;">INSUFFICIENT DATA</div>
+                    <div class="diag-tip" style="border-top:none; padding-top:0; margin-top:10px; font-size:13px; color:#aaa;">${filterMessage}</div>
+                </div>
+            `;
+            return;
+        }
+
+        // 지면접촉시간 진단 (문구 끝마침 . 고정)
         let gctComment = (lang === 'ko') 
             ? (r.gct <= 240 ? "매우 탄력적인 주행입니다. 골반 회전이 아주 좋습니다." : "지면 접촉이 다소 깁니다. 발을 지면에서 더 빨리 떼는 느낌으로 둔근을 사용하세요.")
             : (r.gct <= 240 ? "Excellent elastic stride. Great use of pelvic rotation." : "Ground contact is slightly long. Focus on using your glutes to lift your feet faster.");
 
-        // 케이던스 진단
+        // 케이던스 진단 (문구 끝마침 . 고정)
         let cadComment = (lang === 'ko')
             ? (r.cadence >= 175 ? "이상적인 케이던스입니다. 부상 위험이 적은 안정적인 리듬입니다." : "케이던스를 조금 더 높이면 관절에 가해지는 충격을 줄일 수 있습니다.")
             : (r.cadence >= 175 ? "Ideal cadence. Stable rhythm with low injury risk." : "Increasing your cadence could further reduce impact on your joints.");
 
         // 회복 시간 계산 (거리와 페이스 기반)
-        let recovHours = Math.round(parseFloat(r.dist) * 2.5); // 예: 10km 주행 시 약 25시간
-        if (recovHours < 12) recovHours = 12; // 최소 12시간
+        let recovHours = Math.round(runDistance * 2.5);
+        if (recovHours < 12) recovHours = 12;
 
         let recovComment = (lang === 'ko')
-            ? `다음 고강도 러닝까지 최소 <b>${recovHours}시간</b>의 회복이 필요합니다. 가벼운 가자미근 스트레칭을 잊지 마세요!`
-            : `You need at least <b>${recovHours} hours</b> of recovery before your next high-intensity run. Don't forget light calf stretches!`;
+            ? `다음 고강도 러닝까지 최소 <b>${recovHours}시간</b>의 회복이 필요합니다. 가벼운 가자미근 스트레칭을 잊지 마세요.`
+            : `You need at least <b>${recovHours} hours</b> of recovery before your next high-intensity run. Don't forget light calf stretches.`;
 
         // HTML 삽입
         document.getElementById('diag-content-area').innerHTML = `
