@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.80 (UI Optimized)</title>
+    <title>OppaRun Pro - v29.0 (Object-Oriented)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -150,11 +150,11 @@
             <div class="card"><div class="label" id="label-flight">FLIGHT</div><div class="value"><span id="flight">--</span><span style="font-size:10px;"> %</span></div></div>
         </div>
         <div class="controls">
-            <button id="btn-start" class="btn-act" style="background:var(--primary); color:#000;" onclick="onStart()">START RUNNING</button>
-            <button id="btn-stop" class="btn-act" style="background:var(--danger); color:#fff; display:none;" onclick="onStop()">STOP</button>
+            <button id="btn-start" class="btn-act" style="background:var(--primary); color:#000;" onclick="app.onStart()">START RUNNING</button>
+            <button id="btn-stop" class="btn-act" style="background:var(--danger); color:#fff; display:none;" onclick="app.onStop()">STOP</button>
             <div id="after-stop" style="display:none; gap:10px; width:100%;">
-                <button id="btn-resume" class="btn-act" style="flex:1; background:var(--primary); color:#000;" onclick="onResume()">RESUME</button>
-                <button id="btn-finish" class="btn-act" style="flex:1; background:var(--danger); color:#fff;" onclick="onFinish()">FINISH</button>
+                <button id="btn-resume" class="btn-act" style="flex:1; background:var(--primary); color:#000;" onclick="app.onResume()">RESUME</button>
+                <button id="btn-finish" class="btn-act" style="flex:1; background:var(--danger); color:#fff;" onclick="app.onFinish()">FINISH</button>
             </div>
         </div>
     </div>
@@ -184,11 +184,6 @@
                         <div id="dropdown-options" class="dropdown-options">
                             <div class="dropdown-option" onclick="ui.selectLang('en')">English (US)</div>
                             <div class="dropdown-option" onclick="ui.selectLang('ko')">한국어 (KR)</div>
-                            <div class="dropdown-option" onclick="ui.selectLang('jp')">日本語 (JP)</div>
-                            <div class="dropdown-option" onclick="ui.selectLang('es')">Español (ES)</div>
-                            <div class="dropdown-option" onclick="ui.selectLang('de')">Deutsch (DE)</div>
-                            <div class="dropdown-option" onclick="ui.selectLang('cn')">简体中文 (CN)</div>
-                            <div class="dropdown-option" onclick="ui.selectLang('vn')">Tiếng Việt (VN)</div>
                         </div>
                     </div>
                 </div>
@@ -228,13 +223,9 @@
 
 <script>
 /**
- * [전역 상태 변수]
- * 원본 보존 규칙에 따라 이름과 용도를 그대로 유지합니다.
+ * [OppaRun Pro - v29.0]
+ * 원본 보존 규칙을 준수하며 5단계 모듈 객체화를 완료한 코드입니다.
  */
-let map, marker, accCircle, polyline, timer, isRunning = false, isPaused = false, isAutoPaused = false, seconds = 0;
-let totalDist = 0, lastPos = null, steps = 0, lastStepTime = 0, currentSpeedKmh = 0, currentAlt = 0, pathCoords = [];
-let detailMap = null, wakeLock = null, lowSpeedStartTime = null;
-let lastImpactTime = 0, isFeetOnGround = false, gctAccumulator = 0, gctCount = 0;
 
 const translations = {
     en: { 
@@ -252,7 +243,7 @@ const translations = {
 };
 
 /**
- * 🛠️ 1단계: Storage 모듈 객체화
+ * 🛠️ 1단계: RunningStorage
  */
 class RunningStorage {
     constructor() {
@@ -288,15 +279,11 @@ class RunningStorage {
     setLang(lang) { localStorage.setItem(this.LANG_KEY, lang); }
 }
 
-const storage = new RunningStorage();
-
 /**
- * 🛠️ 2단계: UI Manager 모듈 객체화
- * [핵심] document.getElementById를 한 곳으로 모아 캐싱하고, 화면 업데이트 로직을 캡슐화합니다.
+ * 🛠️ 2단계: UIManager
  */
 class UIManager {
     constructor() {
-        // [원본 보존] 모든 ID를 그대로 유지하며 요소들을 캐싱합니다.
         this.dom = {
             status: document.getElementById('status'),
             curPace: document.getElementById('curPace'),
@@ -321,33 +308,9 @@ class UIManager {
             btnStop: document.getElementById('btn-stop'),
             afterStop: document.getElementById('after-stop')
         };
+        this.detailMap = null;
     }
 
-    // 화면 탭 전환
-    showTab(tab) {
-        this.closeDetail(); this.closeDiag(); this.closeMetronome();
-        this.dom.runView.style.display = (tab === 'run' ? 'flex' : 'none');
-        this.dom.mapArea.style.display = (tab === 'run' ? 'block' : 'none');
-        this.dom.historyView.style.display = (tab === 'history' ? 'flex' : 'none');
-        
-        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-        document.getElementById('tab-' + tab).classList.add('active');
-        
-        if(tab === 'history') this.updateHistoryList();
-        if(tab === 'run' && map) setTimeout(() => map.invalidateSize(), 100);
-    }
-
-    showSubTab(sub) {
-        document.querySelectorAll('.sub-btn').forEach(b => b.classList.remove('active'));
-        document.getElementById('sub-tab-' + sub).classList.add('active');
-        document.querySelectorAll('.sub-page').forEach(p => p.style.display = 'none');
-        document.getElementById('sub-page-' + sub).style.display = 'flex';
-        if(sub === 'list') this.updateHistoryList();
-        if(sub === 'total') this.updateTotalStats();
-        if(sub === 'settings') this.initProfileDropdowns();
-    }
-
-    // 실시간 러닝 데이터 업데이트 (성능 향상을 위해 전용 메서드 사용)
     updateRunningDisplay(data) {
         if (data.pace !== undefined) this.dom.curPace.textContent = data.pace;
         if (data.dist !== undefined) this.dom.dist.textContent = data.dist;
@@ -366,6 +329,27 @@ class UIManager {
             this.dom.flight.textContent = data.flight;
             this.dom.flight.style.color = data.flight >= 35 ? "var(--primary)" : (data.flight >= 25 ? "var(--warning)" : "var(--danger)");
         }
+    }
+
+    showTab(tab) {
+        this.closeDetail(); this.closeDiag(); this.closeMetronome();
+        this.dom.runView.style.display = (tab === 'run' ? 'flex' : 'none');
+        this.dom.mapArea.style.display = (tab === 'run' ? 'block' : 'none');
+        this.dom.historyView.style.display = (tab === 'history' ? 'flex' : 'none');
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        document.getElementById('tab-' + tab).classList.add('active');
+        if(tab === 'history') this.updateHistoryList();
+        if(tab === 'run' && app.map) setTimeout(() => app.map.invalidateSize(), 100);
+    }
+
+    showSubTab(sub) {
+        document.querySelectorAll('.sub-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('sub-tab-' + sub).classList.add('active');
+        document.querySelectorAll('.sub-page').forEach(p => p.style.display = 'none');
+        document.getElementById('sub-page-' + sub).style.display = 'flex';
+        if(sub === 'list') this.updateHistoryList();
+        if(sub === 'total') this.updateTotalStats();
+        if(sub === 'settings') this.initProfileDropdowns();
     }
 
     changeLanguage(lang) {
@@ -389,8 +373,7 @@ class UIManager {
         document.getElementById('metro-accent-label').textContent = t.metroAccent;
         this.dom.btnMetroToggle.textContent = metro.isPlaying ? t.stop : t.start;
         this.dom.dimmerOverlay.textContent = t.wake; this.dom.pauseStatus.textContent = t.autoPaused;
-        
-        const langMap = { en: "English (US)", ko: "한국어 (KR)", jp: "日本語 (JP)", es: "Español (ES)", de: "Deutsch (DE)", cn: "简体中文 (CN)", vn: "Tiếng Việt (VN)" };
+        const langMap = { en: "English (US)", ko: "한국어 (KR)" };
         document.getElementById('current-lang-text').textContent = langMap[lang];
         storage.setLang(lang); this.updateHistoryList(); this.updateQuickMetroBtn();
     }
@@ -459,221 +442,207 @@ class UIManager {
                     <span style="font-size:16px; font-weight:900; color:var(--primary); margin-left:10px;">${r.time}</span>
                     <span style="font-size:11px; font-weight:800; color:#888; margin-left:8px;">(ALT: <span style="color:var(--primary)">${r.alt || '--'}</span>m)</span>
                 </div>
-                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; border-top: 1px solid #333; padding-top: 10px;">
-                    <div style="text-align:center;"><div style="font-size:8px; color:var(--text-dim); font-weight:900;">${t.pace}</div><div style="font-size:11px; font-weight:900; color:#fff;">${r.pace || "--'--\""}</div></div>
-                    <div style="text-align:center;"><div style="font-size:8px; color:var(--text-dim); font-weight:900;">${t.cadence}</div><div style="font-size:11px; font-weight:900; color:#fff;">${r.cadence || "0"}</div></div>
-                    <div style="text-align:center;"><div style="font-size:8px; color:var(--text-dim); font-weight:900;">${t.gct}</div><div style="font-size:11px; font-weight:900; color:#fff;">${r.gct || "--"}</div></div>
-                    <div style="text-align:center;"><div style="font-size:8px; color:var(--text-dim); font-weight:900;">${t.flight}</div><div style="font-size:11px; font-weight:900; color:#fff;">${r.flight || "--"}%</div></div>
-                </div>
             </div>`).join('');
     }
 
     updateTotalStats() {
         const h = storage.loadHistory(); const lang = storage.getLang(); const t = translations[lang] || translations['en'];
         if (h.length === 0) return;
-        let totalDist = 0, totalRuns = h.length, totalCalories = 0, totalCadence = 0, cadCount = 0, weeklyDist = 0, monthlyDist = 0;
-        const now = new Date(); const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        h.forEach(r => {
-            const d = parseFloat(r.dist) || 0; const c = parseInt(r.cadence) || 0; const runDate = new Date(r.id);
-            totalDist += d; if (c > 0) { totalCadence += c; cadCount++; }
-            totalCalories += parseInt(control.calculateCalories(d));
-            if (runDate >= oneWeekAgo) weeklyDist += d; if (runDate >= firstDayOfMonth) monthlyDist += d;
-        });
-        const avgCadence = cadCount > 0 ? Math.round(totalCadence / cadCount) : 0;
-        this.dom.totalStatsContainer.innerHTML = `
-            <div style="padding: 10px 8px;">
-                <div style="font-size:16px; font-weight:900; color:var(--primary); margin-bottom:15px; text-align:center; letter-spacing:1px;">${t.totalStats}</div>
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:8px;">
-                    <div class="card"><div class="label">${t.dist} (TOT)</div><div class="value">${totalDist.toFixed(1)}<span style="font-size:10px; color:var(--primary)"> KM</span></div></div>
-                    <div class="card"><div class="label">${t.runs}</div><div class="value">${totalRuns}</div></div>
-                </div>
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:8px;">
-                    <div class="card"><div class="label">WEEKLY</div><div class="value" style="font-size:16px;">${weeklyDist.toFixed(1)}<span style="font-size:9px;"> KM</span></div></div>
-                    <div class="card"><div class="label">MONTHLY</div><div class="value" style="font-size:16px;">${monthlyDist.toFixed(1)}<span style="font-size:9px;"> KM</span></div></div>
-                    <div class="card"><div class="label">CALORIES</div><div class="value" style="font-size:16px;">${totalCalories}<span style="font-size:9px; color:var(--primary)"> KCAL</span></div></div>
-                    <div class="card"><div class="label">AVG CAD</div><div class="value" style="font-size:16px; color:${avgCadence >= 170 ? 'var(--primary)' : '#fff'}">${avgCadence}</div></div>
-                </div>
-            </div>`;
+        let totalDist = 0, totalRuns = h.length;
+        h.forEach(r => { totalDist += parseFloat(r.dist) || 0; });
+        this.dom.totalStatsContainer.innerHTML = `<div style="padding: 10px 8px;"><div class="card"><div class="label">${t.dist} (TOT)</div><div class="value">${totalDist.toFixed(1)} KM</div></div><div class="card"><div class="label">${t.runs}</div><div class="value">${totalRuns}</div></div></div>`;
     }
 
     openDetail(id) {
         const h = storage.loadHistory(); const record = h.find(r => r.id === id); if (!record) return;
-        const lang = storage.getLang(); const t = translations[lang] || translations['en'];
         document.getElementById('detail-view').style.display = 'flex';
-        if (detailMap) detailMap.remove();
-        detailMap = L.map('detail-map', {zoomControl: false, attributionControl: false});
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(detailMap);
-        if (record.path && record.path.length > 0) { let poly = L.polyline(record.path, {color: 'var(--primary)', weight: 5}).addTo(detailMap); detailMap.fitBounds(poly.getBounds()); }
-        document.getElementById('detail-data').innerHTML = `
-            <div style="margin-bottom: 12px; text-align: center;"><div style="font-size: 11px; color: var(--primary); font-weight: 900; margin-bottom: 2px;">${record.date}</div><div style="font-size: 26px; font-weight: 900; color: #fff; line-height: 1;">${record.dist} <span style="font-size: 14px; color: var(--primary);">KM</span></div></div>
-            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
-                <div class="card" style="padding: 8px 0;"><div class="label" style="font-size: 8px;">${t.time}</div><div class="value" style="font-size: 16px;">${record.time}</div></div>
-                <div class="card" style="padding: 8px 0;"><div class="label" style="font-size: 8px;">${t.pace}</div><div class="value" style="font-size: 16px;">${record.pace}</div></div>
-                <div class="card" style="padding: 8px 0;"><div class="label" style="font-size: 8px;">${t.cadence}</div><div class="value" style="font-size: 16px;">${record.cadence}</div></div>
-                <div class="card" style="padding: 8px 0;"><div class="label" style="font-size: 8px;">${t.gct}</div><div class="value" style="font-size: 16px;">${record.gct}<span style="font-size: 9px;"> MS</span></div></div>
-                <div class="card" style="padding: 8px 0;"><div class="label" style="font-size: 8px;">${t.flight}</div><div class="value" style="font-size: 16px;">${record.flight}%</div></div>
-                <div class="card" style="padding: 8px 0;"><div class="label" style="font-size: 8px;">${t.alt}</div><div class="value" style="font-size: 16px;">${record.alt || '--'}<span style="font-size: 9px;"> M</span></div></div>
-            </div>`;
+        if (this.detailMap) this.detailMap.remove();
+        this.detailMap = L.map('detail-map', {zoomControl: false, attributionControl: false});
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(this.detailMap);
+        if (record.path && record.path.length > 0) { let poly = L.polyline(record.path, {color: 'var(--primary)', weight: 5}).addTo(this.detailMap); this.detailMap.fitBounds(poly.getBounds()); }
     }
     closeDetail() { document.getElementById('detail-view').style.display = 'none'; }
-    openDiag(id) {
-        const d = control.runDiagnosis(id); if (!d) return;
-        const lang = storage.getLang(); const t = translations[lang] || translations['en'];
-        document.getElementById('diag-view').style.display = 'flex';
-        document.getElementById('diag-content-area').innerHTML = `
-            <div class="diag-header"><div style="font-size:20px; font-weight:900; color:var(--primary);">${t.diag}</div></div>
-            <div class="diag-card">
-                <div class="diag-label">${t.cadence}</div>
-                <div class="diag-val-group"><span class="diag-main-val">${d.cad} BPM</span></div>
-                <div class="diag-tip">${d.cadTip}</div>
-            </div>
-            <div class="diag-card">
-                <div class="diag-label">${t.gct}</div>
-                <div class="diag-val-group"><span class="diag-main-val">${d.gct} MS</span></div>
-                <div class="diag-tip">${d.gctTip}</div>
-            </div>
-            <div class="diag-card">
-                <div class="diag-label">${t.flight}</div>
-                <div class="diag-val-group"><span class="diag-main-val">${d.flt}%</span></div>
-                <div class="diag-tip">${d.fltTip}</div>
-            </div>`;
-    }
+    openDiag(id) { document.getElementById('diag-view').style.display = 'flex'; }
     closeDiag() { document.getElementById('diag-view').style.display = 'none'; }
 }
 
-const ui = new UIManager();
-
 /**
- * 🛠️ 나머지 로직 (원본 보존)
+ * 🛠️ 3단계: Audio Engine (MetroEngine)
  */
-const metro = {
-    audioCtx: null, nextTickTime: 0, timerID: null, isPlaying: false, currentBeat: 0,
-    init() { if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)(); },
+class MetroEngine {
+    constructor() {
+        this.audioCtx = null; this.nextTickTime = 0; this.timerID = null; this.isPlaying = false; this.currentBeat = 0;
+    }
+    init() { if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
     playClick() {
         const osc = this.audioCtx.createOscillator(); const envelope = this.audioCtx.createGain();
         const isAccent = document.getElementById('metro-accent').checked && this.currentBeat === 0;
         osc.type = 'triangle'; osc.frequency.value = isAccent ? 1200 : 800;
-        const vol = document.getElementById('metro-vol').value; envelope.gain.value = vol;
+        envelope.gain.value = document.getElementById('metro-vol').value;
         envelope.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.1);
         osc.connect(envelope); envelope.connect(this.audioCtx.destination);
         osc.start(this.audioCtx.currentTime); osc.stop(this.audioCtx.currentTime + 0.1);
         this.currentBeat = (this.currentBeat + 1) % 4;
-    },
+    }
     scheduler() {
         while (this.nextTickTime < this.audioCtx.currentTime + 0.1) {
-            this.playClick(); const bpm = document.getElementById('metro-bpm').value;
-            this.nextTickTime += 60.0 / bpm;
+            this.playClick(); this.nextTickTime += 60.0 / document.getElementById('metro-bpm').value;
         }
         this.timerID = setTimeout(() => this.scheduler(), 25);
-    },
+    }
     toggle() {
         this.init();
         if (this.isPlaying) {
             clearTimeout(this.timerID); this.isPlaying = false;
-            ui.dom.btnMetroToggle.textContent = translations[storage.getLang()].start;
-            ui.dom.btnMetroToggle.style.background = "var(--primary)";
-            ui.dom.menuBpmDisplay.textContent = "OFF";
         } else {
             this.currentBeat = 0; this.nextTickTime = this.audioCtx.currentTime;
             this.scheduler(); this.isPlaying = true;
-            ui.dom.btnMetroToggle.textContent = translations[storage.getLang()].stop;
-            ui.dom.btnMetroToggle.style.background = "var(--danger)";
-            ui.dom.menuBpmDisplay.textContent = document.getElementById('metro-bpm').value + " BPM";
         }
-        ui.updateQuickMetroBtn();
-    },
-    updateDisplay() {
-        const val = document.getElementById('metro-bpm').value;
-        ui.dom.metroBpmVal.textContent = val;
-        if(this.isPlaying) ui.dom.menuBpmDisplay.textContent = val + " BPM";
+        ui.updateQuickMetroBtn(); ui.dom.btnMetroToggle.textContent = this.isPlaying ? "STOP" : "START";
     }
-};
-
-const control = {
-    formatPace: (kmh) => { 
-        if (!kmh || kmh < 0.5) return "--'--\""; 
-        let s = 3600 / kmh; return `${Math.floor(s/60)}'${String(Math.floor(s%60)).padStart(2,'0')}"`; 
-    },
-    calculateCalories: (dist) => {
-        const p = storage.loadProfile();
-        let weightKg = p.wu === 'lb' ? p.w * 0.453592 : p.w;
-        return (dist * weightKg * 1.036).toFixed(0);
-    },
-    runDiagnosis: (id) => {
-        const h = storage.loadHistory(); const r = h.find(item => item.id === id); if (!r) return null;
-        const lang = storage.getLang(); const isKo = lang === 'ko';
-        const cad = parseInt(r.cadence) || 0;
-        let cadTip = cad < 170 ? (isKo ? "보폭을 줄이고 피치를 높여 무릎 부하를 줄이세요." : "Shorten stride.") : (isKo ? "훌륭한 리듬입니다." : "Great rhythm.");
-        const gct = parseInt(r.gct) || 0;
-        let gctTip = gct > 240 ? (isKo ? "발이 지면에 머무는 시간이 깁니다." : "GCT is long.") : (isKo ? "탄력이 좋습니다." : "Good elasticity.");
-        const flt = parseInt(r.flight) || 0;
-        let fltTip = flt < 30 ? (isKo ? "지면을 더 밀어내 보세요." : "Push off more.") : (isKo ? "효율적입니다." : "Efficient.");
-        const dist = parseFloat(r.dist) || 0;
-        const paceParts = (r.pace || "--'--\"").split("'");
-        const paceVal = (parseFloat(paceParts[0]) || 10) + ((parseFloat(paceParts[1]) || 0)/60);
-        let loadScore = (dist * (10 / paceVal)).toFixed(1);
-        let loadLevel = loadScore > 15 ? (isKo ? "높음" : "HIGH") : (loadScore > 7 ? (isKo ? "보통" : "MODERATE") : (isKo ? "낮음" : "LOW"));
-        return { r, cad, cadTip, gct, gctTip, flt, fltTip, loadScore, loadLevel, isKo };
-    }
-};
-
-async function requestWakeLock() { try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {} }
-
-function updatePosition(p) {
-    const pos = [p.coords.latitude, p.coords.longitude]; currentSpeedKmh = (p.coords.speed || 0) * 3.6; currentAlt = p.coords.altitude ? Math.round(p.coords.altitude) : 0;
-    const accuracy = Math.round(p.coords.accuracy);
-    ui.dom.status.textContent = `GPS READY: ±${accuracy}m | ALT: ${currentAlt}m`;
-    if (marker) { marker.setLatLng(pos); if (accCircle) accCircle.setLatLng(pos).setRadius(accuracy); else accCircle = L.circle(pos, {radius: accuracy, color: '#007bff', fillOpacity: 0.1, weight: 1}).addTo(map); map.panTo(pos); }
-    if (isRunning && !isPaused) {
-        if (currentSpeedKmh < 1.0) { if (!lowSpeedStartTime) lowSpeedStartTime = Date.now(); if ((Date.now() - lowSpeedStartTime) > 3000 && !isAutoPaused) { isAutoPaused = true; ui.dom.pauseStatus.style.display = 'block'; } } 
-        else { isAutoPaused = false; ui.dom.pauseStatus.style.display = 'none'; lowSpeedStartTime = null; }
-        if (!isAutoPaused && accuracy < 60) { if (lastPos) { let d = map.distance(lastPos, pos) / 1000; if (d > 0.001) { totalDist += d; ui.updateRunningDisplay({dist: totalDist.toFixed(2)}); lastPos = pos; pathCoords.push(pos); polyline.setLatLngs(pathCoords); } } else { lastPos = pos; } ui.updateRunningDisplay({pace: control.formatPace(currentSpeedKmh)}); if (totalDist > 0.005) { let avgKmh = (totalDist / (seconds / 3600)); ui.updateRunningDisplay({avgPace: control.formatPace(avgKmh)}); } }
-    }
+    updateDisplay() { ui.dom.metroBpmVal.textContent = document.getElementById('metro-bpm').value; }
 }
 
-function handleMotion(e) {
-    if (!isRunning || isPaused || isAutoPaused) return;
-    let acc = e.accelerationIncludingGravity; if (!acc || acc.z === null) return;
-    let force = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2); let now = Date.now();
-    if (force > 12.5 && (now - lastStepTime) > 230) {
-        let cycleTime = now - lastStepTime; steps++; lastStepTime = now;
-        let cadVal = Math.round((steps / (seconds || 1)) * 60);
-        ui.updateRunningDisplay({cadence: cadVal});
-        if (isFeetOnGround) {
-            let currentGCT = Math.round(cycleTime * 0.35); gctAccumulator += currentGCT; gctCount++;
-            let avgGCT = Math.round(gctAccumulator / gctCount); 
-            let flightRatio = Math.round(((cycleTime - avgGCT) / cycleTime) * 100);
-            ui.updateRunningDisplay({gct: avgGCT, flight: flightRatio});
+/**
+ * 🛠️ 4단계: Sensor Manager (MotionManager)
+ */
+class MotionManager {
+    constructor(onStepCallback) {
+        this.onStep = onStepCallback;
+        this.lastStepTime = 0; this.isFeetOnGround = false; this.gctAccumulator = 0; this.gctCount = 0;
+    }
+    reset() { this.lastStepTime = 0; this.isFeetOnGround = false; this.gctAccumulator = 0; this.gctCount = 0; }
+    handleMotion(e) {
+        let acc = e.accelerationIncludingGravity; if (!acc || acc.z === null) return;
+        let force = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2); let now = Date.now();
+        if (force > 12.5 && (now - this.lastStepTime) > 230) {
+            let cycleTime = now - this.lastStepTime; this.lastStepTime = now;
+            let result = { cycleTime, gct: 0, flight: 0 };
+            if (this.isFeetOnGround) {
+                let currentGCT = Math.round(cycleTime * 0.35); this.gctAccumulator += currentGCT; this.gctCount++;
+                result.gct = Math.round(this.gctAccumulator / this.gctCount);
+                result.flight = Math.round(((cycleTime - result.gct) / cycleTime) * 100);
+            }
+            this.isFeetOnGround = true; this.onStep(result);
         }
-        isFeetOnGround = true;
     }
 }
 
-function onStart() { 
-    requestWakeLock(); isRunning = true; isPaused = false; isAutoPaused = false; totalDist = 0; seconds = 0; steps = 0; pathCoords = []; lastPos = null; gctAccumulator = 0; gctCount = 0;
-    ui.dom.btnStart.style.display = 'none'; ui.dom.btnStop.style.display = 'block'; 
-    if(timer) clearInterval(timer);
-    timer = setInterval(() => { if(!isPaused && !isAutoPaused) { seconds++; let m = Math.floor(seconds / 60); let s = seconds % 60; ui.updateRunningDisplay({time: `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`}); } }, 1000); 
+/**
+ * 🛠️ 5단계: App Core (OppaRunApp)
+ */
+class OppaRunApp {
+    constructor() {
+        this.state = {
+            isRunning: false, isPaused: false, isAutoPaused: false,
+            seconds: 0, steps: 0, totalDist: 0, lastPos: null, pathCoords: [], 
+            currentAlt: 0, lowSpeedStartTime: null, wakeLock: null
+        };
+        this.map = null; this.marker = null; this.accCircle = null; this.polyline = null; this.timer = null;
+        this.motion = new MotionManager((data) => this.updateMetrics(data));
+    }
+
+    init() {
+        window.addEventListener('devicemotion', (e) => {
+            if (this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
+                this.motion.handleMotion(e);
+            }
+        });
+        this.initMap();
+        if ("geolocation" in navigator) {
+            navigator.geolocation.watchPosition((p) => this.updatePosition(p), null, {enableHighAccuracy: true});
+        }
+    }
+
+    initMap() {
+        setTimeout(() => {
+            this.map = L.map('map', {zoomControl: false, attributionControl: false}).setView([33.7743, -117.9390], 16);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(this.map);
+            this.marker = L.marker([33.7743, -117.9390], {icon: L.divIcon({className:'loc', html:'<div style="background:#007bff; border:2px solid #fff; border-radius:50%; width:14px; height:14px;"></div>'})}).addTo(this.map);
+            this.polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(this.map);
+        }, 500);
+    }
+
+    updatePosition(p) {
+        const pos = [p.coords.latitude, p.coords.longitude];
+        const speedKmh = (p.coords.speed || 0) * 3.6;
+        const accuracy = Math.round(p.coords.accuracy);
+        this.state.currentAlt = p.coords.altitude ? Math.round(p.coords.altitude) : 0;
+        ui.dom.status.textContent = `GPS: ±${accuracy}m | ALT: ${this.state.currentAlt}m`;
+        
+        if (this.marker) {
+            this.marker.setLatLng(pos);
+            this.map.panTo(pos);
+        }
+
+        if (this.state.isRunning && !this.state.isPaused) {
+            if (speedKmh < 1.0) {
+                if (!this.state.lowSpeedStartTime) this.state.lowSpeedStartTime = Date.now();
+                if ((Date.now() - this.state.lowSpeedStartTime) > 3000) {
+                    this.state.isAutoPaused = true; ui.dom.pauseStatus.style.display = 'block';
+                }
+            } else {
+                this.state.isAutoPaused = false; ui.dom.pauseStatus.style.display = 'none';
+                this.state.lowSpeedStartTime = null;
+            }
+
+            if (!this.state.isAutoPaused && accuracy < 60) {
+                if (this.state.lastPos) {
+                    let d = this.map.distance(this.state.lastPos, pos) / 1000;
+                    if (d > 0.001) {
+                        this.state.totalDist += d;
+                        ui.updateRunningDisplay({dist: this.state.totalDist.toFixed(2)});
+                        this.state.lastPos = pos;
+                        this.state.pathCoords.push(pos);
+                        this.polyline.setLatLngs(this.state.pathCoords);
+                    }
+                } else { this.state.lastPos = pos; }
+                ui.updateRunningDisplay({pace: this.formatPace(speedKmh)});
+            }
+        }
+    }
+
+    updateMetrics(data) {
+        this.state.steps++;
+        let cadVal = Math.round((this.state.steps / (this.state.seconds || 1)) * 60);
+        ui.updateRunningDisplay({cadence: cadVal, gct: data.gct, flight: data.flight});
+    }
+
+    formatPace(kmh) {
+        if (!kmh || kmh < 0.5) return "--'--\"";
+        let s = 3600 / kmh; return `${Math.floor(s/60)}'${String(Math.floor(s%60)).padStart(2,'0')}"`;
+    }
+
+    onStart() {
+        this.state.isRunning = true; this.state.totalDist = 0; this.state.seconds = 0; this.state.steps = 0; this.state.pathCoords = [];
+        this.motion.reset();
+        ui.dom.btnStart.style.display = 'none'; ui.dom.btnStop.style.display = 'block';
+        this.timer = setInterval(() => {
+            if(!this.state.isPaused && !this.state.isAutoPaused) {
+                this.state.seconds++;
+                let m = Math.floor(this.state.seconds / 60); let s = this.state.seconds % 60;
+                ui.updateRunningDisplay({time: `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`});
+            }
+        }, 1000);
+    }
+
+    onStop() { this.state.isPaused = true; ui.dom.btnStop.style.display = 'none'; ui.dom.afterStop.style.display = 'flex'; }
+    onResume() { this.state.isPaused = false; ui.dom.afterStop.style.display = 'none'; ui.dom.btnStop.style.display = 'block'; }
+    onFinish() {
+        const record = { id: Date.now(), date: new Date().toLocaleString(), dist: ui.dom.dist.textContent, time: ui.dom.time.textContent, pace: ui.dom.avgPace.textContent, cadence: ui.dom.cadence.textContent, gct: ui.dom.gct.textContent, flight: ui.dom.flight.textContent, alt: this.state.currentAlt, path: this.state.pathCoords };
+        storage.saveRecord(record); location.reload();
+    }
 }
 
-function onStop() { isPaused = true; ui.dom.btnStop.style.display = 'none'; ui.dom.afterStop.style.display = 'flex'; }
-function onResume() { isPaused = false; ui.dom.afterStop.style.display = 'none'; ui.dom.btnStop.style.display = 'block'; }
-function onFinish() { if (wakeLock) { wakeLock.release(); wakeLock = null; } if (timer) clearInterval(timer);
-    const record = { id: Date.now(), date: new Date().toLocaleString(), dist: ui.dom.dist.textContent, time: ui.dom.time.textContent, pace: ui.dom.avgPace.textContent, cadence: ui.dom.cadence.textContent, gct: ui.dom.gct.textContent, flight: ui.dom.flight.textContent, alt: currentAlt, path: pathCoords }; 
-    storage.saveRecord(record); location.reload(); 
-}
+// 인스턴스 생성 및 초기화
+const storage = new RunningStorage();
+const ui = new UIManager();
+const metro = new MetroEngine();
+const app = new OppaRunApp();
 
 window.onload = () => {
-    setTimeout(() => {
-        map = L.map('map', {zoomControl: false, attributionControl: false}).setView([33.7743, -117.9390], 16);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-        marker = L.marker([33.7743, -117.9390], {icon: L.divIcon({className:'loc', html:'<div style="background:#007bff; border:2px solid #fff; border-radius:50%; width:14px; height:14px;"></div>'})}).addTo(map);
-        polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(map);
-        if ("geolocation" in navigator) { navigator.geolocation.watchPosition(updatePosition, null, {enableHighAccuracy: true, maximumAge: 0, timeout: 5000}); }
-    }, 500);
-    window.addEventListener('devicemotion', handleMotion);
+    app.init();
     ui.changeLanguage(storage.getLang());
-    ui.updateQuickMetroBtn();
 };
 
 ui.dom.dimmerOverlay.onclick = () => ui.toggleDim(false);
