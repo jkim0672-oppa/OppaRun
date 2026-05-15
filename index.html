@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v29.2 (Enhanced History)</title>
+    <title>OppaRun Pro - v29.3 (Visual Feedback)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -13,7 +13,7 @@
         :root { 
             --primary: #00ff88; --bg: #000000; 
             --card-bg: #1e1e1e; --text-main: #ffffff; --text-dim: #999999; --danger: #ff4444; 
-            --warning: #ffcc00;
+            --warning: #ffcc00; --good: #00ff88;
         }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { 
@@ -31,7 +31,7 @@
         .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
         
         .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; padding: 6px; flex-shrink: 0; }
-        .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #333; padding: 10px 0; }
+        .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #333; padding: 10px 0; transition: border-color 0.3s ease; }
         .card-main { grid-column: span 3; border: 2.5px solid var(--primary); height: 88px; position: relative; margin-bottom: 2px; }
         
         .label { font-size: 9px; color: var(--text-dim); font-weight: 900; margin-bottom: 2px; text-transform: uppercase; }
@@ -50,7 +50,6 @@
         .sub-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
         .sub-page { display: none; flex-direction: column; flex: 1; overflow-y: auto; padding-bottom: 100px; }
         
-        /* History Item Enhanced Layout */
         .history-item { background: var(--card-bg); border-radius: 15px; padding: 15px; margin: 10px 12px; border: 1px solid #444; position: relative; }
         .h-date { font-size: 12px; color: var(--primary); font-weight: 900; margin-bottom: 10px; letter-spacing: 0.5px; opacity: 0.8; }
         .h-actions { position: absolute; top: 12px; right: 12px; display: flex; gap: 6px; }
@@ -155,9 +154,9 @@
             <div class="card"><div class="label" id="label-dist">DIST</div><div class="value"><span id="dist">0.00</span><span id="unit-dist" style="font-size:10px; color:var(--primary)"> KM</span></div></div>
             <div class="card"><div class="label" id="label-time">TIME</div><div id="time" class="value">00:00</div></div>
             <div class="card"><div class="label" id="label-avg">AVG</div><div id="avgPace" class="value">--'--"</div></div>
-            <div class="card"><div class="label" id="label-cadence">CADENCE</div><div id="cadence" class="value">0</div></div>
-            <div class="card"><div class="label" id="label-gct">GCT</div><div class="value"><span id="gct">--</span><span style="font-size:10px;"> MS</span></div></div>
-            <div class="card"><div class="label" id="label-flight">FLIGHT</div><div class="value"><span id="flight">--</span><span style="font-size:10px;"> %</span></div></div>
+            <div id="card-cadence" class="card"><div class="label" id="label-cadence">CADENCE</div><div id="cadence" class="value">0</div></div>
+            <div id="card-gct" class="card"><div class="label" id="label-gct">GCT</div><div class="value"><span id="gct">--</span><span style="font-size:10px;"> MS</span></div></div>
+            <div id="card-flight" class="card"><div class="label" id="label-flight">FLIGHT</div><div class="value"><span id="flight">--</span><span style="font-size:10px;"> %</span></div></div>
         </div>
         <div class="controls">
             <button id="btn-start" class="btn-act" style="background:var(--primary); color:#000;" onclick="app.onStart()">START RUNNING</button>
@@ -210,7 +209,6 @@
                         <div class="dropdown-select mini-select" onclick="ui.toggleDropdown('weight-options')">
                             <span id="current-weight">70 kg</span><span style="font-size:8px; color:var(--primary);">▼</span>
                         </div>
-                        <div id="height-options" class="dropdown-options"></div>
                         <div id="weight-options" class="dropdown-options"></div>
                     </div>
                 </div>
@@ -232,8 +230,8 @@
 
 <script>
 /**
- * [OppaRun Pro - v29.2 Enhanced History]
- * 리스트 시인성 강화: 거리/시간 아래 5개 핵심 지표(페이스, 케이던스, GCT, Flight, 칼로리) 배치
+ * [OppaRun Pro - v29.3 Visual Feedback]
+ * 실시간 수치에 따른 색상 피드백 반영 (Cadence, GCT, Flight)
  */
 
 const translations = {
@@ -304,6 +302,9 @@ class UIManager {
             cadence: document.getElementById('cadence'),
             gct: document.getElementById('gct'),
             flight: document.getElementById('flight'),
+            cardCadence: document.getElementById('card-cadence'),
+            cardGct: document.getElementById('card-gct'),
+            cardFlight: document.getElementById('card-flight'),
             pauseStatus: document.getElementById('pause-status'),
             quickMetro: document.getElementById('quick-metro'),
             runView: document.getElementById('run-view'),
@@ -327,9 +328,42 @@ class UIManager {
         if (data.dist !== undefined) this.dom.dist.textContent = data.dist;
         if (data.time !== undefined) this.dom.time.textContent = data.time;
         if (data.avgPace !== undefined) this.dom.avgPace.textContent = data.avgPace;
-        if (data.cadence !== undefined) this.dom.cadence.textContent = data.cadence;
-        if (data.gct !== undefined) this.dom.gct.textContent = data.gct;
-        if (data.flight !== undefined) this.dom.flight.textContent = data.flight;
+        
+        if (data.cadence !== undefined) {
+            this.dom.cadence.textContent = data.cadence;
+            this.updateCardColor(this.dom.cardCadence, this.getCadenceLevel(data.cadence));
+        }
+        if (data.gct !== undefined) {
+            this.dom.gct.textContent = data.gct;
+            this.updateCardColor(this.dom.cardGct, this.getGctLevel(data.gct));
+        }
+        if (data.flight !== undefined) {
+            this.dom.flight.textContent = data.flight;
+            this.updateCardColor(this.dom.cardFlight, this.getFlightLevel(data.flight));
+        }
+    }
+
+    // Color Feedback Logic
+    getCadenceLevel(val) {
+        if (val >= 180) return 'good';
+        if (val >= 170) return 'warning';
+        return 'danger';
+    }
+    getGctLevel(val) {
+        if (val <= 240) return 'good';
+        if (val <= 270) return 'warning';
+        return 'danger';
+    }
+    getFlightLevel(val) {
+        if (val >= 30) return 'good';
+        if (val >= 20) return 'warning';
+        return 'danger';
+    }
+    updateCardColor(el, level) {
+        const colors = { good: 'var(--good)', warning: 'var(--warning)', danger: 'var(--danger)', normal: '#333' };
+        el.style.borderColor = colors[level];
+        const valEl = el.querySelector('.value');
+        if (valEl) valEl.style.color = colors[level];
     }
 
     showTab(tab) {
@@ -455,7 +489,7 @@ class UIManager {
                     </div>
                     <div class="h-det-box">
                         <div class="h-det-label">${t.cadence}</div>
-                        <div class="h-det-val">${r.cadence || 0}</div>
+                        <div class="h-det-val" style="color:${this.getCadenceColor(r.cadence)}">${r.cadence || 0}</div>
                     </div>
                     <div class="h-det-box">
                         <div class="h-det-label">${t.cal}</div>
@@ -463,15 +497,20 @@ class UIManager {
                     </div>
                     <div class="h-det-box">
                         <div class="h-det-label">${t.gct}</div>
-                        <div class="h-det-val">${r.gct || '--'} <span style="font-size:7px">MS</span></div>
+                        <div class="h-det-val" style="color:${this.getGctColor(r.gct)}">${r.gct || '--'} <span style="font-size:7px">MS</span></div>
                     </div>
                     <div class="h-det-box">
                         <div class="h-det-label">${t.flight}</div>
-                        <div class="h-det-val">${r.flight || '--'} <span style="font-size:7px">%</span></div>
+                        <div class="h-det-val" style="color:${this.getFlightColor(r.flight)}">${r.flight || '--'} <span style="font-size:7px">%</span></div>
                     </div>
                 </div>
             </div>`).join('');
     }
+
+    // Helper for history list colors
+    getCadenceColor(v) { const l = this.getCadenceLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
+    getGctColor(v) { const l = this.getGctLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
+    getFlightColor(v) { const l = this.getFlightLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
 
     updateTotalStats() {
         const h = storage.loadHistory(); const lang = storage.getLang(); const t = translations[lang] || translations['en'];
@@ -667,7 +706,6 @@ class OppaRunApp {
     
     onFinish() {
         const p = storage.loadProfile();
-        // Calorie calculation: weight(kg) * distance(km) * 1.036
         const weightKg = p.wu === 'lb' ? p.w * 0.453592 : p.w;
         const calculatedKcal = Math.round(weightKg * parseFloat(this.state.totalDist) * 1.036);
         
