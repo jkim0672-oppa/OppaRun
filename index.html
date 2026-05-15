@@ -560,12 +560,23 @@ class UIManager {
             ? (r.cadence >= 175 ? "이상적인 보폭 빈도입니다. 관절 부하를 최소화하는 안정적인 리듬을 유지하고 있습니다." : "케이던스가 다소 낮아 충격량이 증가할 수 있습니다. 피치를 좁히고 메트로놈 리듬에 맞추어 보폭 효율을 높여 보세요.")
             : (r.cadence >= 175 ? "Optimal step frequency. Maintaining a stable rhythm that minimizes joint loading mechanics." : "Slightly low cadence may increase impact transient. Shorten stride length and sync with the metronome.");
 
-        let recovHours = Math.round(parseFloat(r.dist) * 2.5); 
-        if (recovHours < 12) recovHours = 12; 
+        let isShortDistance = parseFloat(r.dist) < 0.1;
+        let recovHighlightHTML = "";
+        let recovComment = "";
 
-        let recovComment = (lang === 'ko')
-            ? `다음 고강도 주행 전까지 최소 <b>${recovHours}시간</b>의 리커버리 윈도우를 권장합니다. 하퇴삼두근과 가자미근의 충분한 이완 스트레칭을 병행해 주세요.`
-            : `A minimum recovery window of <b>${recovHours} hours</b> is recommended before your next workout. Ensure complete stretching of the gastrocnemius and soleus complexes.`;
+        if (isShortDistance) {
+            recovHighlightHTML = `<span class="recovery-highlight" style="font-size: 16px; color: var(--danger);">DIAGNOSIS OMITTED</span>`;
+            recovComment = (lang === 'ko')
+                ? "100미터 미만 주행으로 회복 시간 진단이 제공되지 않습니다."
+                : "The running distance is less than 100 meters, so recovery analysis is not provided.";
+        } else {
+            let recovHours = Math.round(parseFloat(r.dist) * 2.5); 
+            if (recovHours < 12) recovHours = 12; 
+            recovHighlightHTML = `<span class="recovery-highlight">${recovHours} Hours</span>`;
+            recovComment = (lang === 'ko')
+                ? `다음 고강도 주행 전까지 최소 <b>${recovHours}시간</b>의 리커버리 윈도우를 권장합니다. 하퇴삼두근과 가자미근의 충분한 이완 스트레칭을 병행해 주세요.`
+                : `A minimum recovery window of <b>${recovHours} hours</b> is recommended before your next workout. Ensure complete stretching of the gastrocnemius and soleus complexes.`;
+        }
 
         document.getElementById('diag-content-area').innerHTML = `
             <div class="diag-card">
@@ -586,7 +597,7 @@ class UIManager {
             </div>
             <div class="diag-card">
                 <div class="diag-label">${t.diagRecov}</div>
-                <span class="recovery-highlight">${recovHours} Hours</span>
+                ${recovHighlightHTML}
                 <div class="diag-tip">${recovComment}</div>
             </div>
         `;
@@ -778,13 +789,6 @@ class OppaRunApp {
     onResume() { this.state.isPaused = false; ui.dom.afterStop.style.display = 'none'; ui.dom.btnStop.style.display = 'block'; }
     
     onFinish() {
-        if (parseFloat(this.state.totalDist) < 0.1) {
-            alert("The running distance is less than 100 meters, so the record will not be saved.");
-            storage.clearTempSession();
-            location.reload();
-            return;
-        }
-
         const p = storage.loadProfile();
         const weightKg = p.wu === 'lb' ? p.w * 0.453592 : p.w;
         const calculatedKcal = Math.round(weightKg * parseFloat(this.state.totalDist) * 1.036);
