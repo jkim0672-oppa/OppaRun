@@ -2,195 +2,268 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.97 (Total Restoration)</title>
+    <title>OppaRun Pro - v28.95 (Final)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         :root { 
-            --primary: #00ff88; --bg: #000000; --card-bg: #1a1a1a; 
-            --text-main: #ffffff; --text-dim: #999999; --danger: #ff4444; 
+            --primary: #00ff88; --bg: #000000; 
+            --card-bg: #1e1e1e; --text-main: #ffffff; --text-dim: #999999; --danger: #ff4444; 
             --warning: #ffcc00;
         }
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; font-family: -apple-system, system-ui; }
-        body { margin: 0; background: var(--bg); color: var(--text-main); height: 100svh; overflow: hidden; display: flex; flex-direction: column; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { 
+            margin: 0; background: var(--bg); color: var(--text-main); 
+            font-family: -apple-system, system-ui; height: 100svh; 
+            display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none;
+        }
         
         /* Layout Structure */
-        #map-area { height: 18vh; border-bottom: 2px solid #222; position: relative; }
-        #map { height: 100%; width: 100%; }
-        .status-bar { text-align: center; color: var(--warning); font-size: 11px; padding: 6px; background: #0a0a0a; font-weight: 900; }
+        #map-area { flex-shrink: 0; width: 100%; }
+        #map-container { height: 18vh; min-height: 140px; border-bottom: 2px solid #222; position: relative; }
+        #map { height: 100%; width: 100%; background: #111; }
+        .status-bar { text-align: center; color: var(--warning); font-size: 11px; padding: 6px; background: #0a0a0a; font-weight: 900; border-bottom: 1px solid #222; letter-spacing: 0.5px; }
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
         
-        /* Dashboard - 28.80 Standard */
-        .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 10px; flex-shrink: 0; }
+        /* Dashboard & Cards */
+        .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 6px; flex-shrink: 0; }
         .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #333; padding: 12px 0; }
-        .card-main { grid-column: span 3; border: 2px solid var(--primary); height: 100px; position: relative; }
-        .label { font-size: 10px; color: var(--text-dim); font-weight: 900; margin-bottom: 4px; }
-        .value { font-size: 24px; font-weight: 900; }
-        .value-large { font-size: 48px; color: var(--primary); font-weight: 900; }
+        .card-main { grid-column: span 3; border: 2.5px solid var(--primary); height: 100px; position: relative; margin-bottom: 4px; }
+        .label { font-size: 10px; color: var(--text-dim); font-weight: 900; margin-bottom: 4px; text-transform: uppercase; }
+        .value { font-size: 24px; font-weight: 900; } 
+        .value-large { font-size: 48px; color: var(--primary); font-weight: 900; line-height: 1; }
         
-        /* Controls */
-        .controls { padding: 15px; margin-bottom: 80px; }
-        .btn-act { width: 100%; height: 60px; border-radius: 30px; border: none; font-weight: 900; font-size: 20px; }
+        /* Modal Views (Metronome, Detail, Diag) */
+        #diag-view, #metronome-view, #detail-view { position: fixed; top: 0; left: 0; width: 100%; height: calc(100% - 75px); background: var(--bg); z-index: 5000; display: none; flex-direction: column; overflow-y: auto; }
+        .diag-header { padding: 50px 20px 15px; border-bottom: 1px solid #222; }
+        .diag-card { background: #1a1a1a; border-radius: 12px; padding: 15px; margin: 8px 15px; border: 1px solid #333; }
+        .close-detail { position: absolute; top: 20px; right: 20px; z-index: 20001; background: var(--primary); color: #000; border: none; padding: 8px 16px; border-radius: 20px; font-weight: 900; font-size: 12px; }
 
-        /* History List - Photo 1308 Restore */
-        .history-card { background: #111; border-radius: 15px; padding: 18px; margin: 10px; border: 1px solid #222; }
-        .h-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-        .h-date { font-size: 11px; color: var(--primary); font-weight: 800; }
-        .h-main { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
-        .h-dist { font-size: 26px; font-weight: 900; }
-        .h-time { font-size: 20px; font-weight: 900; color: var(--primary); }
-        .h-grid { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid #222; padding-top: 10px; }
-        .g-item { text-align: center; }
-        .g-label { font-size: 9px; color: #555; font-weight: 900; display: block; }
-        .g-val { font-size: 13px; font-weight: 800; color: #ccc; }
-
-        /* Navigation */
-        .tab-bar { position: fixed; bottom: 0; width: 100%; height: 80px; background: #000; display: flex; border-top: 1px solid #222; z-index: 1000; }
-        .tab-btn { flex: 1; background: none; border: none; color: #444; font-size: 16px; font-weight: 900; }
+        /* Controls & Navigation */
+        .controls { padding: 0 15px; display: flex; justify-content: center; align-items: center; height: 75px; margin-bottom: 85px; margin-top: auto; }
+        .btn-act { width: 100%; height: 60px; border-radius: 30px; border: none; font-weight: 900; font-size: 20px; cursor: pointer; }
+        .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 80px; background: #000; display: flex; border-top: 1px solid #222; padding-bottom: env(safe-area-inset-bottom); z-index: 30000; }
+        .tab-btn { flex: 1; background: none; border: none; color: #444; font-size: 16px; font-weight: 900; cursor: pointer; }
         .tab-btn.active { color: var(--primary); text-decoration: underline; text-underline-offset: 8px; }
         
-        .sub-menu { display: flex; background: #0a0a0a; border-bottom: 1px solid #222; padding: 5px; gap: 5px; }
-        .sub-btn { flex: 1; background: #1a1a1a; border: 1px solid #333; color: #666; font-size: 11px; font-weight: 900; padding: 12px 0; border-radius: 8px; }
-        .sub-btn.active { color: var(--primary); border-color: var(--primary); }
+        /* History Submenu */
+        .history-sub-menu { display: flex; background: #0a0a0a; border-bottom: 1px solid #222; padding: 5px; gap: 5px; }
+        .sub-btn { flex: 1; background: #1a1a1a; border: 1px solid #333; color: #666; font-size: 11px; font-weight: 900; padding: 12px 0; border-radius: 8px; cursor: pointer; }
+        .sub-btn.active { color: var(--primary); border-color: var(--primary); background: #002211; }
 
-        .view { display: none; flex: 1; flex-direction: column; overflow-y: auto; padding-bottom: 90px; }
-        .view.active { display: flex; }
+        /* Settings Style */
+        .settings-container { padding: 20px; }
+        .settings-group { margin-bottom: 25px; position: relative; }
+        .settings-label { font-size: 11px; color: var(--primary); font-weight: 900; margin-bottom: 10px; text-transform: uppercase; }
+        .dropdown-select { background: #2a2a2a; color: #fff; border: 1.5px solid #444; padding: 18px; border-radius: 12px; font-size: 16px; font-weight: 800; display: flex; justify-content: space-between; }
+
+        .auto-pause-label { position: absolute; top: 10px; left: 10px; font-size: 10px; color: var(--danger); font-weight: 900; background: rgba(255,68,68,0.2); padding: 4px 8px; border-radius: 6px; display: none; z-index: 10; border: 1px solid var(--danger); }
+        .btn-quick-metro { position: absolute; bottom: 10px; right: 10px; background: #333; border: 1px solid #444; color: #999; font-size: 10px; padding: 7px 11px; border-radius: 8px; font-weight: 900; }
+        #dimmer-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 99999; display: none; justify-content: center; align-items: center; color: #444; font-weight: 900; }
     </style>
 </head>
-<body>
+<body> 
+    <div id="dimmer-overlay" onclick="ui.toggleDim(false)">TAP TO WAKE</div>
+    
+    <div id="map-area">
+        <div id="map-container"><div id="map"></div></div>
+        <div id="status" class="status-bar">GPS INITIALIZING... | ALT: --m</div>
+    </div> 
 
-<div id="map-area">
-    <div id="map"></div>
-    <div id="status" class="status-bar">GPS INITIALIZING...</div>
-</div>
-
-<div id="view-run" class="view active">
-    <div class="dashboard">
-        <div class="card card-main">
-            <div class="label">PACE</div>
-            <div id="curPace" class="value-large">--'--"</div>
-            <button id="metro-btn" style="position:absolute; bottom:10px; right:10px; background:#333; color:#999; border:none; padding:6px 10px; border-radius:6px; font-size:9px; font-weight:900;" onclick="toggleMetro()">METRO OFF</button>
+    <div id="metronome-view">
+        <button class="close-detail" onclick="ui.closeMetronome()">CLOSE</button>
+        <div class="diag-header"><div style="font-size:22px; font-weight:900; color:var(--primary);">METRONOME</div></div>
+        <div class="diag-card">
+            <div style="text-align:center; font-size:40px; font-weight:900; color:var(--primary);" id="metro-bpm-val">175</div>
+            <input type="range" id="metro-bpm" style="width:100%; accent-color:var(--primary);" min="140" max="200" value="175" oninput="metro.updateDisplay()">
         </div>
-        <div class="card"><div class="label">DIST</div><div class="value"><span id="dist">0.00</span><span style="font-size:12px; color:var(--primary)"> KM</span></div></div>
-        <div class="card"><div class="label">TIME</div><div id="time" class="value">00:00</div></div>
-        <div class="card"><div class="label">AVG</div><div id="avgPace" class="value">--'--"</div></div>
-        <div class="card"><div class="label">CADENCE</div><div id="cadence" class="value">0</div></div>
-        <div class="card"><div class="label">GCT</div><div class="value"><span id="gct">--</span><span style="font-size:12px;"> MS</span></div></div>
-        <div class="card"><div class="label">FLIGHT</div><div class="value"><span id="flight">--</span><span style="font-size:12px;"> %</span></div></div>
+        <div style="padding:0 15px;"><button id="btn-metro-toggle" class="btn-act" style="background:var(--primary); color:#000;" onclick="metro.toggle()">START</button></div>
     </div>
-    <div class="controls">
-        <button id="btn-start" class="btn-act" style="background:var(--primary); color:#000;" onclick="runStart()">START RUNNING</button>
-        <button id="btn-stop" class="btn-act" style="background:var(--danger); color:#fff; display:none;" onclick="runStop()">STOP</button>
-    </div>
-</div>
 
-<div id="view-history" class="view">
-    <div class="sub-menu">
-        <button id="sb-list" class="sub-btn active" onclick="showSub('list')">리스트</button>
-        <button id="sb-stats" class="sub-btn" onclick="showSub('stats')">통계</button>
-        <button id="sb-info" class="sub-btn" onclick="showSub('info')">인포</button>
-        <button id="sb-set" class="sub-btn" onclick="showSub('set')">설정</button>
-    </div>
-    <div id="cnt-list"></div>
-    <div id="cnt-stats" style="display:none; padding:20px;">
-        <div class="history-card" style="text-align:center;">
-            <div class="label">LIFETIME DISTANCE</div>
-            <div id="stat-total" style="font-size:32px; font-weight:900; color:var(--primary); margin-top:10px;">0.0 KM</div>
+    <div id="run-view" class="main-content">
+        <div class="dashboard">
+            <div class="card card-main">
+                <div id="pause-status" class="auto-pause-label">AUTO PAUSED</div>
+                <div class="label">PACE</div>
+                <div id="curPace" class="value-large">--'--"</div>
+                <button id="quick-metro" class="btn-quick-metro" onclick="ui.openMetronome()">METRO OFF</button>
+                <button style="position:absolute; top:10px; right:10px; background:#333; border:1px solid #444; color:#999; font-size:9px; padding:5px 8px; border-radius:5px; font-weight:900;" onclick="ui.toggleDim(true)">DIM</button>
+            </div>
+            <div class="card"><div class="label">DIST</div><div class="value"><span id="dist">0.00</span><span style="font-size:12px; color:var(--primary)"> KM</span></div></div>
+            <div class="card"><div class="label">TIME</div><div id="time" class="value">00:00</div></div>
+            <div class="card"><div class="label">AVG</div><div id="avgPace" class="value">--'--"</div></div>
+            <div class="card"><div class="label">CADENCE</div><div id="cadence" class="value">0</div></div>
+            <div class="card"><div class="label">GCT</div><div class="value"><span id="gct">--</span><span style="font-size:12px;"> MS</span></div></div>
+            <div class="card"><div class="label">FLIGHT</div><div class="value"><span id="flight">--</span><span style="font-size:12px;"> %</span></div></div>
         </div>
-    </div>
-    <div id="cnt-info" style="display:none; padding:20px;">
-        <div class="history-card">
-            <div style="color:var(--primary); font-weight:900; margin-bottom:8px;">CADENCE INFO</div>
-            <div style="font-size:13px; color:#aaa;">권장: 170~185 BPM. 이 범위를 유지하면 족저근막염과 가자미근 부상을 예방하는 데 도움이 됩니다.</div>
+        <div class="controls">
+            <button id="btn-start" class="btn-act" style="background:var(--primary); color:#000;" onclick="onStart()">START RUNNING</button>
+            <button id="btn-stop" class="btn-act" style="background:var(--danger); color:#fff; display:none;" onclick="onStop()">STOP</button>
+            <div id="after-stop" style="display:none; gap:10px; width:100%;">
+                <button class="btn-act" style="flex:1; background:var(--primary); color:#000;" onclick="onResume()">RESUME</button>
+                <button class="btn-act" style="flex:1; background:var(--danger); color:#fff;" onclick="onFinish()">FINISH</button>
+            </div>
         </div>
     </div>
-    <div id="cnt-set" style="display:none; padding:20px;">
-        <div class="label" style="color:var(--primary); margin-bottom:10px;">LANGUAGE</div>
-        <div class="history-card" style="margin:0 0 20px 0; display:flex; justify-content:space-between; padding:15px;"><span>English / 한국어</span><span>▼</span></div>
-        <div class="label" style="color:var(--primary); margin-bottom:10px;">PROFILE</div>
-        <div style="display:flex; gap:10px;">
-            <div class="history-card" style="flex:1; margin:0; text-align:center;">175 cm</div>
-            <div class="history-card" style="flex:1; margin:0; text-align:center;">70 kg</div>
+
+    <div id="history-view" class="main-content" style="display:none;">
+        <div class="history-sub-menu">
+            <button class="sub-btn active" id="sbtn-list" onclick="ui.showSubTab('list')">리스트</button>
+            <button class="sub-btn" id="sbtn-stats" onclick="ui.showSubTab('stats')">통계</button>
+            <button class="sub-btn" id="sbtn-info" onclick="ui.showSubTab('info')">인포</button>
+            <button class="sub-btn" id="sbtn-setting" onclick="ui.showSubTab('setting')">설정</button>
         </div>
-        <button onclick="clearHistory()" style="width:100%; background:none; border:1px solid #333; color:var(--danger); padding:15px; border-radius:12px; margin-top:30px; font-weight:900;">CLEAR ALL HISTORY</button>
+        <div id="sub-list" style="flex:1; overflow-y: auto; padding-bottom: 90px;"><div id="history-list"></div></div>
+        <div id="sub-setting" style="display:none; flex:1; overflow-y: auto; padding-bottom: 90px;" class="settings-container">
+            <div class="settings-group">
+                <div class="settings-label">LANGUAGE</div>
+                <div class="dropdown-select"><span>English / 한국어</span><span>▼</span></div>
+            </div>
+            <div class="settings-group">
+                <div class="settings-label">PROFILE</div>
+                <div style="display:flex; gap:10px;">
+                    <div class="dropdown-select" style="flex:1;"><span>175 cm</span></div>
+                    <div class="dropdown-select" style="flex:1;"><span>70 kg</span></div>
+                </div>
+            </div>
+            <button style="width:100%; padding:18px; border-radius:12px; background:#2a2a2a; color:var(--danger); border:1px solid #444; font-weight:900;" onclick="storage.clearHistory()">CLEAR ALL HISTORY</button>
+        </div>
+        <div id="sub-stats" style="display:none; padding:20px;">
+            <div class="diag-card" style="text-align:center;">
+                <div class="label">LIFETIME DISTANCE</div>
+                <div class="value" id="total-dist-val" style="color:var(--primary)">0.0 KM</div>
+            </div>
+        </div>
+        <div id="sub-info" style="display:none; padding:20px;">
+            <div class="diag-card">
+                <div style="color:var(--primary); font-weight:900;">CADENCE INFO</div>
+                <div style="font-size:12px; margin-top:5px; color:#aaa;">권장: 170~185 BPM</div>
+            </div>
+        </div>
     </div>
-</div>
 
-<div class="tab-bar">
-    <button id="tb-run" class="tab-btn active" onclick="showTab('run')">RUN</button>
-    <button id="tb-history" class="tab-btn" onclick="showTab('history')">HISTORY</button>
-</div>
+    <div class="tab-bar">
+        <button id="tab-run" class="tab-btn active" onclick="ui.showTab('run')">RUN</button>
+        <button id="tab-history" class="tab-btn" onclick="ui.showTab('history')">HISTORY</button>
+    </div> 
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-let state = { running: false, time: 0, timer: null, db: JSON.parse(localStorage.getItem('oppa_db') || '[]') };
+// State & Logic
+const State = {
+    isRunning: false, isPaused: false, isAutoPaused: false,
+    seconds: 0, totalDist: 0, steps: 0,
+    pathCoords: [], lastPos: null, lastStepTime: 0,
+    gctAccumulator: 0, gctCount: 0,
+    wakeLock: null, timer: null, lowSpeedStartTime: null, currentAlt: 0
+};
 
-function showTab(t) {
-    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.getElementById('view-'+t).classList.add('active');
-    document.getElementById('tb-'+t).classList.add('active');
-    if(t === 'history') showSub('list');
-}
+const storage = {
+    key: 'oppaRunHistory',
+    saveRecord(r) { let h = this.loadHistory(); h.unshift(r); localStorage.setItem(this.key, JSON.stringify(h)); },
+    loadHistory() { return JSON.parse(localStorage.getItem(this.key) || "[]"); },
+    clearHistory() { if(confirm("Clear all history?")) { localStorage.removeItem(this.key); location.reload(); } }
+};
 
-function showSub(s) {
-    ['list', 'stats', 'info', 'set'].forEach(k => {
-        document.getElementById('cnt-'+k).style.display = (k === s ? 'block' : 'none');
-        document.getElementById('sb-'+k).classList.toggle('active', k === s);
-    });
-    if(s === 'list') renderList();
-    if(s === 'stats') {
-        let total = state.db.reduce((a, c) => a + parseFloat(c.dist), 0);
-        document.getElementById('stat-total').textContent = total.toFixed(1) + " KM";
+const ui = {
+    showTab(tab) {
+        document.getElementById('run-view').style.display = (tab === 'run' ? 'flex' : 'none');
+        document.getElementById('map-area').style.display = (tab === 'run' ? 'block' : 'none');
+        document.getElementById('history-view').style.display = (tab === 'history' ? 'flex' : 'none');
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        document.getElementById('tab-' + tab).classList.add('active');
+        if (tab === 'history') this.showSubTab('list');
+        if (map) setTimeout(() => map.invalidateSize(), 100);
+    },
+    showSubTab(sub) {
+        ['list', 'stats', 'info', 'setting'].forEach(s => {
+            document.getElementById('sub-' + s).style.display = (s === sub ? 'block' : 'none');
+            document.getElementById('sbtn-' + s).classList.remove('active');
+        });
+        document.getElementById('sbtn-' + sub).classList.add('active');
+        if (sub === 'list') this.updateHistoryList();
+        if (sub === 'stats') {
+            let h = storage.loadHistory();
+            let d = h.reduce((acc, r) => acc + parseFloat(r.dist), 0);
+            document.getElementById('total-dist-val').textContent = d.toFixed(1) + " KM";
+        }
+    },
+    updateHistoryList() {
+        const h = storage.loadHistory();
+        const listDiv = document.getElementById('history-list');
+        if (h.length === 0) { listDiv.innerHTML = `<div style="text-align:center; padding:50px; color:#444; font-weight:900;">NO RECORDS</div>`; return; }
+        listDiv.innerHTML = h.map(r => `
+            <div class="history-item">
+                <div style="font-size:11px; color:var(--primary); font-weight:900; margin-bottom:5px;">${r.date}</div>
+                <div style="display:flex; align-items:baseline; margin-bottom:10px;">
+                    <span style="font-size:24px; font-weight:900; color:#fff;">${r.dist}KM</span>
+                    <span style="font-size:18px; font-weight:900; color:var(--primary); margin-left:15px;">${r.time}</span>
+                </div>
+            </div>`).join('');
+    },
+    openMetronome() { document.getElementById('metronome-view').style.display = 'flex'; },
+    closeMetronome() { document.getElementById('metronome-view').style.display = 'none'; },
+    toggleDim(show) { document.getElementById('dimmer-overlay').style.display = show ? 'flex' : 'none'; }
+};
+
+// Metronome Engine (Simulated for this unified version)
+const metro = {
+    isPlaying: false,
+    toggle() {
+        this.isPlaying = !this.isPlaying;
+        const btn = document.getElementById('btn-metro-toggle');
+        const quick = document.getElementById('quick-metro');
+        btn.textContent = this.isPlaying ? "STOP" : "START";
+        btn.style.background = this.isPlaying ? "var(--danger)" : "var(--primary)";
+        quick.textContent = this.isPlaying ? "METRO ON" : "METRO OFF";
+        quick.style.color = this.isPlaying ? "var(--primary)" : "#999";
+    },
+    updateDisplay() {
+        document.getElementById('metro-bpm-val').textContent = document.getElementById('metro-bpm').value;
     }
-}
+};
 
-function runStart() {
-    state.running = true;
+let map, marker, polyline;
+
+function onStart() {
+    State.isRunning = true; State.isPaused = false; State.totalDist = 0; State.seconds = 0;
     document.getElementById('btn-start').style.display = 'none';
     document.getElementById('btn-stop').style.display = 'block';
-    state.timer = setInterval(() => {
-        state.time++;
-        let m = Math.floor(state.time/60), s = state.time%60;
-        document.getElementById('time').textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    State.timer = setInterval(() => {
+        if(!State.isPaused) {
+            State.seconds++;
+            let m = Math.floor(State.seconds/60), s = State.seconds%60;
+            document.getElementById('time').textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+        }
     }, 1000);
 }
 
-function runStop() {
-    if(!confirm("FINISH RUN?")) return;
-    clearInterval(state.timer);
-    let rec = {
-        date: new Date().toLocaleString(),
+function onStop() { State.isPaused = true; document.getElementById('btn-stop').style.display = 'none'; document.getElementById('after-stop').style.display = 'flex'; }
+function onResume() { State.isPaused = false; document.getElementById('after-stop').style.display = 'none'; document.getElementById('btn-stop').style.display = 'block'; }
+function onFinish() {
+    storage.saveRecord({
+        id: Date.now(), date: new Date().toLocaleString(),
         dist: document.getElementById('dist').textContent,
         time: document.getElementById('time').textContent,
-        pace: document.getElementById('curPace').textContent,
-        cad: '178', gct: '245', flt: '32'
-    };
-    state.db.unshift(rec);
-    localStorage.setItem('oppa_db', JSON.stringify(state.db));
+        pace: document.getElementById('curPace').textContent
+    });
     location.reload();
 }
 
-function renderList() {
-    const list = document.getElementById('cnt-list');
-    if(!state.db.length) { list.innerHTML = '<div style="text-align:center; padding:50px; color:#444;">NO DATA</div>'; return; }
-    list.innerHTML = state.db.map(r => `
-        <div class="history-card">
-            <div class="h-header"><span class="h-date">${r.date}</span></div>
-            <div class="h-main"><span class="h-dist">${r.dist}KM</span><span class="h-time">${r.time}</span></div>
-            <div class="h-grid">
-                <div class="g-item"><span class="g-label">PACE</span><span class="g-val">${r.pace}</span></div>
-                <div class="g-item"><span class="g-label">CAD</span><span class="g-val">${r.cad}</span></div>
-                <div class="g-item"><span class="g-label">GCT</span><span class="g-val">${r.gct}</span></div>
-                <div class="g-item"><span class="g-label">FLT</span><span class="g-val">${r.flt}%</span></div>
-            </div>
-        </div>`).join('');
-}
-
-function clearHistory() { if(confirm("DELETE ALL?")) { localStorage.removeItem('oppa_db'); location.reload(); } }
-
 window.onload = () => {
-    let map = L.map('map', {zoomControl: false}).setView([33.7743, -117.9390], 15);
+    map = L.map('map', {zoomControl: false, attributionControl: false}).setView([33.7743, -117.9390], 16);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    marker = L.marker([33.7743, -117.9390], {icon: L.divIcon({className:'loc', html:'<div style="background:#007bff; border:2px solid #fff; border-radius:50%; width:14px; height:14px;"></div>'})}).addTo(map);
+    if ("geolocation" in navigator) {
+        navigator.geolocation.watchPosition((p) => {
+            const pos = [p.coords.latitude, p.coords.longitude];
+            marker.setLatLng(pos); map.panTo(pos);
+            document.getElementById('status').textContent = `GPS READY: ±${Math.round(p.coords.accuracy)}m | ALT: ${p.coords.altitude ? Math.round(p.coords.altitude) : '--'}m`;
+        }, null, {enableHighAccuracy: true});
+    }
 };
 </script>
 </body>
