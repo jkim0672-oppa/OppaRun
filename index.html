@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>OppaRun Pro v28.95</title>
+    <title>OppaRun Pro v28.96</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
@@ -86,7 +86,7 @@
         <div id="sub-page-settings" class="sub-page">
             <div style="padding:20px; background:#1a1a1a; border-radius:15px; border:1px solid #333;">
                 <h3 style="margin-top:0; color:var(--primary);">APP SETTINGS</h3>
-                <p style="font-size:12px; color:#888;">버전: v28.95 (Stability Engine)</p>
+                <p style="font-size:12px; color:#888;">버전: v28.96 (Stability Fix)</p>
                 <button class="btn-act" style="background:#331111; color:var(--danger); font-size:14px; height:45px;" onclick="storage.clearHistory()">CLEAR ALL RECORDS</button>
             </div>
         </div>
@@ -110,7 +110,7 @@ let isRunning = false, isPaused = false, seconds = 0;
 let totalDist = 0, lastPos = null, pathCoords = [];
 let detailMap = null;
 
-// --- 1. 저장 로직 (원본 구조 유지) ---
+// --- 1. 저장 로직 (원본 보존) ---
 const storage = {
     key: 'oppaRunHistory_v2',
     saveRecord: (record) => {
@@ -144,7 +144,7 @@ const ui = {
         document.getElementById('sub-page-' + sub).style.display = 'flex';
     },
     updateHistoryList: () => {
-        const h = storage.loadHistory().slice(0, 30); // 이미지 제안: 성능 위해 최근 30개만
+        const h = storage.loadHistory().slice(0, 30); 
         const listDiv = document.getElementById('history-list');
         if(h.length === 0) { listDiv.innerHTML = "<p style='text-align:center; color:#555;'>No Records yet.</p>"; return; }
         listDiv.innerHTML = h.map(r => `
@@ -157,14 +157,15 @@ const ui = {
         const r = storage.loadHistory().find(item => item.id === id);
         if(!r) return;
         document.getElementById('detail-view').style.display = 'flex';
-        // 이미지 제안: 기존 지도 안전하게 제거 후 재생성
+        
+        // 상세 지도 안전 제거 후 생성
         if (detailMap) { detailMap.off(); detailMap.remove(); detailMap = null; }
         
         detailMap = L.map('detail-map', {zoomControl: false, attributionControl: false});
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(detailMap);
         
         if (r.path && r.path.length > 0) {
-            const poly = L.polyline(r.path, {color: var(--primary), weight: 5}).addTo(detailMap);
+            const poly = L.polyline(r.path, {color: '#00ff88', weight: 5}).addTo(detailMap);
             detailMap.fitBounds(poly.getBounds());
         }
         document.getElementById('detail-data').innerHTML = `<h2 style="color:var(--primary)">${r.dist} KM</h2><p>${r.time}</p>`;
@@ -184,7 +185,7 @@ function updatePosition(p) {
     if (isRunning && !isPaused) {
         if (lastPos) {
             const d = map.distance(lastPos, pos) / 1000;
-            // ⭐ 이미지 제안: GPS Jump Filter (80m 이상 튀면 노이즈로 간주)
+            // ⭐ GPS Jump Filter (이미지 추천: 80m 이상 튀면 노이즈)
             if (d > 0.001 && d < 0.08) {
                 totalDist += d;
                 pathCoords.push(pos);
@@ -205,7 +206,7 @@ function onStart() {
     document.getElementById('btn-start').style.display = 'none';
     document.getElementById('btn-stop').style.display = 'block';
 
-    // 이미지 제안: 타이머 및 GPS Watcher 중복 방지
+    // 이미지 추천: 타이머 및 GPS 중복 방지 (확실히 끄고 시작)
     if(timer) clearInterval(timer);
     timer = setInterval(() => {
         if(!isPaused) {
@@ -246,10 +247,9 @@ function onFinish() {
         };
         storage.saveRecord(record);
     }
-    resetApp(); // ⭐ 이미지 제안: location.reload() 대신 안전하게 리셋
+    resetApp(); // 이미지 추천: reload() 대신 리셋 함수 호출
 }
 
-// --- 4. 초기화 로직 (reload 대체) ---
 function resetApp() {
     isRunning = false; isPaused = false; seconds = 0; totalDist = 0; 
     pathCoords = []; lastPos = null;
@@ -267,19 +267,28 @@ function resetApp() {
     ui.showTab('history');
 }
 
-// --- 5. 지도 초기화 ---
-window.onload = () => {
+// --- 4. 초기화 로직 (v28.96 맵 픽스) ---
+document.addEventListener('DOMContentLoaded', () => {
+    // 맵 초기화 (HTML이 준비된 직후)
     map = L.map('map', {zoomControl: false, attributionControl: false}).setView([37.5665, 126.9780], 16);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
     marker = L.marker([37.5665, 126.9780]).addTo(map);
-    polyline = L.polyline([], {color: var(--primary), weight: 6}).addTo(map);
+    polyline = L.polyline([], {color: '#00ff88', weight: 6}).addTo(map);
     
-    navigator.geolocation.getCurrentPosition(p => {
-        const pos = [p.coords.latitude, p.coords.longitude];
-        map.setView(pos, 16);
-        marker.setLatLng(pos);
-    });
-};
+    // GPS 최초 위치 잡기
+    setTimeout(() => {
+        navigator.geolocation.getCurrentPosition(p => {
+            const pos = [p.coords.latitude, p.coords.longitude];
+            map.setView(pos, 16);
+            marker.setLatLng(pos);
+            document.getElementById('status').textContent = "GPS READY";
+        }, err => {
+            document.getElementById('status').textContent = "GPS WAITING...";
+        }, {enableHighAccuracy: true});
+    }, 100);
+
+    ui.updateHistoryList();
+});
 </script>
 </body>
 </html>
