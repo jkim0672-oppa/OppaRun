@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v28.85</title>
+    <title>OppaRun Pro - v28.88</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        /* [원 본 보 존] 오빠가 좋아하는 레이아웃 그대로 유지 */
+        /* [원 본 보 존] CSS 전체 복구 */
         :root { --primary: #00ff88; --bg: #000000; --card-bg: #1e1e1e; --text-main: #ffffff; --text-dim: #999999; --danger: #ff4444; --warning: #ffcc00; }
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { margin: 0; background: var(--bg); color: var(--text-main); font-family: -apple-system, system-ui; height: 100vh; height: 100svh; display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none; }
@@ -31,6 +31,8 @@
         .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 80px; background: #000; display: flex; border-top: 1px solid #222; align-items: stretch; padding-bottom: env(safe-area-inset-bottom); z-index: 30000; }
         .tab-btn { flex: 1; background: none; border: none; color: #444; font-size: 16px; font-weight: 900; cursor: pointer; }
         .tab-btn.active { color: var(--primary); text-decoration: underline; text-underline-offset: 8px; }
+        /* 팝업 뷰들 */
+        #metronome-view, #history-view { position: fixed; top: 0; left: 0; width: 100%; height: calc(100% - 80px); background: var(--bg); z-index: 5000; display: none; flex-direction: column; }
     </style>
 </head>
 <body>
@@ -48,6 +50,7 @@
                 <div class="label" style="color:var(--primary)">PACE</div>
                 <div id="curPace" class="value-large">--'--"</div>
                 <button id="quick-metro" class="btn-quick-metro" onclick="metro.toggle()">METRO OFF</button>
+                <button id="btn-dim" style="position:absolute; top:10px; right:10px; background:#333; border:1px solid #444; color:#999; font-size:9px; padding:5px 8px; border-radius:5px; font-weight:900;" onclick="ui.toggleDim(true)">DIM</button>
             </div>
             <div class="card"><div class="label">DIST</div><div class="value"><span id="dist">0.00</span><span style="font-size:10px; color:var(--primary)"> KM</span></div></div>
             <div class="card"><div class="label">TIME</div><div id="time" class="value">00:00</div></div>
@@ -66,55 +69,88 @@
         </div>
     </div>
 
+    <div id="history-view" class="main-content" style="padding:20px; color:#aaa;">
+        <h2>HISTORY</h2>
+        <p>기록 저장 로직은 5단계에서 완성될 예정입니다.</p>
+    </div>
+
     <div class="tab-bar">
         <button id="tab-run" class="tab-btn active" onclick="ui.showTab('run')">RUN</button>
         <button id="tab-history" class="tab-btn" onclick="ui.showTab('history')">HISTORY</button>
     </div>
 
 <script>
-// [원 본 보 존] 핵심 변수
 let map, marker, accCircle, polyline, timer, isRunning = false, isPaused = false, isAutoPaused = false, seconds = 0;
-let totalDist = 0, lastPos = null, steps = 0, currentSpeedKmh = 0, currentAlt = 0, pathCoords = [];
+let totalDist = 0, lastPos = null, pathCoords = [], currentSpeedKmh = 0, lowSpeedStartTime = null;
 
-// [v28.85 핵심 로직] 위치 정보 수신
+const ui = {
+    showTab: (t) => {
+        document.getElementById('run-view').style.display = (t === 'run') ? 'flex' : 'none';
+        document.getElementById('history-view').style.display = (t === 'history') ? 'flex' : 'none';
+        document.getElementById('tab-run').className = `tab-btn ${t==='run'?'active':''}`;
+        document.getElementById('tab-history').className = `tab-btn ${t==='history'?'active':''}`;
+    },
+    toggleDim: (s) => { document.getElementById('dimmer-overlay').style.display = s ? 'flex' : 'none'; }
+};
+
+const metro = {
+    isOn: false,
+    toggle: () => {
+        metro.isOn = !metro.isOn;
+        document.getElementById('quick-metro').textContent = metro.isOn ? "METRO ON" : "METRO OFF";
+        document.getElementById('quick-metro').style.color = metro.isOn ? "var(--primary)" : "#999";
+        // 메트로놈 오디오 로직은 여기에...
+    }
+};
+
 function updatePosition(p) {
     const pos = [p.coords.latitude, p.coords.longitude];
     currentSpeedKmh = (p.coords.speed || 0) * 3.6;
-    currentAlt = p.coords.altitude ? Math.round(p.coords.altitude) : 0;
     const accuracy = Math.round(p.coords.accuracy);
 
-    const statusEl = document.getElementById('status');
-    statusEl.textContent = `GPS READY: ±${accuracy}m | ALT: ${currentAlt}m`;
+    document.getElementById('status').textContent = `GPS READY: ±${accuracy}m | ALT: ${Math.round(p.coords.altitude || 0)}m`;
     
     if (marker) {
         marker.setLatLng(pos);
-        if (accCircle) accCircle.setLatLng(pos).setRadius(accuracy);
         map.panTo(pos);
     }
 
     if (isRunning && !isPaused) {
-        if (lastPos) {
-            let d = map.distance(lastPos, pos) / 1000;
-            // 오빠가 준 이미지 필터 (거리 < 80m, 속도 < 25km, 정확도 < 100m)
-            if (d > 0.001 && d < 0.08 && currentSpeedKmh < 25 && accuracy < 100) {
-                totalDist += d;
-                document.getElementById('dist').textContent = totalDist.toFixed(2);
-                lastPos = pos;
-                pathCoords.push(pos);
-                polyline.setLatLngs(pathCoords);
+        // [자동 일시정지 복구]
+        if (currentSpeedKmh < 1.0) {
+            if (!lowSpeedStartTime) lowSpeedStartTime = Date.now();
+            if ((Date.now() - lowSpeedStartTime) > 3000 && !isAutoPaused) {
+                isAutoPaused = true;
+                document.getElementById('pause-status').style.display = 'block';
             }
-        } else if (accuracy < 100) {
-            lastPos = pos;
+        } else {
+            isAutoPaused = false;
+            document.getElementById('pause-status').style.display = 'none';
+            lowSpeedStartTime = null;
         }
-        document.getElementById('curPace').textContent = formatPace(currentSpeedKmh);
+
+        if (!isAutoPaused) {
+            if (lastPos) {
+                let d = map.distance(lastPos, pos) / 1000;
+                // [1단계 GPS 필터]
+                if (d > 0.001 && d < 0.08 && currentSpeedKmh < 25 && accuracy < 100) {
+                    totalDist += d;
+                    document.getElementById('dist').textContent = totalDist.toFixed(2);
+                    lastPos = pos;
+                    pathCoords.push(pos);
+                    polyline.setLatLngs(pathCoords);
+                }
+            } else if (accuracy < 100) { lastPos = pos; }
+            document.getElementById('curPace').textContent = formatPace(currentSpeedKmh);
+        }
     }
 }
 
-// [버튼 기능들 복구]
 function onStart() {
-    isRunning = true; isPaused = false;
+    isRunning = true; isPaused = false; isAutoPaused = false;
     document.getElementById('btn-start').style.display = 'none';
     document.getElementById('btn-stop').style.display = 'block';
+    document.getElementById('after-stop').style.display = 'none';
     timer = setInterval(() => {
         seconds++;
         let m = Math.floor(seconds / 60), s = seconds % 60;
@@ -129,32 +165,20 @@ function onStop() {
     document.getElementById('after-stop').style.display = 'flex';
 }
 
-function onResume() {
-    isPaused = false;
-    onStart();
-    document.getElementById('after-stop').style.display = 'none';
-}
-
-function onFinish() {
-    location.reload(); // 일단 간단하게 새로고침으로 종료 (기록 저장은 다음 단계에서!)
-}
-
+function onResume() { onStart(); }
+function onFinish() { location.reload(); }
 function formatPace(kmh) {
     if (!kmh || kmh < 0.5) return "--'--\"";
     let s = 3600 / kmh;
     return `${Math.floor(s/60)}'${String(Math.floor(s%60)).padStart(2,'0')}"`;
 }
 
-const ui = { showTab: (t) => { /* 탭 전환 로직 */ }, toggleDim: (s) => {} };
-const metro = { toggle: () => { 
-    let btn = document.getElementById('quick-metro');
-    btn.textContent = btn.textContent === "METRO OFF" ? "METRO ON" : "METRO OFF";
-}};
+document.getElementById('dimmer-overlay').onclick = () => ui.toggleDim(false);
 
 window.onload = () => {
     map = L.map('map', {zoomControl: false, attributionControl: false}).setView([33.7743, -117.9390], 16);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-    marker = L.marker([33.7743, -117.9390]).addTo(map);
+    marker = L.marker([33.7743, -117.9390], {icon: L.divIcon({className:'loc', html:'<div style="background:#007bff; border:2px solid #fff; border-radius:50%; width:14px; height:14px;"></div>'})}).addTo(map);
     polyline = L.polyline([], {color: '#00ff88', weight: 5}).addTo(map);
     if ("geolocation" in navigator) {
         navigator.geolocation.watchPosition(updatePosition, null, {enableHighAccuracy: true});
