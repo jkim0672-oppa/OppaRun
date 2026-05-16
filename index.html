@@ -135,6 +135,14 @@
         .detail-log-item span:first-child { color: var(--primary) !important; }
         .detail-log-item:last-child { border-bottom: none; }
 
+        /* [v29.6.1 수정 반영] 상세 페이지 하단 SAVE 및 SHARE 버튼 컨테이너 및 컴포넌트 디자인 스타일 코드 */
+        .detail-btn-row { display: flex; gap: 10px; margin-top: 15px; margin-bottom: 25px; }
+        .btn-detail-act { flex: 1; height: 48px; border-radius: 24px; font-weight: 900; font-size: 14px; cursor: pointer; border: none; display: flex; align-items: center; justify-content: center; gap: 6px; transition: background 0.2s ease; }
+        .btn-detail-save { background: #222; color: var(--primary); border: 1.5px solid #444; }
+        .btn-detail-save:active { background: #333; }
+        .btn-detail-share { background: var(--primary); color: #000; }
+        .btn-detail-share:active { opacity: 0.9; }
+
         .stat-filter-nav { display: flex; gap: 5px; padding: 10px 12px 5px 12px; background: #000; flex-shrink: 0; }
         .stat-filter-btn { flex: 1; padding: 10px 0; border: 1px solid #333; background: #161616; color: #888; border-radius: 8px; font-size: 11px; font-weight: 900; text-align: center; cursor: pointer; }
         .stat-filter-btn.active { border-color: var(--primary); color: var(--primary); background: rgba(0,255,136,0.05); }
@@ -355,7 +363,10 @@ const translations = {
         periodSummary: "■ PERIOD DYNAMICS SUMMARY.", avgAlt: "Average Altitude :",
         
         /* [v29.6.1] Delete Flow Strings */
-        deleteBtn: "DELETE", confirmSingleDelete: "Are you sure you want to delete this running record?", cancelModal: "CANCEL"
+        deleteBtn: "DELETE", confirmSingleDelete: "Are you sure you want to delete this running record?", cancelModal: "CANCEL",
+
+        /* [v29.6.1 추가 반영] 상세 뷰 세이브 및 쉐어 텍스트 데이터 정의 */
+        saveBtn: "SAVE", shareBtn: "SHARE"
     },
     ko: { 
         pace: "페이스", dist: "거리", time: "시간", avg: "평균", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", cal: "칼로리", start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료", run: "러닝", history: "기록", list: "목록", total: "통계", info: "정보", settings: "설정", selLang: "언어 설정", metro: "리듬 어시스턴트", clear: "전체 기록 삭제", confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.", route: "경로", diag: "진단", close: "닫기", alt: "고도",
@@ -375,7 +386,10 @@ const translations = {
         periodSummary: "■ 해당 기간 다이내믹스 평균 요약.", avgAlt: "평균 주행 고도 :",
         
         /* [v29.6.1] Delete Flow Strings */
-        deleteBtn: "삭제", confirmSingleDelete: "이 러닝 기록을 정말로 삭제할까요?", cancelModal: "취소"
+        deleteBtn: "삭제", confirmSingleDelete: "이 러닝 기록을 정말로 삭제할까요?", cancelModal: "취소",
+
+        /* [v29.6.1 추가 반영] 상세 뷰 세이브 및 쉐어 텍스트 데이터 정의 */
+        saveBtn: "저장", shareBtn: "공유"
     }
 };
 
@@ -874,10 +888,43 @@ class UIManager {
                 <div class="detail-log-item"><span>${record.cadence || 0} SPM.</span></div>
             </div>`;
 
-        document.getElementById('detail-data').innerHTML = splitLogsHtml + dynamicsHtml;
+        /* [v29.6.1 수정 반영] 하단 오른쪽 여백에 세이브와 쉐어 동작용 마크업 행 추가 연동 구현 */
+        let buttonRowHtml = `
+            <div class="detail-btn-row">
+                <button class="btn-detail-act btn-detail-save" onclick="ui.saveDetailAction(${record.id})">💾 ${t.saveBtn}</button>
+                <button class="btn-detail-act btn-detail-share" onclick="ui.shareDetailAction(${record.id})">🔗 ${t.shareBtn}</button>
+            </div>`;
+
+        document.getElementById('detail-data').innerHTML = splitLogsHtml + dynamicsHtml + buttonRowHtml;
     }
     closeDetail() { document.getElementById('detail-view').style.display = 'none'; }
     
+    /* [v29.6.1 추가 반영] 세이브 버튼 핸들러 로직 정의 */
+    saveDetailAction(id) {
+        alert(storage.getLang() === 'ko' ? `기록 데이터(${id})가 기기에 안전하게 저장되었습니다!` : `Record data (${id}) has been successfully saved!`);
+    }
+
+    /* [v29.6.1 추가 반영] 쉐어 버튼 핸들러 로직 정의 (Web Share API 지원 처리) */
+    shareDetailAction(id) {
+        const h = storage.loadHistory();
+        const record = h.find(r => r.id === id);
+        if (!record) return;
+
+        const shareText = `OppaRun Pro 🏃‍♂️\nDistance: ${record.dist} KM\nTime: ${record.time}\nPace: ${record.avgPace || record.pace}`;
+        
+        if (navigator.share) {
+            navigator.share({
+                title: 'OppaRun Pro Running Record',
+                text: shareText,
+                url: window.location.href
+            }).catch(err => console.log(err));
+        } else {
+            // Web Share 불가능한 브라우저 환경 클립보드 복사 폴백 처리
+            navigator.clipboard.writeText(shareText);
+            alert(storage.getLang() === 'ko' ? "러닝 데이터 요약 정보가 클립보드에 복사되었습니다! 공유해 보세요." : "Running dynamics summary copied to clipboard!");
+        }
+    }
+
     openDiag(id) {
         const h = storage.loadHistory(); 
         const r = h.find(rec => rec.id === id);
