@@ -16,12 +16,12 @@
         
         .control-panel { background: var(--card); padding: 15px; border-radius: 16px; border: 1px solid #333; width: 100%; max-width: 600px; box-sizing: border-box; }
         
-        /* 슬라이더 제어: 노랑 버튼 안 움직이던 현상 해결 (pointer-events 제어 및 z-index 부여) */
-        .seek-bar-area { position: relative; width: 100%; height: 40px; margin: 5px 0 10px 0; }
+        /* 슬라이더 공간 다이어트: 높이 40px -> 20px, 원 크기 26px -> 18px 줄임 */
+        .seek-bar-area { position: relative; width: 100%; height: 20px; margin: 2px 0 8px 0; }
         input[type="range"] { position: absolute; width: 100%; -webkit-appearance: none; background: transparent; pointer-events: none; cursor: pointer; }
         #startRange { z-index: 10; }
         #endRange { z-index: 9; }
-        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; height: 26px; width: 26px; border-radius: 50%; background: var(--neon); border: 3px solid #000; margin-top: -2px; pointer-events: auto; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; height: 18px; width: 18px; border-radius: 50%; background: var(--neon); border: 2px solid #000; margin-top: 1px; pointer-events: auto; }
         #endRange::-webkit-slider-thumb { background: var(--blue); }
 
         /* 플레이 및 미세조절 레이아웃 */
@@ -131,16 +131,16 @@
                 sR.value = 0; inS.value = 0;
                 eR.value = inE.value = v.duration;
                 c.width = v.videoWidth; c.height = v.videoHeight;
+                setTimeout(() => { runAI(); }, 300); // 로드 시 첫 프레임 자동 분석
             };
         };
 
-        // 비디오 탐색 및 싱크 로직 유지
         sR.oninput = () => { inS.value = sR.value; v.currentTime = sR.value; };
         eR.oninput = () => { inE.value = eR.value; v.currentTime = eR.value; };
         inS.oninput = () => { sR.value = inS.value; v.currentTime = inS.value; };
         inE.oninput = () => { eR.value = inE.value; v.currentTime = inE.value; };
 
-        // 비디오 재생 중 슬라이더 위치 실시간 연동 (시작점 기준 핸들 이동)
+        // 비디오 재생 중 슬라이더 위치 실시간 연동
         v.ontimeupdate = () => {
             if(!v.paused) {
                 sR.value = v.currentTime;
@@ -148,18 +148,32 @@
             }
         };
 
-        // 재생/일시정지 토글 기능
+        // 수동 미세 탐색 완료 시 실시간 스켈레톤 업데이트
+        v.addEventListener('seeked', () => {
+            if (v.paused) {
+                runAI();
+            }
+        });
+
+        // 비디오 재생 중 끊김 없는 스켈레톤 추적 루프
+        function trackFrame() {
+            if (!v.paused) {
+                runAI();
+                requestAnimationFrame(trackFrame);
+            }
+        }
+
         function togglePlay() {
             if (v.paused) {
                 v.play();
                 btnPlay.innerText = "⏸ 일시정지";
+                trackFrame(); // 추적 루프 시작
             } else {
                 v.pause();
                 btnPlay.innerText = "▶ 재생";
             }
         }
 
-        // 수동으로 지정한 시간만큼 (예: 0.01초) 앞뒤 탐색 기능
         function stepTime(amount) {
             v.pause();
             btnPlay.innerText = "▶ 재생";
@@ -172,13 +186,14 @@
         }
 
         async function runAI() { 
+            if (!v.videoWidth || !v.videoHeight) return;
             c.width = v.videoWidth; c.height = v.videoHeight;
             await pose.send({image: v}); 
         }
 
         function onResults(res) {
             ctx.clearRect(0, 0, c.width, c.height);
-            if (!res.poseLandmarks) return alert("인식 실패!");
+            if (!res.poseLandmarks) return; // 알림창 삭제하여 연속 재생 시 방해 금지
             drawConnectors(ctx, res.poseLandmarks, POSE_CONNECTIONS, {color: '#deff9a', lineWidth: 3});
             const lm = res.poseLandmarks;
             const knee = calcAngle(lm[24], lm[26], lm[28]); 
