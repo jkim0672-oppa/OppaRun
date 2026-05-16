@@ -121,7 +121,6 @@
         .stat-filter-btn.active { border-color: var(--primary); color: var(--primary); background: rgba(0,255,136,0.05); }
         .stat-grid-dashboard { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; padding: 8px 12px; }
         
-        /* INFO 비주얼 아이콘 전용 스타일 */
         .info-visual-box { font-size: 24px; margin-bottom: 8px; display: flex; align-items: center; justify-content: flex-start; }
     </style>
 </head>
@@ -302,7 +301,6 @@ const translations = {
         metroTitle: "METRONOME", metroDesc: "Perfect your cadence.", metroAccent: "ACCENT FIRST BEAT", noRec: "NO RECORDS", totalStats: "LIFETIME STATS", runs: "RUNS", autoPaused: "AUTO PAUSED", wake: "TAP TO WAKE",
         infC: "CADENCE", infCD: "Recommended 170~185 BPM.", infP: "POWER", infPD: "Use hips and glutes.", infS: "STRIKE", infSD: "Midfoot and center of gravity.",
         
-        // New Advanced Guidelines (English)
         infO: "VERTICAL OSCILLATION", infOD: "Minimize bouncing. Keep energy moving forward, not up.",
         infR: "KNEE LEADING & ROLLING", infRD: "Drive forward with your knees. Focus on smooth ankle rolling.",
         infPost: "POSTURE & BREATHING", infPostD: "Keep your chest open and shoulders relaxed. Look straight ahead.",
@@ -320,7 +318,6 @@ const translations = {
         metroTitle: "메트로놈", metroDesc: "러닝 리듬을 일정하게 유지하세요.", metroAccent: "첫 박자 강조", noRec: "기록 없음", totalStats: "누적 통계", runs: "러닝 횟수", autoPaused: "자동 일시정지", wake: "화면을 깨우려면 터치하세요",
         infC: "케이던스", infCD: "170~185 BPM을 권장합니다.", infP: "파워", infPD: "골반과 둔근을 사용하세요.", infS: "착지", infSD: "미드풋과 무게중심 착지를 신경쓰세요.",
         
-        // New Advanced Guidelines (Korean)
         infO: "수직 진폭", infOD: "불필요한 상하 바운싱을 줄여 에너지가 위가 아닌 앞으로만 향하게 하세요.",
         infR: "무릎 리딩 & 롤링", infRD: "무릎을 앞으로 툭툭 던지듯 리딩하고 매끄러운 발구름(롤링)에 집중하세요.",
         infPost: "자세 & 호흡", infPostD: "가슴을 활짝 열고 어깨를 릴랙스하세요. 시선은 정면 멀리 유지합니다.",
@@ -586,7 +583,7 @@ class UIManager {
                 <div class="h-main-stats">
                     <div class="h-val-big">${r.dist}<span class="h-val-unit">KM</span></div>
                     <div class="h-val-big" style="color:var(--primary)">${r.time}</div>
-                    <div style="font-size:10px; color:#888; font-weight:800; margin-left:auto;">ALT: <span style="color:var(--primary)">${r.alt || '--'}</span>m</div>
+                    <div style="font-size:10px; color:#888; font-weight:800; margin-left:auto;">ALT: <span style="color:var(--primary)">${r.alt || '0'}</span>m</div>
                 </div>
 
                 <div class="h-details-grid">
@@ -666,13 +663,15 @@ class UIManager {
             if(r.time) {
                 const parts = r.time.split(':');
                 if(parts.length === 2) {
-                    totalSeconds += (parseInt(parts[0]) * 60) + parseInt(parts[parts.length - 1]);
+                    totalSeconds += (parseInt(parts[0], 10) * 60) + parseInt(parts[1], 10);
+                } else if(parts.length === 3) {
+                    totalSeconds += (parseInt(parts[0], 10) * 3600) + (parseInt(parts[1], 10) * 60) + parseInt(parts[2], 10);
                 }
             }
             if(r.cadence) { sumCadence += r.cadence; countCadence++; }
-            if(r.gct && r.gct !== '--') { sumGct += parseInt(r.gct); countGct++; }
-            if(r.flight && r.flight !== '--') { sumFlight += parseInt(r.flight); countFlight++; }
-            if(r.alt !== undefined) { sumAlt += parseInt(r.alt) || 0; countAlt++; }
+            if(r.gct && r.gct !== '--') { sumGct += parseInt(r.gct, 10); countGct++; }
+            if(r.flight && r.flight !== '--') { sumFlight += parseInt(r.flight, 10); countFlight++; }
+            if(r.alt !== undefined) { sumAlt += parseInt(r.alt, 10) || 0; countAlt++; }
         });
 
         let avgPaceStr = "--'--\"";
@@ -742,10 +741,11 @@ class UIManager {
                     </div>`;
             });
         } else {
+            let baseAlt = record.alt || 0;
             splitLogsHtml += `
                 <div class="detail-log-item" style="color: #ffffff; font-weight: 700;">
-                    <span>■ 1 km :</span>
-                    <span>${t.splitPace} <b>${record.avgPace || record.pace || "--'--\""}</b> | ${t.splitAlt} <b>${record.alt || 0}m</b> → <b>${record.alt || 0}m</b> (▲0m).</span>
+                    <span>■ ${record.dist} km :</span>
+                    <span>${t.splitPace} <b>${record.avgPace || record.pace || "--'--\""}</b> | ${t.splitAlt} <b>${baseAlt}m</b> → <b>${baseAlt}m</b> (▲0m).</span>
                 </div>`;
         }
         splitLogsHtml += `</div>`;
@@ -776,7 +776,7 @@ class UIManager {
         if(r.gct > 240) {
             gctComment = (lang === 'ko') ? "지면 접촉 시간이 다소 깁니다. 발을 지면에서 빠르게 낚아채듯 회수하며 고관절 주동근을 적극 활용해 보세요." : "Ground contact time is slightly prolonged. Focus on a quick pull-off and engage the hip flexors dynamically.";
         } else {
-            gctComment = (lang === 'ko') ? "매우 뛰어난 탄력성입니다. 골반 회전과 수평 가속이 유기적으로 이루어지고 있습니다." : "Excellent movement elasticity. Pelvic rotation and horizontal driving force are well balanced.";
+            gctComment = (lang === 'ko') ? "매우 뛰어난 탄력성입니다. 골반 회전และ 수평 가속이 유기적으로 이루어지고 있습니다." : "Excellent movement elasticity. Pelvic rotation and horizontal driving force are well balanced.";
         }
 
         let cadComment = "";
@@ -1061,7 +1061,7 @@ class OppaRunApp {
                 altFrom: this.state.lastKmAlt,
                 altTo: this.state.currentAlt,
                 altDiff: this.state.currentAlt - this.state.lastKmAlt,
-                coord: this.state.pathCoords[this.state.pathCoords.length - 1]
+                coord: this.state.pathCoords[this.state.pathCoords.length - 1] || null
             });
         }
 
