@@ -85,19 +85,19 @@
         </div>
 
         <div class="play-ctrl-row">
-            <button class="btn-step" id="btnPrevStep" onclick="stepTime(-1)">◀ -1.00s</button>
+            <button class="btn-step" id="btnPrevStep" onclick="stepTime(-1)">◀ -0.03s</button>
             <button class="btn-play" id="btnPlay" onclick="togglePlay()">▶ Play</button>
-            <button class="btn-step" id="btnNextStep" onclick="stepTime(1)">+1.00s ▶</button>
+            <button class="btn-step" id="btnNextStep" onclick="stepTime(1)">+0.03s ▶</button>
         </div>
 
         <div class="time-input-row">
             <div class="input-group" style="flex: 0.9;">
                 <span>Start (s)</span>
-                <input type="number" id="inStart" value="0.00" step="0.1">
+                <input type="number" id="inStart" value="0.0000" step="0.1">
             </div>
             <div class="input-group" style="flex: 0.9;">
                 <span>End (s)</span>
-                <input type="number" id="inEnd" value="0.00" step="0.1">
+                <input type="number" id="inEnd" value="0.0000" step="0.1">
             </div>
             <div class="input-group" style="flex: 1.2;">
                 <span>Speed</span>
@@ -169,31 +169,37 @@
             v.src = URL.createObjectURL(file);
             v.onloadedmetadata = () => {
                 sR.max = eR.max = inE.max = v.duration;
-                sR.value = 0; inS.value = 0;
-                eR.value = inE.value = v.duration;
+                sR.value = 0; inS.value = "0.0000";
+                eR.value = inE.value = v.duration.toFixed(4);
                 c.width = v.videoWidth; c.height = v.videoHeight;
                 
-                // 🔄 영상이 로드되는 순간에도 드롭다운에 지정된 현재 배속과 애로우 수치를 완전히 강제 동기화
+                // 🔄 영상이 로딩되어도 기존에 지정해둔 배속 세팅과 버튼 텍스트가 강제 리셋되지 않고 정밀 동기화 유지
                 applySpeed(currentSpeed); 
                 setTimeout(() => { if(aiTracking) runAI(); }, 300);
             };
         };
 
-        // 노란색/파란색 상단 슬라이더 조절 시 하단 입력창 값 실시간 양방향 연동
+        // 🛡️ 노란색/파란색 슬라이더 조절 시 서로를 추월 교차하지 못하도록 완전 차단 로직 적용
         sR.oninput = () => { 
+            if (parseFloat(sR.value) > parseFloat(eR.value)) {
+                sR.value = eR.value; // End값을 절대 넘지 못하게 가둠
+            }
             v.currentTime = sR.value; 
             inS.value = parseFloat(sR.value).toFixed(4); 
         };
         eR.oninput = () => { 
+            if (parseFloat(eR.value) < parseFloat(sR.value)) {
+                eR.value = sR.value; // Start값 밑으로 내려가지 못하게 가둠
+            }
             v.currentTime = eR.value; 
             inE.value = parseFloat(eR.value).toFixed(4); 
         };
 
-        // 하단 숫자 입력창에 직접 타이핑 입력 시 상단 노란색/파란색 슬라이더 바 위치 실시간 싱크
+        // 🛡️ 하단 숫자 인풋 입력 시에도 서로 역전되지 않도록 밸브 장착
         inS.oninput = () => { 
             let val = parseFloat(inS.value) || 0;
             if(val < 0) val = 0;
-            if(val > v.duration) val = v.duration;
+            if(val > parseFloat(eR.value)) val = parseFloat(eR.value); // 물리 한계 제어
             sR.value = val; 
             v.currentTime = val;
         };
@@ -201,6 +207,7 @@
             let val = parseFloat(inE.value) || 0;
             if(val < 0) val = 0;
             if(val > v.duration) val = v.duration;
+            if(val < parseFloat(sR.value)) val = parseFloat(sR.value); // 물리 한계 제어
             eR.value = val; 
             v.currentTime = val;
         };
@@ -237,19 +244,19 @@
             });
         });
 
-        // 🔥 배속 조절 및 좌우 애로우 버튼 이동 간격 완전 결합 매핑 전역 함수
+        // 🔥 배속 조절 시 하단 드롭다운 값과 무관하게 상단 애로우는 순수 미세 프레임 이동단위 고정 동기화 보존
         function applySpeed(speed) {
             currentSpeed = speed;
             v.playbackRate = currentSpeed;
             
-            // 배속 드롭다운 옵션이 변경되면 좌우 애로우 버튼 안의 단위 텍스트 정밀 싱크 업데이트
-            btnPrevStep.innerText = `◀ -${currentSpeed.toFixed(2)}s`;
-            btnNextStep.innerText = `+${currentSpeed.toFixed(2)}s ▶`;
+            // 배속 속도는 재생에만 관여하고, 좌우 애로우의 텍스트는 오빠가 폼 분석을 정확하게 할 수 있게 프레임 단위(0.03s)로 고정 연동!
+            btnPrevStep.innerText = `◀ -0.03s`;
+            btnNextStep.innerText = `+0.03s ▶`;
         }
 
         function togglePlay() {
             if (v.paused) {
-                applySpeed(currentSpeed); // 플레이 할 때도 전역 속도 한 번 더 확실하게 바인딩
+                applySpeed(currentSpeed); // 플레이 할 때 현재 지정 배속으로 빈틈없이 바인딩
                 v.play();
                 btnPlay.innerText = "⏸ Pause";
                 if(aiTracking) trackFrame();
@@ -259,23 +266,21 @@
             }
         }
 
-        // 방향 인자(direction)를 받아 전역 세팅 배속 수치(currentSpeed) 크기만큼 가변 스텝 이동 처리
+        // 🛡️ 초슬로우 모드에서도 덜덜거림 없이 칼같이 1프레임(0.03초)씩 동영상을 앞뒤로 정밀 제어하는 독립 스텝 매커니즘
         function stepTime(direction) {
             v.pause();
             btnPlay.innerText = "▶ Play";
             
-            // 좌우 스텝 단위를 무조건 드롭다운의 배속 수치(currentSpeed)와 빈틈없이 싱크로나이즈 시켜 무조건 동일 단위로 가감
-            let targetTime = v.currentTime + (direction * currentSpeed);
+            // 가변 배속 수치에 영향받지 않고, 러닝 분석 최적화 규격인 고정 0.03초(프레임 단위)씩 정확하게 증감
+            let targetTime = v.currentTime + (direction * 0.03);
             if (targetTime < 0) targetTime = 0;
             if (targetTime > v.duration) targetTime = v.duration;
             
             v.currentTime = targetTime;
-            sR.value = targetTime;
             
-            // 재생바를 이동시켰으므로 아래 Start 혹은 End 중 하나에 맞춰 타임 스탬프 인풋창 수치도 실시간 반영
-            if(Math.abs(v.currentTime - sR.value) < 0.1) {
-                inS.value = parseFloat(v.currentTime).toFixed(4);
-            }
+            // 현재 위치에 맞게 슬라이더바와 4자리 소수점 인풋창 완벽 업데이트 싱크
+            sR.value = targetTime;
+            inS.value = parseFloat(targetTime).toFixed(4);
         }
 
         function toggleAI() {
@@ -329,7 +334,7 @@
             v.pause();
             btnPlay.innerText = "▶ Play";
             
-            // 🔄 리셋 버튼 누를 때 노란색(Start)과 파란색(End)에 설정해 놓은 숫자 값을 철저히 보존!
+            // 🛡️ 리셋을 눌러도 오빠가 맞춘 고유 구간(Start 인풋 수치)의 원본 데이터를 완벽히 보존하여 복귀
             const startPos = parseFloat(inS.value) || 0;
             v.currentTime = startPos;
             sR.value = startPos;
@@ -337,7 +342,8 @@
             document.querySelectorAll('.dropdown-option').forEach(opt => opt.classList.remove('active'));
             document.querySelector('[data-value="1.0"]').classList.add('active');
             dropdownSelected.innerText = "1.0x";
-            applySpeed(1.0); // 리셋 작동 시 속도 및 버튼 텍스트 단위를 기본인 1.0x 수치로 정밀 초기화
+            applySpeed(1.0); // 리셋 시 기본 속도로 안전 복구
+            
             ctx.clearRect(0,0,c.width,c.height); 
             document.getElementById('gallery').innerHTML = ""; 
             curKnee = "--°"; curElbow = "--°"; curBody = "--°";
