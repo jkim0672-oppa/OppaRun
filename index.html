@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v29.6.1 (Advanced Statistics Dashboard)</title>
+    <title>OppaRun Pro - v29.6.2 (Advanced Statistics Dashboard)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -158,6 +158,9 @@
         .btn-confirm-act { flex: 1; height: 48px; border-radius: 24px; border: none; font-weight: 900; font-size: 14px; cursor: pointer; }
         .btn-confirm-cancel { background: #333; color: #aaa; border: 1px solid #444; }
         .btn-confirm-delete { background: var(--danger); color: #fff; }
+        
+        /* [v29.6.2] Save Confirm Action Button Design Style */
+        .btn-confirm-save { background: var(--primary); color: #000; }
     </style>
 </head>
 <body> 
@@ -169,6 +172,16 @@
             <div class="custom-confirm-actions">
                 <button id="btn-confirm-cancel" class="btn-confirm-act btn-confirm-cancel" onclick="ui.closeConfirmModal(false)">CANCEL</button>
                 <button id="btn-confirm-delete" class="btn-confirm-act btn-confirm-delete" onclick="ui.closeConfirmModal(true)">DELETE</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="save-confirm-modal" class="custom-confirm-overlay">
+        <div class="custom-confirm-box">
+            <div id="save-confirm-modal-msg" class="custom-confirm-msg">Are you sure you want to save this running record?</div>
+            <div class="custom-confirm-actions">
+                <button id="btn-save-confirm-cancel" class="btn-confirm-act btn-confirm-cancel" onclick="ui.closeSaveConfirmModal(false)">CANCEL</button>
+                <button id="btn-save-confirm-save" class="btn-confirm-act btn-confirm-save" onclick="ui.closeSaveConfirmModal(true)">SAVE</button>
             </div>
         </div>
     </div>
@@ -341,7 +354,7 @@
 
 <script>
 /**
- * [OppaRun Pro - v29.6.1 Visual Feedback] - Advanced Statistics Integration & Delete Flow
+ * [OppaRun Pro - v29.6.2 Visual Feedback] - Advanced Statistics Integration & Delete/Save Flow
  */
 
 const translations = {
@@ -366,7 +379,11 @@ const translations = {
         deleteBtn: "DELETE", confirmSingleDelete: "Are you sure you want to delete this running record?", cancelModal: "CANCEL",
 
         /* [v29.6.1 추가 반영] 상세 뷰 세이브 및 쉐어 텍스트 데이터 정의 */
-        saveBtn: "SAVE", shareBtn: "SHARE"
+        saveBtn: "SAVE", shareBtn: "SHARE",
+
+        /* [v29.6.2] Save Custom Modal Mapping Strings */
+        confirmSingleSave: "Are you sure you want to save this running record to your device?",
+        saveSuccessMsg: "Record data has been successfully saved!"
     },
     ko: { 
         pace: "페이스", dist: "거리", time: "시간", avg: "평균", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", cal: "칼로리", start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료", run: "러닝", history: "기록", list: "목록", total: "통계", info: "정보", settings: "설정", selLang: "언어 설정", metro: "리듬 어시스턴트", clear: "전체 기록 삭제", confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.", route: "경로", diag: "진단", close: "닫기", alt: "고도",
@@ -389,7 +406,11 @@ const translations = {
         deleteBtn: "삭제", confirmSingleDelete: "이 러닝 기록을 정말로 삭제할까요?", cancelModal: "취소",
 
         /* [v29.6.1 추가 반영] 상세 뷰 세이브 및 쉐어 텍스트 데이터 정의 */
-        saveBtn: "저장", shareBtn: "공유"
+        saveBtn: "저장", shareBtn: "공유",
+
+        /* [v29.6.2] Save Custom Modal Mapping Strings */
+        confirmSingleSave: "이 러닝 기록 데이터를 기기에 정말 저장할까요?",
+        saveSuccessMsg: "기록 데이터가 기기에 안전하게 저장되었습니다!"
     }
 };
 
@@ -479,6 +500,7 @@ class UIManager {
         this.detailMap = null;
         this.currentStatFilter = 'weekly';
         this.pendingDeleteId = null; /* [v29.6.1] Target Pointer storage */
+        this.pendingSaveId = null;   /* [v29.6.2] Save Target Pointer storage */
     }
 
     /* [지도 테마 전환 핵심 로직] 원본 CSS 필터를 토글하는 방식 */
@@ -685,6 +707,28 @@ class UIManager {
             this.updateTotalStats();
         }
         this.pendingDeleteId = null;
+    }
+
+    /* [v29.6.2] Custom UI Save Modal Action Interceptors */
+    openSaveConfirmModal(id) {
+        this.pendingSaveId = id;
+        const lang = storage.getLang();
+        const t = translations[lang] || translations['en'];
+
+        document.getElementById('save-confirm-modal-msg').textContent = t.confirmSingleSave;
+        document.getElementById('btn-save-confirm-cancel').textContent = t.cancelModal;
+        document.getElementById('btn-save-confirm-save').textContent = t.saveBtn;
+        document.getElementById('save-confirm-modal').style.display = 'flex';
+    }
+
+    closeSaveConfirmModal(isConfirmed) {
+        document.getElementById('save-confirm-modal').style.display = 'none';
+        if (isConfirmed && this.pendingSaveId !== null) {
+            const lang = storage.getLang();
+            const t = translations[lang] || translations['en'];
+            alert(t.saveSuccessMsg);
+        }
+        this.pendingSaveId = null;
     }
 
     updateHistoryList() {
@@ -899,9 +943,9 @@ class UIManager {
     }
     closeDetail() { document.getElementById('detail-view').style.display = 'none'; }
     
-    /* [v29.6.1 추가 반영] 세이브 버튼 핸들러 로직 정의 */
+    /* [v29.6.2 수정 반영] 세이브 버튼 핸들러 내부 커스텀 모달 오픈 방식으로 변경 */
     saveDetailAction(id) {
-        alert(storage.getLang() === 'ko' ? `기록 데이터(${id})가 기기에 안전하게 저장되었습니다!` : `Record data (${id}) has been successfully saved!`);
+        this.openSaveConfirmModal(id);
     }
 
     /* [v29.6.1 추가 반영] 쉐어 버튼 핸들러 로직 정의 (Web Share API 지원 처리) */
