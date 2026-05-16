@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>OppaRun Pro - v29.6.0 (Advanced Statistics Dashboard)</title>
+    <title>OppaRun Pro - v29.6.1 (Advanced Statistics Dashboard)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -56,11 +56,14 @@
         .h-actions { position: absolute; top: 12px; right: 12px; display: flex; gap: 6px; }
         .btn-h-sub { background: #333; border: 1px solid #555; color: var(--primary); font-size: 10px; padding: 6px 10px; border-radius: 6px; font-weight: 900; cursor: pointer; }
         
+        /* [v29.6.1] Delete Button Styling - Identical size to DIAG button */
+        .btn-h-delete { background: #333; border: 1px solid #555; color: var(--danger); font-size: 10px; padding: 6px 10px; border-radius: 6px; font-weight: 900; cursor: pointer; position: absolute; bottom: 12px; right: 12px; }
+        
         .h-main-stats { display: flex; align-items: baseline; gap: 15px; margin-bottom: 12px; border-bottom: 1px solid #333; padding-bottom: 12px; }
         .h-val-big { font-size: 22px; font-weight: 900; color: #fff; }
         .h-val-unit { font-size: 11px; color: var(--primary); margin-left: 2px; }
 
-        .h-details-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+        .h-details-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding-bottom: 5px; }
         .h-nav-box { display: flex; flex-direction: column; }
         .h-det-box { display: flex; flex-direction: column; }
         .h-det-label { font-size: 8px; color: var(--text-dim); font-weight: 900; margin-bottom: 2px; }
@@ -115,18 +118,36 @@
         .detail-log-item span:first-child { color: var(--primary) !important; }
         .detail-log-item:last-child { border-bottom: none; }
 
-        /* [Statistics Upgraded Styling] */
         .stat-filter-nav { display: flex; gap: 5px; padding: 10px 12px 5px 12px; background: #000; flex-shrink: 0; }
         .stat-filter-btn { flex: 1; padding: 10px 0; border: 1px solid #333; background: #161616; color: #888; border-radius: 8px; font-size: 11px; font-weight: 900; text-align: center; cursor: pointer; }
         .stat-filter-btn.active { border-color: var(--primary); color: var(--primary); background: rgba(0,255,136,0.05); }
         .stat-grid-dashboard { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; padding: 8px 12px; flex-shrink: 0; }
         
         .info-visual-box { font-size: 24px; margin-bottom: 8px; display: flex; align-items: center; justify-content: flex-start; }
+
+        /* [v29.6.1] Custom Theme Confirm Modal Design */
+        .custom-confirm-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 999999; display: none; justify-content: center; align-items: center; padding: 20px; }
+        .custom-confirm-box { background: #1a1a1a; border: 2px solid #333; border-radius: 16px; width: 100%; max-width: 320px; padding: 22px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
+        .custom-confirm-msg { font-size: 15px; font-weight: 800; color: #ffffff; margin-bottom: 22px; line-height: 1.5; word-break: keep-all; }
+        .custom-confirm-actions { display: flex; gap: 10px; }
+        .btn-confirm-act { flex: 1; height: 48px; border-radius: 24px; border: none; font-weight: 900; font-size: 14px; cursor: pointer; }
+        .btn-confirm-cancel { background: #333; color: #aaa; border: 1px solid #444; }
+        .btn-confirm-delete { background: var(--danger); color: #fff; }
     </style>
 </head>
 <body> 
     <div id="dimmer-overlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 99999; display: none; justify-content: center; align-items: center; color: #444; font-weight: 900; text-align: center;">TAP TO WAKE</div>
     
+    <div id="confirm-modal" class="custom-confirm-overlay">
+        <div class="custom-confirm-box">
+            <div id="confirm-modal-msg" class="custom-confirm-msg">Are you sure you want to delete this record?</div>
+            <div class="custom-confirm-actions">
+                <button id="btn-confirm-cancel" class="btn-confirm-act btn-confirm-cancel" onclick="ui.closeConfirmModal(false)">CANCEL</button>
+                <button id="btn-confirm-delete" class="btn-confirm-act btn-confirm-delete" onclick="ui.closeConfirmModal(true)">DELETE</button>
+            </div>
+        </div>
+    </div>
+
     <div id="map-area">
         <div id="map-container"><div id="map"></div></div>
         <div id="status" class="status-bar">GPS INITIALIZING... | ALT: --m</div>
@@ -292,7 +313,7 @@
 
 <script>
 /**
- * [OppaRun Pro - v29.6.0 Visual Feedback] - Advanced Statistics Integration
+ * [OppaRun Pro - v29.6.1 Visual Feedback] - Advanced Statistics Integration & Delete Flow
  */
 
 const translations = {
@@ -311,7 +332,10 @@ const translations = {
         summaryTitle: "■ RUNNING DYNAMICS SUMMARY.", avgGct: "Average GCT :", avgFlight: "Average Flight Time :", avgCadence: "Average Cadence :",
         
         statWeekly: "WEEKLY", statMonthly: "MONTHLY", statYearly: "YEARLY", totalDist: "TOTAL DISTANCE", runCount: "RUNS COUNT", avgPaceLabel: "AVG PACE", totalCal: "TOTAL CALORIES",
-        periodSummary: "■ PERIOD DYNAMICS SUMMARY.", avgAlt: "Average Altitude :"
+        periodSummary: "■ PERIOD DYNAMICS SUMMARY.", avgAlt: "Average Altitude :",
+        
+        /* [v29.6.1] Delete Flow Strings */
+        deleteBtn: "DELETE", confirmSingleDelete: "Are you sure you want to delete this running record?", cancelModal: "CANCEL"
     },
     ko: { 
         pace: "페이스", dist: "거리", time: "시간", avg: "평균", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", cal: "칼로리", start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료", run: "러닝", history: "기록", list: "목록", total: "통계", info: "정보", settings: "설정", selLang: "언어 설정", metro: "리듬 어시스턴트", clear: "전체 기록 삭제", confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.", route: "경로", diag: "진단", close: "닫기", alt: "고도",
@@ -328,7 +352,10 @@ const translations = {
         summaryTitle: "■ 러닝 다이내믹스 종합 요약.", avgGct: "평균 지면 접촉 시간 :", avgFlight: "평균 체공 시간 비율 :", avgCadence: "평균 케이던스 수치 :",
         
         statWeekly: "주간 통계", statMonthly: "월간 통계", statYearly: "연간 통계", totalDist: "총 누적 거리", runCount: "러닝 횟수", avgPaceLabel: "평균 페이스", totalCal: "총 소모 칼로리",
-        periodSummary: "■ 해당 기간 다이내믹스 평균 요약.", avgAlt: "평균 주행 고도 :"
+        periodSummary: "■ 해당 기간 다이내믹스 평균 요약.", avgAlt: "평균 주행 고도 :",
+        
+        /* [v29.6.1] Delete Flow Strings */
+        deleteBtn: "삭제", confirmSingleDelete: "이 러닝 기록을 정말로 삭제할까요?", cancelModal: "취소"
     }
 };
 
@@ -348,6 +375,12 @@ class RunningStorage {
     loadHistory() {
         const data = localStorage.getItem(this.HISTORY_KEY);
         return data ? JSON.parse(data) : [];
+    }
+    /* [v29.6.1] Single Record Deletion Engine Logic */
+    deleteRecord(id) {
+        let history = this.loadHistory();
+        history = history.filter(record => record.id !== id);
+        localStorage.setItem(this.HISTORY_KEY, JSON.stringify(history));
     }
     clearHistory() {
         const lang = this.getLang();
@@ -405,6 +438,7 @@ class UIManager {
         };
         this.detailMap = null;
         this.currentStatFilter = 'weekly';
+        this.pendingDeleteId = null; /* [v29.6.1] Target Pointer storage */
     }
 
     updateRunningDisplay(data) {
@@ -569,6 +603,28 @@ class UIManager {
         }
     }
 
+    /* [v29.6.1] Custom UI Dark Modal Action Interceptors */
+    openConfirmModal(id) {
+        this.pendingDeleteId = id;
+        const lang = storage.getLang();
+        const t = translations[lang] || translations['en'];
+        
+        document.getElementById('confirm-modal-msg').textContent = t.confirmSingleDelete;
+        document.getElementById('btn-confirm-cancel').textContent = t.cancelModal;
+        document.getElementById('btn-confirm-delete').textContent = t.deleteBtn;
+        document.getElementById('confirm-modal').style.display = 'flex';
+    }
+
+    closeConfirmModal(isConfirmed) {
+        document.getElementById('confirm-modal').style.display = 'none';
+        if (isConfirmed && this.pendingDeleteId !== null) {
+            storage.deleteRecord(this.pendingDeleteId);
+            this.updateHistoryList();
+            this.updateTotalStats();
+        }
+        this.pendingDeleteId = null;
+    }
+
     updateHistoryList() {
         const h = storage.loadHistory(); const lang = storage.getLang(); const t = translations[lang] || translations['en'];
         if (h.length === 0) { this.dom.historyList.innerHTML = `<div style="text-align:center; padding:50px; color:#444; font-weight:900;">${t.noRec}</div>`; return; }
@@ -608,6 +664,8 @@ class UIManager {
                         <div class="h-det-val" style="color:${this.getFlightColor(r.flight)}">${r.flight || '--'} <span style="font-size:7px">%</span></div>
                     </div>
                 </div>
+                
+                <button class="btn-h-delete" onclick="ui.openConfirmModal(${r.id})">${t.deleteBtn}</button>
             </div>`).join('');
     }
 
