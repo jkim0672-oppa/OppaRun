@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pro Analysis v2.9 - Jenny & Bro</title>
+    <title>Pro Analysis v3.0 - Jenny & Bro</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
     <style>
@@ -24,24 +24,32 @@
         input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; height: 18px; width: 18px; border-radius: 50%; background: var(--neon); border: 2px solid #000; margin-top: -1px; pointer-events: auto; }
         #endRange::-webkit-slider-thumb { background: var(--blue); }
 
-        /* 플레이 및 미세조절 레이아웃 */
-        .play-ctrl-row { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 8px; margin-bottom: 12px; }
-        .btn-play { background: #2C2C2E; color: white; border: 1px solid #444; font-size: 14px; }
-        .btn-step { background: #3A3A3C; color: #eee; font-size: 12px; }
+        /* 플레이 및 미세조절 레이아웃 (영문 최적화로 폰트 크기 정돈) */
+        .play-ctrl-row { display: grid; grid-template-columns: 1fr 1.1fr 1fr; gap: 8px; margin-bottom: 12px; }
+        .btn-play { background: #2C2C2E; color: white; border: 1px solid #444; font-size: 13px; font-weight: bold; }
+        .btn-step { background: #3A3A3C; color: #eee; font-size: 12px; font-weight: bold; white-space: nowrap; }
 
         /* 입력창 및 배속 드롭다운 로우 */
         .time-input-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; }
-        .input-group { flex: 1; min-width: 75px; display: flex; flex-direction: column; gap: 4px; }
+        .input-group { flex: 1; min-width: 75px; display: flex; flex-direction: column; gap: 4px; position: relative; }
         .input-group span { font-size: 11px; color: #aaa; }
-        input[type="number"], .speed-select { background: #2C2C2E; color: white; border: 1px solid #444; padding: 10px; border-radius: 8px; font-size: 14px; width: 100%; box-sizing: border-box; height: 41px; }
-        .speed-select { color: var(--neon); font-weight: bold; outline: none; -webkit-appearance: none; cursor: pointer; text-align: center; }
+        input[type="number"] { background: #2C2C2E; color: white; border: 1px solid #444; padding: 10px; border-radius: 8px; font-size: 14px; width: 100%; box-sizing: border-box; height: 41px; text-align: center; }
+
+        /* 완전 자체 제작 다크모드 커스텀 드롭다운 스타일 (시스템 하얀창 완벽 차단!) */
+        .custom-dropdown { position: relative; width: 100%; height: 41px; box-sizing: border-box; }
+        .dropdown-selected { background: #2C2C2E; color: var(--neon); border: 1px solid #444; padding: 10px; border-radius: 8px; font-size: 13px; font-weight: bold; text-align: center; line-height: 21px; cursor: pointer; box-sizing: border-box; height: 100%; }
+        .dropdown-selected::after { content: ' ▼'; font-size: 9px; color: #888; }
+        .dropdown-options { display: none; position: absolute; top: 45px; left: 0; width: 100%; background: #1C1C1E; border: 1px solid #444; border-radius: 8px; z-index: 150; box-shadow: 0 4px 15px rgba(0,0,0,0.6); max-height: 200px; overflow-y: auto; box-sizing: border-box; }
+        .dropdown-option { padding: 11px; font-size: 13px; text-align: center; color: white; cursor: pointer; border-bottom: 1px solid #2C2C2E; font-weight: bold; }
+        .dropdown-option:last-child { border-bottom: none; }
+        .dropdown-option:hover, .dropdown-option.active { background: #2C2C2E; color: var(--neon); }
 
         .btn-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; }
-        button, .file-lbl { border-radius: 8px; border: none; padding: 12px 5px; font-weight: bold; cursor: pointer; font-size: 13px; text-align: center; color: white; display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
-        .btn-main { background: var(--blue); width: 100%; margin-bottom: 15px; font-size: 15px; }
+        button, .file-lbl { border-radius: 8px; border: none; padding: 12px 2px; font-weight: bold; cursor: pointer; font-size: 12px; text-align: center; color: white; display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
+        .btn-main { background: var(--blue); width: 100%; margin-bottom: 15px; font-size: 14px; padding: 14px 5px; }
         .btn-ai { background: #30D158; color: white; }
         .btn-reset { background: #FF453A; }
-        .file-lbl { background: #3A3A3C; }
+        .file-lbl { background: #3A3A3C; cursor: pointer; }
         
         .result-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
         .res-card { background: #2C2C2E; padding: 10px; border-radius: 8px; border-left: 3px solid var(--neon); text-align: center; }
@@ -56,13 +64,13 @@
         input[type="file"] { display: none; }
 
         /* 전체화면 확대 모달 스타일 */
-        .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); align-items: center; justify-content: center; cursor: pointer; }
+        .modal { display: none; position: fixed; z-index: 200; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); align-items: center; justify-content: center; cursor: pointer; }
         .modal img { max-width: 95%; max-height: 85%; border-radius: 8px; border: 1px solid #444; box-shadow: 0 4px 20px rgba(0,0,0,0.8); }
     </style>
 </head>
 <body>
 
-    <h3 style="color: var(--neon); margin: 5px 0;">PRO ANALYSIS <span style="font-weight: 200;">v2.9</span></h3>
+    <h3 style="color: var(--neon); margin: 5px 0;">PRO ANALYSIS <span style="font-weight: 200;">v3.0</span></h3>
 
     <div class="video-box">
         <video id="video" playsinline muted></video>
@@ -76,53 +84,56 @@
         </div>
 
         <div class="play-ctrl-row">
-            <button class="btn-step" onclick="stepTime(-0.01)">◀ -0.01s</button>
-            <button class="btn-play" id="btnPlay" onclick="togglePlay()">▶ 재생</button>
-            <button class="btn-step" onclick="stepTime(0.01)">+0.01s ▶</button>
+            <button class="btn-step" id="btnPrevStep" onclick="stepTime(-1)">◀ -1.00s</button>
+            <button class="btn-play" id="btnPlay" onclick="togglePlay()">▶ Play</button>
+            <button class="btn-step" id="btnNextStep" onclick="stepTime(1)">+1.00s ▶</button>
         </div>
 
         <div class="time-input-row">
             <div class="input-group" style="flex: 0.9;">
-                <span>시작(초)</span>
+                <span>Start (s)</span>
                 <input type="number" id="inStart" value="0.00" step="0.1">
             </div>
             <div class="input-group" style="flex: 0.9;">
-                <span>끝(초)</span>
+                <span>End (s)</span>
                 <input type="number" id="inEnd" value="0.00" step="0.1">
             </div>
             <div class="input-group" style="flex: 1.2;">
-                <span>재생 속도</span>
-                <select id="speedSelect" class="speed-select" onchange="changeSpeed()">
-                    <option value="0.01">0.01 배속</option>
-                    <option value="0.03">0.03 배속</option>
-                    <option value="0.05">0.05 배속</option>
-                    <option value="0.1">0.1 배속</option>
-                    <option value="0.25">0.25 배속</option>
-                    <option value="0.5">0.5 배속</option>
-                    <option value="1.0" selected>1.0 배속 (일반)</option>
-                </select>
+                <span>Speed</span>
+                <div class="custom-dropdown">
+                    <div class="dropdown-selected" id="dropdownSelected" onclick="toggleDropdown()">1.0x</div>
+                    <div class="dropdown-options" id="dropdownOptions">
+                        <div class="dropdown-option" data-value="0.01">0.01x</div>
+                        <div class="dropdown-option" data-value="0.03">0.03x</div>
+                        <div class="dropdown-option" data-value="0.05">0.05x</div>
+                        <div class="dropdown-option" data-value="0.1">0.1x</div>
+                        <div class="dropdown-option" data-value="0.25">0.25x</div>
+                        <div class="dropdown-option" data-value="0.5">0.5x</div>
+                        <div class="dropdown-option active" data-value="1.0">1.0x (Normal)</div>
+                    </div>
+                </div>
             </div>
         </div>
 
         <div class="btn-row">
-            <label class="file-lbl">📂 영상 선택 <input type="file" id="up" accept="video/*"></label>
-            <button class="btn-ai" id="btnAiToggle" onclick="toggleAI()">🟢 AI 추적 ON</button>
-            <button class="btn-reset" onclick="reset()">🔄 리셋</button>
+            <label class="file-lbl">📂 Open Video <input type="file" id="up" accept="video/*"></label>
+            <button class="btn-ai" id="btnAiToggle" onclick="toggleAI()">🟢 AI Track ON</button>
+            <button class="btn-reset" onclick="reset()">🔄 Reset</button>
         </div>
         
-        <button class="btn-main" onclick="captureSnapshot()">📸 현재 분석 스냅샷 저장</button>
+        <button class="btn-main" onclick="captureSnapshot()">📸 Save Analysis Snapshot</button>
 
         <div class="result-grid" id="res">
-            <div class="res-card"><span class="res-label">무릎</span><span class="res-val" id="valKnee">--°</span><span class="ref-text">160-170°</span></div>
-            <div class="res-card"><span class="res-label">팔치기</span><span class="res-val" id="valElbow">--°</span><span class="ref-text">80-90°</span></div>
-            <div class="res-card"><span class="res-label">상체</span><span class="res-val" id="valBody">--°</span><span class="ref-text">5-10°</span></div>
+            <div class="res-card"><span class="res-label">Knee</span><span class="res-val" id="valKnee">--°</span><span class="ref-text">160-170°</span></div>
+            <div class="res-card"><span class="res-label">Elbow</span><span class="res-val" id="valElbow">--°</span><span class="ref-text">80-90°</span></div>
+            <div class="res-card"><span class="res-label">Torso</span><span class="res-val" id="valBody">--°</span><span class="ref-text">5-10°</span></div>
         </div>
     </div>
 
     <div id="gallery"></div>
 
-    <div id="imgModal" class="modal" onclick="closeModal()">
-        <img id="modalImg" src="">
+    <div id="imgModal" class="modal" onclick="closeModal(event)">
+        <img id="modalImg" src="" onclick="closeModal(event)">
     </div>
 
     <script>
@@ -135,12 +146,16 @@
         const inE = document.getElementById('inEnd');
         const btnPlay = document.getElementById('btnPlay');
         const btnAiToggle = document.getElementById('btnAiToggle');
-        const speedSelect = document.getElementById('speedSelect');
+        
+        const btnPrevStep = document.getElementById('btnPrevStep');
+        const btnNextStep = document.getElementById('btnNextStep');
+        const dropdownSelected = document.getElementById('dropdownSelected');
+        const dropdownOptions = document.getElementById('dropdownOptions');
         
         let aiTracking = true;
         let curKnee = "--°", curElbow = "--°", curBody = "--°";
+        let currentSpeed = 1.0; // 선택된 속도 상태 보관 전역 변수
         
-        // 관절 자막 각인을 위해 좌표를 전역 저장하는 객체
         let lastJoints = { knee: null, elbow: null, hip: null };
         
         const pose = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
@@ -156,28 +171,18 @@
                 sR.value = 0; inS.value = 0;
                 eR.value = inE.value = v.duration;
                 c.width = v.videoWidth; c.height = v.videoHeight;
-                changeSpeed(); // 로드 시 선택된 배속 즉시 적용
+                applySpeed(currentSpeed); // 초기 배속 설정 및 버튼 유동 연동
                 setTimeout(() => { if(aiTracking) runAI(); }, 300);
             };
         };
 
-        // 오빠가 슬라이더나 수치 직접 건드릴 때만 씽크 맞춤
         sR.oninput = () => { v.currentTime = sR.value; };
         eR.oninput = () => { v.currentTime = eR.value; };
         inS.oninput = () => { sR.value = inS.value; };
         inE.oninput = () => { eR.value = inE.value; };
 
-        v.ontimeupdate = () => {
-            if(!v.paused) {
-                sR.value = v.currentTime;
-            }
-        };
-
-        v.addEventListener('seeked', () => {
-            if (v.paused && aiTracking) {
-                runAI();
-            }
-        });
+        v.ontimeupdate = () => { if(!v.paused) sR.value = v.currentTime; };
+        v.addEventListener('seeked', () => { if (v.paused && aiTracking) runAI(); });
 
         function trackFrame() {
             if (!v.paused && aiTracking) {
@@ -186,30 +191,59 @@
             }
         }
 
-        // 배속 조절 함수 (플레이 버튼 및 영상 탐색 시 전체 적용)
-        function changeSpeed() {
-            v.playbackRate = parseFloat(speedSelect.value);
+        /* 🔽 커스텀 드롭다운 내비게이션 제어 모듈 */
+        function toggleDropdown() {
+            dropdownOptions.style.display = dropdownOptions.style.display === 'block' ? 'none' : 'block';
+        }
+
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.custom-dropdown')) dropdownOptions.style.display = 'none';
+        });
+
+        document.querySelectorAll('.dropdown-option').forEach(option => {
+            option.addEventListener('click', function() {
+                document.querySelectorAll('.dropdown-option').forEach(opt => opt.classList.remove('active'));
+                this.classList.add('active');
+                
+                const val = parseFloat(this.getAttribute('data-value'));
+                dropdownSelected.innerText = this.innerText;
+                dropdownOptions.style.display = 'none';
+                
+                applySpeed(val); // 배속 체인지 연동 모듈 호출
+            });
+        });
+
+        // 배속 조절 및 애로우 버튼 실시간 가감 단위 매핑 싱크로나이즈 함수
+        function applySpeed(speed) {
+            currentSpeed = speed;
+            v.playbackRate = currentSpeed;
+            
+            // 드롭다운의 세팅 배속 수치에 맞게 좌우 애로우 버튼 표기 문자열 정밀 업데이트
+            btnPrevStep.innerText = `◀ -${currentSpeed.toFixed(2)}s`;
+            btnNextStep.innerText = `+${currentSpeed.toFixed(2)}s ▶`;
         }
 
         function togglePlay() {
             if (v.paused) {
-                changeSpeed(); // 재생 시작 시점 배속 강제 동기화
+                applySpeed(currentSpeed); 
                 v.play();
-                btnPlay.innerText = "⏸ 일시정지";
+                btnPlay.innerText = "⏸ Pause";
                 if(aiTracking) trackFrame();
             } else {
                 v.pause();
-                btnPlay.innerText = "▶ 재생";
+                btnPlay.innerText = "▶ Play";
             }
         }
 
-        // 미세조절 버튼을 눌러도 오빠가 설정해 둔 수치창(inS)이 바뀌지 않도록 완벽 분리 고정!
-        function stepTime(amount) {
+        // 방향 인자(direction)를 받아 현재 세팅 배속 크기만큼 가변 스텝 이동 처리
+        function stepTime(direction) {
             v.pause();
-            btnPlay.innerText = "▶ 재생";
-            let targetTime = v.currentTime + amount;
+            btnPlay.innerText = "▶ Play";
+            
+            let targetTime = v.currentTime + (direction * currentSpeed);
             if (targetTime < 0) targetTime = 0;
             if (targetTime > v.duration) targetTime = v.duration;
+            
             v.currentTime = targetTime;
             sR.value = targetTime;
         }
@@ -217,12 +251,12 @@
         function toggleAI() {
             aiTracking = !aiTracking;
             if(aiTracking) {
-                btnAiToggle.innerText = "🟢 AI 추적 ON";
+                btnAiToggle.innerText = "🟢 AI Track ON";
                 btnAiToggle.style.background = "#30D158";
                 runAI();
                 if(!v.paused) trackFrame();
             } else {
-                btnAiToggle.innerText = "🔴 추적 중지 OFF";
+                btnAiToggle.innerText = "🔴 AI Track OFF";
                 btnAiToggle.style.background = "#FF453A";
                 ctx.clearRect(0, 0, c.width, c.height);
                 lastJoints = { knee: null, elbow: null, hip: null };
@@ -249,7 +283,6 @@
             document.getElementById('valElbow').innerText = curElbow;
             document.getElementById('valBody').innerText = curBody;
 
-            // 스냅샷 이미지에 관절별로 글씨를 심기 위해 실제 픽셀 좌표 저장
             lastJoints.knee = { x: lm[26].x * c.width, y: lm[26].y * c.height };
             lastJoints.elbow = { x: lm[14].x * c.width, y: lm[14].y * c.height };
             lastJoints.hip = { x: lm[24].x * c.width, y: lm[24].y * c.height };
@@ -264,9 +297,11 @@
 
         function reset() { 
             v.pause();
-            btnPlay.innerText = "▶ 재생";
-            speedSelect.value = "1.0";
-            changeSpeed();
+            btnPlay.innerText = "▶ Play";
+            document.querySelectorAll('.dropdown-option').forEach(opt => opt.classList.remove('active'));
+            document.querySelector('[data-value="1.0"]').classList.add('active');
+            dropdownSelected.innerText = "1.0x";
+            applySpeed(1.0);
             ctx.clearRect(0,0,c.width,c.height); 
             document.getElementById('gallery').innerHTML = ""; 
             curKnee = "--°"; curElbow = "--°"; curBody = "--°";
@@ -276,9 +311,8 @@
             document.getElementById('valBody').innerText = "--°";
         }
 
-        // 스냅샷 저장 시 관절(무릎 옆, 팔치기 옆, 몸 옆) 좌표에 다이렉트로 자막 각인 기능 업그레이드!
         function captureSnapshot() {
-            if (!v.videoWidth || !v.videoHeight) return alert("영상이 로드되지 않았습니다.");
+            if (!v.videoWidth || !v.videoHeight) return alert("Video not loaded.");
             
             const tempC = document.createElement('canvas');
             const tCtx = tempC.getContext('2d');
@@ -288,25 +322,23 @@
             tCtx.drawImage(v, 0, 0, tempC.width, tempC.height);
             tCtx.drawImage(c, 0, 0, tempC.width, tempC.height);
             
-            // 이미지에 직접 텍스트를 새기는 설정
-            tCtx.fillStyle = "#deff9a"; // 가시성 최고 형광 노란색
-            tCtx.font = `bold ${Math.max(14, tempC.width * 0.03)}px sans-serif`; // 비디오 해상도 맞춰 유동적 폰트 조절
+            tCtx.fillStyle = "#deff9a"; 
+            const fontSize = Math.max(14, tempC.width * 0.03);
+            tCtx.font = `bold ${fontSize}px sans-serif`; 
             tCtx.shadowColor = "black";
-            tCtx.shadowBlur = 6;
-            tCtx.shadowOffsetX = 2;
-            tCtx.shadowOffsetY = 2;
+            tCtx.shadowBlur = 6; tCtx.shadowOffsetX = 2; tCtx.shadowOffsetY = 2;
 
+            // 영어 명칭 각인으로 전면 치환 처리
             if (lastJoints.knee && curKnee !== "--°") {
-                tCtx.fillText(`무릎 ${curKnee}`, lastJoints.knee.x + 15, lastJoints.knee.y);
+                tCtx.fillText(`Knee ${curKnee}`, lastJoints.knee.x + 15, lastJoints.knee.y);
             }
             if (lastJoints.elbow && curElbow !== "--°") {
-                tCtx.fillText(`팔치기 ${curElbow}`, lastJoints.elbow.x + 15, lastJoints.elbow.y);
+                tCtx.fillText(`Elbow ${curElbow}`, lastJoints.elbow.x + 15, lastJoints.elbow.y);
             }
             if (lastJoints.hip && curBody !== "--°") {
-                tCtx.fillText(`상체 ${curBody}`, lastJoints.hip.x - 75, lastJoints.hip.y - 15);
+                tCtx.fillText(`Torso ${curBody}`, lastJoints.hip.x - (fontSize * 4), lastJoints.hip.y - 15);
             }
             
-            // 그림자 옵션 초기화
             tCtx.shadowBlur = 0; tCtx.shadowOffsetX = 0; tCtx.shadowOffsetY = 0;
 
             const imgData = tempC.toDataURL('image/jpeg', 0.9);
@@ -329,7 +361,12 @@
             modalImg.src = src;
         }
 
-        function closeModal() {
+        // 💥 모바일 웹 브라우저 터치 찌꺼기 번짐을 원천 차단(stopPropagation)하는 철통 가드 함수
+        function closeModal(event) {
+            if (event) {
+                event.stopPropagation(); // 모달 닫기 터치가 메인 화면의 엘리먼트를 재 클릭하는 것을 봉쇄
+                event.preventDefault();  
+            }
             document.getElementById('imgModal').style.display = "none";
         }
     </script>
