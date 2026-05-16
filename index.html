@@ -27,6 +27,23 @@
         #map-container { height: 18vh; min-height: 140px; border-bottom: 2px solid #222; position: relative; }
         #map { height: 100%; width: 100%; background: #111; }
         
+        /* [지도 다크모드 토글 버튼 스타일] 오른쪽 아래 배치 */
+        .btn-map-theme {
+            position: absolute; bottom: 10px; right: 10px; z-index: 1000;
+            width: 36px; height: 36px; border-radius: 50%;
+            background: rgba(30, 30, 30, 0.9); border: 1.5px solid #444;
+            color: #fff; font-size: 16px; font-weight: 900;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+            transition: all 0.2s ease;
+        }
+        .btn-map-theme:active { transform: scale(0.9); background: #333; }
+
+        /* [지도 다크모드 CSS 필터 효과] */
+        .dark-map-layer {
+            filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+        }
+        
         .status-bar { text-align: center; color: var(--warning); font-size: 11px; padding: 6px; background: #0a0a0a; font-weight: 900; border-bottom: 1px solid #222; letter-spacing: 0.5px; }
         
         .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
@@ -149,7 +166,10 @@
     </div>
 
     <div id="map-area">
-        <div id="map-container"><div id="map"></div></div>
+        <div id="map-container">
+            <div id="map"></div>
+            <button id="map-theme-toggle" class="btn-map-theme" onclick="ui.toggleMapTheme()">🌙</button>
+        </div>
         <div id="status" class="status-bar">GPS INITIALIZING... | ALT: --m</div>
     </div> 
 
@@ -365,6 +385,7 @@ class RunningStorage {
         this.PROFILE_KEY = 'oppaRunProfile';
         this.LANG_KEY = 'oppaRunLang';
         this.TEMP_SESSION_KEY = 'oppaRunTempSession';
+        this.MAP_THEME_KEY = 'oppaRunMapTheme'; /* [지도 테마 설정 키 추가] */
     }
     saveRecord(record) {
         const history = this.loadHistory();
@@ -405,6 +426,10 @@ class RunningStorage {
     }
     getLang() { return localStorage.getItem(this.LANG_KEY) || 'en'; }
     setLang(lang) { localStorage.setItem(this.LANG_KEY, lang); }
+    
+    /* [지도 테마 저장 및 가져오기 메서드] */
+    getMapTheme() { return localStorage.getItem(this.MAP_THEME_KEY) || 'light'; }
+    setMapTheme(theme) { localStorage.setItem(this.MAP_THEME_KEY, theme); }
 }
 
 class UIManager {
@@ -434,11 +459,34 @@ class UIManager {
             btnMetroToggle: document.getElementById('btn-metro-toggle'),
             btnStart: document.getElementById('btn-start'),
             btnStop: document.getElementById('btn-stop'),
-            afterStop: document.getElementById('after-stop')
+            afterStop: document.getElementById('after-stop'),
+            mapThemeToggle: document.getElementById('map-theme-toggle') /* 토글 엘리먼트 바인딩 */
         };
         this.detailMap = null;
         this.currentStatFilter = 'weekly';
         this.pendingDeleteId = null; /* [v29.6.1] Target Pointer storage */
+    }
+
+    /* [지도 테마 전환 핵심 로직] 원본 CSS 필터를 토글하는 방식 */
+    toggleMapTheme() {
+        const currentTheme = storage.getMapTheme();
+        const nextTheme = currentTheme === 'light' ? 'dark' : 'light';
+        storage.setMapTheme(nextTheme);
+        this.applyMapTheme(nextTheme);
+    }
+
+    /* [지도 테마 클래스 적용 함수] */
+    applyMapTheme(theme) {
+        const mapEl = document.getElementById('map');
+        if (!mapEl) return;
+        
+        if (theme === 'dark') {
+            mapEl.classList.add('dark-map-layer');
+            if (this.dom.mapThemeToggle) this.dom.mapThemeToggle.textContent = '☀️';
+        } else {
+            mapEl.classList.remove('dark-map-layer');
+            if (this.dom.mapThemeToggle) this.dom.mapThemeToggle.textContent = '🌙';
+        }
     }
 
     updateRunningDisplay(data) {
@@ -769,6 +817,16 @@ class UIManager {
         this.detailMap = L.map('detail-map', {zoomControl: false, attributionControl: false});
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(this.detailMap);
         
+        /* [상세 기록 보기 지도 진입 시에도 다크모드 상태 동기화 처리] */
+        const detailMapEl = document.getElementById('detail-map');
+        if (detailMapEl) {
+            if (storage.getMapTheme() === 'dark') {
+                detailMapEl.classList.add('dark-map-layer');
+            } else {
+                detailMapEl.classList.remove('dark-map-layer');
+            }
+        }
+
         if (record.path && record.path.length > 0) { 
             let poly = L.polyline(record.path, {color: 'var(--primary)', weight: 5}).addTo(this.detailMap); 
             this.detailMap.fitBounds(poly.getBounds()); 
@@ -813,7 +871,7 @@ class UIManager {
                 <div class="detail-log-title" style="color:var(--warning)">${t.summaryTitle}</div>
                 <div class="detail-log-item"><span>${t.avgGct}</span><span>${record.gct || '--'} ms.</span></div>
                 <div class="detail-log-item"><span>${t.avgFlight}</span><span>${record.flight || '--'} %.</span></div>
-                <div class="detail-log-item"><span>${t.avgCadence}</span><span>${record.cadence || 0} SPM.</span></div>
+                <div class="detail-log-item"><span>${record.cadence || 0} SPM.</span></div>
             </div>`;
 
         document.getElementById('detail-data').innerHTML = splitLogsHtml + dynamicsHtml;
@@ -834,7 +892,7 @@ class UIManager {
         if(r.gct > 240) {
             gctComment = (lang === 'ko') ? "지면 접촉 시간이 다소 깁니다. 발을 지면에서 빠르게 낚아채듯 회수하며 고관절 주동근을 적극 활용해 보세요." : "Ground contact time is slightly prolonged. Focus on a quick pull-off and engage the hip flexors dynamically.";
         } else {
-            gctComment = (lang === 'ko') ? "매우 뛰어난 탄력성입니다. 골반 회전과 수평 가속이 유기적으로 이루어지고 있습니다." : "Excellent movement elasticity. Pelvic rotation and horizontal driving force are well balanced.";
+            gctComment = (lang === 'ko') ? "매우 뛰어난 탄력성입니다. 골반 회전และ 수평 가속이 유기적으로 이루어지고 있습니다." : "Excellent movement elasticity. Pelvic rotation and horizontal driving force are well balanced.";
         }
 
         let cadComment = "";
@@ -986,6 +1044,9 @@ class OppaRunApp {
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(this.map);
             this.marker = L.marker([33.7743, -117.9390], {icon: L.divIcon({className:'loc', html:'<div style="background:#007bff; border:2px solid #fff; border-radius:50%; width:14px; height:14px;"></div>'})}).addTo(this.map);
             this.polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(this.map);
+            
+            /* [앱 로딩 시 저장된 지도 테마 불러와서 즉시 동기화 반영] */
+            ui.applyMapTheme(storage.getMapTheme());
         }, 500);
     }
 
