@@ -16,20 +16,27 @@
         
         .control-panel { background: var(--card); padding: 15px; border-radius: 16px; border: 1px solid #333; width: 100%; max-width: 600px; box-sizing: border-box; }
         
-        /* 슬라이더 */
+        /* 슬라이더 제어: 노랑 버튼 안 움직이던 현상 해결 (pointer-events 제어 및 z-index 부여) */
         .seek-bar-area { position: relative; width: 100%; height: 40px; margin: 5px 0 10px 0; }
-        input[type="range"] { position: absolute; width: 100%; -webkit-appearance: none; background: transparent; pointer-events: auto; cursor: pointer; }
-        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; height: 26px; width: 26px; border-radius: 50%; background: var(--neon); border: 3px solid #000; margin-top: -2px; }
+        input[type="range"] { position: absolute; width: 100%; -webkit-appearance: none; background: transparent; pointer-events: none; cursor: pointer; }
+        #startRange { z-index: 10; }
+        #endRange { z-index: 9; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; height: 26px; width: 26px; border-radius: 50%; background: var(--neon); border: 3px solid #000; margin-top: -2px; pointer-events: auto; }
         #endRange::-webkit-slider-thumb { background: var(--blue); }
 
-        /* 입력창: 화면 안으로 쏙 들어오게 수정 */
+        /* 플레이 및 미세조절 레이아웃 */
+        .play-ctrl-row { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 8px; margin-bottom: 12px; }
+        .btn-play { background: #2C2C2E; color: white; border: 1px solid #444; font-size: 14px; }
+        .btn-step { background: #3A3A3C; color: #eee; font-size: 12px; }
+
+        /* 입력창 */
         .time-input-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; }
         .input-group { flex: 1; min-width: 80px; display: flex; flex-direction: column; gap: 4px; }
         .input-group span { font-size: 11px; color: #aaa; }
         input[type="number"] { background: #2C2C2E; color: white; border: 1px solid #444; padding: 10px; border-radius: 8px; font-size: 14px; width: 100%; box-sizing: border-box; }
 
         .btn-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; }
-        button, .file-lbl { border-radius: 8px; border: none; padding: 12px 5px; font-weight: bold; cursor: pointer; font-size: 13px; text-align: center; color: white; display: flex; align-items: center; justify-content: center; }
+        button, .file-lbl { border-radius: 8px; border: none; padding: 12px 5px; font-weight: bold; cursor: pointer; font-size: 13px; text-align: center; color: white; display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
         .btn-main { background: var(--blue); width: 100%; margin-bottom: 15px; font-size: 15px; }
         .btn-ai { background: var(--neon); color: black; }
         .btn-reset { background: #FF453A; }
@@ -60,6 +67,12 @@
         <div class="seek-bar-area">
             <input type="range" id="startRange" value="0" step="0.01">
             <input type="range" id="endRange" value="100" step="0.01">
+        </div>
+
+        <div class="play-ctrl-row">
+            <button class="btn-step" onclick="stepTime(-0.01)">◀ -0.01s</button>
+            <button class="btn-play" id="btnPlay" onclick="togglePlay()">▶ 재생</button>
+            <button class="btn-step" onclick="stepTime(0.01)">+0.01s ▶</button>
         </div>
 
         <div class="time-input-row">
@@ -103,6 +116,7 @@
         const inS = document.getElementById('inStart');
         const inE = document.getElementById('inEnd');
         const inG = document.getElementById('inGap');
+        const btnPlay = document.getElementById('btnPlay');
         
         const pose = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
         pose.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.5 });
@@ -120,10 +134,42 @@
             };
         };
 
+        // 비디오 탐색 및 싱크 로직 유지
         sR.oninput = () => { inS.value = sR.value; v.currentTime = sR.value; };
         eR.oninput = () => { inE.value = eR.value; v.currentTime = eR.value; };
         inS.oninput = () => { sR.value = inS.value; v.currentTime = inS.value; };
         inE.oninput = () => { eR.value = inE.value; v.currentTime = inE.value; };
+
+        // 비디오 재생 중 슬라이더 위치 실시간 연동 (시작점 기준 핸들 이동)
+        v.ontimeupdate = () => {
+            if(!v.paused) {
+                sR.value = v.currentTime;
+                inS.value = parseFloat(v.currentTime).toFixed(2);
+            }
+        };
+
+        // 재생/일시정지 토글 기능
+        function togglePlay() {
+            if (v.paused) {
+                v.play();
+                btnPlay.innerText = "⏸ 일시정지";
+            } else {
+                v.pause();
+                btnPlay.innerText = "▶ 재생";
+            }
+        }
+
+        // 수동으로 지정한 시간만큼 (예: 0.01초) 앞뒤 탐색 기능
+        function stepTime(amount) {
+            v.pause();
+            btnPlay.innerText = "▶ 재생";
+            let targetTime = v.currentTime + amount;
+            if (targetTime < 0) targetTime = 0;
+            if (targetTime > v.duration) targetTime = v.duration;
+            v.currentTime = targetTime;
+            sR.value = targetTime;
+            inS.value = parseFloat(targetTime).toFixed(2);
+        }
 
         async function runAI() { 
             c.width = v.videoWidth; c.height = v.videoHeight;
@@ -151,6 +197,8 @@
         }
 
         function reset() { 
+            v.pause();
+            btnPlay.innerText = "▶ 재생";
             ctx.clearRect(0,0,c.width,c.height); 
             document.getElementById('gallery').innerHTML = ""; 
             document.getElementById('valKnee').innerText = "--°";
