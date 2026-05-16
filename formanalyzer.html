@@ -85,9 +85,9 @@
         </div>
 
         <div class="play-ctrl-row">
-            <button class="btn-step" id="btnPrevStep" onclick="stepTime(-1)">◀ -0.03s</button>
+            <button class="btn-step" id="btnPrevStep" onclick="stepTime(-1)">◀ -1.00s</button>
             <button class="btn-play" id="btnPlay" onclick="togglePlay()">▶ Play</button>
-            <button class="btn-step" id="btnNextStep" onclick="stepTime(1)">+0.03s ▶</button>
+            <button class="btn-step" id="btnNextStep" onclick="stepTime(1)">+1.00s ▶</button>
         </div>
 
         <div class="time-input-row">
@@ -163,6 +163,11 @@
         pose.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.5 });
         pose.onResults(onResults);
 
+        // 초기 구동 시 스피드 3개 요소 동기화 셋업 진행
+        window.addEventListener('DOMContentLoaded', () => {
+            applySpeed(1.0);
+        });
+
         document.getElementById('up').onchange = (e) => {
             const file = e.target.files[0];
             if(!file) return;
@@ -173,43 +178,55 @@
                 eR.value = inE.value = v.duration.toFixed(4);
                 c.width = v.videoWidth; c.height = v.videoHeight;
                 
-                // 🔄 영상이 로딩되어도 기존에 지정해둔 배속 세팅과 버튼 텍스트가 강제 리셋되지 않고 정밀 동기화 유지
+                // 🔄 영상 로드 시 오빠가 세팅해 둔 속도가 엉뚱하게 풀리지 않도록 전방위 락 연동
                 applySpeed(currentSpeed); 
                 setTimeout(() => { if(aiTracking) runAI(); }, 300);
             };
         };
 
-        // 🛡️ 노란색/파란색 슬라이더 조절 시 서로를 추월 교차하지 못하도록 완전 차단 로직 적용
+        // 🛡️ 노란색/파란색 슬라이더 조절 시 겹침 현상 해결 및 역전 방지
         sR.oninput = () => { 
             if (parseFloat(sR.value) > parseFloat(eR.value)) {
-                sR.value = eR.value; // End값을 절대 넘지 못하게 가둠
+                sR.value = eR.value;
             }
+            // 겹쳤을 때 터치 제어권을 지키기 위해 z-index를 상황에 맞게 유동 전환
+            sR.style.zIndex = "10";
+            eR.style.zIndex = "9";
+            
             v.currentTime = sR.value; 
             inS.value = parseFloat(sR.value).toFixed(4); 
         };
         eR.oninput = () => { 
             if (parseFloat(eR.value) < parseFloat(sR.value)) {
-                eR.value = sR.value; // Start값 밑으로 내려가지 못하게 가둠
+                eR.value = sR.value;
             }
+            // 파란색 원을 만질 때는 파란색 인풋의 레이어를 위로 올려서 제어 불능 현상 완전 박멸
+            eR.style.zIndex = "10";
+            sR.style.zIndex = "9";
+            
             v.currentTime = eR.value; 
             inE.value = parseFloat(eR.value).toFixed(4); 
         };
 
-        // 🛡️ 하단 숫자 인풋 입력 시에도 서로 역전되지 않도록 밸브 장착
+        // 🛡️ 하단 숫자 인풋 입력 시 제한 가드 및 레이어 싱크
         inS.oninput = () => { 
             let val = parseFloat(inS.value) || 0;
             if(val < 0) val = 0;
-            if(val > parseFloat(eR.value)) val = parseFloat(eR.value); // 물리 한계 제어
+            if(val > parseFloat(eR.value)) val = parseFloat(eR.value);
             sR.value = val; 
             v.currentTime = val;
+            sR.style.zIndex = "10";
+            eR.style.zIndex = "9";
         };
         inE.oninput = () => { 
             let val = parseFloat(inE.value) || 0;
             if(val < 0) val = 0;
             if(val > v.duration) val = v.duration;
-            if(val < parseFloat(sR.value)) val = parseFloat(sR.value); // 물리 한계 제어
+            if(val < parseFloat(sR.value)) val = parseFloat(sR.value);
             eR.value = val; 
             v.currentTime = val;
+            eR.style.zIndex = "10";
+            sR.style.zIndex = "9";
         };
 
         v.ontimeupdate = () => { if(!v.paused) sR.value = v.currentTime; };
@@ -244,14 +261,14 @@
             });
         });
 
-        // 🔥 배속 조절 시 하단 드롭다운 값과 무관하게 상단 애로우는 순수 미세 프레임 이동단위 고정 동기화 보존
+        // 🔥 배속 조절 시 3가지 요소(비디오 재생속도, 상단 글씨, 미세 이동 수치)를 원클릭 완전 동기화 체인
         function applySpeed(speed) {
             currentSpeed = speed;
             v.playbackRate = currentSpeed;
             
-            // 배속 속도는 재생에만 관여하고, 좌우 애로우의 텍스트는 오빠가 폼 분석을 정확하게 할 수 있게 프레임 단위(0.03s)로 고정 연동!
-            btnPrevStep.innerText = `◀ -0.03s`;
-            btnNextStep.innerText = `+0.03s ▶`;
+            // 배속 수치에 맞춰서 상단 애로우 버튼 텍스트의 표기 초 단위를 동적으로 정밀 가변화!
+            btnPrevStep.innerText = `◀ -${currentSpeed.toFixed(2)}s`;
+            btnNextStep.innerText = `+${currentSpeed.toFixed(2)}s ▶`;
         }
 
         function togglePlay() {
@@ -266,13 +283,13 @@
             }
         }
 
-        // 🛡️ 초슬로우 모드에서도 덜덜거림 없이 칼같이 1프레임(0.03초)씩 동영상을 앞뒤로 정밀 제어하는 독립 스텝 매커니즘
+        // 🛡️ 고정된 0.03초 이동의 족쇄를 풀고 오빠가 지정한 속도(currentSpeed) 단위만큼 유연하게 반응하는 스마트 스텝 함수
         function stepTime(direction) {
             v.pause();
             btnPlay.innerText = "▶ Play";
             
-            // 가변 배속 수치에 영향받지 않고, 러닝 분석 최적화 규격인 고정 0.03초(프레임 단위)씩 정확하게 증감
-            let targetTime = v.currentTime + (direction * 0.03);
+            // 3단 연동 완성: 드롭다운에서 맞춘 currentSpeed 단위 크기만큼 정확히 앞뒤 프레임 이동 점프 실행
+            let targetTime = v.currentTime + (direction * currentSpeed);
             if (targetTime < 0) targetTime = 0;
             if (targetTime > v.duration) targetTime = v.duration;
             
@@ -342,7 +359,7 @@
             document.querySelectorAll('.dropdown-option').forEach(opt => opt.classList.remove('active'));
             document.querySelector('[data-value="1.0"]').classList.add('active');
             dropdownSelected.innerText = "1.0x";
-            applySpeed(1.0); // 리셋 시 기본 속도로 안전 복구
+            applySpeed(1.0); // 리셋 시 스피드 조합도 기본인 1.0x 체계로 깔끔하게 초기화
             
             ctx.clearRect(0,0,c.width,c.height); 
             document.getElementById('gallery').innerHTML = ""; 
