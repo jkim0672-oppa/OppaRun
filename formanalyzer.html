@@ -16,7 +16,7 @@
         
         .control-panel { background: var(--card); padding: 15px; border-radius: 16px; border: 1px solid #333; width: 100%; max-width: 600px; box-sizing: border-box; }
         
-        /* 슬라이더 공간 다이어트: 높이 40px -> 20px, 원 크기 26px -> 18px 줄임 */
+        /* 슬라이더 공간 다이어트 */
         .seek-bar-area { position: relative; width: 100%; height: 20px; margin: 2px 0 8px 0; }
         input[type="range"] { position: absolute; width: 100%; -webkit-appearance: none; background: transparent; pointer-events: none; cursor: pointer; }
         #startRange { z-index: 10; }
@@ -38,7 +38,7 @@
         .btn-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; }
         button, .file-lbl { border-radius: 8px; border: none; padding: 12px 5px; font-weight: bold; cursor: pointer; font-size: 13px; text-align: center; color: white; display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
         .btn-main { background: var(--blue); width: 100%; margin-bottom: 15px; font-size: 15px; }
-        .btn-ai { background: var(--neon); color: black; }
+        .btn-ai { background: #30D158; color: white; }
         .btn-reset { background: #FF453A; }
         .file-lbl { background: #3A3A3C; }
         
@@ -48,10 +48,15 @@
         .res-val { font-size: 16px; font-weight: bold; color: var(--neon); }
         .ref-text { color: #FF9500; font-size: 9px; display: block; margin-top: 4px; }
 
+        /* 갤러리 영역 */
         #gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(85px, 1fr)); gap: 6px; width: 100%; max-width: 600px; margin-top: 15px; }
-        .thumb { aspect-ratio: 1/1; border-radius: 6px; overflow: hidden; border: 1px solid #333; }
+        .thumb { aspect-ratio: 1/1; border-radius: 6px; overflow: hidden; border: 1px solid #333; cursor: pointer; }
         .thumb img { width: 100%; height: 100%; object-fit: cover; }
         input[type="file"] { display: none; }
+
+        /* 전체화면 확대 모달 스타일 추가 */
+        .modal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); align-items: center; justify-content: center; cursor: pointer; }
+        .modal img { max-width: 95%; max-height: 85%; border-radius: 8px; border: 1px solid #444; box-shadow: 0 4px 20px rgba(0,0,0,0.8); }
     </style>
 </head>
 <body>
@@ -92,11 +97,11 @@
 
         <div class="btn-row">
             <label class="file-lbl">📂 영상 선택 <input type="file" id="up" accept="video/*"></label>
-            <button class="btn-ai" onclick="runAI()">✨ AI 스냅</button>
+            <button class="btn-ai" id="btnAiToggle" onclick="toggleAI()">🟢 AI 추적 ON</button>
             <button class="btn-reset" onclick="reset()">🔄 리셋</button>
         </div>
         
-        <button class="btn-main" onclick="extract()">선택 구간 프레임 추출</button>
+        <button class="btn-main" onclick="captureSnapshot()">📸 현재 분석 스냅샷 저장</button>
 
         <div class="result-grid" id="res">
             <div class="res-card"><span class="res-label">무릎</span><span class="res-val" id="valKnee">--°</span><span class="ref-text">160-170°</span></div>
@@ -106,6 +111,10 @@
     </div>
 
     <div id="gallery"></div>
+
+    <div id="imgModal" class="modal" onclick="closeModal()">
+        <img id="modalImg" src="">
+    </div>
 
     <script>
         const v = document.getElementById('video');
@@ -117,6 +126,13 @@
         const inE = document.getElementById('inEnd');
         const inG = document.getElementById('inGap');
         const btnPlay = document.getElementById('btnPlay');
+        const btnAiToggle = document.getElementById('btnAiToggle');
+        
+        // AI 추적 활성화 상태 변수
+        let aiTracking = true;
+
+        // 현재 분석 각도 저장용 변수
+        let curKnee = "--°", curElbow = "--°", curBody = "--°";
         
         const pose = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
         pose.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.5 });
@@ -131,7 +147,7 @@
                 sR.value = 0; inS.value = 0;
                 eR.value = inE.value = v.duration;
                 c.width = v.videoWidth; c.height = v.videoHeight;
-                setTimeout(() => { runAI(); }, 300); // 로드 시 첫 프레임 자동 분석
+                setTimeout(() => { if(aiTracking) runAI(); }, 300);
             };
         };
 
@@ -140,7 +156,6 @@
         inS.oninput = () => { sR.value = inS.value; v.currentTime = inS.value; };
         inE.oninput = () => { eR.value = inE.value; v.currentTime = inE.value; };
 
-        // 비디오 재생 중 슬라이더 위치 실시간 연동
         v.ontimeupdate = () => {
             if(!v.paused) {
                 sR.value = v.currentTime;
@@ -148,16 +163,14 @@
             }
         };
 
-        // 수동 미세 탐색 완료 시 실시간 스켈레톤 업데이트
         v.addEventListener('seeked', () => {
-            if (v.paused) {
+            if (v.paused && aiTracking) {
                 runAI();
             }
         });
 
-        // 비디오 재생 중 끊김 없는 스켈레톤 추적 루프
         function trackFrame() {
-            if (!v.paused) {
+            if (!v.paused && aiTracking) {
                 runAI();
                 requestAnimationFrame(trackFrame);
             }
@@ -167,7 +180,7 @@
             if (v.paused) {
                 v.play();
                 btnPlay.innerText = "⏸ 일시정지";
-                trackFrame(); // 추적 루프 시작
+                if(aiTracking) trackFrame();
             } else {
                 v.pause();
                 btnPlay.innerText = "▶ 재생";
@@ -185,23 +198,40 @@
             inS.value = parseFloat(targetTime).toFixed(2);
         }
 
+        // AI 실시간 추적 ON/OFF 토글 함수
+        function toggleAI() {
+            aiTracking = !aiTracking;
+            if(aiTracking) {
+                btnAiToggle.innerText = "🟢 AI 추적 ON";
+                btnAiToggle.style.background = "#30D158";
+                runAI();
+                if(!v.paused) trackFrame();
+            } else {
+                btnAiToggle.innerText = "🔴 추적 중지 OFF";
+                btnAiToggle.style.background = "#FF453A";
+                ctx.clearRect(0, 0, c.width, c.height); // 스켈레톤 선 클리어
+            }
+        }
+
         async function runAI() { 
-            if (!v.videoWidth || !v.videoHeight) return;
+            if (!v.videoWidth || !v.videoHeight || !aiTracking) return;
             c.width = v.videoWidth; c.height = v.videoHeight;
             await pose.send({image: v}); 
         }
 
         function onResults(res) {
             ctx.clearRect(0, 0, c.width, c.height);
-            if (!res.poseLandmarks) return; // 알림창 삭제하여 연속 재생 시 방해 금지
+            if (!res.poseLandmarks || !aiTracking) return;
             drawConnectors(ctx, res.poseLandmarks, POSE_CONNECTIONS, {color: '#deff9a', lineWidth: 3});
             const lm = res.poseLandmarks;
-            const knee = calcAngle(lm[24], lm[26], lm[28]); 
-            const elbow = calcAngle(lm[12], lm[14], lm[16]);
-            const body = (Math.abs(Math.atan2(lm[24].x - lm[12].x, lm[24].y - lm[12].y) * 180 / Math.PI)).toFixed(1);
-            document.getElementById('valKnee').innerText = knee + "°";
-            document.getElementById('valElbow').innerText = elbow + "°";
-            document.getElementById('valBody').innerText = body + "°";
+            
+            curKnee = calcAngle(lm[24], lm[26], lm[28]) + "°"; 
+            curElbow = calcAngle(lm[12], lm[14], lm[16]) + "°";
+            curBody = (Math.abs(Math.atan2(lm[24].x - lm[12].x, lm[24].y - lm[12].y) * 180 / Math.PI)).toFixed(1) + "°";
+            
+            document.getElementById('valKnee').innerText = curKnee;
+            document.getElementById('valElbow').innerText = curElbow;
+            document.getElementById('valBody').innerText = curBody;
         }
 
         function calcAngle(p1, p2, p3) {
@@ -216,27 +246,76 @@
             btnPlay.innerText = "▶ 재생";
             ctx.clearRect(0,0,c.width,c.height); 
             document.getElementById('gallery').innerHTML = ""; 
+            curKnee = "--°"; curElbow = "--°"; curBody = "--°";
             document.getElementById('valKnee').innerText = "--°";
             document.getElementById('valElbow').innerText = "--°";
             document.getElementById('valBody').innerText = "--°";
         }
 
-        async function extract() {
-            const start = parseFloat(inS.value), end = parseFloat(inE.value), gap = parseFloat(inG.value);
-            const gal = document.getElementById('gallery'); gal.innerHTML = "";
-            const tempC = document.createElement('canvas'); const tCtx = tempC.getContext('2d');
-            tempC.width = v.videoWidth; tempC.height = v.videoHeight;
-            let cur = start;
-            while(cur <= end) {
-                v.currentTime = cur; await new Promise(r => v.onseeked = r);
-                tCtx.drawImage(v, 0, 0);
-                const img = document.createElement('img'); 
-                img.src = tempC.toDataURL('image/jpeg', 0.6);
-                const box = document.createElement('div'); box.className = "thumb";
-                img.onclick = ((t) => () => { v.currentTime = t; })(cur);
-                box.appendChild(img); gal.appendChild(box); 
-                cur += gap; if(gap <= 0) break;
-            }
+        // 비디오 프레임 + 스켈레톤 캔버스 + 각도 텍스트 자막까지 완벽하게 병합해 저장하는 크리티컬 캡처 로직
+        function captureSnapshot() {
+            if (!v.videoWidth || !v.videoHeight) return alert("영상이 로드되지 않았습니다.");
+            
+            const tempC = document.createElement('canvas');
+            const tCtx = tempC.getContext('2d');
+            tempC.width = v.videoWidth;
+            tempC.height = v.videoHeight;
+            
+            // 1. 배경 비디오 프레임 그리기
+            tCtx.drawImage(v, 0, 0, tempC.width, tempC.height);
+            
+            // 2. 그려진 실시간 스켈레톤 라인 오버레이 병합
+            tCtx.drawImage(c, 0, 0, tempC.width, tempC.height);
+            
+            // 3. 우측 하단에 정밀 분석 스냅샷 실시간 데이터 자막 박스 각인
+            const boxW = 160;
+            const boxH = 75;
+            const posX = tempC.width - boxW - 15;
+            const posY = tempC.height - boxH - 15;
+            
+            tCtx.fillStyle = "rgba(28, 28, 30, 0.85)";
+            tCtx.strokeStyle = "#deff9a";
+            tCtx.lineWidth = 2;
+            tCtx.lineJoin = "round";
+            // 라운드 박스 그리기
+            tCtx.beginPath();
+            tCtx.roundRect ? tCtx.roundRect(posX, posY, boxW, boxH, 8) : tCtx.rect(posX, posY, boxW, boxH);
+            tCtx.fill();
+            tCtx.stroke();
+            
+            // 자막 텍스트 스타일 지정
+            tCtx.fillStyle = "#ffffff";
+            tCtx.font = "bold 13px sans-serif";
+            tCtx.textAlign = "left";
+            tCtx.fillText(`무릎: ${curKnee}`, posX + 15, posY + 22);
+            tCtx.fillText(`팔치기: ${curElbow}`, posX + 15, posY + 44);
+            tCtx.fillText(`상체: ${curBody}`, posX + 15, posY + 66);
+            
+            // 갤러리 등록 및 클릭 시 전체화면 연동
+            const imgData = tempC.toDataURL('image/jpeg', 0.9);
+            const gal = document.getElementById('gallery');
+            const box = document.createElement('div');
+            box.className = "thumb";
+            
+            const img = document.createElement('img');
+            img.src = imgData;
+            // 터치하면 전체화면 모달이 열리도록 함수 바인딩
+            img.onclick = () => openModal(imgData);
+            
+            box.appendChild(img);
+            gal.insertBefore(box, gal.firstChild); // 최신 스냅샷이 맨 앞으로 오게 추가
+        }
+
+        // 모달 제어 함수들
+        function openModal(src) {
+            const modal = document.getElementById('imgModal');
+            const modalImg = document.getElementById('modalImg');
+            modal.style.display = "flex";
+            modalImg.src = src;
+        }
+
+        function closeModal() {
+            document.getElementById('imgModal').style.display = "none";
         }
     </script>
 </body>
