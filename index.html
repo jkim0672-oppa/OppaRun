@@ -108,10 +108,17 @@
         .settings-label { font-size: 11px; color: var(--primary); font-weight: 900; margin-bottom: 10px; letter-spacing: 1px; text-transform: uppercase; }
         .dropdown-select { background: #2a2a2a; color: #fff; border: 1.5px solid #444; padding: 18px; border-radius: 12px; font-size: 16px; font-weight: 800; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
         .dropdown-options { display: none; position: absolute; top: 105%; left: 0; width: 100%; background: #2a2a2a; border: 1.5px solid #444; border-radius: 12px; z-index: 1000; overflow-y: auto; max-height: 250px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        
+        /* 폼 정밀 분석실 전용 독립 드롭다운 확장 레이아웃 스타일 설정 */
+        .precision-dropdown-options { display: none; position: absolute; top: 105%; right: 0; width: 160px; background: #2a2a2a; border: 1.5px solid #444; border-radius: 12px; z-index: 2000; overflow-y: auto; max-height: 200px; box-shadow: 0 5px 20px rgba(0,0,0,0.6); }
+        
         .dropdown-option { padding: 18px; font-size: 16px; font-weight: 800; border-bottom: 1px solid #333; cursor: pointer; color: #fff; }
         .dropdown-option:last-child { border-bottom: none; }
         .dropdown-option:active { background: #333; }
         
+        /* 폼 정밀 분석실 콤팩트 드롭다운 옵션 패딩 조절 */
+        .precision-option { padding: 10px 14px; font-size: 12px; font-weight: 800; text-align: left; }
+
         .profile-row { display: flex; gap: 10px; margin-bottom: 25px; }
         .profile-col { flex: 1; position: relative; }
         .mini-select { padding: 12px; font-size: 14px; }
@@ -325,12 +332,17 @@
             </div>
 
             <div id="info-precision-analysis-area" style="display: none; flex-direction: column; width: 100%;">
-                <div class="diag-card" style="margin: 0 0 10px 0;">
+                <div class="diag-card" style="margin: 0 0 10px 0; position: relative;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                         <div style="color: var(--primary); font-weight: 900; font-size: 14px;">ANALYSIS DASHBOARD</div>
-                        <select id="precision-record-selector" onchange="ui.loadPrecisionDashboard(this.value)" style="background: #2a2a2a; color: #fff; border: 1px solid #444; padding: 6px 10px; border-radius: 6px; font-weight: 900; font-size: 11px; max-width: 160px;">
-                            <option value="">기록 없음</option>
-                        </select>
+                        
+                        <div style="position: relative; max-width: 160px; width: 160px;">
+                            <div id="precision-dropdown-select-btn" onclick="ui.toggleDropdown('precision-record-dropdown-options')" style="background: #2a2a2a; color: #fff; border: 1px solid #444; padding: 6px 10px; border-radius: 6px; font-weight: 900; font-size: 11px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                <span id="current-precision-record-text">기록 없음</span><span style="font-size:8px; color:var(--primary); margin-left: 4px;">▼</span>
+                            </div>
+                            <div id="precision-record-dropdown-options" class="precision-dropdown-options">
+                                </div>
+                        </div>
                     </div>
                     
                     <div class="precision-dashboard">
@@ -689,25 +701,37 @@ class UIManager {
         }
     }
 
-    /* [v29.6.3 신설] 폼 정밀 분석실 내 과거 기록 목록 드롭다운 빌드 로직 */
+    /* [v29.6.4 고도화 변경] 정밀 분석실 내 과거 기록 목록 테마 커스텀 드롭다운 빌드 로직 */
     buildPrecisionSelector() {
         const h = storage.loadHistory();
-        const selector = document.getElementById('precision-record-selector');
+        const dropdownOptions = document.getElementById('precision-record-dropdown-options');
+        const currentSelectText = document.getElementById('current-precision-record-text');
+        const isKo = (storage.getLang() === 'ko');
         
         if (h.length === 0) {
-            selector.innerHTML = '<option value="">기록 없음</option>';
+            currentSelectText.textContent = isKo ? "기록 없음" : "NO RECORDS";
+            dropdownOptions.innerHTML = `<div class="dropdown-option precision-option" style="color: #666; text-align:center;">${isKo ? "기록 없음" : "NO RECORDS"}</div>`;
             this.loadPrecisionDashboard(""); // 데이터 공란 초기화
             return;
         }
 
-        // 전체 기록을 날짜 포맷팅하여 옵션으로 바인딩
-        selector.innerHTML = h.map((r, index) => {
+        // 전체 과거 주행 데이터를 다크 테마 커스텀 옵션 레이어로 동적 렌더링 스택 바인딩
+        dropdownOptions.innerHTML = h.map((r) => {
             const shortDate = r.date.split(' (')[0].replace(', ', ' ');
-            return `<option value="${r.id}" ${index === 0 ? 'selected' : ''}>${shortDate}</option>`;
+            return `<div class="dropdown-option precision-option" onclick="ui.selectPrecisionRecord('${r.id}', '${shortDate}')">${shortDate}</div>`;
         }).join('');
 
-        // 기본값으로 0번째 인덱스(가장 방금 뛴 최신 기록) 자동 로드
+        // 첫 진입 시 가장 최근에 달린 최신 기록 수치를 인덱스 0번 기본 디폴트로 설정
+        const defaultDateText = h[0].date.split(' (')[0].replace(', ', ' ');
+        currentSelectText.textContent = defaultDateText;
         this.loadPrecisionDashboard(h[0].id);
+    }
+
+    /* [v29.6.4 신설] 정밀 분석실 커스텀 드롭다운 전용 클릭 액션 처리기 */
+    selectPrecisionRecord(recordId, dateText) {
+        document.getElementById('current-precision-record-text').textContent = dateText;
+        this.loadPrecisionDashboard(recordId);
+        document.getElementById('precision-record-dropdown-options').style.display = 'none'; // 선택 완료 후 레이어 숨김
     }
 
     /* [v29.6.4 변경] 8종 확장 정밀 지표 데이터 바인딩 및 동적 피드백 매핑 함수 */
@@ -821,9 +845,10 @@ class UIManager {
     }
 
     toggleDim(show) { this.dom.dimmerOverlay.style.display = show ? 'flex' : 'none'; }
+    
     toggleDropdown(id) { 
         const opt = document.getElementById(id); const isOpen = opt.style.display === 'block';
-        document.querySelectorAll('.dropdown-options').forEach(d => d.style.display = 'none');
+        document.querySelectorAll('.dropdown-options, .precision-dropdown-options').forEach(d => d.style.display = 'none');
         opt.style.display = isOpen ? 'none' : 'block'; 
     }
     selectLang(lang) { this.changeLanguage(lang); this.toggleDropdown('dropdown-options'); }
@@ -1028,7 +1053,7 @@ class UIManager {
             if(r.alt !== undefined) { sumAlt += parseInt(r.alt, 10) || 0; countAlt++; }
         });
 
-        let avgPaceStr = "--'--\"";
+        let avgPaceStr = "--'--";
         if (totalDist > 0 && totalSeconds > 0) {
             let avgKmh = totalDist / (totalSeconds / 3600);
             let s = 3600 / avgKmh;
