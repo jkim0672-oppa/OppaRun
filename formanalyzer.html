@@ -61,7 +61,7 @@
         video { width: 100%; height: 100%; object-fit: contain; display: block; }
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
         
-        /* 신설 비디오 밑 타임라인 컨테이너 */
+        /* 비디오 밑 타임라인 컨테이너 */
         .timeline-box {
             width: 100%;
             max-width: 500px;
@@ -133,7 +133,7 @@
             align-items: center;
             justify-content: center;
         }
-        /* 오른쪽 초 단위 수동 제어 그룹 */
+        /* 오른쪽 초 단위 수동 제어 그룹 (0.1초 단위 보정) */
         .manual-step-group {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -348,8 +348,8 @@
         <div class="top-ctrl-split-row">
             <button class="btn-play-small" id="btnPlay" onclick="AppControl.togglePlay()">▶ Play</button>
             <div class="manual-step-group">
-                <button class="btn-manual-step" onclick="AppControl.stepTime(-1.0)">◀ -1.0s</button>
-                <button class="btn-manual-step" onclick="AppControl.stepTime(1.0)">1.0s ▶</button>
+                <button class="btn-manual-step" onclick="AppControl.stepTime(-0.1)">◀ -0.1s</button>
+                <button class="btn-manual-step" onclick="AppControl.stepTime(0.1)">0.1s ▶</button>
             </div>
         </div>
 
@@ -369,8 +369,8 @@
                         <option value="0.05">0.05x</option>
                         <option value="0.1">0.1x</option>
                         <option value="0.25">0.25x</option>
-                        <option value="0.5" selected>0.5x</option>
-                        <option value="1.0">1.0x</option>
+                        <option value="0.5">0.5x</option>
+                        <option value="1.0" selected>1.0x (Normal)</option>
                     </select>
                 </div>
             </div>
@@ -406,12 +406,12 @@
         const btnPlay = document.getElementById('btnPlay');
         const btnAiToggle = document.getElementById('btnAiToggle');
         const speedSelect = document.getElementById('speedSelect');
-        const timeline = document.getElementById('videoTimeline'); // 타임라인 참조 추가
+        const timeline = document.getElementById('videoTimeline');
     </script>
 
     <script>
         // ==========================================
-        // [2번 방] MediaPipe & AI Core 데이터 처리 서랍 (100% 원본 보존)
+        // [2번 방] MediaPipe & AI Core 데이터 처리 서랍 (100% 로직 유지)
         // ==========================================
         const CoreAI = {
             aiTracking: true,
@@ -476,7 +476,7 @@
 
     <script>
         // ==========================================
-        // [3번 방] UI Event & Video Control 로직 서랍 (타임라인 연동 로직 추가 수용)
+        // [3번 방] UI Event & Video Control 로직 서랍 (자동재생 시 연산 패스 제어 추가)
         // ==========================================
         const AppControl = {
             initEvents() {
@@ -484,13 +484,13 @@
                     let val = parseFloat(inS.value) || 0;
                     if(val < 0) val = 0;
                     v.currentTime = val;
-                    if(v.paused) CoreAI.runStableAI();
+                    if(v.paused) CoreAI.runStableAI(); // 멈춘 상태에서 시간 조절 입력 시 연산 작동
                 };
 
                 inE.oninput = () => {
                     let val = parseFloat(inE.value) || v.duration;
                     v.currentTime = val;
-                    if(v.paused) CoreAI.runStableAI();
+                    if(v.paused) CoreAI.runStableAI(); // 멈춘 상태에서 시간 조절 입력 시 연산 작동
                 };
 
                 v.ontimeupdate = () => {
@@ -501,14 +501,12 @@
                         v.currentTime = startTime;
                     }
 
-                    // 실시간 타임라인 바 위치 업데이트 보정
                     if(v.duration) {
                         timeline.value = v.currentTime;
                     }
-
-                    if (CoreAI.aiTracking && !v.paused && !CoreAI.isAiProcessing) {
-                        CoreAI.runStableAI();
-                    }
+                    
+                    // [핵심 변경] 비디오가 일반 Play 중일 때는 스켈레톤 연산을 완전히 패스(Skip)하여 부하 해제
+                    // 오직 일시정지(수동 모드)일 때 일어나는 다른 이벤트에서만 연산을 명시적으로 호출합니다.
                 };
             },
 
@@ -518,13 +516,14 @@
                 v.src = URL.createObjectURL(file);
                 v.onloadedmetadata = () => {
                     inE.max = v.duration;
-                    timeline.max = v.duration; // 타임라인 최대 길이 동기화
+                    timeline.max = v.duration;
                     inS.value = "0.0000";
                     inE.value = v.duration.toFixed(4);
                     c.width = v.videoWidth; c.height = v.videoHeight;
                     v.currentTime = 0;
                     timeline.value = 0;
                     
+                    // 비디오 로드 시 정지 상태이므로 최초 1회 분석 스케치 작동
                     setTimeout(() => { CoreAI.runStableAI(); }, 300);
                 };
             },
@@ -535,24 +534,43 @@
                     if (v.currentTime < startTime || v.currentTime >= (parseFloat(inE.value) || v.duration)) {
                         v.currentTime = startTime;
                     }
+                    
+                    // 재생 시작 시 화면 클리어 (재생 중에는 스켈레톤 비표시)
+                    ctx.clearRect(0, 0, c.width, c.height);
+                    
                     v.playbackRate = parseFloat(speedSelect.value);
                     v.play();
                     btnPlay.innerText = "⏸ Pause";
                 } else {
                     v.pause();
                     btnPlay.innerText = "▶ Play";
+                    // 멈추는 순간 그 자리에 딱 멈춘 프레임의 관절 스켈레톤과 수치를 즉시 역추적 연산
+                    setTimeout(() => { CoreAI.runStableAI(); }, 50);
                 }
             },
 
+            // 수동 0.1초 조절 제어 트리거
             stepTime(amount) {
+                if (!v.paused) {
+                    v.pause();
+                    btnPlay.innerText = "▶ Play";
+                }
                 v.currentTime = Math.max(0, Math.min(v.duration, v.currentTime + amount));
-                timeline.value = v.currentTime; // 수동 작동시 타임라인 동기화
-                if(v.paused) setTimeout(() => { CoreAI.runStableAI(); }, 40);
+                timeline.value = v.currentTime;
+                
+                // 정지 상태에서 초 단위 수동 탐색할 때만 정밀 포즈 분석 작동
+                setTimeout(() => { CoreAI.runStableAI(); }, 40);
             },
 
+            // 타임라인 드래그 제어 트리거
             onTimelineDrag(val) {
+                if (!v.paused) {
+                    v.pause();
+                    btnPlay.innerText = "▶ Play";
+                }
                 v.currentTime = parseFloat(val);
-                if(v.paused) setTimeout(() => { CoreAI.runStableAI(); }, 40);
+                // 타임라인 수동 탐색할 때만 정밀 포즈 분석 작동
+                setTimeout(() => { CoreAI.runStableAI(); }, 40);
             },
 
             changeSpeed(val) {
@@ -566,6 +584,8 @@
                 if(!CoreAI.aiTracking) {
                     ctx.clearRect(0, 0, c.width, c.height);
                     CoreAI.lastJoints = { knee: null, elbow: null, hip: null };
+                } else if(v.paused) {
+                    CoreAI.runStableAI();
                 }
             },
 
@@ -584,7 +604,7 @@
                 document.getElementById('valKnee').innerText = "--°";
                 document.getElementById('valElbow').innerText = "--°";
                 document.getElementById('valBody').innerText = "--°";
-                CoreAI.runStableAI();
+                setTimeout(() => { CoreAI.runStableAI(); }, 50);
             }
         };
 
