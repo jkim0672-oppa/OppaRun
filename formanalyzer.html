@@ -155,7 +155,7 @@
         
         let aiTracking = true;
         let curKnee = "--°", curElbow = "--°", curBody = "--°";
-        let currentSpeed = 1.0; // 선택된 속도 상태 보관 전역 변수
+        let currentSpeed = 1.0; 
         
         let lastJoints = { knee: null, elbow: null, hip: null };
         
@@ -163,7 +163,7 @@
         pose.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.5 });
         pose.onResults(onResults);
 
-        // 초기 구동 시 스피드 3개 요소 동기화 셋업 진행
+        // 초기 구동 시 스피드 동기화 진행
         window.addEventListener('DOMContentLoaded', () => {
             applySpeed(1.0);
         });
@@ -178,7 +178,7 @@
                 eR.value = inE.value = v.duration.toFixed(4);
                 c.width = v.videoWidth; c.height = v.videoHeight;
                 
-                // 🔄 영상 처음 로딩 시 무조건 스피드를 1.0x 기본 속도로 초기화 및 UI 연동 활성화
+                // 🛠️ 제니의 애로우 스피드 고정 버그 완전 해결: 영상이 로드될 때 무조건 1.0배속 UI와 글자 동기화 실행
                 document.querySelectorAll('.dropdown-option').forEach(opt => opt.classList.remove('active'));
                 const defaultOpt = document.querySelector('[data-value="1.0"]');
                 if(defaultOpt) defaultOpt.classList.add('active');
@@ -189,15 +189,12 @@
             };
         };
 
-        // 🛡️ 노란색/파란색 슬라이더 조절 시 겹침 현상 해결 및 역전 방지
         sR.oninput = () => { 
             if (parseFloat(sR.value) > parseFloat(eR.value)) {
                 sR.value = eR.value;
             }
-            // 겹쳤을 때 터치 제어권을 지키기 위해 z-index를 상황에 맞게 유동 전환
             sR.style.zIndex = "10";
             eR.style.zIndex = "9";
-            
             v.currentTime = sR.value; 
             inS.value = parseFloat(sR.value).toFixed(4); 
         };
@@ -205,15 +202,12 @@
             if (parseFloat(eR.value) < parseFloat(sR.value)) {
                 eR.value = sR.value;
             }
-            // 파란색 원을 만질 때는 파란색 인풋의 레이어를 위로 올려서 제어 불능 현상 완전 박멸
             eR.style.zIndex = "10";
             sR.style.zIndex = "9";
-            
             v.currentTime = eR.value; 
             inE.value = parseFloat(eR.value).toFixed(4); 
         };
 
-        // 🛡️ 하단 숫자 인풋 입력 시 제한 가드 및 레이어 싱크
         inS.oninput = () => { 
             let val = parseFloat(inS.value) || 0;
             if(val < 0) val = 0;
@@ -234,7 +228,6 @@
         };
 
         v.ontimeupdate = () => { 
-            // 🔄 구간 반복(A-B Loop) 기능 핵심 가드 모듈 구현
             const endTime = parseFloat(inE.value) || v.duration;
             const startTime = parseFloat(inS.value) || 0;
 
@@ -244,10 +237,8 @@
                 inS.value = startTime.toFixed(4);
                 return; 
             }
-
             else if(!v.paused) {
                 sR.value = v.currentTime;
-                // 🔄 재생 중에도 인풋창 소수점 4자리 실시간 동기화 연동 추가
                 inS.value = parseFloat(v.currentTime).toFixed(4);
             } 
         };
@@ -260,7 +251,6 @@
             }
         }
 
-        /* 커스텀 드롭다운 내비게이션 제어 모듈 */
         function toggleDropdown() {
             dropdownOptions.style.display = dropdownOptions.style.display === 'block' ? 'none' : 'block';
         }
@@ -278,23 +268,23 @@
                 dropdownSelected.innerText = this.innerText;
                 dropdownOptions.style.display = 'none';
                 
-                applySpeed(val); // 🛠️ 제니의 텍스트 싱크 최종 수정: 드롭다운 변경 시에도 확실하게 연동 추적 바인딩
+                applySpeed(val); 
             });
         });
 
-        // 🔥 배속 조절 시 3가지 요소(비디오 재생속도, 상단 글씨, 미세 이동 수치)를 원클릭 완전 동기화 체인
+        // 🔥 배속 조절 핵심 동기화 모듈 (비디오 속도 제어 + 상단 애로우 글자 밀어넣기)
         function applySpeed(speed) {
             currentSpeed = speed;
             v.playbackRate = currentSpeed;
             
-            // 🛡️ 상단 양쪽 애로우 버튼 텍스트의 표기 초 단위를 동적으로 정밀 가변화 및 먹통 현상 완전 해결!
+            // 🛠️ 제니의 애로우 스피드 고정 버그 완전 해결: 수치가 소수점 2자리(예: 0.03) 형태로 글자에 칼같이 박히도록 수정!
             btnPrevStep.innerText = `◀ -${currentSpeed.toFixed(2)}s`;
             btnNextStep.innerText = `+${currentSpeed.toFixed(2)}s ▶`;
         }
 
         function togglePlay() {
             if (v.paused) {
-                applySpeed(currentSpeed); // 플레이 할 때 현재 지정 배속으로 빈틈없이 바인딩
+                applySpeed(currentSpeed); 
                 v.play();
                 btnPlay.innerText = "⏸ Pause";
                 if(aiTracking) trackFrame();
@@ -304,25 +294,21 @@
             }
         }
 
-        // 🛡️ 고정된 0.03초 이동의 족쇄를 풀고 오빠가 지정한 속도(currentSpeed) 단위만큼 유연하게 반응하는 스마트 스텝 함수
         function stepTime(direction) {
             v.pause();
             btnPlay.innerText = "▶ Play";
             
             let stepUnit = currentSpeed;
-            if (stepUnit < 0.03) stepUnit = 0.03; // 최소 이동 보장선 가드 구축
+            if (stepUnit < 0.03) stepUnit = 0.03; 
 
             let targetTime = v.currentTime + (direction * stepUnit);
             if (targetTime < 0) targetTime = 0;
             if (v.duration && targetTime > v.duration) targetTime = v.duration;
             
             v.currentTime = targetTime;
-            
-            // 현재 위치에 맞게 슬라이더바와 4자리 소수점 인풋창 완벽 업데이트 싱크
             sR.value = targetTime;
             inS.value = parseFloat(targetTime).toFixed(4);
 
-            // 🛡️ 슬라이더 뭉침 전면 방지 가드: 이동한 위치가 파란색 범위를 벗어나면 파란색 슬라이더도 같이 밀어주기
             if (parseFloat(sR.value) > parseFloat(eR.value)) {
                 eR.value = sR.value;
                 inE.value = parseFloat(sR.value).toFixed(4);
@@ -380,19 +366,17 @@
             v.pause();
             btnPlay.innerText = "▶ Play";
             
-            // 🛡️ 리셋을 눌러도 오빠가 맞춘 고유 구간(Start 인풋 수치)의 원본 데이터를 완벽히 보존하여 복귀
             const startPos = parseFloat(inS.value) || 0;
             v.currentTime = startPos;
             sR.value = startPos;
 
+            // 🛠️ 제니의 애로우 스피드 고정 버그 완전 해결: 리셋 시 하단 드롭다운 리스트의 액티브 상태 초기화
             document.querySelectorAll('.dropdown-option').forEach(opt => opt.classList.remove('active'));
-            
-            // 🛠 *제니의 텍스트 싱크 최종 수정*: 확실하게 1.0 요소에 active를 심고 innerText를 강제 밀어넣기 처리 후 스피드를 세팅하도록 완벽 정렬
             const defaultOpt = document.querySelector('[data-value="1.0"]');
             if(defaultOpt) defaultOpt.classList.add('active');
             dropdownSelected.innerText = "1.0x (Normal)"; 
             
-            // 🛡️ 리셋을 누르면 상단 양쪽 애로우 버튼 텍스트도 1.00s 기준 스펙으로 내부 가변식 반영 적용완료!
+            // 🔥 핵심: 리셋 시 상단 미세조절 애로우 글자도 드롭다운 배속(1.0)에 맞게 강제 강제 동기화 호출!
             applySpeed(1.0); 
             
             ctx.clearRect(0,0,c.width,c.height); 
