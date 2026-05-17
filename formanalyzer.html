@@ -134,6 +134,7 @@
         const dropdownOptions = document.getElementById('dropdownOptions');
         
         let aiTracking = true;
+        let isAiProcessing = false; 
         let curKnee = "--°", curElbow = "--°", curBody = "--°";
         let currentSpeed = 1.0; 
         
@@ -163,6 +164,7 @@
                 dropdownSelected.innerText = "1.0x (Normal)";
                 
                 applySpeed(1.0); 
+                v.currentTime = 0;
                 setTimeout(() => { if(aiTracking) runAI(); }, 300);
             };
         };
@@ -186,21 +188,23 @@
             const endTime = parseFloat(inE.value) || v.duration;
             const startTime = parseFloat(inS.value) || 0;
 
-            if (v.currentTime >= endTime) {
+            if (v.currentTime >= endTime || v.currentTime < startTime) {
                 v.currentTime = startTime;
-                inS.value = startTime.toFixed(4);
                 return; 
             }
+
+            // [오빠의 천재적 아이디어 반영 단락]
+            // 재생 중이고 AI 가 켜져 있더라도, 오직 0.1배속 이하(0.01x, 0.03x, 0.05x, 0.1x) 정밀 수동/슬로우 모드일 때만 연산 가동!!
+            if (!v.paused && aiTracking && currentSpeed <= 0.1 && !isAiProcessing) {
+                runAI();
+            }
         };
-        v.addEventListener('seeked', () => { if (v.paused && aiTracking) runAI(); });
+        
+        // 탐색(Seek)이나 멈춰서 수동으로 돌려볼 때는 언제든 AI가 즉시 연산하도록 예외 보장!
+        v.addEventListener('seeked', () => { if (aiTracking) runAI(); });
 
         function trackFrame() {
             if (!v.paused) {
-                // 재생 중에만 렌더링 주기에 맞춰 텍스트 인풋 동기화 (부하 최소화)
-                inS.value = parseFloat(v.currentTime).toFixed(4);
-                if (aiTracking) {
-                    runAI();
-                }
                 requestAnimationFrame(trackFrame);
             }
         }
@@ -229,10 +233,21 @@
         function applySpeed(speed) {
             currentSpeed = speed;
             v.playbackRate = currentSpeed;
+            
+            // 배속을 일반 배속(0.25x 이상)으로 올리는 순간 캔버스를 깨끗하게 비워서 영상 관리를 쾌적하게 함
+            if (currentSpeed > 0.1) {
+                ctx.clearRect(0, 0, c.width, c.height);
+            } else {
+                if (aiTracking) runAI();
+            }
         }
 
         function togglePlay() {
             if (v.paused) {
+                const startTime = parseFloat(inS.value) || 0;
+                if (v.currentTime < startTime || v.currentTime >= (parseFloat(inE.value) || v.duration)) {
+                    v.currentTime = startTime;
+                }
                 applySpeed(currentSpeed); 
                 v.play();
                 btnPlay.innerText = "⏸ Pause";
@@ -240,6 +255,7 @@
             } else {
                 v.pause();
                 btnPlay.innerText = "▶ Play";
+                if (aiTracking) runAI(); // 일시정지 시점의 완벽한 뼈대 그리기
             }
         }
 
@@ -249,7 +265,6 @@
                 btnAiToggle.innerText = "🟢 AI ON";
                 btnAiToggle.style.background = "#30D158";
                 runAI();
-                if(!v.paused) trackFrame();
             } else {
                 btnAiToggle.innerText = "🔴 AI OFF";
                 btnAiToggle.style.background = "#FF453A";
@@ -259,9 +274,16 @@
         }
 
         async function runAI() { 
-            if (!v.videoWidth || !v.videoHeight || !aiTracking) return;
-            c.width = v.videoWidth; c.height = v.videoHeight;
-            await pose.send({image: v}); 
+            if (!v.videoWidth || !v.videoHeight || !aiTracking || isAiProcessing) return;
+            try {
+                isAiProcessing = true; 
+                c.width = v.videoWidth; c.height = v.videoHeight;
+                await pose.send({image: v}); 
+            } catch(err) {
+                console.error(err);
+            } finally {
+                isAiProcessing = false; 
+            }
         }
 
         function onResults(res) {
@@ -294,9 +316,9 @@
             v.pause();
             btnPlay.innerText = "▶ Play";
             
-            // 🛠️ 리셋 버튼 클릭 시 시작 지점 강제로 0으로 완벽 초기화!
             v.currentTime = 0;
             inS.value = "0.0000";
+            inE.value = v.duration ? v.duration.toFixed(4) : "0.0000";
 
             document.querySelectorAll('.dropdown-option').forEach(opt => opt.classList.remove('active'));
             const defaultOpt = document.querySelector('[data-value="1.0"]');
