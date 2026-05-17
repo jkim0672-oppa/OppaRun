@@ -3,106 +3,117 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pro Analysis v3.0 - Frame Control Engine</title>
+    <title>Pro Analysis v3.0 - Modular Architecture</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
+    
     <style>
         :root { --neon: #deff9a; --blue: #007AFF; --bg: #0A0A0C; --card: #1C1C1E; }
         body { background: var(--bg); color: white; font-family: sans-serif; margin: 0; padding: 10px; display: flex; flex-direction: column; align-items: center; overflow-x: hidden; }
         
-        .video-box { position: relative; width: 100%; max-width: 600px; background: #000; border-radius: 12px; overflow: hidden; border: 1px solid #333; margin-bottom: 10px; }
-        video { width: 100%; display: block; }
+        /* 비디오 스크린 프레임 */
+        .video-box { position: relative; width: 100%; max-width: 600px; background: #000; border-radius: 20px; overflow: hidden; border: 1px solid #333; margin-bottom: 12px; aspect-ratio: 16/10; }
+        video { width: 100%; height: 100%; object-fit: contain; display: block; }
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
         
-        .control-panel { background: var(--card); padding: 15px; border-radius: 16px; border: 1px solid #333; width: 100%; max-width: 600px; box-sizing: border-box; }
+        /* 메인 패널 베이스 */
+        .control-panel { background: #151517; padding: 16px; border-radius: 24px; border: 1px solid #222; width: 100%; max-width: 600px; box-sizing: border-box; position: relative; }
         
-        .play-ctrl-row { display: block; margin-bottom: 12px; width: 100%; }
-        .btn-play { background: #2C2C2E; color: white; border: 1px solid #444; font-size: 13px; font-weight: bold; height: 41px; line-height: 39px; box-sizing: border-box; width: 100%; text-align: center; border-radius: 8px; cursor: pointer; }
+        /* 상단 장식용 원형 노브 */
+        .decor-knobs { display: flex; justify-content: space-between; margin-bottom: 10px; padding: 0 4px; }
+        .knob-left { width: 14px; height: 14px; background: #deff9a; border-radius: 50%; }
+        .knob-right { width: 14px; height: 14px; background: #007AFF; border-radius: 50%; }
 
-        .time-input-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; }
-        .input-group { flex: 1; min-width: 75px; display: flex; flex-direction: column; gap: 4px; position: relative; box-sizing: border-box; }
-        .input-group span { font-size: 11px; color: #aaa; }
-        input[type="number"] { background: #2C2C2E; color: white; border: 1px solid #444; padding: 0 5px; border-radius: 8px; font-size: 13px; width: 100%; box-sizing: border-box; height: 41px; text-align: center; line-height: 41px; }
+        /* 최상단 제어 버튼 행 */
+        .top-ctrl-row { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 8px; margin-bottom: 12px; }
+        .btn-step { background: #2C2C2E; color: white; border: none; font-size: 13px; font-weight: bold; height: 44px; border-radius: 10px; cursor: pointer; }
+        .btn-play { background: #2C2C2E; color: white; border: none; font-size: 14px; font-weight: bold; height: 44px; border-radius: 10px; cursor: pointer; }
 
-        .custom-dropdown { position: relative; width: 100%; height: 41px; box-sizing: border-box; }
-        .dropdown-selected { background: #2C2C2E; color: var(--neon); border: 1px solid #444; padding: 0 5px; border-radius: 8px; font-size: 13px; font-weight: bold; text-align: center; line-height: 39px; cursor: pointer; box-sizing: border-box; height: 100%; }
-        .dropdown-selected::after { content: ' ▼'; font-size: 9px; color: #888; }
-        .dropdown-options { display: none; position: absolute; top: 45px; left: 0; width: 100%; background: #1C1C1E; border: 1px solid #444; border-radius: 8px; z-index: 150; box-shadow: 0 4px 15px rgba(0,0,0,0.6); max-height: 200px; overflow-y: auto; box-sizing: border-box; }
-        .dropdown-option { padding: 11px; font-size: 13px; text-align: center; color: white; cursor: pointer; border-bottom: 1px solid #2C2C2E; font-weight: bold; }
-        .dropdown-option:last-child { border-bottom: none; }
-        .dropdown-option:hover, .dropdown-option.active { background: #2C2C2E; color: var(--neon); }
+        /* 타임 인풋 컴포넌트 행 */
+        .time-input-row { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 8px; margin-bottom: 12px; }
+        .input-group { display: flex; flex-direction: column; gap: 4px; }
+        .input-group span { font-size: 11px; color: #8e8e93; font-weight: 500; }
+        input[type="number"], .custom-select { background: #2C2C2E; color: white; border: 1px solid #3a3a3c; padding: 0 10px; border-radius: 10px; font-size: 14px; height: 42px; text-align: center; box-sizing: border-box; font-weight: bold; }
+        .custom-select { color: var(--neon); display: flex; align-items: center; justify-content: center; cursor: pointer; }
 
-        .btn-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; width: 100%; box-sizing: border-box; }
-        button, .file-lbl { border-radius: 8px; border: none; height: 41px; font-weight: bold; cursor: pointer; font-size: 12px; text-align: center; color: white; display: flex; align-items: center; justify-content: center; box-sizing: border-box; margin: 0; width: 100%; }
-        .btn-main { background: var(--blue); width: 100%; margin-bottom: 8px; font-size: 14px; height: 48px; }
-        .btn-manual { background: #FF9500; color: white; width: 100%; margin-bottom: 8px; font-size: 14px; height: 48px; }
-        .btn-ai { background: #30D158; color: white; width: 100%; display: flex; align-items: center; justify-content: center; white-space: nowrap; }
-        .btn-reset { background: #FF453A; }
-        .file-lbl { background: #3A3A3C; cursor: pointer; line-height: 41px; }
+        /* 중앙 기능 제어 버튼 3분할 */
+        .mid-btn-row { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+        .file-lbl { background: #2C2C2E; color: white; font-weight: bold; border-radius: 10px; height: 44px; display: flex; align-items: center; justify-content: center; font-size: 12px; cursor: pointer; }
+        .btn-ai { background: #30D158; color: white; font-weight: bold; border-radius: 10px; height: 44px; font-size: 12px; border: none; cursor: pointer; }
+        .btn-reset { background: #FF453A; color: white; font-weight: bold; border-radius: 10px; height: 44px; font-size: 12px; border: none; cursor: pointer; }
+
+        /* 하단 주요 실행 버튼 구조 */
+        .btn-manual { background: #FF9500; color: white; border-radius: 12px; border: none; width: 100%; height: 48px; font-size: 14px; font-weight: bold; margin-bottom: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .btn-snapshot { background: #007AFF; color: white; border-radius: 12px; border: none; width: 100%; height: 48px; font-size: 14px; font-weight: bold; margin-bottom: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
         
+        /* 데이터 스코어보드 그리드 */
         .result-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
-        .res-card { background: #2C2C2E; padding: 10px; border-radius: 8px; border-left: 3px solid var(--neon); text-align: center; box-sizing: border-box; }
-        .res-label { font-size: 10px; color: #888; display: block; margin-bottom: 3px; }
-        .res-val { font-size: 16px; font-weight: bold; color: var(--neon); }
+        .res-card { background: #1C1C1E; padding: 12px 6px; border-radius: 12px; border-left: 3px solid var(--neon); text-align: center; box-sizing: border-box; }
+        .res-label { font-size: 10px; color: #8e8e93; display: block; margin-bottom: 4px; }
+        .res-val { font-size: 16px; font-weight: bold; color: var(--neon); display: block; }
         .ref-text { color: #FF9500; font-size: 9px; display: block; margin-top: 4px; }
 
+        /* 스냅샷 아카이브 갤러리 */
         #gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(85px, 1fr)); gap: 6px; width: 100%; max-width: 600px; margin-top: 15px; }
-        .thumb { aspect-ratio: 1/1; border-radius: 6px; overflow: hidden; border: 1px solid #333; cursor: pointer; }
+        .thumb { aspect-ratio: 1/1; border-radius: 6px; overflow: hidden; border: 1px solid #333; }
         .thumb img { width: 100%; height: 100%; object-fit: cover; }
         input[type="file"] { display: none; }
 
-        .modal { display: none; position: fixed; z-index: 200; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); align-items: center; justify-content: center; cursor: pointer; }
-        .modal img { max-width: 95%; max-height: 85%; border-radius: 8px; border: 1px solid #444; box-shadow: 0 4px 20px rgba(0,0,0,0.8); }
+        /* 이미지 팝업 모달 크기 */
+        .modal { display: none; position: fixed; z-index: 200; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); align-items: center; justify-content: center; }
+        .modal img { max-width: 95%; max-height: 85%; border-radius: 8px; }
     </style>
 </head>
 <body>
 
-    <h3 style="color: var(--neon); margin: 5px 0;">PRO ANALYSIS <span style="font-weight: 200;">v3.0</span></h3>
+    <h3 style="color: var(--neon); margin: 6px 0; font-size: 16px; letter-spacing: 0.5px;">PRO ANALYSIS <span style="font-weight: 300; color: #fff; opacity: 0.7;">v3.0</span></h3>
 
     <div class="video-box">
-        <video id="video" playsinline muted style="pointer-events: none;"></video>
+        <video id="video" playsinline muted></video>
         <canvas id="canvas"></canvas>
     </div>
 
     <div class="control-panel">
-        <div class="play-ctrl-row">
-            <button class="btn-play" id="btnPlay" onclick="togglePlay()">▶ Play</button>
+        <div class="decor-knobs">
+            <div class="knob-left"></div>
+            <div class="knob-right"></div>
+        </div>
+
+        <div class="top-ctrl-row">
+            <button class="btn-step" onclick="AppControl.stepTime(-1.0)">◀ -1.00s</button>
+            <button class="btn-play" id="btnPlay" onclick="AppControl.togglePlay()">▶ Play</button>
+            <button class="btn-step" onclick="AppControl.stepTime(1.0)">+1.00s ▶</button>
         </div>
 
         <div class="time-input-row">
-            <div class="input-group" style="flex: 0.9;">
+            <div class="input-group">
                 <span>Start (s)</span>
                 <input type="number" id="inStart" value="0.0000" step="0.1">
             </div>
-            <div class="input-group" style="flex: 0.9;">
+            <div class="input-group">
                 <span>End (s)</span>
                 <input type="number" id="inEnd" value="0.0000" step="0.1">
             </div>
-            <div class="input-group" style="flex: 1.2;">
+            <div class="input-group">
                 <span>Speed</span>
-                <div class="custom-dropdown">
-                    <div class="dropdown-selected" id="dropdownSelected" onclick="toggleDropdown()">1.0x (Normal)</div>
-                    <div class="dropdown-options" id="dropdownOptions">
-                        <div class="dropdown-option" data-value="0.01">0.01x</div>
-                        <div class="dropdown-option" data-value="0.03">0.03x</div>
-                        <div class="dropdown-option" data-value="0.05">0.05x</div>
-                        <div class="dropdown-option" data-value="0.1">0.1x</div>
-                        <div class="dropdown-option" data-value="0.25">0.25x</div>
-                        <div class="dropdown-option" data-value="0.5">0.5x</div>
-                        <div class="dropdown-option active" data-value="1.0">1.0x (Normal)</div>
-                    </div>
-                </div>
+                <select id="speedSelect" class="custom-select" onchange="AppControl.changeSpeed(this.value)" style="-webkit-appearance: none; appearance: none;">
+                    <option value="0.05">0.05x</option>
+                    <option value="0.1">0.1x</option>
+                    <option value="0.25">0.25x</option>
+                    <option value="0.5">0.5x</option>
+                    <option value="1.0" selected>1.0x (Normal)</option>
+                </select>
             </div>
         </div>
 
-        <div class="btn-row">
-            <label class="file-lbl">📂 Open Video <input type="file" id="up" accept="video/*"></label>
-            <button class="btn-ai" id="btnAiToggle" onclick="toggleAI()">🟢 AI ON</button>
-            <button class="btn-reset" onclick="reset()">🔄 Reset</button>
+        <div class="mid-btn-row">
+            <label class="file-lbl">📂 Open Video <input type="file" id="up" accept="video/*" onchange="AppControl.loadVideo(event)"></label>
+            <button class="btn-ai" id="btnAiToggle" onclick="AppControl.toggleAI()">🟢 AI ON</button>
+            <button class="btn-reset" onclick="AppControl.resetAll()">🔄 Reset</button>
         </div>
         
-        <button class="btn-manual" onclick="manualRunAI()">🎯 AI Manual Run</button>
-        <button class="btn-main" onclick="captureSnapshot()">📸 Save Analysis Snapshot</button>
+        <button class="btn-manual" onclick="AppControl.manualRunAI()">🎯 AI Manual Run</button>
+        <button class="btn-snapshot" onclick="AppStorage.captureSnapshot()">📸 Save Analysis Snapshot</button>
 
         <div class="result-grid" id="res">
             <div class="res-card"><span class="res-label">Knee</span><span class="res-val" id="valKnee">--°</span><span class="ref-text">160-170°</span></div>
@@ -113,8 +124,8 @@
 
     <div id="gallery"></div>
 
-    <div id="imgModal" class="modal" onclick="closeModal(event)">
-        <img id="modalImg" src="" onclick="closeModal(event)">
+    <div id="imgModal" class="modal" onclick="AppStorage.closeModal()">
+        <img id="modalImg" src="">
     </div>
 
     <script>
@@ -125,223 +136,231 @@
         const inE = document.getElementById('inEnd');
         const btnPlay = document.getElementById('btnPlay');
         const btnAiToggle = document.getElementById('btnAiToggle');
-        const dropdownSelected = document.getElementById('dropdownSelected');
-        const dropdownOptions = document.getElementById('dropdownOptions');
+        const speedSelect = document.getElementById('speedSelect');
+    </script>
 
-        let isPlaying = false; // 수동 재생 플래그
-        let aiTracking = true;
-        let isAiProcessing = false;
-        let currentSpeed = 1.0;
-        let animationFrameId = null;
-        let lastTimestamp = 0;
+    <script>
+        // ==========================================
+        // [2번 방] MediaPipe & AI Core 데이터 서랍
+        // ==========================================
+        const CoreAI = {
+            aiTracking: true,
+            isAiProcessing: false,
+            curKnee: "--°",
+            curElbow: "--°",
+            curBody: "--°",
+            lastJoints: { knee: null, elbow: null, hip: null },
+            instance: null,
 
-        let curKnee = "--°", curElbow = "--°", curBody = "--°";
-        let lastJoints = { knee: null, elbow: null, hip: null };
+            init() {
+                this.instance = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
+                this.instance.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.5 });
+                this.instance.onResults(this.onResults.bind(this));
+            },
 
-        const pose = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
-        pose.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.5 });
-        pose.onResults(onResults);
-
-        document.getElementById('up').onchange = (e) => {
-            const file = e.target.files[0];
-            if(!file) return;
-            v.src = URL.createObjectURL(file);
-            v.onloadedmetadata = () => {
-                inE.max = v.duration;
-                inS.value = "0.0000";
-                inE.value = v.duration.toFixed(4);
-                c.width = v.videoWidth; c.height = v.videoHeight;
-                v.currentTime = 0;
-                
-                // 첫 로드 프레임 즉시 분석 유도
-                setTimeout(() => { runAI(); }, 300);
-            };
-        };
-
-        inS.oninput = () => {
-            let val = parseFloat(inS.value) || 0;
-            if(val < 0) val = 0;
-            v.currentTime = val;
-            runAI();
-        };
-        inE.oninput = () => {
-            let val = parseFloat(inE.value) || v.duration;
-            v.currentTime = val;
-            runAI();
-        };
-
-        function toggleDropdown() {
-            dropdownOptions.style.display = dropdownOptions.style.display === 'block' ? 'none' : 'block';
-        }
-        document.addEventListener('click', function(e) {
-            if (!e.target.closest('.custom-dropdown')) dropdownOptions.style.display = 'none';
-        });
-        document.querySelectorAll('.dropdown-option').forEach(option => {
-            option.addEventListener('click', function() {
-                document.querySelectorAll('.dropdown-option').forEach(opt => opt.classList.remove('active'));
-                this.classList.add('active');
-                currentSpeed = parseFloat(this.getAttribute('data-value'));
-                dropdownSelected.innerText = this.innerText;
-                dropdownOptions.style.display = 'none';
-            });
-        });
-
-        // 🛠️ [핵심 엔진 변경] 재생 제어를 수동 시뮬레이션 인터벌 구조로 변경
-        function togglePlay() {
-            if (!isPlaying) {
-                isPlaying = true;
-                btnPlay.innerText = "⏸ Pause";
-                lastTimestamp = performance.now();
-                animationFrameId = requestAnimationFrame(renderLoop);
-            } else {
-                isPlaying = false;
-                btnPlay.innerText = "▶ Play";
-                if(animationFrameId) {
-                    cancelAnimationFrame(animationFrameId);
-                    animationFrameId = null;
+            async runStableAI() {
+                if (!v.videoWidth || !v.videoHeight || this.isAiProcessing) return;
+                try {
+                    this.isAiProcessing = true;
+                    if(c.width !== v.videoWidth || c.height !== v.videoHeight) {
+                        c.width = v.videoWidth; c.height = v.videoHeight;
+                    }
+                    await this.instance.send({image: v});
+                } catch(err) {
+                    console.log("Frame Skip to Prevent Lock");
+                } finally {
+                    this.isAiProcessing = false;
                 }
-            }
-        }
+            },
 
-        // 🛠️ 비디오 내부 하드웨어 드라이버를 쓰지 않고 자바스크립트가 직접 타임라인을 밀어주는 루프
-        async function renderLoop(timestamp) {
-            if (!isPlaying) return;
-
-            const elapsed = (timestamp - lastTimestamp) / 1000; // 초 단위 계산
-            lastTimestamp = timestamp;
-
-            const startTime = parseFloat(inS.value) || 0;
-            const endTime = parseFloat(inE.value) || v.duration;
-
-            // 시간에 맞춰 현재 타임스탬프 강제 이동 (배속 반영)
-            let nextTime = v.currentTime + (elapsed * currentSpeed);
-
-            if (nextTime >= endTime || nextTime < startTime) {
-                nextTime = startTime;
-            }
-
-            v.currentTime = nextTime;
-
-            // 화면 전환 동기화 후 AI 처리 실행 (렌더링 락 방지)
-            if (aiTracking && !isAiProcessing) {
-                await runAI();
-            }
-
-            animationFrameId = requestAnimationFrame(renderLoop);
-        }
-
-        function toggleAI() {
-            aiTracking = !aiTracking;
-            btnAiToggle.innerText = aiTracking ? "🟢 AI ON" : "🔴 AI OFF";
-            btnAiToggle.style.background = aiTracking ? "#30D158" : "#FF453A";
-            if(!aiTracking) {
+            onResults(res) {
                 ctx.clearRect(0, 0, c.width, c.height);
-                lastJoints = { knee: null, elbow: null, hip: null };
+                if (!res.poseLandmarks || !this.aiTracking) return;
+                
+                drawConnectors(ctx, res.poseLandmarks, POSE_CONNECTIONS, {color: '#deff9a', lineWidth: 3});
+                const lm = res.poseLandmarks;
+                
+                this.curKnee = this.calcAngle(lm[24], lm[26], lm[28]) + "°"; 
+                this.curElbow = this.calcAngle(lm[12], lm[14], lm[16]) + "°";
+                this.curBody = (Math.abs(Math.atan2(lm[24].x - lm[12].x, lm[24].y - lm[12].y) * 180 / Math.PI)).toFixed(1) + "°";
+                
+                document.getElementById('valKnee').innerText = this.curKnee;
+                document.getElementById('valElbow').innerText = this.curElbow;
+                document.getElementById('valBody').innerText = this.curBody;
+
+                this.lastJoints.knee = { x: lm[26].x * c.width, y: lm[26].y * c.height };
+                this.lastJoints.elbow = { x: lm[14].x * c.width, y: lm[14].y * c.height };
+                this.lastJoints.hip = { x: lm[24].x * c.width, y: lm[24].y * c.height };
+            },
+
+            calcAngle(p1, p2, p3) {
+                const a = Math.atan2(p3.y - p2.y, p3.x - p2.x) - Math.atan2(p1.y - p2.y, p1.x - p2.x);
+                let ang = Math.abs(a * 180 / Math.PI);
+                if (ang > 180) ang = 360 - ang;
+                return ang.toFixed(1);
             }
-        }
+        };
 
-        async function manualRunAI() {
-            if(!aiTracking) return alert("AI ON 상태에서만 수동 연산이 가능합니다.");
-            await runAI();
-        }
+        // Core AI 최초 예열 실행
+        CoreAI.init();
+    </script>
 
-        async function runAI() {
-            if (!v.videoWidth || !v.videoHeight || isAiProcessing) return;
-            try {
-                isAiProcessing = true;
-                if(c.width !== v.videoWidth || c.height !== v.videoHeight) {
+    <script>
+        // ==========================================
+        // [3번 방] UI Event & Video Control 로직 서랍
+        // ==========================================
+        const AppControl = {
+            initEvents() {
+                inS.oninput = () => {
+                    let val = parseFloat(inS.value) || 0;
+                    if(val < 0) val = 0;
+                    v.currentTime = val;
+                    if(v.paused) CoreAI.runStableAI();
+                };
+
+                inE.oninput = () => {
+                    let val = parseFloat(inE.value) || v.duration;
+                    v.currentTime = val;
+                    if(v.paused) CoreAI.runStableAI();
+                };
+
+                v.ontimeupdate = () => {
+                    const startTime = parseFloat(inS.value) || 0;
+                    const endTime = parseFloat(inE.value) || v.duration;
+                    
+                    if (v.currentTime >= endTime || v.currentTime < startTime) {
+                        v.currentTime = startTime;
+                    }
+
+                    if (CoreAI.aiTracking && !v.paused && !CoreAI.isAiProcessing) {
+                        CoreAI.runStableAI();
+                    }
+                };
+            },
+
+            loadVideo(e) {
+                const file = e.target.files[0];
+                if(!file) return;
+                v.src = URL.createObjectURL(file);
+                v.onloadedmetadata = () => {
+                    inE.max = v.duration;
+                    inS.value = "0.0000";
+                    inE.value = v.duration.toFixed(4);
                     c.width = v.videoWidth; c.height = v.videoHeight;
+                    v.currentTime = 0;
+                    
+                    setTimeout(() => { CoreAI.runStableAI(); }, 300);
+                };
+            },
+
+            togglePlay() {
+                if (v.paused) {
+                    const startTime = parseFloat(inS.value) || 0;
+                    if (v.currentTime < startTime || v.currentTime >= (parseFloat(inE.value) || v.duration)) {
+                        v.currentTime = startTime;
+                    }
+                    v.playbackRate = parseFloat(speedSelect.value);
+                    v.play();
+                    btnPlay.innerText = "⏸ Pause";
+                } else {
+                    v.pause();
+                    btnPlay.innerText = "▶ Play";
                 }
-                await pose.send({image: v});
-            } catch(err) {
-                console.error("Engine Error:", err);
-            } finally {
-                isAiProcessing = false;
+            },
+
+            stepTime(amount) {
+                v.currentTime = Math.max(0, Math.min(v.duration, v.currentTime + amount));
+                if(v.paused) setTimeout(() => { CoreAI.runStableAI(); }, 40);
+            },
+
+            changeSpeed(val) {
+                v.playbackRate = parseFloat(val);
+            },
+
+            toggleAI() {
+                CoreAI.aiTracking = !CoreAI.aiTracking;
+                btnAiToggle.innerText = CoreAI.aiTracking ? "🟢 AI ON" : "🔴 AI OFF";
+                btnAiToggle.style.background = CoreAI.aiTracking ? "#30D158" : "#FF453A";
+                if(!CoreAI.aiTracking) {
+                    ctx.clearRect(0, 0, c.width, c.height);
+                    CoreAI.lastJoints = { knee: null, elbow: null, hip: null };
+                }
+            },
+
+            manualRunAI() {
+                if(!CoreAI.aiTracking) return alert("AI ON 상태에서만 수동 연산이 가능합니다.");
+                CoreAI.runStableAI();
+            },
+
+            resetAll() {
+                v.pause();
+                btnPlay.innerText = "▶ Play";
+                v.currentTime = parseFloat(inS.value) || 0;
+                ctx.clearRect(0,0,c.width,c.height);
+                document.getElementById('gallery').innerHTML = "";
+                document.getElementById('valKnee').innerText = "--°";
+                document.getElementById('valElbow').innerText = "--°";
+                document.getElementById('valBody').innerText = "--°";
+                CoreAI.runStableAI();
             }
-        }
+        };
 
-        function onResults(res) {
-            ctx.clearRect(0, 0, c.width, c.height);
-            if (!res.poseLandmarks || !aiTracking) return;
-            
-            drawConnectors(ctx, res.poseLandmarks, POSE_CONNECTIONS, {color: '#deff9a', lineWidth: 3});
-            const lm = res.poseLandmarks;
-            
-            curKnee = calcAngle(lm[24], lm[26], lm[28]) + "°"; 
-            curElbow = calcAngle(lm[12], lm[14], lm[16]) + "°";
-            curBody = (Math.abs(Math.atan2(lm[24].x - lm[12].x, lm[24].y - lm[12].y) * 180 / Math.PI)).toFixed(1) + "°";
-            
-            document.getElementById('valKnee').innerText = curKnee;
-            document.getElementById('valElbow').innerText = curElbow;
-            document.getElementById('valBody').innerText = curBody;
+        // 컨트롤러 초기 리스너 바인딩
+        AppControl.initEvents();
+    </script>
 
-            lastJoints.knee = { x: lm[26].x * c.width, y: lm[26].y * c.height };
-            lastJoints.elbow = { x: lm[14].x * c.width, y: lm[14].y * c.height };
-            lastJoints.hip = { x: lm[24].x * c.width, y: lm[24].y * c.height };
-        }
+    <script>
+        // ==========================================
+        // [4번 방] Storage & Snapshot 데이터 처리 서랍
+        // ==========================================
+        const AppStorage = {
+            captureSnapshot() {
+                if (!v.videoWidth || !v.videoHeight) return alert("비디오 리소스가 준비되지 않았습니다.");
+                
+                const tempC = document.createElement('canvas');
+                const tCtx = tempC.getContext('2d');
+                tempC.width = v.videoWidth; tempC.height = v.videoHeight;
+                
+                // 오버레이 합성 데이터 주입
+                tCtx.drawImage(v, 0, 0, tempC.width, tempC.height);
+                tCtx.drawImage(c, 0, 0, tempC.width, tempC.height);
+                
+                tCtx.fillStyle = "#deff9a"; 
+                const fontSize = Math.max(14, tempC.width * 0.03);
+                tCtx.font = `bold ${fontSize}px sans-serif`;
+                tCtx.shadowColor = "black"; tCtx.shadowBlur = 4;
 
-        function calcAngle(p1, p2, p3) {
-            const a = Math.atan2(p3.y - p2.y, p3.x - p2.x) - Math.atan2(p1.y - p2.y, p1.x - p2.x);
-            let ang = Math.abs(a * 180 / Math.PI);
-            if (ang > 180) ang = 360 - ang;
-            return ang.toFixed(1);
-        }
+                if (CoreAI.lastJoints.knee && CoreAI.curKnee !== "--°") tCtx.fillText(`Knee ${CoreAI.curKnee}`, CoreAI.lastJoints.knee.x + 15, CoreAI.lastJoints.knee.y);
+                if (CoreAI.lastJoints.elbow && CoreAI.curElbow !== "--°") tCtx.fillText(`Elbow ${CoreAI.curElbow}`, CoreAI.lastJoints.elbow.x + 15, CoreAI.lastJoints.elbow.y);
+                if (CoreAI.lastJoints.hip && CoreAI.curBody !== "--°") tCtx.fillText(`Torso ${CoreAI.curBody}`, CoreAI.lastJoints.hip.x - (fontSize * 4), CoreAI.lastJoints.hip.y - 15);
 
-        function captureSnapshot() {
-            if (!v.videoWidth || !v.videoHeight) return alert("비디오를 로드해주세요.");
-            
-            const tempC = document.createElement('canvas');
-            const tCtx = tempC.getContext('2d');
-            tempC.width = v.videoWidth; tempC.height = v.videoHeight;
-            
-            tCtx.drawImage(v, 0, 0, tempC.width, tempC.height);
-            tCtx.drawImage(c, 0, 0, tempC.width, tempC.height);
-            
-            tCtx.fillStyle = "#deff9a"; 
-            const fontSize = Math.max(14, tempC.width * 0.03);
-            tCtx.font = `bold ${fontSize}px sans-serif`;
-            tCtx.shadowColor = "black"; tCtx.shadowBlur = 4;
+                const imgData = tempC.toDataURL('image/jpeg', 0.9);
+                this.renderThumbnail(imgData);
+            },
 
-            if (lastJoints.knee && curKnee !== "--°") tCtx.fillText(`Knee ${curKnee}`, lastJoints.knee.x + 15, lastJoints.knee.y);
-            if (lastJoints.elbow && curElbow !== "--°") tCtx.fillText(`Elbow ${curElbow}`, lastJoints.elbow.x + 15, lastJoints.elbow.y);
-            if (lastJoints.hip && curBody !== "--°") tCtx.fillText(`Torso ${curBody}`, lastJoints.hip.x - (fontSize * 4), lastJoints.hip.y - 15);
+            renderThumbnail(src) {
+                const gal = document.getElementById('gallery');
+                const box = document.createElement('div');
+                box.className = "thumb";
+                
+                const img = document.createElement('img');
+                img.src = src;
+                img.onclick = () => this.openModal(src);
+                
+                box.appendChild(img);
+                gal.insertBefore(box, gal.firstChild);
+            },
 
-            const imgData = tempC.toDataURL('image/jpeg', 0.9);
-            const gal = document.getElementById('gallery');
-            const box = document.createElement('div');
-            box.className = "thumb";
-            
-            const img = document.createElement('img');
-            img.src = imgData;
-            img.onclick = () => openModal(imgData);
-            
-            box.appendChild(img);
-            gal.insertBefore(box, gal.firstChild);
-        }
+            openModal(src) {
+                const modal = document.getElementById('imgModal');
+                modal.style.display = "flex";
+                document.getElementById('modalImg').src = src;
+            },
 
-        function reset() {
-            isPlaying = false;
-            btnPlay.innerText = "▶ Play";
-            if(animationFrameId) cancelAnimationFrame(animationFrameId);
-            v.currentTime = parseFloat(inS.value) || 0;
-            ctx.clearRect(0,0,c.width,c.height);
-            document.getElementById('gallery').innerHTML = "";
-            document.getElementById('valKnee').innerText = "--°";
-            document.getElementById('valElbow').innerText = "--°";
-            document.getElementById('valBody').innerText = "--°";
-            runAI();
-        }
-
-        function openModal(src) {
-            const modal = document.getElementById('imgModal');
-            modal.style.display = "flex";
-            document.getElementById('modalImg').src = src;
-        }
-
-        function closeModal(event) {
-            if (event) { event.stopPropagation(); event.preventDefault(); }
-            document.getElementById('imgModal').style.display = "none";
-        }
+            closeModal() {
+                document.getElementById('imgModal').style.display = "none";
+            }
+        };
     </script>
 </body>
 </html>
