@@ -178,8 +178,13 @@
                 eR.value = inE.value = v.duration.toFixed(4);
                 c.width = v.videoWidth; c.height = v.videoHeight;
                 
-                // 🔄 영상 로드 시 오빠가 세팅해 둔 속도가 엉뚱하게 풀리지 않도록 전방위 락 연동
-                applySpeed(currentSpeed); 
+                // 🔄 영상 처음 로딩 시 무조건 스피드를 1.0x 기본 속도로 초기화 및 UI 연동 활성화
+                document.querySelectorAll('.dropdown-option').forEach(opt => opt.classList.remove('active'));
+                const defaultOpt = document.querySelector('[data-value="1.0"]');
+                if(defaultOpt) defaultOpt.classList.add('active');
+                dropdownSelected.innerText = "1.0x (Normal)";
+                
+                applySpeed(1.0); 
                 setTimeout(() => { if(aiTracking) runAI(); }, 300);
             };
         };
@@ -229,7 +234,13 @@
             sR.style.zIndex = "9";
         };
 
-        v.ontimeupdate = () => { if(!v.paused) sR.value = v.currentTime; };
+        v.ontimeupdate = () => { 
+            if(!v.paused) {
+                sR.value = v.currentTime;
+                // 🔄 재생 중에도 인풋창 소수점 4자리 실시간 동기화 연동 추가
+                inS.value = parseFloat(v.currentTime).toFixed(4);
+            } 
+        };
         v.addEventListener('seeked', () => { if (v.paused && aiTracking) runAI(); });
 
         function trackFrame() {
@@ -291,13 +302,19 @@
             // 3단 연동 완성: 드롭다운에서 맞춘 currentSpeed 단위 크기만큼 정확히 앞뒤 프레임 이동 점프 실행
             let targetTime = v.currentTime + (direction * currentSpeed);
             if (targetTime < 0) targetTime = 0;
-            if (targetTime > v.duration) targetTime = v.duration;
+            if (v.duration && targetTime > v.duration) targetTime = v.duration;
             
             v.currentTime = targetTime;
             
             // 현재 위치에 맞게 슬라이더바와 4자리 소수점 인풋창 완벽 업데이트 싱크
             sR.value = targetTime;
             inS.value = parseFloat(targetTime).toFixed(4);
+
+            // 🛡️ 슬라이더 뭉침 전면 방지 가드: 이동한 위치가 파란색 범위를 벗어나면 파란색 슬라이더도 같이 밀어주기
+            if (parseFloat(sR.value) > parseFloat(eR.value)) {
+                eR.value = sR.value;
+                inE.value = parseFloat(sR.value).toFixed(4);
+            }
         }
 
         function toggleAI() {
