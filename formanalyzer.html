@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, shrink-to-fit=no">
-    <title>Pro Analysis v4.3 - Full Screen Edition</title>
+    <title>Pro Analysis v4.4 - AI Auto Detection Edition</title>
     
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -40,7 +40,7 @@
             align-items: center; 
             overflow: hidden; 
             height: 100vh;
-            height: -webkit-fill-available; /* 모바일 브라우저 주소창 높이 대응 */
+            height: -webkit-fill-available; 
             box-sizing: border-box; 
         }
         
@@ -129,7 +129,7 @@
             background: transparent; color: #fff; border: 1.5px solid var(--neon);
             font-size: 13px; font-weight: bold; height: 42px; border-radius: 10px; cursor: pointer;
         }
-        .btn-marking.active-auto { background: rgba(187, 242, 70, 0.2); }
+        .btn-marking.active-auto { background: rgba(187, 242, 70, 0.2); border-color: #10b981; color: #10b981; }
 
         .select-wrapper { 
             position: relative; background: var(--input-bg); border: 1px solid #2c2c2e; border-radius: 10px; height: 42px;
@@ -199,7 +199,7 @@
 </head>
 <body>
 
-    <h3 class="main-title">PRO ANALYSIS v4.3</h3>
+    <h3 class="main-title">PRO ANALYSIS v4.4</h3>
 
     <div class="video-box">
         <video id="video" playsinline muted></video>
@@ -219,8 +219,8 @@
         <div class="grid-row precision-row">
             <button class="btn-precision" onclick="AppControl.stepTime(-0.03)">◀ -0.03s</button>
             <button class="btn-precision" onclick="AppControl.stepTime(-0.01)">◀ -0.01s</button>
-            <button class="btn-precision" onclick="AppControl.stepTime(0.01)">0.01s ▶</button>
-            <button class="btn-precision" onclick="AppControl.stepTime(0.03)">0.03s ▶</button>
+            <button class="btn-precision" onclick="AppControl.stepTime(0.01) || AppControl.checkAutoAnalysis()">0.01s ▶</button>
+            <button class="btn-precision" onclick="AppControl.stepTime(0.03) || AppControl.checkAutoAnalysis()">0.03s ▶</button>
         </div>
 
         <div class="grid-row marking-row">
@@ -304,6 +304,8 @@
             curKnee: "--°", curElbow: "--°", curBody: "--°",
             lastJoints: { knee: null, elbow: null, hip: null },
             instance: null,
+            // 실시간 최저점 알고리즘용 발 좌표 히스토리 버퍼 데이터
+            footDataHistory: [],
 
             init() {
                 this.instance = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
@@ -338,12 +340,67 @@
                 this.lastJoints.knee = { x: lm[26].x * c.width, y: lm[26].y * c.height };
                 this.lastJoints.elbow = { x: lm[14].x * c.width, y: lm[14].y * c.height };
                 this.lastJoints.hip = { x: lm[24].x * c.width, y: lm[24].y * c.height };
+
+                // [v4.4 신규 추가] Auto Mark 전용 발(뒤꿈치, 앞꿈치) 변동성 기록 적재 로직
+                if(AppControl.isAutoMode) {
+                    this.footDataHistory.push({
+                        time: v.currentTime,
+                        leftHeelY: lm[29].y,
+                        leftToeY: lm[31].y,
+                        rightHeelY: lm[30].y,
+                        rightToeY: lm[32].y
+                    });
+                    if(this.footDataHistory.length > 90) this.footDataHistory.shift(); // 실시간 데이터 유지를 위한 큐 처리
+                    this.analyzeRunningGCT();
+                }
             },
             calcAngle(p1, p2, p3) {
                 const a = Math.atan2(p3.y - p2.y, p3.x - p2.x) - Math.atan2(p1.y - p2.y, p1.x - p2.x);
                 let ang = Math.abs(a * 180 / Math.PI);
                 if (ang > 180) ang = 360 - ang;
                 return ang.toFixed(1);
+            },
+            // [v4.4 신규 추가] 착지 스타일 독립형 물리 판정 장치
+            analyzeRunningGCT() {
+                if(this.footDataHistory.length < 5) return;
+                const h = this.footDataHistory;
+                const len = h.length;
+                
+                // 최신 프레임의 가속도 및 변곡점 분석을 통한 발바닥 접촉 판정
+                let cur = h[len-1];
+                let prev = h[len-2];
+                let pprev = h[len-3];
+
+                // 양발 중 가장 지면에 가까운(Y축 값이 높은) 상태 확인
+                let activeLeftY = Math.max(cur.leftHeelY, cur.leftToeY);
+                let prevLeftY = Math.max(prev.leftHeelY, prev.leftToeY);
+                let pprevLeftY = Math.max(pprev.leftHeelY, pprev.leftToeY);
+
+                let activeRightY = Math.max(cur.rightHeelY, cur.rightToeY);
+                let prevRightY = Math.max(prev.rightHeelY, prev.rightToeY);
+                let pprevRightY = Math.max(pprev.rightHeelY, pprev.rightToeY);
+
+                // 왼쪽 발 자동 접지 및 이륙 판정 매칭
+                if(prevLeftY >= pprevLeftY && cur.leftHeelY <= prev.leftHeelY && AppControl.contactTime === null) {
+                    // 낙하 가속도가 멈추고 수평으로 전될되는 첫 프레임 임계점 검출
+                    AppControl.syncAutoMark('left', cur.time);
+                }
+                if(AppControl.contactTime !== null && AppControl.takeoffTime === null) {
+                    if(cur.leftToeY < prev.leftToeY && prev.leftToeY >= pprev.leftToeY) {
+                        // 발가락 끝이 최종 지면을 이탈하여 솟구치는 반전 타이밍
+                        AppControl.syncAutoMark('right', prev.time);
+                    }
+                }
+
+                // 우측 발 대응 인터록 스캔 (교차 구동 보완)
+                if(prevRightY >= pprevRightY && cur.rightHeelY <= prev.rightHeelY && AppControl.contactTime === null) {
+                    AppControl.syncAutoMark('left', cur.time);
+                }
+                if(AppControl.contactTime !== null && AppControl.takeoffTime === null) {
+                    if(cur.rightToeY < prev.rightToeY && prev.rightToeY >= pprev.rightToeY) {
+                        AppControl.syncAutoMark('right', prev.time);
+                    }
+                }
             }
         };
 
@@ -365,9 +422,29 @@
                 if(this.isAutoMode) {
                     btnAutoMark.classList.add('active-auto');
                     btnAutoMark.innerText = "Analyzing";
+                    CoreAI.footDataHistory = []; // 버퍼 초기화 후 스캔 대기
                 } else {
                     btnAutoMark.classList.remove('active-auto');
                     btnAutoMark.innerText = "Auto";
+                }
+            },
+            // [v4.4 신규 추가] AI 연산 엔진이 찾은 타임 스탬프를 하단 레이아웃과 동기화하는 결합 장치
+            syncAutoMark(side, targetTime) {
+                if(side === 'left') {
+                    sL.value = targetTime;
+                    this.contactTime = targetTime;
+                } else {
+                    if(targetTime > this.contactTime) {
+                        sR.value = targetTime;
+                        this.takeoffTime = targetTime;
+                    }
+                }
+                this.updateTrack();
+                this.calculateMetrics();
+            },
+            checkAutoAnalysis() {
+                if(this.isAutoMode && CoreAI.aiTracking) {
+                    CoreAI.runStableAI();
                 }
             },
             loadVideo(e) {
@@ -386,6 +463,7 @@
                     this.takeoffTime = null;
                     valGCT.innerText = `0ms`;
                     valFlight.innerText = `0ms`;
+                    CoreAI.footDataHistory = [];
                     if(CoreAI.aiTracking) {
                         setTimeout(() => { CoreAI.runStableAI(); }, 150);
                     }
@@ -437,8 +515,10 @@
             calculateMetrics() {
                 if (this.contactTime !== null && this.takeoffTime !== null) {
                     const diffMs = Math.round((this.takeoffTime - this.contactTime) * 1000);
-                    valGCT.innerText = `${diffMs}ms`;
-                    valFlight.innerText = Math.round(diffMs * 0.45) + "ms"; 
+                    if(diffMs >= 0) {
+                        valGCT.innerText = `${diffMs}ms`;
+                        valFlight.innerText = Math.round(diffMs * 0.45) + "ms"; 
+                    }
                 }
             },
             syncPlayAI() {
@@ -500,6 +580,11 @@
                 document.getElementById('valKnee').innerText = "--°";
                 document.getElementById('valElbow').innerText = "--°";
                 document.getElementById('valBody').innerText = "--°";
+                this.contactTime = null;
+                this.takeoffTime = null;
+                valGCT.innerText = "0ms";
+                valFlight.innerText = "0ms";
+                CoreAI.footDataHistory = [];
                 setTimeout(() => { CoreAI.runStableAI(); }, 50);
             }
         };
