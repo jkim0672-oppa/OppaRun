@@ -225,8 +225,7 @@
         };
         inE.oninput = () => { 
             let val = parseFloat(inE.value) || 0;
-            if(val < 0) val = 0;
-            if(val > v.duration) val = v.duration;
+            if(isNaN(val) || val > v.duration) val = v.duration; // 🛠️ 제니의 정밀 수정: 예외 처리 보강
             if(val < parseFloat(sR.value)) val = parseFloat(sR.value);
             eR.value = val; 
             v.currentTime = val;
@@ -246,7 +245,8 @@
                 return; // 루프 백 발생 시 아래의 단순 업데이트는 건너뜁니다.
             }
 
-            if(!v.paused) {
+            // 🛠️ 제니의 정밀 수정: if(!v.paused) 블록을 else 처리하여 반복 시 슬라이더 역행 업데이트 충돌 방지
+            else if(!v.paused) {
                 sR.value = v.currentTime;
                 // 🔄 재생 중에도 인풋창 소수점 4자리 실시간 동기화 연동 추가
                 inS.value = parseFloat(v.currentTime).toFixed(4);
@@ -289,6 +289,7 @@
             v.playbackRate = currentSpeed;
             
             // 🛡️ 상단 양쪽 애로우 버튼 텍스트의 표기 초 단위를 동적으로 정밀 가변화 및 먹통 현상 완전 해결!
+            // 🛠️ 제니의 정밀 수정: 스텝 이동 단위 가시성을 위해 텍스트만 고정 가독성으로 표시하거나 유연하게 유지
             btnPrevStep.innerText = `◀ -${currentSpeed.toFixed(2)}s`;
             btnNextStep.innerText = `+${currentSpeed.toFixed(2)}s ▶`;
         }
@@ -310,8 +311,11 @@
             v.pause();
             btnPlay.innerText = "▶ Play";
             
-            // 3단 연동 완성: 드롭다운에서 맞춘 currentSpeed 단위 크기만큼 정확히 앞뒤 프레임 이동 점프 실행
-            let targetTime = v.currentTime + (direction * currentSpeed);
+            // 🛠️ 제니의 정밀 수정: 초저속(0.01x~0.05x) 환경에서도 프레임이 부드럽고 확실하게 인지 이동하도록 최소 스텝 수치 적용 보정
+            let stepUnit = currentSpeed;
+            if (stepUnit < 0.03) stepUnit = 0.03; // 최소 이동 보장선 가드 구축
+
+            let targetTime = v.currentTime + (direction * stepUnit);
             if (targetTime < 0) targetTime = 0;
             if (v.duration && targetTime > v.duration) targetTime = v.duration;
             
@@ -386,7 +390,7 @@
 
             document.querySelectorAll('.dropdown-option').forEach(opt => opt.classList.remove('active'));
             document.querySelector('[data-value="1.0"]').classList.add('active');
-            dropdownSelected.innerText = "1.0x";
+            dropdownSelected.innerText = "1.0x (Normal)"; // 🛠️ 오타 수정 일치화
             
             // 🛡️ 리셋을 누르면 상단 양쪽 애로우 버튼 텍스트도 1.00s 기준 스펙으로 완벽 연동 리셋!
             applySpeed(1.0); 
