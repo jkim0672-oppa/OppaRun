@@ -38,7 +38,8 @@
         /* 하단 버튼 로우 크기 박스 모델 고정 */
         .btn-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; width: 100%; box-sizing: border-box; }
         button, .file-lbl { border-radius: 8px; border: none; height: 41px; font-weight: bold; cursor: pointer; font-size: 12px; text-align: center; color: white; display: flex; align-items: center; justify-content: center; box-sizing: border-box; margin: 0; width: 100%; }
-        .btn-main { background: var(--blue); width: 100%; margin-bottom: 15px; font-size: 14px; height: 48px; }
+        .btn-main { background: var(--blue); width: 100%; margin-bottom: 8px; font-size: 14px; height: 48px; }
+        .btn-manual { background: #FF9500; color: white; width: 100%; margin-bottom: 8px; font-size: 14px; height: 48px; }
         .btn-ai { background: #30D158; color: white; width: 100%; display: flex; align-items: center; justify-content: center; white-space: nowrap; }
         .btn-reset { background: #FF453A; }
         .file-lbl { background: #3A3A3C; cursor: pointer; line-height: 41px; }
@@ -106,6 +107,7 @@
             <button class="btn-reset" onclick="reset()">🔄 Reset</button>
         </div>
         
+        <button class="btn-manual" onclick="manualRunAI()">🎯 AI Manual Run</button>
         <button class="btn-main" onclick="captureSnapshot()">📸 Save Analysis Snapshot</button>
 
         <div class="result-grid" id="res">
@@ -165,7 +167,6 @@
                 
                 applySpeed(1.0); 
                 v.currentTime = 0;
-                setTimeout(() => { if(aiTracking) runAI(); }, 300);
             };
         };
 
@@ -192,22 +193,15 @@
                 v.currentTime = startTime;
                 return; 
             }
-
-            // [오빠의 천재적 아이디어 반영 단락]
-            // 재생 중이고 AI 가 켜져 있더라도, 오직 0.1배속 이하(0.01x, 0.03x, 0.05x, 0.1x) 정밀 수동/슬로우 모드일 때만 연산 가동!!
-            if (!v.paused && aiTracking && currentSpeed <= 0.1 && !isAiProcessing) {
-                runAI();
-            }
+            
+            // [보정 완료] 오빠의 조건 반영: 자동 플레이 재생 중엔 무조건 AI 연산 완전 차단! (공백 상태 유지)
         };
         
-        // 탐색(Seek)이나 멈춰서 수동으로 돌려볼 때는 언제든 AI가 즉시 연산하도록 예외 보장!
-        v.addEventListener('seeked', () => { if (aiTracking) runAI(); });
-
-        function trackFrame() {
-            if (!v.paused) {
-                requestAnimationFrame(trackFrame);
-            }
-        }
+        v.addEventListener('seeked', () => {
+            // 탐색(미세 수동 조작) 시에도 자동 연산하지 않고 캔버스만 맞춰줌
+            if (!v.videoWidth || !v.videoHeight) return;
+            c.width = v.videoWidth; c.height = v.videoHeight;
+        });
 
         function toggleDropdown() {
             dropdownOptions.style.display = dropdownOptions.style.display === 'block' ? 'none' : 'block';
@@ -233,13 +227,6 @@
         function applySpeed(speed) {
             currentSpeed = speed;
             v.playbackRate = currentSpeed;
-            
-            // 배속을 일반 배속(0.25x 이상)으로 올리는 순간 캔버스를 깨끗하게 비워서 영상 관리를 쾌적하게 함
-            if (currentSpeed > 0.1) {
-                ctx.clearRect(0, 0, c.width, c.height);
-            } else {
-                if (aiTracking) runAI();
-            }
         }
 
         function togglePlay() {
@@ -251,11 +238,9 @@
                 applySpeed(currentSpeed); 
                 v.play();
                 btnPlay.innerText = "⏸ Pause";
-                trackFrame();
             } else {
                 v.pause();
                 btnPlay.innerText = "▶ Play";
-                if (aiTracking) runAI(); // 일시정지 시점의 완벽한 뼈대 그리기
             }
         }
 
@@ -264,13 +249,18 @@
             if(aiTracking) {
                 btnAiToggle.innerText = "🟢 AI ON";
                 btnAiToggle.style.background = "#30D158";
-                runAI();
             } else {
                 btnAiToggle.innerText = "🔴 AI OFF";
                 btnAiToggle.style.background = "#FF453A";
                 ctx.clearRect(0, 0, c.width, c.height);
                 lastJoints = { knee: null, elbow: null, hip: null };
             }
+        }
+
+        // [오빠 전용 수동 실행 제어 함수]
+        function manualRunAI() {
+            if(!aiTracking) return alert("AI ON 상태에서만 수동 연산이 가능합니다.");
+            runAI();
         }
 
         async function runAI() { 
@@ -316,9 +306,9 @@
             v.pause();
             btnPlay.innerText = "▶ Play";
             
-            v.currentTime = 0;
-            inS.value = "0.0000";
-            inE.value = v.duration ? v.duration.toFixed(4) : "0.0000";
+            // 🛠️ [보정 완료] 리셋 시 오빠가 맞춰둔 인풋창의 Start (s) 값을 보존하여 지정 위치로 이동
+            const currentStartVal = parseFloat(inS.value) || 0;
+            v.currentTime = currentStartVal;
 
             document.querySelectorAll('.dropdown-option').forEach(opt => opt.classList.remove('active'));
             const defaultOpt = document.querySelector('[data-value="1.0"]');
