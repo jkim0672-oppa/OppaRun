@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, shrink-to-fit=no">
-    <title>Pro Analysis v4.4 - AI Auto Detection Edition</title>
+    <title>Pro Analysis v4.5 - AI Auto Average Edition</title>
     
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -199,7 +199,7 @@
 </head>
 <body>
 
-    <h3 class="main-title">PRO ANALYSIS v4.4</h3>
+    <h3 class="main-title">PRO ANALYSIS v4.5</h3>
 
     <div class="video-box">
         <video id="video" playsinline muted></video>
@@ -251,8 +251,8 @@
             <div class="res-card"><span class="res-label">Elbow</span><span class="res-val" id="valElbow">--°</span><span class="ref-text">80-90°</span></div>
             <div class="res-card"><span class="res-label">Torso</span><span class="res-val" id="valBody">--°</span><span class="ref-text">5-10°</span></div>
             
-            <div class="res-card blue-card"><span class="res-label">GCT</span><span class="res-val" id="valGCT">0ms</span><span class="ref-text">180-220ms</span></div>
-            <div class="res-card blue-card"><span class="res-label">Flight</span><span class="res-val" id="valFlight">0ms</span><span class="ref-text">70-100ms</span></div>
+            <div class="res-card blue-card"><span class="res-label" id="lblGCT">GCT</span><span class="res-val" id="valGCT">0ms</span><span class="ref-text">180-220ms</span></div>
+            <div class="res-card blue-card"><span class="res-label" id="lblFlight">Flight</span><span class="res-val" id="valFlight">0ms</span><span class="ref-text">70-100ms</span></div>
             <div class="res-card blue-card"><span class="res-label">Stride</span><span class="res-val" id="valStride">0.0m</span><span class="ref-text">1.0-1.4m</span></div>
         </div>
     </div>
@@ -297,6 +297,8 @@
         const valGCT = document.getElementById('valGCT');
         const valFlight = document.getElementById('valFlight');
         const btnAutoMark = document.getElementById('btnAutoMark');
+        const lblGCT = document.getElementById('lblGCT');
+        const lblFlight = document.getElementById('lblFlight');
 
         const CoreAI = {
             aiTracking: false, 
@@ -304,8 +306,12 @@
             curKnee: "--°", curElbow: "--°", curBody: "--°",
             lastJoints: { knee: null, elbow: null, hip: null },
             instance: null,
-            // 실시간 최저점 알고리즘용 발 좌표 히스토리 버퍼 데이터
             footDataHistory: [],
+            
+            // [v4.5 신규 추가] 여러 발걸음 데이터 누적 저장 배열
+            autoGctList: [],
+            autoFlightList: [],
+            lastDetectedContact: null, // 중복 방지용 인터록 타임스탬프
 
             init() {
                 this.instance = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
@@ -341,7 +347,6 @@
                 this.lastJoints.elbow = { x: lm[14].x * c.width, y: lm[14].y * c.height };
                 this.lastJoints.hip = { x: lm[24].x * c.width, y: lm[24].y * c.height };
 
-                // [v4.4 신규 추가] Auto Mark 전용 발(뒤꿈치, 앞꿈치) 변동성 기록 적재 로직
                 if(AppControl.isAutoMode) {
                     this.footDataHistory.push({
                         time: v.currentTime,
@@ -350,7 +355,7 @@
                         rightHeelY: lm[30].y,
                         rightToeY: lm[32].y
                     });
-                    if(this.footDataHistory.length > 90) this.footDataHistory.shift(); // 실시간 데이터 유지를 위한 큐 처리
+                    if(this.footDataHistory.length > 90) this.footDataHistory.shift();
                     this.analyzeRunningGCT();
                 }
             },
@@ -360,18 +365,15 @@
                 if (ang > 180) ang = 360 - ang;
                 return ang.toFixed(1);
             },
-            // [v4.4 신규 추가] 착지 스타일 독립형 물리 판정 장치
             analyzeRunningGCT() {
                 if(this.footDataHistory.length < 5) return;
                 const h = this.footDataHistory;
                 const len = h.length;
                 
-                // 최신 프레임의 가속도 및 변곡점 분석을 통한 발바닥 접촉 판정
                 let cur = h[len-1];
                 let prev = h[len-2];
                 let pprev = h[len-3];
 
-                // 양발 중 가장 지면에 가까운(Y축 값이 높은) 상태 확인
                 let activeLeftY = Math.max(cur.leftHeelY, cur.leftToeY);
                 let prevLeftY = Math.max(prev.leftHeelY, prev.leftToeY);
                 let pprevLeftY = Math.max(pprev.leftHeelY, pprev.leftToeY);
@@ -380,21 +382,24 @@
                 let prevRightY = Math.max(prev.rightHeelY, prev.rightToeY);
                 let pprevRightY = Math.max(pprev.rightHeelY, pprev.rightToeY);
 
-                // 왼쪽 발 자동 접지 및 이륙 판정 매칭
+                // [v4.5 연산 고도화] 자동 연산 루프 중 실시간 리스트 누적 및 평균 필터 스캔
                 if(prevLeftY >= pprevLeftY && cur.leftHeelY <= prev.leftHeelY && AppControl.contactTime === null) {
-                    // 낙하 가속도가 멈추고 수평으로 전될되는 첫 프레임 임계점 검출
-                    AppControl.syncAutoMark('left', cur.time);
+                    if(this.lastDetectedContact === null || Math.abs(cur.time - this.lastDetectedContact) > 0.2) {
+                        AppControl.syncAutoMark('left', cur.time);
+                        this.lastDetectedContact = cur.time;
+                    }
                 }
                 if(AppControl.contactTime !== null && AppControl.takeoffTime === null) {
                     if(cur.leftToeY < prev.leftToeY && prev.leftToeY >= pprev.leftToeY) {
-                        // 발가락 끝이 최종 지면을 이탈하여 솟구치는 반전 타이밍
                         AppControl.syncAutoMark('right', prev.time);
                     }
                 }
 
-                // 우측 발 대응 인터록 스캔 (교차 구동 보완)
                 if(prevRightY >= pprevRightY && cur.rightHeelY <= prev.rightHeelY && AppControl.contactTime === null) {
-                    AppControl.syncAutoMark('left', cur.time);
+                    if(this.lastDetectedContact === null || Math.abs(cur.time - this.lastDetectedContact) > 0.2) {
+                        AppControl.syncAutoMark('left', cur.time);
+                        this.lastDetectedContact = cur.time;
+                    }
                 }
                 if(AppControl.contactTime !== null && AppControl.takeoffTime === null) {
                     if(cur.rightToeY < prev.rightToeY && prev.rightToeY >= pprev.rightToeY) {
@@ -422,13 +427,22 @@
                 if(this.isAutoMode) {
                     btnAutoMark.classList.add('active-auto');
                     btnAutoMark.innerText = "Analyzing";
-                    CoreAI.footDataHistory = []; // 버퍼 초기화 후 스캔 대기
+                    lblGCT.innerText = "Avg GCT";
+                    lblFlight.innerText = "Avg Flight";
+                    // 자동 모드 진입 시 배열 초기화 및 기존 플래그 리셋
+                    CoreAI.footDataHistory = [];
+                    CoreAI.autoGctList = [];
+                    CoreAI.autoFlightList = [];
+                    CoreAI.lastDetectedContact = null;
+                    this.contactTime = null;
+                    this.takeoffTime = null;
                 } else {
                     btnAutoMark.classList.remove('active-auto');
                     btnAutoMark.innerText = "Auto";
+                    lblGCT.innerText = "GCT";
+                    lblFlight.innerText = "Flight";
                 }
             },
-            // [v4.4 신규 추가] AI 연산 엔진이 찾은 타임 스탬프를 하단 레이아웃과 동기화하는 결합 장치
             syncAutoMark(side, targetTime) {
                 if(side === 'left') {
                     sL.value = targetTime;
@@ -437,6 +451,15 @@
                     if(targetTime > this.contactTime) {
                         sR.value = targetTime;
                         this.takeoffTime = targetTime;
+                        
+                        // [v4.5 핵심 로직] 한 스텝 완결 시 자동으로 누적 배열에 푸시 후 수동 플래그만 초기화하여 다음 발 대기
+                        const stepGct = Math.round((this.takeoffTime - this.contactTime) * 1000);
+                        if(stepGct > 50 && stepGct < 500) { 
+                            CoreAI.autoGctList.push(stepGct);
+                            CoreAI.autoFlightList.push(Math.round(stepGct * 0.45));
+                        }
+                        this.contactTime = null;
+                        this.takeoffTime = null;
                     }
                 }
                 this.updateTrack();
@@ -464,6 +487,9 @@
                     valGCT.innerText = `0ms`;
                     valFlight.innerText = `0ms`;
                     CoreAI.footDataHistory = [];
+                    CoreAI.autoGctList = [];
+                    CoreAI.autoFlightList = [];
+                    CoreAI.lastDetectedContact = null;
                     if(CoreAI.aiTracking) {
                         setTimeout(() => { CoreAI.runStableAI(); }, 150);
                     }
@@ -483,6 +509,7 @@
                 v.currentTime = targetTime;
                 timeOverlay.innerText = targetTime.toFixed(2) + "s";
                 
+                // 수동 조작 시 무조건 단일 수동 계산 체제로 전환되도록 설계 보존
                 this.contactTime = parseFloat(sL.value);
                 this.takeoffTime = parseFloat(sR.value);
                 this.calculateMetrics();
@@ -494,6 +521,10 @@
                 sT.style.background = `linear-gradient(to right, #333 ${pL}%, var(--blue) ${pL}%, var(--neon) ${pR}%, #333 ${pR}%)`;
             },
             markBall(side) {
+                // 수동 마킹 버튼 구동 시 자동 모드가 켜져 있었다면 자동으로 수동 모드로 복귀 처리
+                if(this.isAutoMode) {
+                    this.toggleAutoMode();
+                }
                 if (side === 'left') {
                     if (this.takeoffTime !== null && v.currentTime > this.takeoffTime) {
                         sR.value = v.currentTime;
@@ -513,11 +544,24 @@
                 this.calculateMetrics();
             },
             calculateMetrics() {
-                if (this.contactTime !== null && this.takeoffTime !== null) {
-                    const diffMs = Math.round((this.takeoffTime - this.contactTime) * 1000);
-                    if(diffMs >= 0) {
-                        valGCT.innerText = `${diffMs}ms`;
-                        valFlight.innerText = Math.round(diffMs * 0.45) + "ms"; 
+                // [v4.5 연산 진화] 자동 모드 유무에 따라 누적 평균값 vs 수동 단일값 분기 표출
+                if(this.isAutoMode) {
+                    if(CoreAI.autoGctList.length > 0) {
+                        const sumGct = CoreAI.autoGctList.reduce((acc, cur) => acc + cur, 0);
+                        const sumFlight = CoreAI.autoFlightList.reduce((acc, cur) => acc + cur, 0);
+                        const avgGct = Math.round(sumGct / CoreAI.autoGctList.length);
+                        const avgFlight = Math.round(sumFlight / CoreAI.autoFlightList.length);
+                        
+                        valGCT.innerText = `${avgGct}ms`;
+                        valFlight.innerText = `${avgFlight}ms`;
+                    }
+                } else {
+                    if (this.contactTime !== null && this.takeoffTime !== null) {
+                        const diffMs = Math.round((this.takeoffTime - this.contactTime) * 1000);
+                        if(diffMs >= 0) {
+                            valGCT.innerText = `${diffMs}ms`;
+                            valFlight.innerText = Math.round(diffMs * 0.45) + "ms"; 
+                        }
                     }
                 }
             },
@@ -580,11 +624,19 @@
                 document.getElementById('valKnee').innerText = "--°";
                 document.getElementById('valElbow').innerText = "--°";
                 document.getElementById('valBody').innerText = "--°";
+                
+                if(this.isAutoMode) {
+                    this.toggleAutoMode();
+                }
+                
                 this.contactTime = null;
                 this.takeoffTime = null;
                 valGCT.innerText = "0ms";
                 valFlight.innerText = "0ms";
                 CoreAI.footDataHistory = [];
+                CoreAI.autoGctList = [];
+                CoreAI.autoFlightList = [];
+                CoreAI.lastDetectedContact = null;
                 setTimeout(() => { CoreAI.runStableAI(); }, 50);
             }
         };
