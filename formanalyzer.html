@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pro Analysis v3.0 - Jenny & Bro</title>
+    <title>Pro Analysis v3.0 - OppaRun Engine</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
     <style>
@@ -16,17 +16,17 @@
         
         .control-panel { background: var(--card); padding: 15px; border-radius: 16px; border: 1px solid #333; width: 100%; max-width: 600px; box-sizing: border-box; }
         
-        /* 플레이 버튼 단독 로우 레이아웃 구성 */
+        /* 플레이 버튼 레이아웃 */
         .play-ctrl-row { display: block; margin-bottom: 12px; width: 100%; }
         .btn-play { background: #2C2C2E; color: white; border: 1px solid #444; font-size: 13px; font-weight: bold; height: 41px; line-height: 39px; box-sizing: border-box; width: 100%; text-align: center; border-radius: 8px; cursor: pointer; }
 
-        /* 입력창 및 배속 드롭다운 로우 */
+        /* 입력창 및 배속 드롭다운 */
         .time-input-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; }
         .input-group { flex: 1; min-width: 75px; display: flex; flex-direction: column; gap: 4px; position: relative; box-sizing: border-box; }
         .input-group span { font-size: 11px; color: #aaa; }
         input[type="number"] { background: #2C2C2E; color: white; border: 1px solid #444; padding: 0 5px; border-radius: 8px; font-size: 13px; width: 100%; box-sizing: border-box; height: 41px; text-align: center; line-height: 41px; }
 
-        /* 완전 자체 제작 다크모드 커스텀 드롭다운 스타일 */
+        /* 커스텀 드롭다운 스타일 */
         .custom-dropdown { position: relative; width: 100%; height: 41px; box-sizing: border-box; }
         .dropdown-selected { background: #2C2C2E; color: var(--neon); border: 1px solid #444; padding: 0 5px; border-radius: 8px; font-size: 13px; font-weight: bold; text-align: center; line-height: 39px; cursor: pointer; box-sizing: border-box; height: 100%; }
         .dropdown-selected::after { content: ' ▼'; font-size: 9px; color: #888; }
@@ -35,7 +35,7 @@
         .dropdown-option:last-child { border-bottom: none; }
         .dropdown-option:hover, .dropdown-option.active { background: #2C2C2E; color: var(--neon); }
 
-        /* 하단 버튼 로우 크기 박스 모델 고정 */
+        /* 중앙 및 하단 버튼 제어 그룹 */
         .btn-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; width: 100%; box-sizing: border-box; }
         button, .file-lbl { border-radius: 8px; border: none; height: 41px; font-weight: bold; cursor: pointer; font-size: 12px; text-align: center; color: white; display: flex; align-items: center; justify-content: center; box-sizing: border-box; margin: 0; width: 100%; }
         .btn-main { background: var(--blue); width: 100%; margin-bottom: 8px; font-size: 14px; height: 48px; }
@@ -44,6 +44,7 @@
         .btn-reset { background: #FF453A; }
         .file-lbl { background: #3A3A3C; cursor: pointer; line-height: 41px; }
         
+        /* 각도 판정 카드 그리드 */
         .result-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
         .res-card { background: #2C2C2E; padding: 10px; border-radius: 8px; border-left: 3px solid var(--neon); text-align: center; box-sizing: border-box; }
         .res-label { font-size: 10px; color: #888; display: block; margin-bottom: 3px; }
@@ -56,7 +57,7 @@
         .thumb img { width: 100%; height: 100%; object-fit: cover; }
         input[type="file"] { display: none; }
 
-        /* 전체화면 확대 모달 스타일 */
+        /* 전체화면 모달 */
         .modal { display: none; position: fixed; z-index: 200; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); align-items: center; justify-content: center; cursor: pointer; }
         .modal img { max-width: 95%; max-height: 85%; border-radius: 8px; border: 1px solid #444; box-shadow: 0 4px 20px rgba(0,0,0,0.8); }
     </style>
@@ -87,7 +88,7 @@
             <div class="input-group" style="flex: 1.2;">
                 <span>Speed</span>
                 <div class="custom-dropdown">
-                    <div class="dropdown-selected" id="dropdownSelected" onclick="toggleDropdown()">1.0x</div>
+                    <div class="dropdown-selected" id="dropdownSelected" onclick="toggleDropdown()">1.0x (Normal)</div>
                     <div class="dropdown-options" id="dropdownOptions">
                         <div class="dropdown-option" data-value="0.01">0.01x</div>
                         <div class="dropdown-option" data-value="0.03">0.03x</div>
@@ -131,115 +132,91 @@
         const inE = document.getElementById('inEnd');
         const btnPlay = document.getElementById('btnPlay');
         const btnAiToggle = document.getElementById('btnAiToggle');
-        
         const dropdownSelected = document.getElementById('dropdownSelected');
         const dropdownOptions = document.getElementById('dropdownOptions');
-        
+
         let aiTracking = true;
-        let isAiProcessing = false; 
-        let curKnee = "--°", curElbow = "--°", curBody = "--°";
-        let currentSpeed = 1.0; 
+        let isAiProcessing = false;
+        let currentSpeed = 1.0;
         let animationFrameId = null;
-        let lastAiTime = 0; // 🛠️ 과부하 방지용 타임스탬프 추가
-        
+        let lastAiTime = 0;
+
+        let curKnee = "--°", curElbow = "--°", curBody = "--°";
         let lastJoints = { knee: null, elbow: null, hip: null };
-        
+
+        // MediaPipe 초기화 및 설정
         const pose = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
         pose.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.5 });
         pose.onResults(onResults);
 
-        window.addEventListener('DOMContentLoaded', () => {
-            applySpeed(1.0);
-        });
-
+        // 🛠️ [엔진 보정] 비디오 메타데이터 로드 시 사전 Warm-up 연산 구동
         document.getElementById('up').onchange = (e) => {
             const file = e.target.files[0];
             if(!file) return;
             v.src = URL.createObjectURL(file);
-            v.onloadedmetadata = () => {
+            v.onloadedmetadata = async () => {
                 inE.max = v.duration;
                 inS.value = "0.0000";
                 inE.value = v.duration.toFixed(4);
                 c.width = v.videoWidth; c.height = v.videoHeight;
-                
-                document.querySelectorAll('.dropdown-option').forEach(opt => opt.classList.remove('active'));
-                const defaultOpt = document.querySelector('[data-value="1.0"]');
-                if(defaultOpt) defaultOpt.classList.add('active');
-                dropdownSelected.innerText = "1.0x (Normal)";
-                
-                applySpeed(1.0); 
                 v.currentTime = 0;
+                
+                // 파일 열자마자 빈 연산을 한 번 던져서 AI 메모리를 완전히 깨워둠 (지연 예방 핵심!)
+                console.log("AI Warm-up initialized...");
+                await runAI(); 
             };
         };
 
-        inS.oninput = () => { 
+        // 수동 입력 제어 및 동기화
+        inS.oninput = () => {
             let val = parseFloat(inS.value) || 0;
             if(val < 0) val = 0;
-            let endVal = parseFloat(inE.value) || v.duration;
-            if(val > endVal) val = endVal;
             v.currentTime = val;
-            if(v.paused) runAI(); 
+            if(v.paused) runAI();
         };
-        inE.oninput = () => { 
-            let val = parseFloat(inE.value) || 0;
-            if(isNaN(val) || val > v.duration) val = v.duration; 
-            let startVal = parseFloat(inS.value) || 0;
-            if(val < startVal) val = startVal;
+        inE.oninput = () => {
+            let val = parseFloat(inE.value) || v.duration;
             v.currentTime = val;
-            if(v.paused) runAI(); 
+            if(v.paused) runAI();
         };
 
-        v.ontimeupdate = () => { 
-            const endTime = parseFloat(inE.value) || v.duration;
+        v.ontimeupdate = () => {
             const startTime = parseFloat(inS.value) || 0;
-
+            const endTime = parseFloat(inE.value) || v.duration;
             if (v.currentTime >= endTime || v.currentTime < startTime) {
                 v.currentTime = startTime;
-                return; 
             }
         };
-        
-        v.addEventListener('seeked', () => {
-            if (!v.videoWidth || !v.videoHeight) return;
-            c.width = v.videoWidth; c.height = v.videoHeight;
-        });
 
+        // 드롭다운 컨트롤 관련 UI 스크립트
         function toggleDropdown() {
             dropdownOptions.style.display = dropdownOptions.style.display === 'block' ? 'none' : 'block';
         }
-
         document.addEventListener('click', function(e) {
             if (!e.target.closest('.custom-dropdown')) dropdownOptions.style.display = 'none';
         });
-
         document.querySelectorAll('.dropdown-option').forEach(option => {
             option.addEventListener('click', function() {
                 document.querySelectorAll('.dropdown-option').forEach(opt => opt.classList.remove('active'));
                 this.classList.add('active');
-                
-                const val = parseFloat(this.getAttribute('data-value'));
+                currentSpeed = parseFloat(this.getAttribute('data-value'));
                 dropdownSelected.innerText = this.innerText;
                 dropdownOptions.style.display = 'none';
-                
-                applySpeed(val); 
+                v.playbackRate = currentSpeed;
             });
         });
 
-        function applySpeed(speed) {
-            currentSpeed = speed;
-            v.playbackRate = currentSpeed;
-        }
-
+        // 🛠️ [정석 연산 체인 구현] 재생 토글 매커니즘 분리
         function togglePlay() {
             if (v.paused) {
                 const startTime = parseFloat(inS.value) || 0;
                 if (v.currentTime < startTime || v.currentTime >= (parseFloat(inE.value) || v.duration)) {
                     v.currentTime = startTime;
                 }
-                applySpeed(currentSpeed); 
+                v.playbackRate = currentSpeed;
                 v.play();
                 btnPlay.innerText = "⏸ Pause";
-                trackFrame(); 
+                trackFrame(); // 독립 프레임 루프 엔진 가동
             } else {
                 v.pause();
                 btnPlay.innerText = "▶ Play";
@@ -250,12 +227,10 @@
             }
         }
 
-        // 🛠️ [성능 극대화 변경] 재생 시 영상 출발 딜레이를 없애기 위해 쓰로틀링(Throttling) 필터 적용
+        // 🛠️ 비디오 스레드 독립 추적 루프 구조화 (쓰로틀링 50ms 설계)
         async function trackFrame() {
             if (v.paused || v.ended) return;
-            
             const now = performance.now();
-            // 1초에 최대 20번(50ms 간격)만 AI 연산을 하도록 제한하여 재생 성능 확보!
             if (aiTracking && !isAiProcessing && (now - lastAiTime >= 50)) {
                 lastAiTime = now;
                 await runAI();
@@ -265,45 +240,42 @@
 
         function toggleAI() {
             aiTracking = !aiTracking;
-            if(aiTracking) {
-                btnAiToggle.innerText = "🟢 AI ON";
-                btnAiToggle.style.background = "#30D158";
-                if(!v.paused) trackFrame();
-            } else {
-                btnAiToggle.innerText = "🔴 AI OFF";
-                btnAiToggle.style.background = "#FF453A";
-                if(animationFrameId) {
-                    cancelAnimationFrame(animationFrameId);
-                    animationFrameId = null;
-                }
+            btnAiToggle.innerText = aiTracking ? "🟢 AI ON" : "🔴 AI OFF";
+            btnAiToggle.style.background = aiTracking ? "#30D158" : "#FF453A";
+            if(!aiTracking) {
                 ctx.clearRect(0, 0, c.width, c.height);
                 lastJoints = { knee: null, elbow: null, hip: null };
             }
         }
 
-        function manualRunAI() {
+        // 🎯 AI Manual Run 기능 구현
+        async function manualRunAI() {
             if(!aiTracking) return alert("AI ON 상태에서만 수동 연산이 가능합니다.");
-            runAI();
+            console.log("Manual running logic executing...");
+            await runAI();
         }
 
-        async function runAI() { 
+        // 핵심 연산 파이프라인 엔진 안정화
+        async function runAI() {
             if (!v.videoWidth || !v.videoHeight || !aiTracking || isAiProcessing) return;
             try {
-                isAiProcessing = true; 
+                isAiProcessing = true;
                 if(c.width !== v.videoWidth || c.height !== v.videoHeight) {
                     c.width = v.videoWidth; c.height = v.videoHeight;
                 }
-                await pose.send({image: v}); 
+                await pose.send({image: v});
             } catch(err) {
-                console.error(err);
+                console.error("AI Engine Frame Error:", err);
             } finally {
-                isAiProcessing = false; 
+                isAiProcessing = false;
             }
         }
 
+        // 미디어파이프 데이터 가공 및 실시간 드로잉
         function onResults(res) {
             ctx.clearRect(0, 0, c.width, c.height);
             if (!res.poseLandmarks || !aiTracking) return;
+            
             drawConnectors(ctx, res.poseLandmarks, POSE_CONNECTIONS, {color: '#deff9a', lineWidth: 3});
             const lm = res.poseLandmarks;
             
@@ -327,61 +299,25 @@
             return ang.toFixed(1);
         }
 
-        function reset() { 
-            v.pause();
-            btnPlay.innerText = "▶ Play";
-            if(animationFrameId) {
-                cancelAnimationFrame(animationFrameId);
-                animationFrameId = null;
-            }
-            
-            const currentStartVal = parseFloat(inS.value) || 0;
-            v.currentTime = currentStartVal;
-
-            document.querySelectorAll('.dropdown-option').forEach(opt => opt.classList.remove('active'));
-            const defaultOpt = document.querySelector('[data-value="1.0"]');
-            if(defaultOpt) defaultOpt.classList.add('active');
-            dropdownSelected.innerText = "1.0x (Normal)"; 
-            
-            applySpeed(1.0); 
-            
-            ctx.clearRect(0,0,c.width,c.height); 
-            document.getElementById('gallery').innerHTML = ""; 
-            curKnee = "--°"; curElbow = "--°"; curBody = "--°";
-            lastJoints = { knee: null, elbow: null, hip: null };
-            document.getElementById('valKnee').innerText = "--°";
-            document.getElementById('valElbow').innerText = "--°";
-            document.getElementById('valBody').innerText = "--°";
-        }
-
+        // 📸 Save Analysis Snapshot 기능 구현
         function captureSnapshot() {
-            if (!v.videoWidth || !v.videoHeight) return alert("Video not loaded.");
+            if (!v.videoWidth || !v.videoHeight) return alert("비디오 파일이 없습니다.");
             
             const tempC = document.createElement('canvas');
             const tCtx = tempC.getContext('2d');
-            tempC.width = v.videoWidth;
-            tempC.height = v.videoHeight;
+            tempC.width = v.videoWidth; tempC.height = v.videoHeight;
             
             tCtx.drawImage(v, 0, 0, tempC.width, tempC.height);
             tCtx.drawImage(c, 0, 0, tempC.width, tempC.height);
             
             tCtx.fillStyle = "#deff9a"; 
             const fontSize = Math.max(14, tempC.width * 0.03);
-            tCtx.font = `bold ${fontSize}px sans-serif`; 
-            tCtx.shadowColor = "black";
-            tCtx.shadowBlur = 6; tCtx.shadowOffsetX = 2; tCtx.shadowOffsetY = 2;
+            tCtx.font = `bold ${fontSize}px sans-serif`;
+            tCtx.shadowColor = "black"; tCtx.shadowBlur = 4;
 
-            if (lastJoints.knee && curKnee !== "--°") {
-                tCtx.fillText(`Knee ${curKnee}`, lastJoints.knee.x + 15, lastJoints.knee.y);
-            }
-            if (lastJoints.elbow && curElbow !== "--°") {
-                tCtx.fillText(`Elbow ${curElbow}`, lastJoints.elbow.x + 15, lastJoints.elbow.y);
-            }
-            if (lastJoints.hip && curBody !== "--°") {
-                tCtx.fillText(`Torso ${curBody}`, lastJoints.hip.x - (fontSize * 4), lastJoints.hip.y - 15);
-            }
-            
-            tCtx.shadowBlur = 0; tCtx.shadowOffsetX = 0; tCtx.shadowOffsetY = 0;
+            if (lastJoints.knee && curKnee !== "--°") tCtx.fillText(`Knee ${curKnee}`, lastJoints.knee.x + 15, lastJoints.knee.y);
+            if (lastJoints.elbow && curElbow !== "--°") tCtx.fillText(`Elbow ${curElbow}`, lastJoints.elbow.x + 15, lastJoints.elbow.y);
+            if (lastJoints.hip && curBody !== "--°") tCtx.fillText(`Torso ${curBody}`, lastJoints.hip.x - (fontSize * 4), lastJoints.hip.y - 15);
 
             const imgData = tempC.toDataURL('image/jpeg', 0.9);
             const gal = document.getElementById('gallery');
@@ -396,18 +332,26 @@
             gal.insertBefore(box, gal.firstChild);
         }
 
+        function reset() {
+            v.pause();
+            btnPlay.innerText = "▶ Play";
+            if(animationFrameId) cancelAnimationFrame(animationFrameId);
+            v.currentTime = parseFloat(inS.value) || 0;
+            ctx.clearRect(0,0,c.width,c.height);
+            document.getElementById('gallery').innerHTML = "";
+            document.getElementById('valKnee').innerText = "--°";
+            document.getElementById('valElbow').innerText = "--°";
+            document.getElementById('valBody').innerText = "--°";
+        }
+
         function openModal(src) {
             const modal = document.getElementById('imgModal');
-            const modalImg = document.getElementById('modalImg');
             modal.style.display = "flex";
-            modalImg.src = src;
+            document.getElementById('modalImg').src = src;
         }
 
         function closeModal(event) {
-            if (event) {
-                event.stopPropagation(); 
-                event.preventDefault();  
-            }
+            if (event) { event.stopPropagation(); event.preventDefault(); }
             document.getElementById('imgModal').style.display = "none";
         }
     </script>
