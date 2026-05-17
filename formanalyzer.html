@@ -139,10 +139,11 @@
         let isAiProcessing = false; 
         let curKnee = "--°", curElbow = "--°", curBody = "--°";
         let currentSpeed = 1.0; 
+        let animationFrameId = null;
+        let lastAiTime = 0; // 🛠️ 과부하 방지용 타임스탬프 추가
         
         let lastJoints = { knee: null, elbow: null, hip: null };
         
-        // v2.9의 안정적인 초기 선언 구조 그대로 유지
         const pose = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
         pose.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.5 });
         pose.onResults(onResults);
@@ -177,6 +178,7 @@
             let endVal = parseFloat(inE.value) || v.duration;
             if(val > endVal) val = endVal;
             v.currentTime = val;
+            if(v.paused) runAI(); 
         };
         inE.oninput = () => { 
             let val = parseFloat(inE.value) || 0;
@@ -184,9 +186,9 @@
             let startVal = parseFloat(inS.value) || 0;
             if(val < startVal) val = startVal;
             v.currentTime = val;
+            if(v.paused) runAI(); 
         };
 
-        // v2.9처럼 타임라인 재생 부하를 없애기 위해 순수하게 반복 렌더링을 완전히 분리
         v.ontimeupdate = () => { 
             const endTime = parseFloat(inE.value) || v.duration;
             const startTime = parseFloat(inS.value) || 0;
@@ -237,10 +239,28 @@
                 applySpeed(currentSpeed); 
                 v.play();
                 btnPlay.innerText = "⏸ Pause";
+                trackFrame(); 
             } else {
                 v.pause();
                 btnPlay.innerText = "▶ Play";
+                if(animationFrameId) {
+                    cancelAnimationFrame(animationFrameId);
+                    animationFrameId = null;
+                }
             }
+        }
+
+        // 🛠️ [성능 극대화 변경] 재생 시 영상 출발 딜레이를 없애기 위해 쓰로틀링(Throttling) 필터 적용
+        async function trackFrame() {
+            if (v.paused || v.ended) return;
+            
+            const now = performance.now();
+            // 1초에 최대 20번(50ms 간격)만 AI 연산을 하도록 제한하여 재생 성능 확보!
+            if (aiTracking && !isAiProcessing && (now - lastAiTime >= 50)) {
+                lastAiTime = now;
+                await runAI();
+            }
+            animationFrameId = requestAnimationFrame(trackFrame);
         }
 
         function toggleAI() {
@@ -248,9 +268,14 @@
             if(aiTracking) {
                 btnAiToggle.innerText = "🟢 AI ON";
                 btnAiToggle.style.background = "#30D158";
+                if(!v.paused) trackFrame();
             } else {
                 btnAiToggle.innerText = "🔴 AI OFF";
                 btnAiToggle.style.background = "#FF453A";
+                if(animationFrameId) {
+                    cancelAnimationFrame(animationFrameId);
+                    animationFrameId = null;
+                }
                 ctx.clearRect(0, 0, c.width, c.height);
                 lastJoints = { knee: null, elbow: null, hip: null };
             }
@@ -265,7 +290,9 @@
             if (!v.videoWidth || !v.videoHeight || !aiTracking || isAiProcessing) return;
             try {
                 isAiProcessing = true; 
-                c.width = v.videoWidth; c.height = v.videoHeight;
+                if(c.width !== v.videoWidth || c.height !== v.videoHeight) {
+                    c.width = v.videoWidth; c.height = v.videoHeight;
+                }
                 await pose.send({image: v}); 
             } catch(err) {
                 console.error(err);
@@ -303,6 +330,10 @@
         function reset() { 
             v.pause();
             btnPlay.innerText = "▶ Play";
+            if(animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
             
             const currentStartVal = parseFloat(inS.value) || 0;
             v.currentTime = currentStartVal;
