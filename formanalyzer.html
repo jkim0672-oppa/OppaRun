@@ -340,7 +340,7 @@
 
     <script>
         const CoreAI = {
-            aiTracking: true,
+            aiTracking: false, // [수정] 오빠의 원본 화면 상태(AI OFF)와 일치시키기 위해 false로 기본 세팅 연동
             isAiProcessing: false,
             curKnee: "--°",
             curElbow: "--°",
@@ -355,7 +355,7 @@
             },
 
             async runStableAI() {
-                if (!v.videoWidth || !v.videoHeight || this.isAiProcessing) return;
+                if (!v.videoWidth || !v.videoHeight || this.isAiProcessing || !this.aiTracking) return; // [보정] aiTracking 꺼져있을 땐 철저히 차단
                 try {
                     this.isAiProcessing = true;
                     if(c.width !== v.videoWidth || c.height !== v.videoHeight) {
@@ -442,10 +442,23 @@
                     inS.value = "0.0000";
                     inE.value = v.duration.toFixed(4);
                     c.width = v.videoWidth; c.height = v.videoHeight;
+                    
+                    // [수정] 모바일 브라우저에서도 타임라인 구슬과 비디오 현재 재생 시간이 '0'으로 확실히 안착하도록 싱크 보정
                     v.currentTime = 0;
                     timeline.value = 0;
+                    ctx.clearRect(0, 0, c.width, c.height); // 기존 잔여 스켈레톤 라인 즉각 소거
                     
-                    setTimeout(() => { CoreAI.runStableAI(); }, 300);
+                    // 비디오 리소스 준비 완료 직후 시점(seeked)에 다시 한 번 강제로 완벽 리셋 고정
+                    v.onseeked = () => {
+                        v.currentTime = 0;
+                        timeline.value = 0;
+                        v.onseeked = null; // 이벤트 단발성 해제
+                    };
+                    
+                    // [수정] 첫 로드 시 AI 기능이 켜져 있을 때만 그리도록 조건 제어 및 강제 나대기(드로잉) 제거하여 얌전하게 대기 처리
+                    if(CoreAI.aiTracking) {
+                        setTimeout(() => { CoreAI.runStableAI(); }, 150);
+                    }
                 };
             },
 
