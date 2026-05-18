@@ -756,7 +756,7 @@
                 this.instance.onResults(this.onResults.bind(this));
             },
             async runStableAI(forceShow = false) {
-                if (!vActive.src || !vActive.videoWidth || !vActive.videoHeight || this.isAiProcessing) return; 
+                if (!this.instance || !vActive.src || !vActive.videoWidth || !vActive.videoHeight || this.isAiProcessing) return; 
                 
                 if (AppControl.currentRoom === 'manual' && !forceShow) {
                     if (!vActive.paused || vActive.paused) {
@@ -789,6 +789,7 @@
                 document.getElementById('valStrideM').innerText = "0.00m";
             },
             onResults(res) {
+                if (!res.poseLandmarks) return;
                 if (vActive.paused && AppControl.currentRoom === 'auto' && !this.aiTracking) {
                     return;
                 }
@@ -801,7 +802,6 @@
                 }
 
                 ctxActive.clearRect(0, 0, cActive.width, cActive.height);
-                if (!res.poseLandmarks) return;
                 if (!this.aiTracking && AppControl.currentRoom === 'auto') return;
                 
                 if(drawConnectors) {
@@ -1040,6 +1040,7 @@
                     if(vActive.paused) CoreAI.runStableAI(); else this.syncPlayAI();
                 } else {
                     btnAutoActive.style.background = "transparent";
+                    CoreAI.aiTracking = false;
                     cancelAnimationFrame(this.playLoopId);
                 }
                 I18n.updateUIStrings();
@@ -1074,7 +1075,7 @@
                 vM.src = objectUrl;
                 vA.src = objectUrl;
 
-                vActive.onloadedmetadata = () => {
+                const initMetadataConfig = () => {
                     const sLM = document.getElementById('timelineLeftManual');
                     const sRM = document.getElementById('timelineRightManual');
                     const sLA = document.getElementById('timelineLeftAuto');
@@ -1132,6 +1133,9 @@
                         setTimeout(() => { CoreAI.runStableAI(true); }, 150);
                     }
                 };
+
+                vM.onloadedmetadata = initMetadataConfig;
+                vA.onloadedmetadata = initMetadataConfig;
             },
             onDualSliderInput(side) {
                 if(!vActive.src) return;
@@ -1354,7 +1358,7 @@
             },
             closeReportModal() { document.getElementById('reportModal').style.display = "none"; },
             syncPlayAI() {
-                if (vActive.paused) {
+                if (!this.isAutoMode || vActive.paused) {
                     cancelAnimationFrame(this.playLoopId);
                     return;
                 }
@@ -1368,7 +1372,9 @@
                 }
                 if (vActive.paused) {
                     vActive.play();
-                    this.syncPlayAI();
+                    if (this.currentRoom === 'auto' && this.isAutoMode) {
+                        this.syncPlayAI();
+                    }
                 } else {
                     vActive.pause();
                     cancelAnimationFrame(this.playLoopId); 
@@ -1429,6 +1435,7 @@
                 document.getElementById('innerGallery').innerHTML = "";
                 
                 this.isAutoMode = false;
+                CoreAI.aiTracking = false;
                 document.getElementById('btnAutoMarkActive').style.background = "transparent";
                 
                 this.contactTime = null;
