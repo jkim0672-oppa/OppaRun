@@ -106,7 +106,6 @@
             height: 8px; background: none; outline: none; top: 0; margin: 0;
         }
         
-        /* 볼 크기를 화면 스케일에 맞춰 축소 조정하여 하단 뷰포트 밀림 방지 */
         .video-timeline-dual::-webkit-slider-thumb {
             pointer-events: auto; -webkit-appearance: none; appearance: none; 
             width: 16px; height: 16px; border-radius: 50%; cursor: pointer; 
@@ -931,11 +930,11 @@
                     return;
                 }
                 
-                // [구간 무한루프 제거] 지정 끝점(Takeoff) 이탈 시 구간 첫 점으로 복귀하지 않고, 1회 정밀하게 도달 후 일시정지 상태로 멈춤
+                // [단발성 구간 재생 교정] 끝점(Takeoff)에 완벽하게 도달하거나 넘어서면 무한 루프 돌리지 않고 정지 및 리셋
                 if (this.takeoffTime !== null && this.contactTime !== null && v.currentTime >= this.takeoffTime) {
-                    v.currentTime = this.takeoffTime;
                     v.pause();
                     btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
+                    v.currentTime = this.contactTime;
                     cancelAnimationFrame(this.playLoopId);
                     setTimeout(() => { CoreAI.runStableAI(); }, 50);
                     return;
@@ -947,6 +946,10 @@
             togglePlay() {
                 if (v.paused) {
                     if(this.isAutoMode) CoreAI.aiTracking = true;
+                    // 이미 끝점에 정지되어 있는 상태에서 다시 누르면 매끄럽게 시작 지점부터 재출발하도록 처리
+                    if (this.takeoffTime !== null && this.contactTime !== null && v.currentTime >= this.takeoffTime) {
+                        v.currentTime = this.contactTime;
+                    }
                     v.play();
                     btnPlay.innerText = I18n[I18n.currentLang].btnPause;
                     if (CoreAI.aiTracking) this.syncPlayAI();
@@ -966,7 +969,6 @@
                 v.currentTime = Math.max(0, Math.min(v.duration, v.currentTime + amount));
                 timeOverlay.innerText = v.currentTime.toFixed(2) + "s";
                 
-                // 프레임 정밀 단일 탐색 시에는 조건 검사를 제거하여 이탈 및 갇힘 없이 완전 자유로운 탐색 보장
                 setTimeout(() => { CoreAI.runStableAI(); }, 40);
             },
             resetAll() {
@@ -1011,22 +1013,15 @@
                 I18n.updateUIStrings();
             },
             resetToMark() {
-                v.pause();
-                btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
-                cancelAnimationFrame(this.playLoopId);
-
-                // [오토 리셋 버그 교정] 오토 모드가 활성화된 상태였다면 수집 락 해제 및 연산 상태 재동기화
-                if(this.isAutoMode) {
-                    this.isAutoMode = false;
-                    btnAutoMark.classList.remove('active-auto');
-                    I18n.updateUIStrings();
-                }
-
+                const wasPaused = v.paused;
+                
                 const targetTime = (this.contactTime !== null) ? this.contactTime : 0;
                 v.currentTime = targetTime;
                 timeOverlay.innerText = targetTime.toFixed(2) + "s";
                 
-                setTimeout(() => { CoreAI.runStableAI(); }, 50);
+                if (wasPaused) {
+                    setTimeout(() => { CoreAI.runStableAI(); }, 50);
+                }
             }
         };
 
