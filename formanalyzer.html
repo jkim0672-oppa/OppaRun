@@ -740,7 +740,6 @@
             takeoffTime: null,
 
             initEvents() {
-                // 비디오 재생/일시정지 이벤트를 직접 감지하여 버튼 텍스트를 확실하게 변경
                 v.onplay = () => {
                     btnPlay.innerText = I18n[I18n.currentLang].btnPause;
                 };
@@ -752,11 +751,11 @@
                     if(v.duration) {
                         timeOverlay.innerText = v.currentTime.toFixed(2) + "s";
                         
-                        // [구간 도달 시 멈춤 제어 구현]
-                        // 지정 종료 지점(takeoffTime)을 지나면 무한루프를 돌지 않고 즉시 일시정지
+                        // [구간 제어 핵심 개선] 지정 완료 지점을 지나면 멈추도록 강제 제어
                         if (this.takeoffTime !== null && this.contactTime !== null && v.currentTime >= this.takeoffTime) {
                             v.pause();
                             cancelAnimationFrame(this.playLoopId);
+                            v.currentTime = this.takeoffTime;
                         }
                     }
                 };
@@ -829,8 +828,8 @@
                     v.currentTime = 0;
                     timeOverlay.innerText = "0.00s";
                     ctx.clearRect(0, 0, c.width, c.height); 
-                    this.contactTime = null;
-                    this.takeoffTime = null;
+                    this.contactTime = 0;
+                    this.takeoffTime = v.duration;
                     
                     inputStartPoint.value = "0.00";
                     inputEndPoint.value = v.duration.toFixed(2);
@@ -1041,11 +1040,11 @@
                     return;
                 }
                 
-                // [구간 도달 시 AI 프레임 추적 멈춤 제어]
-                // AI 분석 구동 중에도 정해진 끝 시간을 지나면 더 돌지 않고 일시정지 처리
+                // [구간 도달 시 AI 프레임 추적 및 재생 완벽 제어] 오토 모드 분석 중에도 제한 타임 도달 시 완벽 차단
                 if (this.takeoffTime !== null && this.contactTime !== null && v.currentTime >= this.takeoffTime) {
                     v.pause();
                     cancelAnimationFrame(this.playLoopId);
+                    v.currentTime = this.takeoffTime;
                     return;
                 }
 
@@ -1059,6 +1058,7 @@
                 }
                 if (v.paused) {
                     if(this.isAutoMode) CoreAI.aiTracking = true;
+                    // 종료 구간을 지났거나 끝에 가 있으면 다시 시작 구간(contactTime)으로 루프 백
                     if (this.takeoffTime !== null && this.contactTime !== null && v.currentTime >= this.takeoffTime) {
                         v.currentTime = this.contactTime;
                     }
@@ -1129,14 +1129,25 @@
             },
             resetToMark() {
                 if(!v.src) return;
-                // 구간 리셋 시 무조건 정지 상태로 전환하여 첫 지점에서 다시 플레이 대기하도록 설계
                 v.pause();
                 cancelAnimationFrame(this.playLoopId);
+                
+                // [구간 리셋 개선] 오토 모드가 켜져 있다면 구간 재생 대기를 위해 안전하게 OFF 처리
+                if (this.isAutoMode) {
+                    this.isAutoMode = false;
+                    btnAutoMark.classList.remove('active-auto');
+                    I18n.updateUIStrings();
+                }
                 
                 const targetTime = (this.contactTime !== null) ? this.contactTime : 0;
                 v.currentTime = targetTime;
                 timeOverlay.innerText = targetTime.toFixed(2) + "s";
                 
+                // UI 입력창 및 슬라이더 트랙을 오빠가 지정한 구간 첫 부분으로 확정 정렬
+                sL.value = targetTime;
+                inputStartPoint.value = targetTime.toFixed(2);
+                this.updateTrack();
+
                 setTimeout(() => { CoreAI.runStableAI(); }, 50);
             }
         };
