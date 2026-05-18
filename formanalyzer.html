@@ -190,13 +190,13 @@
             background: var(--card-bg); padding: 8px 4px; border-radius: 12px; border-left: 3px solid var(--neon); 
             border-top: 1px solid rgba(187, 242, 70, 0.15); text-align: center; box-sizing: border-box;
             display: flex; flex-direction: column; justify-content: center; align-items: center;
-            height: 100%; /* [변경] 그리드 안에서 카드가 완벽한 고정 높이를 가지도록 선언 */
+            height: 100%; 
         }
         .res-card.blue-card { border-left-color: var(--blue); }
         .res-label { 
             font-size: 11px; font-weight: 600; color: #9a9a9f; display: block; white-space: nowrap; overflow: hidden;
-            height: 14px;      /* [추가] 언어 전환 시 글자 폰트 높낮이 차이로 인한 들썩임 철저 방쇄 */
-            line-height: 14px; /* [추가] 라인 높이를 균일하게 밀착 고정 */
+            height: 14px;      
+            line-height: 14px; 
         }
         .res-val { font-size: 16px; font-weight: bold; color: var(--neon); display: block; margin: 4px 0; }
         .res-card.blue-card .res-val { color: var(--blue); }
@@ -507,7 +507,6 @@
             autoFlightList: [],
             lastDetectedContact: null,
 
-            // [v4.7 추가] 자동 분석 모드용 실시간 각도 누적 버퍼 저장소
             autoKneeList: [],
             autoElbowList: [],
             autoTorsoList: [],
@@ -553,7 +552,6 @@
                 this.lastJoints.hip = { x: lm[24].x * c.width, y: lm[24].y * c.height };
 
                 if(AppControl.isAutoMode) {
-                    // [v4.7 추가] 자동 분석 모드 가동 중에만 매 프레임 수치 어레이에 축적
                     this.autoKneeList.push(kneeValNum);
                     this.autoElbowList.push(elbowValNum);
                     this.autoTorsoList.push(torsoValNum);
@@ -628,6 +626,7 @@
                 v.ontimeupdate = () => {
                     if(v.duration) {
                         timeOverlay.innerText = v.currentTime.toFixed(2) + "s";
+                        this.calculateMetrics(); // 느린 배속 재생 시 실시간 수치 동기화 갱신 유도
                     }
                 };
             },
@@ -640,7 +639,6 @@
                     CoreAI.autoFlightList = [];
                     CoreAI.lastDetectedContact = null;
                     
-                    // [v4.7 추가] 자동 토글 작동 시 누적 각도 리스트 메모리 비우기
                     CoreAI.autoKneeList = [];
                     CoreAI.autoElbowList = [];
                     CoreAI.autoTorsoList = [];
@@ -649,8 +647,12 @@
                     this.takeoffTime = null;
                 } else {
                     btnAutoMark.classList.remove('active-auto');
+                    // 수동모드로 돌아왔을 때 현재 양쪽 핸들 상태 기반으로 재인식
+                    this.contactTime = parseFloat(sL.value);
+                    this.takeoffTime = parseFloat(sR.value);
                 }
                 I18n.updateUIStrings();
+                this.calculateMetrics();
             },
             syncAutoMark(side, targetTime) {
                 if(side === 'left') {
@@ -690,8 +692,8 @@
                     v.currentTime = 0;
                     timeOverlay.innerText = "0.00s";
                     ctx.clearRect(0, 0, c.width, c.height); 
-                    this.contactTime = null;
-                    this.takeoffTime = null;
+                    this.contactTime = 0;
+                    this.takeoffTime = v.duration;
                     valGCT.innerText = `0ms`;
                     valFlight.innerText = `0ms`;
                     CoreAI.footDataHistory = [];
@@ -702,6 +704,8 @@
                     CoreAI.autoKneeList = [];
                     CoreAI.autoElbowList = [];
                     CoreAI.autoTorsoList = [];
+
+                    this.calculateMetrics();
 
                     if(CoreAI.aiTracking) {
                         setTimeout(() => { CoreAI.runStableAI(); }, 150);
@@ -766,17 +770,23 @@
                         valFlight.innerText = `${avgFlight}ms`;
                     }
                 } else {
-                    if (this.contactTime !== null && this.takeoffTime !== null) {
-                        const diffMs = Math.round((this.takeoffTime - this.contactTime) * 1000);
+                    // 수동모드일 때 변수값이 명시적으로 비어있다면 슬라이더 값 핸들러 강제 매핑해서 안정성 획득
+                    const currentContact = (this.contactTime !== null) ? this.contactTime : parseFloat(sL.value);
+                    const currentTakeoff = (this.takeoffTime !== null) ? this.takeoffTime : parseFloat(sR.value);
+                    
+                    if (!isNaN(currentContact) && !isNaN(currentTakeoff)) {
+                        const diffMs = Math.round((currentTakeoff - currentContact) * 1000);
                         if(diffMs >= 0) {
                             valGCT.innerText = `${diffMs}ms`;
                             valFlight.innerText = Math.round(diffMs * 0.45) + "ms"; 
+                        } else {
+                            valGCT.innerText = "0ms";
+                            valFlight.innerText = "0ms";
                         }
                     }
                 }
             },
             openReportModal() {
-                // [v4.7 변경] 자동 모드 중 누적 각도 리스트 데이터가 존재할 경우 전체 평균값 연산
                 if(this.isAutoMode && CoreAI.autoKneeList.length > 0) {
                     const sumKnee = CoreAI.autoKneeList.reduce((a, b) => a + b, 0);
                     const sumElbow = CoreAI.autoElbowList.reduce((a, b) => a + b, 0);
@@ -786,7 +796,6 @@
                     document.getElementById('repValElbow').innerText = (sumElbow / CoreAI.autoElbowList.length).toFixed(1) + "°";
                     document.getElementById('repValBody').innerText = (sumTorso / CoreAI.autoTorsoList.length).toFixed(1) + "°";
                 } else {
-                    // 수동 모드이거나 데이터가 없을 땐 기존 설계대로 마지막(현재) 실시간 계측 데이터 표출
                     document.getElementById('repValKnee').innerText = CoreAI.curKnee;
                     document.getElementById('repValElbow').innerText = CoreAI.curElbow;
                     document.getElementById('repValBody').innerText = CoreAI.curBody;
@@ -836,6 +845,14 @@
                 }
                 v.currentTime = Math.max(0, Math.min(v.duration, v.currentTime + amount));
                 timeOverlay.innerText = v.currentTime.toFixed(2) + "s";
+                
+                // 프레임 단위 미세이동 제어 시에도 수동 마킹 포인트 값 재갱신 연동
+                if(!this.isAutoMode) {
+                    this.contactTime = parseFloat(sL.value);
+                    this.takeoffTime = parseFloat(sR.value);
+                }
+                this.calculateMetrics();
+                
                 setTimeout(() => { CoreAI.runStableAI(); }, 40);
             },
             toggleAI() {
@@ -872,6 +889,10 @@
                     this.toggleAutoMode();
                 }
                 
+                sL.value = 0;
+                sR.value = v.duration || 0;
+                this.updateTrack();
+
                 this.contactTime = null;
                 this.takeoffTime = null;
                 valGCT.innerText = "0ms";
@@ -881,7 +902,6 @@
                 CoreAI.autoFlightList = [];
                 CoreAI.lastDetectedContact = null;
 
-                // [v4.7 추가] 리셋 누를 때 내부 각도 누적 메모리 완전 공백화
                 CoreAI.autoKneeList = [];
                 CoreAI.autoElbowList = [];
                 CoreAI.autoTorsoList = [];
