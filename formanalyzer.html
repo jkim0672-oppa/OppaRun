@@ -772,6 +772,7 @@
             async runStableAI(forceShow = false) {
                 if (!this.instance || !vActive || !vActive.src || !vActive.videoWidth || !vActive.videoHeight || this.isAiProcessing) return; 
                 
+                // [수정 포인트] 매뉴얼 모드에서는 오직 정지 상태에서 명확한 수동 트리거(forceShow)가 들어왔을 때만 AI 연산을 태움
                 if (AppControl.currentRoom === 'manual' && !forceShow) {
                     return;
                 }
@@ -978,11 +979,15 @@
                     if(vTarget && vTarget.duration) {
                         document.getElementById(overlayId).innerText = vTarget.currentTime.toFixed(2) + "s";
                         
-                        if (this.currentRoom === 'manual' && !vTarget.paused) {
-                            const currentVal = vTarget.currentTime;
-                            document.getElementById('timelineLeftManual').value = currentVal;
-                            document.getElementById('inputStartPointManual').value = currentVal.toFixed(2);
-                            this.updateTrack();
+                        if (this.currentRoom === 'manual') {
+                            // [수정 포인트] 매뉴얼 모드 재생 중에는 잔상을 완전히 클리어하여 생성 원천 차단
+                            ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                            if (!vTarget.paused) {
+                                const currentVal = vTarget.currentTime;
+                                document.getElementById('timelineLeftManual').value = currentVal;
+                                document.getElementById('inputStartPointManual').value = currentVal.toFixed(2);
+                                this.updateTrack();
+                            }
                         }
 
                         if (this.takeoffTime !== null && this.contactTime !== null && vTarget.currentTime >= this.takeoffTime) {
@@ -996,7 +1001,8 @@
 
                 const targetSeekEnd = () => {
                     if(this.currentRoom === 'manual') {
-                        CoreAI.runStableAI(true);
+                        // [수정 포인트] 타임 슬라이더 이동 완료 시(seeked) 캔버스를 초기 리셋하여 무분별한 잔상 자동 표기를 차단
+                        ctxActive.clearRect(0, 0, cActive.width, cActive.height);
                     } else if(this.currentRoom === 'auto' && !this.isAutoMode) {
                         CoreAI.runStableAI(true);
                     }
@@ -1055,7 +1061,8 @@
                     if (this.currentRoom === 'auto') {
                         setTimeout(() => { CoreAI.runStableAI(); }, 60);
                     } else {
-                        setTimeout(() => { CoreAI.runStableAI(true); }, 60);
+                        // [수정 포인트] 매뉴얼 룸 전환 시 화면을 깨끗하게 비워줌
+                        setTimeout(() => { ctxActive.clearRect(0, 0, cActive.width, cActive.height); }, 60);
                     }
                 }
                 I18n.updateUIStrings();
@@ -1189,7 +1196,8 @@
                     CoreAI.autoElbowList = [];
                     CoreAI.autoTorsoList = [];
 
-                    setTimeout(() => { CoreAI.runStableAI(true); }, 150);
+                    // [수정 포인트] 로드 완료 시에도 매뉴얼 모드는 처음에 잔상을 그리지 않고 비워둠
+                    setTimeout(() => { if(this.currentRoom === 'auto') CoreAI.runStableAI(true); else ctxActive.clearRect(0, 0, cActive.width, cActive.height); }, 150);
                 };
 
                 vM.onloadedmetadata = initMetadataConfig;
@@ -1235,6 +1243,8 @@
                 document.getElementById('inputEndPointAuto').value = this.takeoffTime.toFixed(2);
 
                 this.calculateMetrics();
+                // [수정 포인트] 드래그 노브를 움직이는 도중에는 스켈레톤 라인을 지워버림
+                if(this.currentRoom === 'manual') ctxActive.clearRect(0, 0, cActive.width, cActive.height);
             },
             onManualTimeInputChange(side) {
                 if(!vActive || !vActive.src) {
@@ -1281,6 +1291,8 @@
                 document.getElementById('timeOverlayAuto').innerText = vActive.currentTime.toFixed(2) + "s";
 
                 this.calculateMetrics();
+                // [수정 포인트] 사용자가 텍스트 인풋 박스로 정밀 수치를 입력 완료했을 땐 즉각 분석 핏 처리
+                if(this.currentRoom === 'manual') CoreAI.runStableAI(true);
             },
             updateTrack() {
                 const sLM = document.getElementById('timelineLeftManual');
@@ -1342,6 +1354,8 @@
 
                 this.updateTrack();
                 this.calculateMetrics();
+                // [수정 포인트] Contact, Takeoff 버튼을 터치한 이 순간에만 스켈레톤을 정확하게 새로 계산해 노출함
+                if(this.currentRoom === 'manual') CoreAI.runStableAI(true);
             },
             disabled() {},
             calculateMetrics() {
@@ -1369,7 +1383,7 @@
             closeSettingModal() {
                 this.saveSettings();
                 document.getElementById('settingModal').style.display = "none";
-                setTimeout(() => { CoreAI.runStableAI(true); }, 50);
+                setTimeout(() => { if(this.currentRoom === 'auto') CoreAI.runStableAI(true); }, 50);
             },
             saveSettings() {
                 userHeight = parseFloat(document.getElementById('inputHeight').value) || 175;
@@ -1454,6 +1468,9 @@
                 vActive.currentTime = Math.max(0, Math.min(vActive.duration, vActive.currentTime + amount));
                 
                 document.getElementById('timelineLeftManual').value = document.getElementById('timelineLeftAuto').value = vActive.currentTime;
+                
+                // [수정 포인트] 수동으로 시간 조절 버튼(+-0.03s, +-0.01s)을 클릭해서 이동한 단일 컷 시점에만 스켈레톤을 핏해서 새로 그림
+                if(this.currentRoom === 'manual') CoreAI.runStableAI(true);
             },
             resetAll() {
                 vM.pause(); vA.pause();
@@ -1533,6 +1550,8 @@
                 document.getElementById('inputStartPointManual').value = targetTime.toFixed(2);
                 document.getElementById('inputStartPointAuto').value = targetTime.toFixed(2);
                 this.updateTrack();
+                // [수정 포인트] 구간 리셋 직후에도 캔버스를 깨끗하게 클리어
+                if(this.currentRoom === 'manual') ctxActive.clearRect(0, 0, cActive.width, cActive.height);
             }
         };
 
