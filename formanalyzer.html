@@ -524,7 +524,7 @@
     </div>
 
     <script>
-        const drawConnectors = window.drawConnectors || (window.DrawingUtils ? window.DrawingUtils.drawConnectors : null) || (() => {});
+        const getDrawConnectors = () => window.drawConnectors || (window.DrawingUtils ? window.DrawingUtils.drawConnectors : null) || null;
         
         const POSE_CONNECTIONS = [
             [11,12], [11,13], [13,15], [12,14], [14,16], [11,23], [12,24], [23,24],
@@ -770,9 +770,8 @@
                     return;
                 }
 
-                // 델타 타임 확인 기반 가드 시스템으로 개선 (소수점 타이머 끊김 완벽 방어)
                 const currentPlaybackTime = vActive.currentTime;
-                if (!vActive.paused && this.lastFrameTime >= 0 && Math.abs(currentPlaybackTime - this.lastFrameTime) < 0.005) {
+                if (!vActive.paused && this.lastFrameTime >= 0 && Math.abs(currentPlaybackTime - this.lastFrameTime) < 0.002) {
                     return; 
                 }
 
@@ -784,13 +783,12 @@
                     }
                     await this.instance.send({image: vActive});
                 } catch(err) {
-                    console.log("Frame Skip System Anchor Triggered");
+                    console.log("Frame Skip Control Catch Block Triggered");
                 } finally {
                     this.isAiProcessing = false;
                 }
             },
             clearManualDataDisplay() {
-                const p = I18n[I18n.currentLang];
                 document.getElementById('valKneeM').innerText = "--°";
                 document.getElementById('valElbowM').innerText = "--°";
                 document.getElementById('valBodyM').innerText = "--°";
@@ -811,8 +809,9 @@
                 ctxActive.clearRect(0, 0, cActive.width, cActive.height);
                 if (!this.aiTracking && AppControl.currentRoom === 'auto') return;
                 
-                if(window.drawConnectors && drawConnectors) {
-                    drawConnectors(ctxActive, res.poseLandmarks, POSE_CONNECTIONS, {color: '#deff9a', lineWidth: 3});
+                const dConnectors = getDrawConnectors();
+                if(dConnectors) {
+                    dConnectors(ctxActive, res.poseLandmarks, POSE_CONNECTIONS, {color: '#deff9a', lineWidth: 3});
                 }
                 const lm = res.poseLandmarks;
                 
@@ -984,6 +983,16 @@
 
                 vM.ontimeupdate = () => timeUpdateSync(vM, 'timeOverlayManual');
                 vA.ontimeupdate = () => timeUpdateSync(vA, 'timeOverlayAuto');
+
+                const targetSeekEnd = () => {
+                    if(this.currentRoom === 'manual') {
+                        CoreAI.runStableAI(true);
+                    } else if(this.currentRoom === 'auto' && !this.isAutoMode) {
+                        CoreAI.runStableAI(true);
+                    }
+                };
+                vM.onseeked = targetSeekEnd;
+                vA.onseeked = targetSeekEnd;
             },
 
             switchRoom(roomName) {
@@ -1031,6 +1040,12 @@
                     AppStorage.triggerCustomConfirm('alertNoVideo');
                     return;
                 }
+                
+                if(this.playLoopId) {
+                    cancelAnimationFrame(this.playLoopId);
+                    this.playLoopId = null;
+                }
+                
                 this.isAutoMode = !this.isAutoMode;
                 const btnAutoActive = document.getElementById('btnAutoMarkActive');
                 if(this.isAutoMode) {
@@ -1058,10 +1073,6 @@
                 } else {
                     btnAutoActive.style.background = "transparent";
                     CoreAI.aiTracking = false;
-                    if(this.playLoopId) {
-                        cancelAnimationFrame(this.playLoopId);
-                        this.playLoopId = null;
-                    }
                 }
                 I18n.updateUIStrings();
             },
@@ -1198,7 +1209,6 @@
                 document.getElementById('inputEndPointAuto').value = this.takeoffTime.toFixed(2);
 
                 this.calculateMetrics();
-                setTimeout(() => { CoreAI.runStableAI(true); }, 40);
             },
             onManualTimeInputChange(side) {
                 if(!vActive || !vActive.src) {
@@ -1245,7 +1255,6 @@
                 document.getElementById('timeOverlayAuto').innerText = vActive.currentTime.toFixed(2) + "s";
 
                 this.calculateMetrics();
-                setTimeout(() => { CoreAI.runStableAI(true); }, 40);
             },
             updateTrack() {
                 const sLM = document.getElementById('timelineLeftManual');
@@ -1307,7 +1316,6 @@
 
                 this.updateTrack();
                 this.calculateMetrics();
-                setTimeout(() => { CoreAI.runStableAI(true); }, 40);
             },
             calculateMetrics() {
                 if(CoreAI.autoGctList.length > 0) {
@@ -1419,7 +1427,6 @@
                 vActive.currentTime = Math.max(0, Math.min(vActive.duration, vActive.currentTime + amount));
                 
                 document.getElementById('timelineLeftManual').value = document.getElementById('timelineLeftAuto').value = vActive.currentTime;
-                setTimeout(() => { CoreAI.runStableAI(true); }, 40);
             },
             resetAll() {
                 vM.pause(); vA.pause();
@@ -1499,8 +1506,6 @@
                 document.getElementById('inputStartPointManual').value = targetTime.toFixed(2);
                 document.getElementById('inputStartPointAuto').value = targetTime.toFixed(2);
                 this.updateTrack();
-
-                setTimeout(() => { CoreAI.runStableAI(true); }, 50);
             }
         };
 
@@ -1583,13 +1588,13 @@
                     tCtx.font = `bold ${fontSize}px sans-serif`;
                     tCtx.shadowColor = "black"; tCtx.shadowBlur = 4;
                     
-                    if (CoreAI.lastJoints.knee && CoreAI.curKnee !== "--°") {
+                    if (CoreAI.lastJoints.knee && CoreAI.curKnee !== "--°" && !isNaN(scaleRatio)) {
                         tCtx.fillText(`Knee ${CoreAI.curKnee}`, CoreAI.lastJoints.knee.x * scaleRatio + 15, CoreAI.lastJoints.knee.y * scaleRatio);
                     }
-                    if (CoreAI.lastJoints.elbow && CoreAI.curElbow !== "--°") {
+                    if (CoreAI.lastJoints.elbow && CoreAI.curElbow !== "--°" && !isNaN(scaleRatio)) {
                         tCtx.fillText(`Elbow ${CoreAI.curElbow}`, CoreAI.lastJoints.elbow.x * scaleRatio + 15, CoreAI.lastJoints.elbow.y * scaleRatio);
                     }
-                    if (CoreAI.lastJoints.hip && CoreAI.curBody !== "--°") {
+                    if (CoreAI.lastJoints.hip && CoreAI.curBody !== "--°" && !isNaN(scaleRatio)) {
                         tCtx.fillText(`Torso ${CoreAI.curBody}`, CoreAI.lastJoints.hip.x * scaleRatio - (fontSize * 4), CoreAI.lastJoints.hip.y * scaleRatio - 15);
                     }
                 }
