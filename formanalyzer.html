@@ -139,7 +139,6 @@
             height: 38px; border-radius: 10px; cursor: pointer;
         }
 
-        /* 변경: 상단 스피드 박스 삭제에 따라 3개 버튼이 꽉 차도록 1fr 1fr 1fr 구조 변경 */
         .marking-row { grid-template-columns: 1fr 1fr 1fr; }
         .btn-marking {
             background: transparent; color: #fff; border: 1.5px solid var(--neon);
@@ -147,7 +146,6 @@
         }
         .btn-marking.active-auto { background: rgba(187, 242, 70, 0.2); border-color: #10b981; color: #10b981; }
 
-        /* 신규: 4분할 하단 레포트/제어 칸 스타일 */
         .report-grid-row { grid-template-columns: 1.1fr 1.1fr 1fr 1.2fr; }
         .manual-input-box {
             background: var(--input-bg); border: 1px solid #2c2c2e; border-radius: 10px; height: 38px;
@@ -426,7 +424,6 @@
         const lblFlight = document.getElementById('lblFlight');
         const btnReturnMark = document.getElementById('btnReturnMark');
         
-        // 추가 바인딩 엘리먼트
         const inputStartPoint = document.getElementById('inputStartPoint');
         const inputEndPoint = document.getElementById('inputEndPoint');
 
@@ -562,7 +559,6 @@
                 document.getElementById('btnModalClose').innerText = p.galleryClose;
                 document.getElementById('btnModalDelete').innerText = p.confirmYes;
                 
-                // 갤러리 삭제 텍스트 기본 갱신
                 if(AppStorage.currentConfirmType === 'deleteSnapshot' || !AppStorage.currentConfirmType) {
                     document.getElementById('txtConfirmMsg').innerHTML = p.confirmMsg.replace('\n', '<br>');
                     document.getElementById('btnConfirmYes').innerText = p.confirmYes;
@@ -747,6 +743,12 @@
                 v.ontimeupdate = () => {
                     if(v.duration) {
                         timeOverlay.innerText = v.currentTime.toFixed(2) + "s";
+                        
+                        // [구간 반복 무한 루프 핵심 구현]
+                        // 설정된 루프 종료 지점(takeoffTime)이 있고 현재 재생 시간이 지났을 때 시작점(contactTime)으로 무한 리셋
+                        if (this.takeoffTime !== null && this.contactTime !== null && v.currentTime >= this.takeoffTime) {
+                            v.currentTime = this.contactTime;
+                        }
                     }
                 };
             },
@@ -821,7 +823,6 @@
                     this.contactTime = null;
                     this.takeoffTime = null;
                     
-                    // 수동 제어 입력 창 초기 설정 동기화
                     inputStartPoint.value = "0.00";
                     inputEndPoint.value = v.duration.toFixed(2);
 
@@ -867,14 +868,12 @@
                 this.contactTime = parseFloat(sL.value);
                 this.takeoffTime = parseFloat(sR.value);
                 
-                // 수동 텍스트 인풋 동기화
                 inputStartPoint.value = this.contactTime.toFixed(2);
                 inputEndPoint.value = this.takeoffTime.toFixed(2);
 
                 this.calculateMetrics();
                 setTimeout(() => { CoreAI.runStableAI(); }, 40);
             },
-            // 신규: 하단 인풋 박스로 매뉴얼 시작/끝 범위 직접 타자 입력 수정 시 처리 로직
             onManualTimeInputChange(side) {
                 if(!v.src) {
                     AppStorage.triggerCustomConfirm('alertNoVideo');
@@ -944,7 +943,6 @@
                     this.takeoffTime = v.currentTime;
                 }
                 
-                // 인풋 박스 값 채우기 동기화
                 inputStartPoint.value = (this.contactTime !== null) ? this.contactTime.toFixed(2) : "0.00";
                 inputEndPoint.value = (this.takeoffTime !== null) ? this.takeoffTime.toFixed(2) : v.duration.toFixed(2);
 
@@ -1035,13 +1033,10 @@
                     return;
                 }
                 
+                // [구간 제어 분석 무한 루프 구현]
+                // 인공지능 프레임 추적 중에도 끝을 지나면 즉시 시작 시간으로 되감아 멈추지 않고 연달아 재생되도록 변경
                 if (this.takeoffTime !== null && this.contactTime !== null && v.currentTime >= this.takeoffTime) {
-                    v.pause();
-                    btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
                     v.currentTime = this.contactTime;
-                    cancelAnimationFrame(this.playLoopId);
-                    setTimeout(() => { CoreAI.runStableAI(); }, 50);
-                    return;
                 }
 
                 CoreAI.runStableAI();
@@ -1144,7 +1139,6 @@
             targetThumbBox: null, 
             currentConfirmType: 'deleteSnapshot',
             
-            // 전용 커스텀 컨펌/얼럿 통합 관리 제어 핸들러
             triggerCustomConfirm(type) {
                 this.currentConfirmType = type;
                 const overlay = document.getElementById('customConfirm');
