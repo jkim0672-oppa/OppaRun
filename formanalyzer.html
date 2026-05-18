@@ -314,8 +314,8 @@
             <div class="grid-row precision-row">
                 <button class="btn-precision" onclick="AppControl.stepTime(-0.03)">◀ -0.03s</button>
                 <button class="btn-precision" onclick="AppControl.stepTime(-0.01)">◀ -0.01s</button>
-                <button class="btn-precision" onclick="AppControl.stepTime(0.01)">0.01s ▶</button>
-                <button class="btn-precision" onclick="AppControl.stepTime(0.03)">0.03s ▶</button>
+                <button class="btn-precision" onclick="AppControl.stepTime(0.01) || CoreAI.runStableAI()">0.01s ▶</button>
+                <button class="btn-precision" onclick="AppControl.stepTime(0.03) || CoreAI.runStableAI()">0.03s ▶</button>
             </div>
 
             <div class="grid-row marking-row">
@@ -738,7 +738,7 @@
                 this.instance.onResults(this.onResults.bind(this));
             },
             async runStableAI() {
-                if (!vActive.src || !vActive.videoWidth || !vActive.videoHeight || this.isAiProcessing || !this.aiTracking) return; 
+                if (!vActive.src || !vActive.videoWidth || !vActive.videoHeight || this.isAiProcessing || (!this.aiTracking && AppControl.currentRoom === 'auto')) return; 
                 try {
                     this.isAiProcessing = true;
                     if(cActive.width !== vActive.videoWidth || cActive.height !== vActive.videoHeight) {
@@ -753,7 +753,9 @@
             },
             onResults(res) {
                 ctxActive.clearRect(0, 0, cActive.width, cActive.height);
-                if (!res.poseLandmarks || !this.aiTracking) return;
+                if (!res.poseLandmarks) return;
+                if (!this.aiTracking && AppControl.currentRoom === 'auto') return;
+                
                 drawConnectors(ctxActive, res.poseLandmarks, POSE_CONNECTIONS, {color: '#deff9a', lineWidth: 3});
                 const lm = res.poseLandmarks;
                 
@@ -794,13 +796,13 @@
                     if(computedStrideMeters > 0.3 && computedStrideMeters < 2.5) {
                         document.getElementById('valStrideM').innerText = computedStrideMeters.toFixed(2) + "m";
                         document.getElementById('valStrideA').innerText = computedStrideMeters.toFixed(2) + "m";
-                        if(AppControl.isAutoMode) {
+                        if(AppControl.isAutoMode && AppControl.currentRoom === 'auto') {
                             this.autoStrideList.push(computedStrideMeters);
                         }
                     }
                 }
 
-                if(AppControl.isAutoMode) {
+                if(AppControl.isAutoMode && AppControl.currentRoom === 'auto') {
                     this.autoKneeList.push(kneeValNum);
                     this.autoElbowList.push(elbowValNum);
                     this.autoTorsoList.push(torsoValNum);
@@ -1039,9 +1041,7 @@
                     CoreAI.autoElbowList = [];
                     CoreAI.autoTorsoList = [];
 
-                    if(CoreAI.aiTracking) {
-                        setTimeout(() => { CoreAI.runStableAI(); }, 150);
-                    }
+                    setTimeout(() => { CoreAI.runStableAI(); }, 150);
                 };
             },
             onDualSliderInput(side) {
@@ -1259,7 +1259,7 @@
             },
             closeReportModal() { document.getElementById('reportModal').style.display = "none"; },
             syncPlayAI() {
-                if (vActive.paused || !CoreAI.aiTracking) {
+                if (vActive.paused) {
                     cancelAnimationFrame(this.playLoopId);
                     return;
                 }
@@ -1272,9 +1272,8 @@
                     return;
                 }
                 if (vActive.paused) {
-                    if(this.isAutoMode) CoreAI.aiTracking = true;
                     vActive.play();
-                    if (this.isAutoMode) this.syncPlayAI();
+                    this.syncPlayAI();
                 } else {
                     vActive.pause();
                     cancelAnimationFrame(this.playLoopId); 
@@ -1320,26 +1319,11 @@
                 ctxA.clearRect(0, 0, cA.width, cA.height);
                 document.getElementById('innerGallery').innerHTML = "";
                 
-                document.getElementById('valKneeM').innerText = "--°";
-                document.getElementById('valElbowM').innerText = "--°";
-                document.getElementById('valBodyM').innerText = "--°";
-                document.getElementById('valKneeA').innerText = "--°";
-                document.getElementById('valElbowA').innerText = "--°";
-                document.getElementById('valBodyA').innerText = "--°";
-                
-                document.getElementById('valStrideM').innerText = "0.00m";
-                document.getElementById('valStrideA').innerText = "0.00m";
-                
                 this.isAutoMode = false;
                 document.getElementById('btnAutoMarkActive').style.background = "transparent";
                 
-                CoreAI.aiTracking = false; 
                 this.contactTime = null;
                 this.takeoffTime = null;
-                document.getElementById('valGCTM').innerText = "0ms";
-                document.getElementById('valFlightM').innerText = "0ms";
-                document.getElementById('valGCTA').innerText = "0ms";
-                document.getElementById('valFlightA').innerText = "0ms";
                 
                 CoreAI.footDataHistory = [];
                 CoreAI.autoGctList = [];
