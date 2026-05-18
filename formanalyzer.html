@@ -314,8 +314,8 @@
             <div class="grid-row precision-row">
                 <button class="btn-precision" onclick="AppControl.stepTime(-0.03)">◀ -0.03s</button>
                 <button class="btn-precision" onclick="AppControl.stepTime(-0.01)">◀ -0.01s</button>
-                <button class="btn-precision" onclick="AppControl.stepTime(0.01) || CoreAI.runStableAI()">0.01s ▶</button>
-                <button class="btn-precision" onclick="AppControl.stepTime(0.03) || CoreAI.runStableAI()">0.03s ▶</button>
+                <button class="btn-precision" onclick="AppControl.stepTime(0.01)">0.01s ▶</button>
+                <button class="btn-precision" onclick="AppControl.stepTime(0.03)">0.03s ▶</button>
             </div>
 
             <div class="grid-row marking-row">
@@ -739,6 +739,13 @@
             },
             async runStableAI() {
                 if (!vActive.src || !vActive.videoWidth || !vActive.videoHeight || this.isAiProcessing || (!this.aiTracking && AppControl.currentRoom === 'auto')) return; 
+                
+                // [요구사항 반영] 수동 페이지에서 비디오가 일반 재생 중일 때는 캔버스를 비우고 스켈레톤 및 연산을 중단시킴
+                if (AppControl.currentRoom === 'manual' && !vActive.paused) {
+                    ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                    return;
+                }
+
                 try {
                     this.isAiProcessing = true;
                     if(cActive.width !== vActive.videoWidth || cActive.height !== vActive.videoHeight) {
@@ -875,7 +882,12 @@
             currentRoom: 'manual',
 
             initEvents() {
-                const handlerPlay = () => { btnPlayManual.innerText = I18n[I18n.currentLang].btnPause; btnPlayAuto.innerText = I18n[I18n.currentLang].btnPause; };
+                const handlerPlay = () => { 
+                    btnPlayManual.innerText = I18n[I18n.currentLang].btnPause; 
+                    btnPlayAuto.innerText = I18n[I18n.currentLang].btnPause; 
+                    // 수동 모드 플레이 시 캔버스 스켈레톤 초기화 클리어
+                    if (this.currentRoom === 'manual') ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                };
                 const handlerPause = () => { btnPlayManual.innerText = I18n[I18n.currentLang].btnPlay; btnPlayAuto.innerText = I18n[I18n.currentLang].btnPlay; };
 
                 vM.onplay = handlerPlay; vM.onpause = handlerPause;
@@ -888,6 +900,8 @@
                             vTarget.pause();
                             cancelAnimationFrame(this.playLoopId);
                             vTarget.currentTime = this.takeoffTime;
+                            // 지정 엔드프레임 도달 시 데이터 갱신 및 스켈레톤 출력
+                            setTimeout(() => { CoreAI.runStableAI(); }, 40);
                         }
                     }
                 };
@@ -1025,6 +1039,13 @@
                     document.getElementById('inputStartPointAuto').value = "0.00";
                     document.getElementById('inputEndPointAuto').value = vActive.duration.toFixed(2);
 
+                    document.getElementById('valKneeM').innerText = "--°";
+                    document.getElementById('valElbowM').innerText = "--°";
+                    document.getElementById('valBodyM').innerText = "--°";
+                    document.getElementById('valKneeA').innerText = "--°";
+                    document.getElementById('valElbowA').innerText = "--°";
+                    document.getElementById('valBodyA').innerText = "--°";
+
                     document.getElementById('valGCTM').innerText = "0ms";
                     document.getElementById('valFlightM').innerText = "0ms";
                     document.getElementById('valStrideM').innerText = "0.00m";
@@ -1155,6 +1176,12 @@
                     AppStorage.triggerCustomConfirm('alertNoVideo');
                     return;
                 }
+                // 마킹 버튼을 누르면 즉시 일시정지하고 해당 프레임 캡처 고정
+                if (!vActive.paused) {
+                    vActive.pause();
+                    cancelAnimationFrame(this.playLoopId);
+                }
+
                 const sLM = document.getElementById('timelineLeftManual');
                 const sRM = document.getElementById('timelineRightManual');
                 const sLA = document.getElementById('timelineLeftAuto');
@@ -1186,6 +1213,7 @@
 
                 this.updateTrack();
                 this.calculateMetrics();
+                setTimeout(() => { CoreAI.runStableAI(); }, 40); // 스켈레톤 및 데이터 출력 트리거
             },
             calculateMetrics() {
                 if(CoreAI.autoGctList.length > 0) {
@@ -1315,6 +1343,22 @@
                 document.getElementById('inputStartPointAuto').value = "0.00";
                 document.getElementById('inputEndPointAuto').value = "0.00";
 
+                // [요구사항 반영] 카드 및 하단 텍스트 데이터 리셋 연동
+                CoreAI.curKnee = "--°"; CoreAI.curElbow = "--°"; CoreAI.curBody = "--°";
+                document.getElementById('valKneeM').innerText = "--°";
+                document.getElementById('valElbowM').innerText = "--°";
+                document.getElementById('valBodyM').innerText = "--°";
+                document.getElementById('valKneeA').innerText = "--°";
+                document.getElementById('valElbowA').innerText = "--°";
+                document.getElementById('valBodyA').innerText = "--°";
+
+                document.getElementById('valGCTM').innerText = "0ms";
+                document.getElementById('valFlightM').innerText = "0ms";
+                document.getElementById('valStrideM').innerText = "0.00m";
+                document.getElementById('valGCTA').innerText = "0ms";
+                document.getElementById('valFlightA').innerText = "0ms";
+                document.getElementById('valStrideA').innerText = "0.00m";
+
                 ctxM.clearRect(0, 0, cM.width, cM.height);
                 ctxA.clearRect(0, 0, cA.width, cA.height);
                 document.getElementById('innerGallery').innerHTML = "";
@@ -1350,6 +1394,7 @@
                 document.getElementById('inputStartPointAuto').value = targetTime.toFixed(2);
                 this.updateTrack();
 
+                // [요구사항 반영] 구간리셋 시 해당 프레임 데이터 재측정 동기화
                 setTimeout(() => { CoreAI.runStableAI(); }, 50);
             }
         };
