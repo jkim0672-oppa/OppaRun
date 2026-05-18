@@ -197,6 +197,11 @@
             width: 85%; background: transparent; border: none; color: white; text-align: center;
             font-size: 12px; font-weight: bold; outline: none; padding: 0;
         }
+        /* 모바일 스핀 버튼 간섭 제거 */
+        .manual-input-box input::-webkit-outer-spin-button,
+        .manual-input-box input::-webkit-inner-spin-button {
+            -webkit-appearance: none; margin: 0;
+        }
 
         .select-wrapper { 
             position: relative; background: var(--input-bg); border: 1px solid #2c2c2e; border-radius: 10px; height: 38px;
@@ -758,12 +763,9 @@
             async runStableAI(forceShow = false) {
                 if (!this.instance || !vActive.src || !vActive.videoWidth || !vActive.videoHeight || this.isAiProcessing) return; 
                 
+                // 수동 모드 정지 상태에서 프레임 조작 시 예외 방어 및 버그 논리 수정
                 if (AppControl.currentRoom === 'manual' && !forceShow) {
-                    if (!vActive.paused || vActive.paused) {
-                        ctxActive.clearRect(0, 0, cActive.width, cActive.height);
-                        this.clearManualDataDisplay();
-                        return;
-                    }
+                    return;
                 }
 
                 if (AppControl.currentRoom === 'auto' && !this.aiTracking && vActive.paused && !forceShow) {
@@ -790,15 +792,16 @@
             },
             onResults(res) {
                 if (!res.poseLandmarks) return;
-                if (vActive.paused && AppControl.currentRoom === 'auto' && !this.aiTracking) {
-                    return;
-                }
+                
+                // 수동 모드 재생 중에는 실시간 수치 표기 및 연산 패스하여 오작동 방어
                 if (AppControl.currentRoom === 'manual') {
                     if (!vActive.paused) {
                         ctxActive.clearRect(0, 0, cActive.width, cActive.height);
                         this.clearManualDataDisplay();
                         return;
                     }
+                } else {
+                    if (vActive.paused && !this.aiTracking) return;
                 }
 
                 ctxActive.clearRect(0, 0, cActive.width, cActive.height);
@@ -853,15 +856,18 @@
                             document.getElementById('valStrideA').innerText = computedStrideMeters.toFixed(2) + "m";
                         }
                         if(AppControl.isAutoMode && AppControl.currentRoom === 'auto') {
-                            this.autoStrideList.push(computedStrideMeters);
+                            // 모바일 오버플로우 메모리 누수 방지 상한선 스로틀링 필터 적용
+                            if(this.autoStrideList.length < 1000) this.autoStrideList.push(computedStrideMeters);
                         }
                     }
                 }
 
                 if(AppControl.isAutoMode && AppControl.currentRoom === 'auto') {
-                    this.autoKneeList.push(kneeValNum);
-                    this.autoElbowList.push(elbowValNum);
-                    this.autoTorsoList.push(torsoValNum);
+                    if(this.autoKneeList.length < 2000) {
+                        this.autoKneeList.push(kneeValNum);
+                        this.autoElbowList.push(elbowValNum);
+                        this.autoTorsoList.push(torsoValNum);
+                    }
 
                     this.footDataHistory.push({
                         time: vActive.currentTime,
@@ -1076,6 +1082,9 @@
                 vA.src = objectUrl;
 
                 const initMetadataConfig = () => {
+                    // 유효하지 않은 비디오 메타데이터 차단 방어 코드 배치
+                    if (!vActive.duration || !isFinite(vActive.duration)) return;
+
                     const sLM = document.getElementById('timelineLeftManual');
                     const sRM = document.getElementById('timelineRightManual');
                     const sLA = document.getElementById('timelineLeftAuto');
