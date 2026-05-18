@@ -740,14 +740,16 @@
             async runStableAI(forceShow = false) {
                 if (!vActive.src || !vActive.videoWidth || !vActive.videoHeight || this.isAiProcessing) return; 
                 
-                // [오빠 요청 반영] 수동 모드 룸에서 일반 재생(Play) 중일 때는 캔버스를 항상 비우고 데이터 노출 및 그리기 정지
-                if (AppControl.currentRoom === 'manual' && !vActive.paused && !forceShow) {
-                    ctxActive.clearRect(0, 0, cActive.width, cActive.height);
-                    this.clearManualDataDisplay();
-                    return;
+                // 수동 모드 룸에서 정지 상태이거나 일반 재생 중일 때, 강제 보여주기 플래그가 없다면 차단
+                if (AppControl.currentRoom === 'manual' && !forceShow) {
+                    if (!vActive.paused || vActive.paused) {
+                        ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                        this.clearManualDataDisplay();
+                        return;
+                    }
                 }
 
-                // 오토 모드가 아닐 때 영상이 멈춰있으면 프레임 렌더링 업데이트 중단 (단, 강제 노출 조건이 아닐 때만)
+                // 오토 모드가 아닐 때 영상이 멈춰있으면 프레임 렌더링 업데이트 중단
                 if (AppControl.currentRoom === 'auto' && !this.aiTracking && vActive.paused && !forceShow) {
                     return;
                 }
@@ -771,15 +773,17 @@
                 document.getElementById('valStrideM').innerText = "0.00m";
             },
             onResults(res) {
-                // 영상이 멈춰있거나 수동모드 재생 중(강제조작 버튼 제외)에는 캔버스를 깔끔히 비우고 리턴
+                // 영상이 멈춰있거나 수동모드 재생/정지 중(강제조작 플래그 제외)에는 차단 규칙 적용
                 if (vActive.paused && AppControl.currentRoom === 'auto' && !this.aiTracking) {
                     return;
                 }
-                if (AppControl.currentRoom === 'manual' && !vActive.paused) {
-                    // 수동 모드 재생 중일 때 프레임 콜백이 밀려 들어오면 캔버스와 텍스트를 차단
-                    ctxActive.clearRect(0, 0, cActive.width, cActive.height);
-                    this.clearManualDataDisplay();
-                    return;
+                if (AppControl.currentRoom === 'manual') {
+                    // 수동 모드에서는 명시적인 수동 트리거 프레임 렌더링이 아닌 평상시 상태에는 캔버스를 항상 엄격히 소거
+                    if (!vActive.paused) {
+                        ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                        this.clearManualDataDisplay();
+                        return;
+                    }
                 }
 
                 ctxActive.clearRect(0, 0, cActive.width, cActive.height);
@@ -797,7 +801,6 @@
                 this.curElbow = elbowValNum.toFixed(1) + "°";
                 this.curBody = torsoValNum.toFixed(1) + "°";
 
-                // 현재 활성화된 룸의 성격에 맞춰 데이터 반영 분기 처리
                 if (AppControl.currentRoom === 'manual') {
                     document.getElementById('valKneeM').innerText = this.curKnee;
                     document.getElementById('valElbowM').innerText = this.curElbow;
@@ -915,13 +918,19 @@
                 const handlerPlay = () => { 
                     btnPlayManual.innerText = I18n[I18n.currentLang].btnPause; 
                     btnPlayAuto.innerText = I18n[I18n.currentLang].btnPause; 
-                    // 수동 모드 플레이 작동 즉시 캔버스 잔여 스켈레톤 그래픽 흔적 및 데이터 텍스트 클리어
                     if (this.currentRoom === 'manual') {
                         ctxActive.clearRect(0, 0, cActive.width, cActive.height);
                         CoreAI.clearManualDataDisplay();
                     }
                 };
-                const handlerPause = () => { btnPlayManual.innerText = I18n[I18n.currentLang].btnPlay; btnPlayAuto.innerText = I18n[I18n.currentLang].btnPlay; };
+                const handlerPause = () => { 
+                    btnPlayManual.innerText = I18n[I18n.currentLang].btnPlay; 
+                    btnPlayAuto.innerText = I18n[I18n.currentLang].btnPlay; 
+                    if (this.currentRoom === 'manual') {
+                        ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                        CoreAI.clearManualDataDisplay();
+                    }
+                };
 
                 vM.onplay = handlerPlay; vM.onpause = handlerPause;
                 vA.onplay = handlerPlay; vA.onpause = handlerPause;
@@ -934,12 +943,10 @@
                             cancelAnimationFrame(this.playLoopId);
                             vTarget.currentTime = this.takeoffTime;
                             
-                            // 구간 재생 끝(Takeoff)에 도달해서 멈췄을 때 데이터 강제 노출 방지 처리 후 프레임 대기
                             if (this.currentRoom === 'manual') {
                                 ctxActive.clearRect(0, 0, cActive.width, cActive.height);
                                 CoreAI.clearManualDataDisplay();
                             }
-                            setTimeout(() => { CoreAI.runStableAI(); }, 40);
                         }
                     }
                 };
@@ -976,7 +983,12 @@
                 if(vActive.src) {
                     vActive.currentTime = savedTime;
                     this.updateTrack();
-                    setTimeout(() => { CoreAI.runStableAI(); }, 60);
+                    if (this.currentRoom === 'auto') {
+                        setTimeout(() => { CoreAI.runStableAI(); }, 60);
+                    } else {
+                        ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                        CoreAI.clearManualDataDisplay();
+                    }
                 }
                 I18n.updateUIStrings();
             },
@@ -1097,8 +1109,12 @@
                     CoreAI.autoElbowList = [];
                     CoreAI.autoTorsoList = [];
 
-                    // 수동 모드 로드 직후 강제 연동 시켜 0초 프레임 스켈레톤과 데이터 노출 처리
-                    setTimeout(() => { CoreAI.runStableAI(true); }, 150);
+                    if (this.currentRoom === 'manual') {
+                        ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                        CoreAI.clearManualDataDisplay();
+                    } else {
+                        setTimeout(() => { CoreAI.runStableAI(true); }, 150);
+                    }
                 };
             },
             onDualSliderInput(side) {
@@ -1138,7 +1154,6 @@
                 document.getElementById('inputEndPointAuto').value = this.takeoffTime.toFixed(2);
 
                 this.calculateMetrics();
-                // 슬라이더 바 조작은 수동 이벤트이므로 스켈레톤+데이터 강제 활성화(forceShow = true)
                 setTimeout(() => { CoreAI.runStableAI(true); }, 40);
             },
             onManualTimeInputChange(side) {
@@ -1186,7 +1201,6 @@
                 document.getElementById('timeOverlayAuto').innerText = vActive.currentTime.toFixed(2) + "s";
 
                 this.calculateMetrics();
-                // 텍스트 타이핑 변경도 수동 변경이므로 스켈레톤+데이터 강제 활성화(forceShow = true)
                 setTimeout(() => { CoreAI.runStableAI(true); }, 40);
             },
             updateTrack() {
@@ -1250,7 +1264,6 @@
 
                 this.updateTrack();
                 this.calculateMetrics();
-                // 하단 수동 터치 어프 및 컨택트 마킹 버튼 입력이므로 스켈레톤+데이터 강제 생성(forceShow = true)
                 setTimeout(() => { CoreAI.runStableAI(true); }, 40);
             },
             calculateMetrics() {
@@ -1343,13 +1356,10 @@
                 } else {
                     vActive.pause();
                     cancelAnimationFrame(this.playLoopId); 
-                    
-                    // 플레이 도중 일시정지 버튼을 눌렀을 때 불필요한 스켈레톤 난사 방지 클리어 후 프레임 싱크
                     if (this.currentRoom === 'manual') {
                         ctxActive.clearRect(0, 0, cActive.width, cActive.height);
                         CoreAI.clearManualDataDisplay();
                     }
-                    setTimeout(() => { CoreAI.runStableAI(); }, 50);
                 }
             },
             stepTime(amount) {
@@ -1364,8 +1374,6 @@
                 vActive.currentTime = Math.max(0, Math.min(vActive.duration, vActive.currentTime + amount));
                 
                 document.getElementById('timelineLeftManual').value = document.getElementById('timelineLeftAuto').value = vActive.currentTime;
-                
-                // 애로우 조작 미세 버튼 클릭은 명시적인 수동 조작이므로 스켈레톤+데이터 강제 활성화(forceShow = true)
                 setTimeout(() => { CoreAI.runStableAI(true); }, 40);
             },
             resetAll() {
@@ -1435,8 +1443,10 @@
                 document.getElementById('inputStartPointAuto').value = targetTime.toFixed(2);
                 this.updateTrack();
 
-                // 구간리셋 직후 해당 프레임 자리에 맞는 고정 데이터만 단발성으로 출력되도록 강제 싱크 연동
-                if (this.currentRoom === 'manual') ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                if (this.currentRoom === 'manual') {
+                    ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                    CoreAI.clearManualDataDisplay();
+                }
                 setTimeout(() => { CoreAI.runStableAI(true); }, 50);
             }
         };
