@@ -314,7 +314,7 @@
             <div class="grid-row precision-row">
                 <button class="btn-precision" onclick="AppControl.stepTime(-0.03)">◀ -0.03s</button>
                 <button class="btn-precision" onclick="AppControl.stepTime(-0.01)">◀ -0.01s</button>
-                <button class="btn-precision" onclick="AppControl.stepTime(0.01)">0.01s ▶</button>
+                <button class="btn-precision" onclick="AppControl.stepTime(0.01) ">0.01s ▶</button>
                 <button class="btn-precision" onclick="AppControl.stepTime(0.03)">0.03s ▶</button>
             </div>
 
@@ -737,17 +737,18 @@
                 this.instance.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.5 });
                 this.instance.onResults(this.onResults.bind(this));
             },
-            async runStableAI() {
+            async runStableAI(forceShow = false) {
                 if (!vActive.src || !vActive.videoWidth || !vActive.videoHeight || this.isAiProcessing) return; 
                 
-                // [오류 수정] 수동 모드 룸에서 일반 재생(Play) 중일 때는 캔버스를 항상 비우고 데이터 분석 및 스켈레톤 그리기를 완벽히 중단시킴
-                if (AppControl.currentRoom === 'manual' && !vActive.paused) {
+                // [오빠 요청 반영] 수동 모드 룸에서 일반 재생(Play) 중일 때는 캔버스를 항상 비우고 데이터 노출 및 그리기 정지
+                if (AppControl.currentRoom === 'manual' && !vActive.paused && !forceShow) {
                     ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                    this.clearManualDataDisplay();
                     return;
                 }
 
-                // [오류 수정] 오토 모드가 아닐 때 영상이 멈춰있으면 불필요한 프레임 렌더링 업데이트 동작을 락걸어 멈춤 상태 데이터 튐 방지
-                if (AppControl.currentRoom === 'auto' && !this.aiTracking && vActive.paused) {
+                // 오토 모드가 아닐 때 영상이 멈춰있으면 프레임 렌더링 업데이트 중단 (단, 강제 노출 조건이 아닐 때만)
+                if (AppControl.currentRoom === 'auto' && !this.aiTracking && vActive.paused && !forceShow) {
                     return;
                 }
 
@@ -763,13 +764,21 @@
                     this.isAiProcessing = false;
                 }
             },
+            clearManualDataDisplay() {
+                document.getElementById('valKneeM').innerText = "--°";
+                document.getElementById('valElbowM').innerText = "--°";
+                document.getElementById('valBodyM').innerText = "--°";
+                document.getElementById('valStrideM').innerText = "0.00m";
+            },
             onResults(res) {
-                // [오류 수정] 영상이 멈춰있거나 수동모드 재생 중에는 캔버스를 깔끔히 비우고 리턴 처리하여 잔여 각도 흔들림 제거
+                // 영상이 멈춰있거나 수동모드 재생 중(강제조작 버튼 제외)에는 캔버스를 깔끔히 비우고 리턴
                 if (vActive.paused && AppControl.currentRoom === 'auto' && !this.aiTracking) {
                     return;
                 }
                 if (AppControl.currentRoom === 'manual' && !vActive.paused) {
+                    // 수동 모드 재생 중일 때 프레임 콜백이 밀려 들어오면 캔버스와 텍스트를 차단
                     ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                    this.clearManualDataDisplay();
                     return;
                 }
 
@@ -788,12 +797,16 @@
                 this.curElbow = elbowValNum.toFixed(1) + "°";
                 this.curBody = torsoValNum.toFixed(1) + "°";
 
-                document.getElementById('valKneeM').innerText = this.curKnee;
-                document.getElementById('valElbowM').innerText = this.curElbow;
-                document.getElementById('valBodyM').innerText = this.curBody;
-                document.getElementById('valKneeA').innerText = this.curKnee;
-                document.getElementById('valElbowA').innerText = this.curElbow;
-                document.getElementById('valBodyA').innerText = this.curBody;
+                // 현재 활성화된 룸의 성격에 맞춰 데이터 반영 분기 처리
+                if (AppControl.currentRoom === 'manual') {
+                    document.getElementById('valKneeM').innerText = this.curKnee;
+                    document.getElementById('valElbowM').innerText = this.curElbow;
+                    document.getElementById('valBodyM').innerText = this.curBody;
+                } else {
+                    document.getElementById('valKneeA').innerText = this.curKnee;
+                    document.getElementById('valElbowA').innerText = this.curElbow;
+                    document.getElementById('valBodyA').innerText = this.curBody;
+                }
 
                 this.lastJoints.knee = { x: lm[26].x * cActive.width, y: lm[26].y * cActive.height };
                 this.lastJoints.elbow = { x: lm[14].x * cActive.width, y: lm[14].y * cActive.height };
@@ -815,8 +828,11 @@
                     computedStrideMeters = computedStrideMeters * 1.5; 
 
                     if(computedStrideMeters > 0.3 && computedStrideMeters < 2.5) {
-                        document.getElementById('valStrideM').innerText = computedStrideMeters.toFixed(2) + "m";
-                        document.getElementById('valStrideA').innerText = computedStrideMeters.toFixed(2) + "m";
+                        if (AppControl.currentRoom === 'manual') {
+                            document.getElementById('valStrideM').innerText = computedStrideMeters.toFixed(2) + "m";
+                        } else {
+                            document.getElementById('valStrideA').innerText = computedStrideMeters.toFixed(2) + "m";
+                        }
                         if(AppControl.isAutoMode && AppControl.currentRoom === 'auto') {
                             this.autoStrideList.push(computedStrideMeters);
                         }
@@ -899,8 +915,11 @@
                 const handlerPlay = () => { 
                     btnPlayManual.innerText = I18n[I18n.currentLang].btnPause; 
                     btnPlayAuto.innerText = I18n[I18n.currentLang].btnPause; 
-                    // 수동 모드 플레이 작동 즉시 캔버스 잔여 스켈레톤 그래픽 흔적 클리어
-                    if (this.currentRoom === 'manual') ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                    // 수동 모드 플레이 작동 즉시 캔버스 잔여 스켈레톤 그래픽 흔적 및 데이터 텍스트 클리어
+                    if (this.currentRoom === 'manual') {
+                        ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                        CoreAI.clearManualDataDisplay();
+                    }
                 };
                 const handlerPause = () => { btnPlayManual.innerText = I18n[I18n.currentLang].btnPlay; btnPlayAuto.innerText = I18n[I18n.currentLang].btnPlay; };
 
@@ -915,9 +934,10 @@
                             cancelAnimationFrame(this.playLoopId);
                             vTarget.currentTime = this.takeoffTime;
                             
-                            // [오류 수정] 구간 재생 끝(Takeoff)에 도달해서 멈췄을 때 강제 노출 방지 처리 후 정지 프레임 데이터 재연동
+                            // 구간 재생 끝(Takeoff)에 도달해서 멈췄을 때 데이터 강제 노출 방지 처리 후 프레임 대기
                             if (this.currentRoom === 'manual') {
                                 ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                                CoreAI.clearManualDataDisplay();
                             }
                             setTimeout(() => { CoreAI.runStableAI(); }, 40);
                         }
@@ -1057,16 +1077,13 @@
                     document.getElementById('inputStartPointAuto').value = "0.00";
                     document.getElementById('inputEndPointAuto').value = vActive.duration.toFixed(2);
 
-                    document.getElementById('valKneeM').innerText = "--°";
-                    document.getElementById('valElbowM').innerText = "--°";
-                    document.getElementById('valBodyM').innerText = "--°";
+                    CoreAI.clearManualDataDisplay();
                     document.getElementById('valKneeA').innerText = "--°";
                     document.getElementById('valElbowA').innerText = "--°";
                     document.getElementById('valBodyA').innerText = "--°";
 
                     document.getElementById('valGCTM').innerText = "0ms";
                     document.getElementById('valFlightM').innerText = "0ms";
-                    document.getElementById('valStrideM').innerText = "0.00m";
                     document.getElementById('valGCTA').innerText = "0ms";
                     document.getElementById('valFlightA').innerText = "0ms";
                     document.getElementById('valStrideA').innerText = "0.00m";
@@ -1080,7 +1097,8 @@
                     CoreAI.autoElbowList = [];
                     CoreAI.autoTorsoList = [];
 
-                    setTimeout(() => { CoreAI.runStableAI(); }, 150);
+                    // 수동 모드 로드 직후 강제 연동 시켜 0초 프레임 스켈레톤과 데이터 노출 처리
+                    setTimeout(() => { CoreAI.runStableAI(true); }, 150);
                 };
             },
             onDualSliderInput(side) {
@@ -1120,7 +1138,8 @@
                 document.getElementById('inputEndPointAuto').value = this.takeoffTime.toFixed(2);
 
                 this.calculateMetrics();
-                setTimeout(() => { CoreAI.runStableAI(); }, 40);
+                // 슬라이더 바 조작은 수동 이벤트이므로 스켈레톤+데이터 강제 활성화(forceShow = true)
+                setTimeout(() => { CoreAI.runStableAI(true); }, 40);
             },
             onManualTimeInputChange(side) {
                 if(!vActive.src) {
@@ -1167,7 +1186,8 @@
                 document.getElementById('timeOverlayAuto').innerText = vActive.currentTime.toFixed(2) + "s";
 
                 this.calculateMetrics();
-                setTimeout(() => { CoreAI.runStableAI(); }, 40);
+                // 텍스트 타이핑 변경도 수동 변경이므로 스켈레톤+데이터 강제 활성화(forceShow = true)
+                setTimeout(() => { CoreAI.runStableAI(true); }, 40);
             },
             updateTrack() {
                 const sLM = document.getElementById('timelineLeftManual');
@@ -1230,7 +1250,8 @@
 
                 this.updateTrack();
                 this.calculateMetrics();
-                setTimeout(() => { CoreAI.runStableAI(); }, 40);
+                // 하단 수동 터치 어프 및 컨택트 마킹 버튼 입력이므로 스켈레톤+데이터 강제 생성(forceShow = true)
+                setTimeout(() => { CoreAI.runStableAI(true); }, 40);
             },
             calculateMetrics() {
                 if(CoreAI.autoGctList.length > 0) {
@@ -1323,8 +1344,11 @@
                     vActive.pause();
                     cancelAnimationFrame(this.playLoopId); 
                     
-                    // [오류 수정] 플레이 도중 일시정지 버튼을 눌렀을 때 불필요한 스켈레톤 난사 방지 클리어 후 프레임 싱크
-                    if (this.currentRoom === 'manual') ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                    // 플레이 도중 일시정지 버튼을 눌렀을 때 불필요한 스켈레톤 난사 방지 클리어 후 프레임 싱크
+                    if (this.currentRoom === 'manual') {
+                        ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                        CoreAI.clearManualDataDisplay();
+                    }
                     setTimeout(() => { CoreAI.runStableAI(); }, 50);
                 }
             },
@@ -1341,7 +1365,8 @@
                 
                 document.getElementById('timelineLeftManual').value = document.getElementById('timelineLeftAuto').value = vActive.currentTime;
                 
-                setTimeout(() => { CoreAI.runStableAI(); }, 40);
+                // 애로우 조작 미세 버튼 클릭은 명시적인 수동 조작이므로 스켈레톤+데이터 강제 활성화(forceShow = true)
+                setTimeout(() => { CoreAI.runStableAI(true); }, 40);
             },
             resetAll() {
                 vM.pause(); vA.pause();
@@ -1363,18 +1388,14 @@
                 document.getElementById('inputStartPointAuto').value = "0.00";
                 document.getElementById('inputEndPointAuto').value = "0.00";
 
-                // [오류 수정] 전체 데이터 리셋 시 하단 데이터 카드 텍스트들 깔끔하게 초기화 연동
                 CoreAI.curKnee = "--°"; CoreAI.curElbow = "--°"; CoreAI.curBody = "--°";
-                document.getElementById('valKneeM').innerText = "--°";
-                document.getElementById('valElbowM').innerText = "--°";
-                document.getElementById('valBodyM').innerText = "--°";
+                CoreAI.clearManualDataDisplay();
                 document.getElementById('valKneeA').innerText = "--°";
                 document.getElementById('valElbowA').innerText = "--°";
                 document.getElementById('valBodyA').innerText = "--°";
 
                 document.getElementById('valGCTM').innerText = "0ms";
                 document.getElementById('valFlightM').innerText = "0ms";
-                document.getElementById('valStrideM').innerText = "0.00m";
                 document.getElementById('valGCTA').innerText = "0ms";
                 document.getElementById('valFlightA').innerText = "0ms";
                 document.getElementById('valStrideA').innerText = "0.00m";
@@ -1414,9 +1435,9 @@
                 document.getElementById('inputStartPointAuto').value = targetTime.toFixed(2);
                 this.updateTrack();
 
-                // [오류 수정] 구간리셋 시 해당 프레임 자리에 맞는 고정 데이터만 단발성으로 출력되도록 연동 동기화
+                // 구간리셋 직후 해당 프레임 자리에 맞는 고정 데이터만 단발성으로 출력되도록 강제 싱크 연동
                 if (this.currentRoom === 'manual') ctxActive.clearRect(0, 0, cActive.width, cActive.height);
-                setTimeout(() => { CoreAI.runStableAI(); }, 50);
+                setTimeout(() => { CoreAI.runStableAI(true); }, 50);
             }
         };
 
