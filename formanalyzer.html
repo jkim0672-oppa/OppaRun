@@ -240,6 +240,7 @@
         .res-card.blue-card .res-val { color: var(--blue); }
         .ref-text { color: #ffcc00; font-size: 9.5px; display: block; font-weight: 500; opacity: 0.8; }
 
+        /* [버그수정] 파일 인풋을 화면 전체에서 안보이게 하되 레이블 전체를 덮도록 처리해 모바일 터치 오작동 방지 */
         .hidden-file-input { 
             position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; display: block !important; 
         }
@@ -257,7 +258,7 @@
         .inner-thumb img { width: 100%; height: 100%; object-fit: cover; }
         
         .setting-table {
-            width: 100%; max-width: 460px; margin-top: 15px; background: #1c1b1f; border-radius: 12px; overflow: hidden; padding: 16px; box-sizing: border-box;
+            width: 100%; max-width: 460px; margin-top: 15px; background: #1c1b1f; border-radius: 12px; overflow: hidden; padding: 166px; padding: 16px; box-sizing: border-box;
         }
         .setting-table .setting-group { margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; }
         .setting-group label { font-size: 14px; font-weight: bold; color: #9a9a9f; }
@@ -295,8 +296,8 @@
     <div class="header-row">
         <h3 class="main-title" id="txtMainTitle">PRO ANALYSIS v5.1</h3>
         <div class="tab-container">
-            <button id="tabManual" class="mode-tab active" onclick="AppControl.switchRoom('manual')">Manual Mode</button>
-            <button id="tabAuto" class="mode-tab auto-tab" onclick="AppControl.switchRoom('auto')">Auto AI Mode</button>
+            <button id="tabManual" class="mode-tab active" onclick="AppControl.switchRoom('manual')" ontouchstart="AppControl.switchRoom('manual')">Manual Mode</button>
+            <button id="tabAuto" class="mode-tab auto-tab" onclick="AppControl.switchRoom('auto')" ontouchstart="AppControl.switchRoom('auto')">Auto AI Mode</button>
         </div>
     </div>
 
@@ -396,7 +397,7 @@
             </div>
 
             <div class="grid-row marking-row">
-                <button id="btnAutoMarkActive" class="btn-marking btn-marking-auto-style" onclick="AppControl.toggleAutoMode()">AI 실시간 추적 시작</button>
+                <button id="btnAutoMarkActive" class="btn-marking btn-marking-auto-style" onclick="AppControl.toggleAutoMode()" style="border-color:#10b981; color:#10b981; grid-column: span 2;">AI 실시간 추적 시작</button>
             </div>
 
             <div class="grid-row action-row">
@@ -661,10 +662,9 @@
                 const p = this[this.currentLang];
                 document.getElementById('txtMainTitle').innerText = p.mainTitle;
                 
-                const lblM = document.querySelector('#lblOpenFileManual .btn-lbl-text');
-                const lblA = document.querySelector('#lblOpenFileAuto .btn-lbl-text');
-                if(lblM) lblM.innerText = p.openFile;
-                if(lblA) lblA.innerText = p.openFile;
+                // [버그수정] 인풋 태그를 통째로 지우지 않고 내부 텍스트 스팬만 정교하게 제어하도록 변경
+                document.querySelector('#lblOpenFileManual .btn-lbl-text').innerText = p.openFile;
+                document.querySelector('#lblOpenFileAuto .btn-lbl-text').innerText = p.openFile;
                 
                 if(vActive && vActive.paused) {
                     document.getElementById('btnPlayManual').innerText = p.btnPlay;
@@ -756,7 +756,7 @@
             autoFlightList: [],
             autoStrideList: [], 
             lastDetectedContact: null,
-            lastFrameTime = -1,
+            lastFrameTime: -1,
 
             autoKneeList: [],
             autoElbowList: [],
@@ -977,6 +977,14 @@
                 const timeUpdateSync = (vTarget, overlayId) => {
                     if(vTarget && vTarget.duration) {
                         document.getElementById(overlayId).innerText = vTarget.currentTime.toFixed(2) + "s";
+                        
+                        if (this.currentRoom === 'manual' && !vTarget.paused) {
+                            const currentVal = vTarget.currentTime;
+                            document.getElementById('timelineLeftManual').value = currentVal;
+                            document.getElementById('inputStartPointManual').value = currentVal.toFixed(2);
+                            this.updateTrack();
+                        }
+
                         if (this.takeoffTime !== null && this.contactTime !== null && vTarget.currentTime >= this.takeoffTime) {
                             vTarget.pause();
                         }
@@ -1224,7 +1232,7 @@
                 document.getElementById('inputStartPointManual').value = this.contactTime.toFixed(2);
                 document.getElementById('inputEndPointManual').value = this.takeoffTime.toFixed(2);
                 document.getElementById('inputStartPointAuto').value = this.contactTime.toFixed(2);
-                document.getElementById('inputEndPointManual').value = this.takeoffTime.toFixed(2);
+                document.getElementById('inputEndPointAuto').value = this.takeoffTime.toFixed(2);
 
                 this.calculateMetrics();
             },
@@ -1380,7 +1388,7 @@
                     const sumTorso = CoreAI.autoTorsoList.reduce((a, b) => a + b, 0);
 
                     document.getElementById('repValKnee').innerText = (sumKnee / CoreAI.autoKneeList.length).toFixed(1) + "°";
-                    document.getElementById('repValElbow').innerText = (sumElbow / CoreAI.autoKneeList.length).toFixed(1) + "°";
+                    document.getElementById('repValElbow').innerText = (sumElbow / CoreAI.autoElbowList.length).toFixed(1) + "°";
                     document.getElementById('repValBody').innerText = (sumTorso / CoreAI.autoTorsoList.length).toFixed(1) + "°";
                 } else {
                     document.getElementById('repValKnee').innerText = CoreAI.curKnee;
@@ -1517,21 +1525,13 @@
                 if(!vActive || !vActive.src) return;
                 vActive.pause();
                 
-                // 설정된 마크가 없거나 리셋되었을 때는 0으로 고정
                 const targetTime = (this.contactTime !== null) ? this.contactTime : 0;
                 vActive.currentTime = targetTime;
                 
-                // 듀얼 타임라인 슬라이더의 실제 DOM 값과 스케일 강제 연동
-                const sLM = document.getElementById('timelineLeftManual');
-                const sLA = document.getElementById('timelineLeftAuto');
-                if(sLM) sLM.value = targetTime;
-                if(sLA) sLA.value = targetTime;
-                
-                // 타임 필드 텍스트 업데이트
+                document.getElementById('timelineLeftManual').value = targetTime;
+                document.getElementById('timelineLeftAuto').value = targetTime;
                 document.getElementById('inputStartPointManual').value = targetTime.toFixed(2);
                 document.getElementById('inputStartPointAuto').value = targetTime.toFixed(2);
-                
-                // 트랙 채우기 배경색 바(Bar) 레이아웃 즉시 동기화
                 this.updateTrack();
             }
         };
