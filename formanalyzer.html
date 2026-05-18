@@ -611,7 +611,7 @@
                 this.instance.onResults(this.onResults.bind(this));
             },
             async runStableAI() {
-                if (!v.videoWidth || !v.videoHeight || this.isAiProcessing || !this.aiTracking) return; 
+                if (!v.src || !v.videoWidth || !v.videoHeight || this.isAiProcessing || !this.aiTracking) return; 
                 try {
                     this.isAiProcessing = true;
                     if(c.width !== v.videoWidth || c.height !== v.videoHeight) {
@@ -740,14 +740,23 @@
             takeoffTime: null,
 
             initEvents() {
+                // 비디오 재생/일시정지 이벤트를 직접 감지하여 버튼 텍스트를 확실하게 변경
+                v.onplay = () => {
+                    btnPlay.innerText = I18n[I18n.currentLang].btnPause;
+                };
+                v.onpause = () => {
+                    btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
+                };
+
                 v.ontimeupdate = () => {
                     if(v.duration) {
                         timeOverlay.innerText = v.currentTime.toFixed(2) + "s";
                         
-                        // [구간 반복 무한 루프 핵심 구현]
-                        // 설정된 루프 종료 지점(takeoffTime)이 있고 현재 재생 시간이 지났을 때 시작점(contactTime)으로 무한 리셋
+                        // [구간 도달 시 멈춤 제어 구현]
+                        // 지정 종료 지점(takeoffTime)을 지나면 무한루프를 돌지 않고 즉시 일시정지
                         if (this.takeoffTime !== null && this.contactTime !== null && v.currentTime >= this.takeoffTime) {
-                            v.currentTime = this.contactTime;
+                            v.pause();
+                            cancelAnimationFrame(this.playLoopId);
                         }
                     }
                 };
@@ -848,7 +857,6 @@
                 if(!v.src) return;
                 if (!v.paused) {
                     v.pause();
-                    btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
                     cancelAnimationFrame(this.playLoopId);
                 }
                 if (parseFloat(sL.value) > parseFloat(sR.value)) {
@@ -1033,10 +1041,12 @@
                     return;
                 }
                 
-                // [구간 제어 분석 무한 루프 구현]
-                // 인공지능 프레임 추적 중에도 끝을 지나면 즉시 시작 시간으로 되감아 멈추지 않고 연달아 재생되도록 변경
+                // [구간 도달 시 AI 프레임 추적 멈춤 제어]
+                // AI 분석 구동 중에도 정해진 끝 시간을 지나면 더 돌지 않고 일시정지 처리
                 if (this.takeoffTime !== null && this.contactTime !== null && v.currentTime >= this.takeoffTime) {
-                    v.currentTime = this.contactTime;
+                    v.pause();
+                    cancelAnimationFrame(this.playLoopId);
+                    return;
                 }
 
                 CoreAI.runStableAI();
@@ -1053,11 +1063,9 @@
                         v.currentTime = this.contactTime;
                     }
                     v.play();
-                    btnPlay.innerText = I18n[I18n.currentLang].btnPause;
                     if (CoreAI.aiTracking) this.syncPlayAI();
                 } else {
                     v.pause();
-                    btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
                     cancelAnimationFrame(this.playLoopId); 
                     setTimeout(() => { CoreAI.runStableAI(); }, 50);
                 }
@@ -1069,7 +1077,6 @@
                 }
                 if (!v.paused) {
                     v.pause();
-                    btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
                     cancelAnimationFrame(this.playLoopId); 
                 }
                 v.currentTime = Math.max(0, Math.min(v.duration, v.currentTime + amount));
@@ -1079,7 +1086,6 @@
             },
             resetAll() {
                 v.pause();
-                btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
                 cancelAnimationFrame(this.playLoopId); 
                 
                 v.currentTime = 0;
@@ -1123,15 +1129,15 @@
             },
             resetToMark() {
                 if(!v.src) return;
-                const wasPaused = v.paused;
+                // 구간 리셋 시 무조건 정지 상태로 전환하여 첫 지점에서 다시 플레이 대기하도록 설계
+                v.pause();
+                cancelAnimationFrame(this.playLoopId);
                 
                 const targetTime = (this.contactTime !== null) ? this.contactTime : 0;
                 v.currentTime = targetTime;
                 timeOverlay.innerText = targetTime.toFixed(2) + "s";
                 
-                if (wasPaused) {
-                    setTimeout(() => { CoreAI.runStableAI(); }, 50);
-                }
+                setTimeout(() => { CoreAI.runStableAI(); }, 50);
             }
         };
 
