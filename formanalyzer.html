@@ -521,6 +521,15 @@
     </div>
 
     <script>
+        // MediaPipe 그리기 도구 글로벌 참조 방어 스크립트화
+        const drawConnectors = window.drawConnectors || (window.DrawingUtils ? window.DrawingUtils.drawConnectors : null) || (() => {});
+        
+        // MediaPipe 표준 포즈 스켈레톤 인덱스 커넥션 매핑 리스트 보존 선언
+        const POSE_CONNECTIONS = [
+            [11,12], [11,13], [13,15], [12,14], [14,16], [11,23], [12,24], [23,24],
+            [23,25], [24,26], [25,27], [26,28], [27,29], [28,30], [29,31], [30,32], [27,31], [28,32]
+        ];
+
         let vActive = document.getElementById('videoManual');
         let cActive = document.getElementById('canvasManual');
         let ctxActive = cActive.getContext('2d');
@@ -583,7 +592,9 @@
                 setLang: "시스템 언어 (Language)",
                 alertNoVideo: "먼저 분석할 영상을 불러와 주세요!",
                 alertInvalidRange: "시작 지점은 끝 지점보다 작아야 하며, 영상의 길이를 초과할 수 없습니다.",
-                alertNoData: "측정된 매뉴얼 구간 데이터가 없습니다."
+                alertNoData: "측정된 매뉴얼 구간 데이터가 없습니다.",
+                lblStart: "START",
+                lblEnd: "END"
             },
             en: {
                 mainTitle: "PRO ANALYSIS v5.1",
@@ -628,7 +639,9 @@
                 setLang: "Language",
                 alertNoVideo: "Please open a video file first!",
                 alertInvalidRange: "Start point must be less than end point and within video duration.",
-                alertNoData: "No manual section analysis dataset available."
+                alertNoData: "No manual section analysis dataset available.",
+                lblStart: "START",
+                lblEnd: "END"
             },
             setLanguage(lang) {
                 this.currentLang = lang;
@@ -673,6 +686,11 @@
                 document.getElementById('lblFlightM').innerText = p.flightManual;
                 document.getElementById('lblGCTA').innerText = p.gctAuto;
                 document.getElementById('lblFlightA').innerText = p.flightAuto;
+
+                document.getElementById('lblManualStart').innerText = p.lblStart;
+                document.getElementById('lblManualEnd').innerText = p.lblEnd;
+                document.getElementById('lblAutoStart').innerText = p.lblStart;
+                document.getElementById('lblAutoEnd').innerText = p.lblEnd;
                 
                 const btnAutoActive = document.getElementById('btnAutoMarkActive');
                 if(AppControl.isAutoMode) {
@@ -740,7 +758,6 @@
             async runStableAI(forceShow = false) {
                 if (!vActive.src || !vActive.videoWidth || !vActive.videoHeight || this.isAiProcessing) return; 
                 
-                // 수동 모드 룸에서 정지 상태이거나 일반 재생 중일 때, 강제 보여주기 플래그가 없다면 차단
                 if (AppControl.currentRoom === 'manual' && !forceShow) {
                     if (!vActive.paused || vActive.paused) {
                         ctxActive.clearRect(0, 0, cActive.width, cActive.height);
@@ -749,7 +766,6 @@
                     }
                 }
 
-                // 오토 모드가 아닐 때 영상이 멈춰있으면 프레임 렌더링 업데이트 중단
                 if (AppControl.currentRoom === 'auto' && !this.aiTracking && vActive.paused && !forceShow) {
                     return;
                 }
@@ -773,12 +789,10 @@
                 document.getElementById('valStrideM').innerText = "0.00m";
             },
             onResults(res) {
-                // 영상이 멈춰있거나 수동모드 재생/정지 중(강제조작 플래그 제외)에는 차단 규칙 적용
                 if (vActive.paused && AppControl.currentRoom === 'auto' && !this.aiTracking) {
                     return;
                 }
                 if (AppControl.currentRoom === 'manual') {
-                    // 수동 모드에서는 명시적인 수동 트리거 프레임 렌더링이 아닌 평상시 상태에는 캔버스를 항상 엄격히 소거
                     if (!vActive.paused) {
                         ctxActive.clearRect(0, 0, cActive.width, cActive.height);
                         this.clearManualDataDisplay();
@@ -790,7 +804,9 @@
                 if (!res.poseLandmarks) return;
                 if (!this.aiTracking && AppControl.currentRoom === 'auto') return;
                 
-                drawConnectors(ctxActive, res.poseLandmarks, POSE_CONNECTIONS, {color: '#deff9a', lineWidth: 3});
+                if(drawConnectors) {
+                    drawConnectors(ctxActive, res.poseLandmarks, POSE_CONNECTIONS, {color: '#deff9a', lineWidth: 3});
+                }
                 const lm = res.poseLandmarks;
                 
                 const kneeValNum = this.calcAngle(lm[24], lm[26], lm[28]);
