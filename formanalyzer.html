@@ -751,7 +751,7 @@
                     if(v.duration) {
                         timeOverlay.innerText = v.currentTime.toFixed(2) + "s";
                         
-                        // [구간 제어 핵심 개선] 지정 완료 지점을 지나면 멈추도록 강제 제어
+                        // 일반 재생 모드 시 안전 구간 정지 보장
                         if (this.takeoffTime !== null && this.contactTime !== null && v.currentTime >= this.takeoffTime) {
                             v.pause();
                             cancelAnimationFrame(this.playLoopId);
@@ -1040,9 +1040,10 @@
                     return;
                 }
                 
-                // [구간 도달 시 AI 프레임 추적 및 재생 완벽 제어] 오토 모드 분석 중에도 제한 타임 도달 시 완벽 차단
+                // [오토 모드 구간 도달 핵심 개선] 비동기 루프 안에서 종료 구간 도달 시 프레임 추적 완전 차단 및 Pause
                 if (this.takeoffTime !== null && this.contactTime !== null && v.currentTime >= this.takeoffTime) {
                     v.pause();
+                    CoreAI.aiTracking = false; // AI 감시를 일시 중지하여 타임라인 락업 현상 방지
                     cancelAnimationFrame(this.playLoopId);
                     v.currentTime = this.takeoffTime;
                     return;
@@ -1058,7 +1059,6 @@
                 }
                 if (v.paused) {
                     if(this.isAutoMode) CoreAI.aiTracking = true;
-                    // 종료 구간을 지났거나 끝에 가 있으면 다시 시작 구간(contactTime)으로 루프 백
                     if (this.takeoffTime !== null && this.contactTime !== null && v.currentTime >= this.takeoffTime) {
                         v.currentTime = this.contactTime;
                     }
@@ -1132,23 +1132,27 @@
                 v.pause();
                 cancelAnimationFrame(this.playLoopId);
                 
-                // [구간 리셋 개선] 오토 모드가 켜져 있다면 구간 재생 대기를 위해 안전하게 OFF 처리
+                // [오토 모드 구간 리셋 연동 완벽 보완] 리셋 점프 시 누적 데이터 및 AI 감시 상태 동시 정상화
                 if (this.isAutoMode) {
-                    this.isAutoMode = false;
-                    btnAutoMark.classList.remove('active-auto');
-                    I18n.updateUIStrings();
+                    CoreAI.footDataHistory = [];
+                    CoreAI.lastDetectedContact = null;
+                    CoreAI.aiTracking = true; // 리셋 지점부터 깨끗하게 다시 추적 대기
                 }
                 
                 const targetTime = (this.contactTime !== null) ? this.contactTime : 0;
                 v.currentTime = targetTime;
                 timeOverlay.innerText = targetTime.toFixed(2) + "s";
                 
-                // UI 입력창 및 슬라이더 트랙을 오빠가 지정한 구간 첫 부분으로 확정 정렬
                 sL.value = targetTime;
                 inputStartPoint.value = targetTime.toFixed(2);
                 this.updateTrack();
 
-                setTimeout(() => { CoreAI.runStableAI(); }, 50);
+                // 오토 모드가 활성화된 상태라면 점프한 첫 프레임 즉시 다시 랜더링
+                if (this.isAutoMode) {
+                    this.syncPlayAI();
+                } else {
+                    setTimeout(() => { CoreAI.runStableAI(); }, 50);
+                }
             }
         };
 
