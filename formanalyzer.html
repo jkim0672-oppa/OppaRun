@@ -139,12 +139,25 @@
             height: 38px; border-radius: 10px; cursor: pointer;
         }
 
-        .marking-row { grid-template-columns: 1fr 1fr 1fr 1.1fr; }
+        /* 변경: 상단 스피드 박스 삭제에 따라 3개 버튼이 꽉 차도록 1fr 1fr 1fr 구조 변경 */
+        .marking-row { grid-template-columns: 1fr 1fr 1fr; }
         .btn-marking {
             background: transparent; color: #fff; border: 1.5px solid var(--neon);
             font-size: 13px; font-weight: bold; height: 38px; border-radius: 10px; cursor: pointer;
         }
         .btn-marking.active-auto { background: rgba(187, 242, 70, 0.2); border-color: #10b981; color: #10b981; }
+
+        /* 신규: 4분할 하단 레포트/제어 칸 스타일 */
+        .report-grid-row { grid-template-columns: 1.1fr 1.1fr 1fr 1.2fr; }
+        .manual-input-box {
+            background: var(--input-bg); border: 1px solid #2c2c2e; border-radius: 10px; height: 38px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; box-sizing: border-box;
+        }
+        .manual-input-box span { font-size: 9px; color: #9a9a9f; font-weight: bold; line-height: 1; margin-bottom: 2px; }
+        .manual-input-box input {
+            width: 85%; background: transparent; border: none; color: white; text-align: center;
+            font-size: 12px; font-weight: bold; outline: none; padding: 0;
+        }
 
         .select-wrapper { 
             position: relative; background: var(--input-bg); border: 1px solid #2c2c2e; border-radius: 10px; height: 38px;
@@ -265,11 +278,6 @@
             <button id="btnAutoMark" class="btn-marking" onclick="AppControl.toggleAutoMode()">Auto</button>
             <button id="btnContact" class="btn-marking" onclick="AppControl.markBall('left')">Contact</button>
             <button id="btnTakeoff" class="btn-marking" onclick="AppControl.markBall('right')">Takeoff</button>
-            <div class="select-wrapper">
-                <select id="speedSelect" class="custom-select" onchange="v.playbackRate = parseFloat(this.value)">
-                    <option value="0.05">0.05x</option><option value="0.1">0.1x</option><option value="0.25">0.25x</option><option value="0.5">0.5x</option><option value="1.0" selected>1.0x</option>
-                </select>
-            </div>
         </div>
 
         <div class="grid-row action-row">
@@ -284,8 +292,21 @@
             <button class="ctrl-btn btn-folder-mix" id="btnGallery" onclick="AppStorage.openGalleryPanel()">📁 Gallery</button>
         </div>
 
-        <div class="grid-row action-row" style="grid-template-columns: 1fr;">
-            <button class="ctrl-btn btn-report-mix" id="btnReport" onclick="AppControl.openReportModal()">📊 Report</button>
+        <div class="grid-row report-grid-row">
+            <div class="manual-input-box">
+                <span id="lblManualStart">START</span>
+                <input type="number" id="inputStartPoint" step="0.01" min="0" value="0.00" onchange="AppControl.onManualTimeInputChange('left')">
+            </div>
+            <div class="manual-input-box">
+                <span id="lblManualEnd">END</span>
+                <input type="number" id="inputEndPoint" step="0.01" min="0" value="0.00" onchange="AppControl.onManualTimeInputChange('right')">
+            </div>
+            <div class="select-wrapper">
+                <select id="speedSelect" class="custom-select" onchange="v.playbackRate = parseFloat(this.value)">
+                    <option value="0.05">0.05x</option><option value="0.1">0.1x</option><option value="0.25">0.25x</option><option value="0.5">0.5x</option><option value="1.0" selected>1.0x</option>
+                </select>
+            </div>
+            <button class="ctrl-btn btn-report-mix" id="btnReport" style="height:38px;" onclick="AppControl.openReportModal()">📊 Report</button>
         </div>
         
         <div class="result-grid-compact">
@@ -371,7 +392,7 @@
 
     <div id="imgModal" class="modal">
         <div class="modal-controls">
-            <button class="text-btn danger" id="btnModalDelete" onclick="AppStorage.triggerCustomConfirm()">삭제</button>
+            <button class="text-btn danger" id="btnModalDelete" onclick="AppStorage.triggerCustomConfirm('deleteSnapshot')">삭제</button>
             <button class="text-btn" id="btnModalClose" onclick="AppStorage.closeModal()">닫기</button>
         </div>
         <img id="modalImg" src="">
@@ -380,7 +401,7 @@
     <div id="customConfirm" class="custom-confirm-overlay">
         <div class="custom-confirm-box">
             <p class="confirm-msg" id="txtConfirmMsg">이 스냅샷을 창고 방에서<br>영구 삭제할까요?</p>
-            <div class="confirm-buttons">
+            <div class="confirm-buttons" id="confirmBtnContainer">
                 <button class="confirm-btn yes" id="btnConfirmYes" onclick="AppStorage.executeDelete()">삭제</button>
                 <button class="confirm-btn no" id="btnConfirmNo" onclick="AppStorage.cancelDelete()">취소</button>
             </div>
@@ -404,6 +425,10 @@
         const lblGCT = document.getElementById('lblGCT');
         const lblFlight = document.getElementById('lblFlight');
         const btnReturnMark = document.getElementById('btnReturnMark');
+        
+        // 추가 바인딩 엘리먼트
+        const inputStartPoint = document.getElementById('inputStartPoint');
+        const inputEndPoint = document.getElementById('inputEndPoint');
 
         let userHeight = 175;
         let userWeight = 70;
@@ -417,7 +442,7 @@
                 openFile: "📁 비디오 열기",
                 btnPlay: "▶ 재생",
                 btnPause: "⏸ 일시정지",
-                btnReport: "📊 종합레포트",
+                btnReport: "📊 Report",
                 btnGallery: "📁 갤러리",
                 btnReset: "⏮️ 전체 리셋",
                 btnReturn: "↩️ 구간 리셋",
@@ -452,7 +477,10 @@
                 setWeight: "체중 (Weight, kg)",
                 setAge: "나이 (Age)",
                 setGender: "성별 (Gender)",
-                setLang: "시스템 언어 (Language)"
+                setLang: "시스템 언어 (Language)",
+                alertNoVideo: "먼저 분석할 영상을 불러와 주세요!",
+                alertInvalidRange: "시작 지점은 끝 지점보다 작아야 하며, 영상의 길이를 초과할 수 없습니다.",
+                alertNoData: "측정된 매뉴얼 구간 데이터가 없습니다."
             },
             en: {
                 mainTitle: "PRO ANALYSIS v4.8",
@@ -461,9 +489,9 @@
                 btnPause: "⏸ Pause",
                 btnReport: "📊 Report",
                 btnGallery: "📁 Gallery",
-                btnReset: "⏮️ Reset All",
-                btnReturn: "↩️ Reset Loop",
-                btnSetting: "⚙️ Settings",
+                btnReset: "Reset All",
+                btnReturn: "Reset Loop",
+                btnSetting: "Settings",
                 cardKnee: "Knee",
                 cardElbow: "Elbow",
                 cardTorso: "Torso",
@@ -494,7 +522,10 @@
                 setWeight: "Weight (kg)",
                 setAge: "Age",
                 setGender: "Gender",
-                setLang: "Language"
+                setLang: "Language",
+                alertNoVideo: "Please open a video file first!",
+                alertInvalidRange: "Start point must be less than end point and within video duration.",
+                alertNoData: "No manual section analysis dataset available."
             },
             setLanguage(lang) {
                 this.currentLang = lang;
@@ -506,7 +537,6 @@
                 document.getElementById('txtMainTitle').innerText = p.mainTitle;
                 document.getElementById('lblOpenFile').innerHTML = `<input type="file" id="up" accept="video/*" onchange="AppControl.loadVideo(event)">${p.openFile}`;
                 if(v.paused) btnPlay.innerText = p.btnPlay; else btnPlay.innerText = p.btnPause;
-                document.getElementById('btnReport').innerText = p.btnReport;
                 document.getElementById('btnGallery').innerText = p.btnGallery;
                 document.getElementById('btnResetAll').innerText = p.btnReset;
                 document.getElementById('btnReturnMark').innerText = p.btnReturn;
@@ -531,9 +561,13 @@
                 document.getElementById('txtGalleryClose').innerText = p.galleryClose;
                 document.getElementById('btnModalClose').innerText = p.galleryClose;
                 document.getElementById('btnModalDelete').innerText = p.confirmYes;
-                document.getElementById('txtConfirmMsg').innerHTML = p.confirmMsg.replace('\n', '<br>');
-                document.getElementById('btnConfirmYes').innerText = p.confirmYes;
-                document.getElementById('btnConfirmNo').innerText = p.confirmNo;
+                
+                // 갤러리 삭제 텍스트 기본 갱신
+                if(AppStorage.currentConfirmType === 'deleteSnapshot' || !AppStorage.currentConfirmType) {
+                    document.getElementById('txtConfirmMsg').innerHTML = p.confirmMsg.replace('\n', '<br>');
+                    document.getElementById('btnConfirmYes').innerText = p.confirmYes;
+                    document.getElementById('btnConfirmNo').innerText = p.confirmNo;
+                }
 
                 document.getElementById('txtReportTitle').innerText = p.reportTitle;
                 document.getElementById('txtReportClose').innerText = p.galleryClose;
@@ -717,6 +751,10 @@
                 };
             },
             toggleAutoMode() {
+                if(!v.src) {
+                    AppStorage.triggerCustomConfirm('alertNoVideo');
+                    return;
+                }
                 this.isAutoMode = !this.isAutoMode;
                 if(this.isAutoMode) {
                     btnAutoMark.classList.add('active-auto');
@@ -734,6 +772,8 @@
 
                     this.contactTime = null;
                     this.takeoffTime = null;
+                    inputStartPoint.value = "0.00";
+                    inputEndPoint.value = "0.00";
                     
                     if(v.paused) CoreAI.runStableAI(); else this.syncPlayAI();
                 } else {
@@ -744,9 +784,11 @@
             syncAutoMark(side, targetTime) {
                 if(side === 'left') {
                     this.contactTime = targetTime;
+                    inputStartPoint.value = targetTime.toFixed(2);
                 } else {
                     if(this.contactTime !== null && targetTime > this.contactTime) {
                         this.takeoffTime = targetTime;
+                        inputEndPoint.value = targetTime.toFixed(2);
                         
                         const stepGct = Math.round((this.takeoffTime - this.contactTime) * 1000);
                         if(stepGct > 50 && stepGct < 500) { 
@@ -778,6 +820,11 @@
                     ctx.clearRect(0, 0, c.width, c.height); 
                     this.contactTime = null;
                     this.takeoffTime = null;
+                    
+                    // 수동 제어 입력 창 초기 설정 동기화
+                    inputStartPoint.value = "0.00";
+                    inputEndPoint.value = v.duration.toFixed(2);
+
                     valGCT.innerText = `0ms`;
                     valFlight.innerText = `0ms`;
                     valStride.innerText = `0.00m`;
@@ -797,6 +844,7 @@
                 };
             },
             onDualSliderInput(side) {
+                if(!v.src) return;
                 if (!v.paused) {
                     v.pause();
                     btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
@@ -818,15 +866,63 @@
 
                 this.contactTime = parseFloat(sL.value);
                 this.takeoffTime = parseFloat(sR.value);
+                
+                // 수동 텍스트 인풋 동기화
+                inputStartPoint.value = this.contactTime.toFixed(2);
+                inputEndPoint.value = this.takeoffTime.toFixed(2);
+
+                this.calculateMetrics();
+                setTimeout(() => { CoreAI.runStableAI(); }, 40);
+            },
+            // 신규: 하단 인풋 박스로 매뉴얼 시작/끝 범위 직접 타자 입력 수정 시 처리 로직
+            onManualTimeInputChange(side) {
+                if(!v.src) {
+                    AppStorage.triggerCustomConfirm('alertNoVideo');
+                    inputStartPoint.value = "0.00";
+                    inputEndPoint.value = "0.00";
+                    return;
+                }
+                let valL = parseFloat(inputStartPoint.value) || 0;
+                let valR = parseFloat(inputEndPoint.value) || 0;
+
+                if(valL < 0) valL = 0;
+                if(valR > v.duration) valR = v.duration;
+
+                if(valL > valR) {
+                    AppStorage.triggerCustomConfirm('alertInvalidRange');
+                    inputStartPoint.value = (this.contactTime || 0).toFixed(2);
+                    inputEndPoint.value = (this.takeoffTime || v.duration).toFixed(2);
+                    return;
+                }
+
+                this.contactTime = valL;
+                this.takeoffTime = valR;
+                sL.value = valL;
+                sR.value = valR;
+                
+                this.updateTrack();
+                v.currentTime = (side === 'left') ? valL : valR;
+                timeOverlay.innerText = v.currentTime.toFixed(2) + "s";
+
+                if(this.isAutoMode) {
+                    this.isAutoMode = false;
+                    btnAutoMark.classList.remove('active-auto');
+                    I18n.updateUIStrings();
+                }
+
                 this.calculateMetrics();
                 setTimeout(() => { CoreAI.runStableAI(); }, 40);
             },
             updateTrack() {
                 const pL = (sL.value / sL.max) * 100;
                 const pR = (sR.value / sR.max) * 100;
-                sT.style.background = `linear-gradient(to right, #333 #333 ${pL}%, var(--blue) ${pL}%, var(--neon) ${pR}%, #333 ${pR}%)`;
+                sT.style.background = `linear-gradient(to right, #333, #333 ${pL}%, var(--blue) ${pL}%, var(--neon) ${pR}%, #333 ${pR}%)`;
             },
             markBall(side) {
+                if(!v.src) {
+                    AppStorage.triggerCustomConfirm('alertNoVideo');
+                    return;
+                }
                 if(this.isAutoMode) {
                     this.isAutoMode = false;
                     btnAutoMark.classList.remove('active-auto');
@@ -847,6 +943,11 @@
                     sR.value = v.currentTime;
                     this.takeoffTime = v.currentTime;
                 }
+                
+                // 인풋 박스 값 채우기 동기화
+                inputStartPoint.value = (this.contactTime !== null) ? this.contactTime.toFixed(2) : "0.00";
+                inputEndPoint.value = (this.takeoffTime !== null) ? this.takeoffTime.toFixed(2) : v.duration.toFixed(2);
+
                 this.updateTrack();
                 this.calculateMetrics();
             },
@@ -886,6 +987,10 @@
                 userGender = document.getElementById('selectGender').value;
             },
             openReportModal() {
+                if(!v.src) {
+                    AppStorage.triggerCustomConfirm('alertNoVideo');
+                    return;
+                }
                 if(this.isAutoMode && CoreAI.autoKneeList.length > 0) {
                     const sumKnee = CoreAI.autoKneeList.reduce((a, b) => a + b, 0);
                     const sumElbow = CoreAI.autoElbowList.reduce((a, b) => a + b, 0);
@@ -930,7 +1035,6 @@
                     return;
                 }
                 
-                // [단발성 구간 재생 교정] 끝점(Takeoff)에 완벽하게 도달하거나 넘어서면 무한 루프 돌리지 않고 정지 및 리셋
                 if (this.takeoffTime !== null && this.contactTime !== null && v.currentTime >= this.takeoffTime) {
                     v.pause();
                     btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
@@ -944,9 +1048,12 @@
                 this.playLoopId = requestAnimationFrame(() => this.syncPlayAI());
             },
             togglePlay() {
+                if(!v.src) {
+                    AppStorage.triggerCustomConfirm('alertNoVideo');
+                    return;
+                }
                 if (v.paused) {
                     if(this.isAutoMode) CoreAI.aiTracking = true;
-                    // 이미 끝점에 정지되어 있는 상태에서 다시 누르면 매끄럽게 시작 지점부터 재출발하도록 처리
                     if (this.takeoffTime !== null && this.contactTime !== null && v.currentTime >= this.takeoffTime) {
                         v.currentTime = this.contactTime;
                     }
@@ -961,6 +1068,10 @@
                 }
             },
             stepTime(amount) {
+                if(!v.src) {
+                    AppStorage.triggerCustomConfirm('alertNoVideo');
+                    return;
+                }
                 if (!v.paused) {
                     v.pause();
                     btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
@@ -982,6 +1093,9 @@
                 sL.value = 0;
                 sR.value = sR.max || 100;
                 this.updateTrack();
+
+                inputStartPoint.value = "0.00";
+                inputEndPoint.value = "0.00";
 
                 ctx.clearRect(0, 0, c.width, c.height);
                 document.getElementById('innerGallery').innerHTML = "";
@@ -1013,6 +1127,7 @@
                 I18n.updateUIStrings();
             },
             resetToMark() {
+                if(!v.src) return;
                 const wasPaused = v.paused;
                 
                 const targetTime = (this.contactTime !== null) ? this.contactTime : 0;
@@ -1027,6 +1142,46 @@
 
         const AppStorage = {
             targetThumbBox: null, 
+            currentConfirmType: 'deleteSnapshot',
+            
+            // 전용 커스텀 컨펌/얼럿 통합 관리 제어 핸들러
+            triggerCustomConfirm(type) {
+                this.currentConfirmType = type;
+                const overlay = document.getElementById('customConfirm');
+                const msg = document.getElementById('txtConfirmMsg');
+                const btnContainer = document.getElementById('confirmBtnContainer');
+                const p = I18n[I18n.currentLang];
+
+                overlay.style.display = "flex";
+
+                if (type === 'deleteSnapshot') {
+                    msg.innerHTML = p.confirmMsg.replace('\n', '<br>');
+                    btnContainer.innerHTML = `
+                        <button class="confirm-btn yes" onclick="AppStorage.executeDelete()">${p.confirmYes}</button>
+                        <button class="confirm-btn no" onclick="AppStorage.cancelDelete()">${p.confirmNo}</button>
+                    `;
+                } else if (type === 'alertNoVideo') {
+                    msg.innerHTML = `<span style="color:var(--neon); font-weight:bold;">NOTIFICATION</span><br><br>${p.alertNoVideo}`;
+                    btnContainer.innerHTML = `
+                        <button class="confirm-btn no" style="grid-column: span 2; background:var(--blue);" onclick="AppStorage.cancelDelete()">OK</button>
+                    `;
+                } else if (type === 'alertInvalidRange') {
+                    msg.innerHTML = `<span style="color:#ff453a; font-weight:bold;">RANGE ERROR</span><br><br>${p.alertInvalidRange}`;
+                    btnContainer.innerHTML = `
+                        <button class="confirm-btn no" style="grid-column: span 2; background:#3a3a3c;" onclick="AppStorage.cancelDelete()">OK</button>
+                    `;
+                }
+            },
+            cancelDelete() { 
+                document.getElementById('customConfirm').style.display = "none"; 
+            },
+            executeDelete() {
+                document.getElementById('customConfirm').style.display = "none";
+                if (this.currentConfirmType === 'deleteSnapshot' && this.targetThumbBox) {
+                    this.targetThumbBox.remove();
+                }
+                this.closeModal();
+            },
             captureSnapshot() {
                 const isReportOpen = document.getElementById('reportModal').style.display === "flex";
                 const tempC = document.createElement('canvas');
@@ -1089,14 +1244,7 @@
                 modal.style.display = "flex";
                 document.getElementById('modalImg').src = src;
             },
-            closeModal() { document.getElementById('imgModal').style.display = "none"; this.targetThumbBox = null; },
-            triggerCustomConfirm() { document.getElementById('customConfirm').style.display = "flex"; },
-            cancelDelete() { document.getElementById('customConfirm').style.display = "none"; },
-            executeDelete() {
-                document.getElementById('customConfirm').style.display = "none";
-                if (this.targetThumbBox) this.targetThumbBox.remove();
-                this.closeModal();
-            }
+            closeModal() { document.getElementById('imgModal').style.display = "none"; this.targetThumbBox = null; }
         };
 
         CoreAI.init();
