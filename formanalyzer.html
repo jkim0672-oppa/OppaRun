@@ -421,6 +421,10 @@
         const lblGCT = document.getElementById('lblGCT');
         const lblFlight = document.getElementById('lblFlight');
 
+        // 초고속 소프트웨어 재생 루프 변수
+        let customPlayTimer = null;
+        let lastFrameTime = 0;
+
         // [v4.6 신규 다국어 언어팩 저장소 정의]
         const I18n = {
             currentLang: 'ko',
@@ -498,7 +502,7 @@
                 const p = this[this.currentLang];
                 document.getElementById('txtMainTitle').innerText = p.mainTitle;
                 document.getElementById('lblOpenFile').innerHTML = `<input type="file" id="up" accept="video/*" onchange="AppControl.loadVideo(event)">${p.openFile}`;
-                if(v.paused) btnPlay.innerText = p.btnPlay; else btnPlay.innerText = p.btnPause;
+                if(v.paused && !customPlayTimer) btnPlay.innerText = p.btnPlay; else btnPlay.innerText = p.btnPause;
                 document.getElementById('btnReport').innerText = p.btnReport;
                 document.getElementById('btnGallery').innerText = p.btnGallery;
                 document.getElementById('btnResetAll').innerText = p.btnReset;
@@ -559,7 +563,20 @@
             },
             select(val) {
                 speedSelect.value = val;
-                v.playbackRate = parseFloat(val);
+                const rate = parseFloat(val);
+                
+                if (rate >= 0.1) {
+                    v.playbackRate = rate;
+                } else {
+                    v.playbackRate = 1.0; // 하드웨어 제한 미만일 시 기준 속도로 초기화 후 커스텀 타이머로 처리
+                }
+
+                // 재생 중이었다면 타이머 재조정 처리
+                if (!v.paused || customPlayTimer) {
+                    AppControl.stopPlaybackLoops();
+                    AppControl.startPlaybackLoops();
+                }
+
                 this.close();
             }
         };
@@ -582,7 +599,7 @@
                 this.instance.onResults(this.onResults.bind(this));
             },
             async runStableAI() {
-                if (!v.videoWidth || !v.videoHeight || this.isAiProcessing || !this.aiTracking) return; 
+                if (!v.videoWidth || !v.videoHeight || this.isAiProcessing || (!v.paused && parseFloat(speedSelect.value) >= 0.1 && !this.aiTracking)) return; 
                 try {
                     this.isAiProcessing = true;
                     if(c.width !== v.videoWidth || c.height !== v.videoHeight) {
@@ -683,11 +700,11 @@
                         timeOverlay.innerText = v.currentTime.toFixed(2) + "s";
                         
                         // [통합 수정 포인트] 재생 중에 실시간으로 우측 연두색 슬라이더 끝지점(sR.value)을 넘어가면 정지 후 시작점(sL.value)으로 점프
-                        if (!v.paused && v.currentTime >= parseFloat(sR.value)) {
+                        if ((!v.paused || customPlayTimer) && v.currentTime >= parseFloat(sR.value)) {
+                            this.stopPlaybackLoops();
                             v.pause();
                             btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
                             v.currentTime = parseFloat(sL.value);
-                            cancelAnimationFrame(this.playLoopId);
                             setTimeout(() => { CoreAI.runStableAI(); }, 50);
                         }
                     }
@@ -737,6 +754,7 @@
             loadVideo(e) {
                 const file = e.target.files[0];
                 if(!file) return;
+                this.stopPlaybackLoops();
                 v.src = URL.createObjectURL(file);
                 v.onloadedmetadata = () => {
                     sL.max = sR.max = v.duration;
@@ -760,11 +778,12 @@
                 };
             },
             onDualSliderInput(side) {
+                this.stopPlaybackLoops();
                 if (!v.paused) {
                     v.pause();
-                    btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
-                    cancelAnimationFrame(this.playLoopId);
                 }
+                btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
+
                 if (parseFloat(sL.value) > parseFloat(sR.value)) {
                     if (side === 'left') sL.value = sR.value; else sR.value = sL.value;
                 }
@@ -848,37 +867,82 @@
                 document.getElementById('reportModal').style.display = "none";
             },
             syncPlayAI() {
-                if (v.paused || !CoreAI.aiTracking) {
+                if ((v.paused && !customPlayTimer) || !CoreAI.aiTracking) {
                     cancelAnimationFrame(this.playLoopId);
                     return;
                 }
                 CoreAI.runStableAI();
                 this.playLoopId = requestAnimationFrame(() => this.syncPlayAI());
             },
+            startPlaybackLoops() {
+                const rate = parseFloat(speedSelect.value);
+                if (rate >= 0.1) {
+                    v.play();
+                    if (CoreAI.aiTracking) this.syncPlayAI();
+                } else {
+                    // 0.1 배속 미만(0.05, 0.03, 0.01) 처리용 커스텀 타임 슬라이서 구동
+                    v.pause();
+                    lastFrameTime = performance.now();
+                    const stepInterval = () => {
+                        const now = performance.now();
+                        const delta = (now - lastFrameTime) / 1000;
+                        lastFrameTime = now;
+
+                        // 실제 초당 변화되어야 할 비디오 시간 가산
+                        v.currentTime = Math.min(parseFloat(sR.value || v.duration), v.currentTime + (delta * rate));
+                        
+                        // 타임오버레이 및 슬라이더 트랙 동기화 수동 반영
+                        timeOverlay.innerText = v.currentTime.toFixed(2) + "s";
+                        
+                        if (CoreAI.aiTracking) {
+                            CoreAI.runStableAI();
+                        }
+
+                        if (v.currentTime >= parseFloat(sR.value || v.duration)) {
+                            this.stopPlaybackLoops();
+                            btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
+                            v.currentTime = parseFloat(sL.value);
+                        } else {
+                            customPlayTimer = requestAnimationFrame(stepInterval);
+                        }
+                    };
+                    customPlayTimer = requestAnimationFrame(stepInterval);
+                }
+            },
+            stopPlaybackLoops() {
+                if (this.playLoopId) {
+                    cancelAnimationFrame(this.playLoopId);
+                    this.playLoopId = null;
+                }
+                if (customPlayTimer) {
+                    cancelAnimationFrame(customPlayTimer);
+                    customPlayTimer = null;
+                }
+            },
             togglePlay() {
-                if (v.paused) {
+                const isPlaying = !v.paused || customPlayTimer;
+                if (!isPlaying) {
                     const startRange = parseFloat(sL.value || 0);
                     const endRange = parseFloat(sR.value || v.duration);
                     if (v.currentTime < startRange || v.currentTime >= endRange) {
                         v.currentTime = startRange;
                     }
 
-                    v.play();
                     btnPlay.innerText = I18n[I18n.currentLang].btnPause;
-                    if (CoreAI.aiTracking) this.syncPlayAI();
+                    this.startPlaybackLoops();
                 } else {
                     v.pause();
+                    this.stopPlaybackLoops();
                     btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
-                    cancelAnimationFrame(this.playLoopId); 
                     setTimeout(() => { CoreAI.runStableAI(); }, 50);
                 }
             },
             stepTime(amount) {
+                this.stopPlaybackLoops();
                 if (!v.paused) {
                     v.pause();
-                    btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
-                    cancelAnimationFrame(this.playLoopId); 
                 }
+                btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
                 v.currentTime = Math.max(0, Math.min(v.duration, v.currentTime + amount));
                 timeOverlay.innerText = v.currentTime.toFixed(2) + "s";
                 setTimeout(() => { CoreAI.runStableAI(); }, 40);
@@ -888,20 +952,22 @@
                 btnAiToggle.innerText = CoreAI.aiTracking ? "AI ON" : "AI OFF";
                 btnAiToggle.style.background = CoreAI.aiTracking ? "#10b981" : "#ff3b30";
                 if(!CoreAI.aiTracking) {
-                    cancelAnimationFrame(this.playLoopId); 
+                    this.stopPlaybackLoops();
+                    v.pause();
+                    btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
                     ctx.clearRect(0, 0, c.width, c.height);
                     CoreAI.lastJoints = { knee: null, elbow: null, hip: null };
                     document.getElementById('valKnee').innerText = "--°";
                     document.getElementById('valElbow').innerText = "--°";
                     document.getElementById('valBody').innerText = "--°";
                 } else {
-                    if(v.paused) CoreAI.runStableAI(); else this.syncPlayAI();
+                    if(v.paused && !customPlayTimer) CoreAI.runStableAI(); else this.syncPlayAI();
                 }
             },
             resetAll() {
+                this.stopPlaybackLoops();
                 v.pause();
                 btnPlay.innerText = I18n[I18n.currentLang].btnPlay;
-                cancelAnimationFrame(this.playLoopId); 
                 
                 const targetJumpTime = (this.contactTime !== null) ? this.contactTime : parseFloat(sL.value || 0);
                 v.currentTime = targetJumpTime;
