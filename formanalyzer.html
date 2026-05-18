@@ -738,11 +738,16 @@
                 this.instance.onResults(this.onResults.bind(this));
             },
             async runStableAI() {
-                if (!vActive.src || !vActive.videoWidth || !vActive.videoHeight || this.isAiProcessing || (!this.aiTracking && AppControl.currentRoom === 'auto')) return; 
+                if (!vActive.src || !vActive.videoWidth || !vActive.videoHeight || this.isAiProcessing) return; 
                 
-                // [요구사항 반영] 수동 페이지에서 비디오가 일반 재생 중일 때는 캔버스를 비우고 스켈레톤 및 연산을 중단시킴
+                // [오류 수정] 수동 모드 룸에서 일반 재생(Play) 중일 때는 캔버스를 항상 비우고 데이터 분석 및 스켈레톤 그리기를 완벽히 중단시킴
                 if (AppControl.currentRoom === 'manual' && !vActive.paused) {
                     ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                    return;
+                }
+
+                // [오류 수정] 오토 모드가 아닐 때 영상이 멈춰있으면 불필요한 프레임 렌더링 업데이트 동작을 락걸어 멈춤 상태 데이터 튐 방지
+                if (AppControl.currentRoom === 'auto' && !this.aiTracking && vActive.paused) {
                     return;
                 }
 
@@ -759,6 +764,15 @@
                 }
             },
             onResults(res) {
+                // [오류 수정] 영상이 멈춰있거나 수동모드 재생 중에는 캔버스를 깔끔히 비우고 리턴 처리하여 잔여 각도 흔들림 제거
+                if (vActive.paused && AppControl.currentRoom === 'auto' && !this.aiTracking) {
+                    return;
+                }
+                if (AppControl.currentRoom === 'manual' && !vActive.paused) {
+                    ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                    return;
+                }
+
                 ctxActive.clearRect(0, 0, cActive.width, cActive.height);
                 if (!res.poseLandmarks) return;
                 if (!this.aiTracking && AppControl.currentRoom === 'auto') return;
@@ -885,7 +899,7 @@
                 const handlerPlay = () => { 
                     btnPlayManual.innerText = I18n[I18n.currentLang].btnPause; 
                     btnPlayAuto.innerText = I18n[I18n.currentLang].btnPause; 
-                    // 수동 모드 플레이 시 캔버스 스켈레톤 초기화 클리어
+                    // 수동 모드 플레이 작동 즉시 캔버스 잔여 스켈레톤 그래픽 흔적 클리어
                     if (this.currentRoom === 'manual') ctxActive.clearRect(0, 0, cActive.width, cActive.height);
                 };
                 const handlerPause = () => { btnPlayManual.innerText = I18n[I18n.currentLang].btnPlay; btnPlayAuto.innerText = I18n[I18n.currentLang].btnPlay; };
@@ -900,7 +914,11 @@
                             vTarget.pause();
                             cancelAnimationFrame(this.playLoopId);
                             vTarget.currentTime = this.takeoffTime;
-                            // 지정 엔드프레임 도달 시 데이터 갱신 및 스켈레톤 출력
+                            
+                            // [오류 수정] 구간 재생 끝(Takeoff)에 도달해서 멈췄을 때 강제 노출 방지 처리 후 정지 프레임 데이터 재연동
+                            if (this.currentRoom === 'manual') {
+                                ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                            }
                             setTimeout(() => { CoreAI.runStableAI(); }, 40);
                         }
                     }
@@ -1176,7 +1194,6 @@
                     AppStorage.triggerCustomConfirm('alertNoVideo');
                     return;
                 }
-                // 마킹 버튼을 누르면 즉시 일시정지하고 해당 프레임 캡처 고정
                 if (!vActive.paused) {
                     vActive.pause();
                     cancelAnimationFrame(this.playLoopId);
@@ -1213,7 +1230,7 @@
 
                 this.updateTrack();
                 this.calculateMetrics();
-                setTimeout(() => { CoreAI.runStableAI(); }, 40); // 스켈레톤 및 데이터 출력 트리거
+                setTimeout(() => { CoreAI.runStableAI(); }, 40);
             },
             calculateMetrics() {
                 if(CoreAI.autoGctList.length > 0) {
@@ -1305,6 +1322,9 @@
                 } else {
                     vActive.pause();
                     cancelAnimationFrame(this.playLoopId); 
+                    
+                    // [오류 수정] 플레이 도중 일시정지 버튼을 눌렀을 때 불필요한 스켈레톤 난사 방지 클리어 후 프레임 싱크
+                    if (this.currentRoom === 'manual') ctxActive.clearRect(0, 0, cActive.width, cActive.height);
                     setTimeout(() => { CoreAI.runStableAI(); }, 50);
                 }
             },
@@ -1343,7 +1363,7 @@
                 document.getElementById('inputStartPointAuto').value = "0.00";
                 document.getElementById('inputEndPointAuto').value = "0.00";
 
-                // [요구사항 반영] 카드 및 하단 텍스트 데이터 리셋 연동
+                // [오류 수정] 전체 데이터 리셋 시 하단 데이터 카드 텍스트들 깔끔하게 초기화 연동
                 CoreAI.curKnee = "--°"; CoreAI.curElbow = "--°"; CoreAI.curBody = "--°";
                 document.getElementById('valKneeM').innerText = "--°";
                 document.getElementById('valElbowM').innerText = "--°";
@@ -1394,7 +1414,8 @@
                 document.getElementById('inputStartPointAuto').value = targetTime.toFixed(2);
                 this.updateTrack();
 
-                // [요구사항 반영] 구간리셋 시 해당 프레임 데이터 재측정 동기화
+                // [오류 수정] 구간리셋 시 해당 프레임 자리에 맞는 고정 데이터만 단발성으로 출력되도록 연동 동기화
+                if (this.currentRoom === 'manual') ctxActive.clearRect(0, 0, cActive.width, cActive.height);
                 setTimeout(() => { CoreAI.runStableAI(); }, 50);
             }
         };
