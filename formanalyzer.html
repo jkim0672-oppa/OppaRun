@@ -152,11 +152,12 @@
             height: 8px; background: none; outline: none; top: 0; margin: 0;
         }
         
+        /* 주석 변경 금지: 모바일 드래그 향상을 위해 포인터 이벤트 자동 할당 처리 */
         .video-timeline-dual::-webkit-slider-thumb {
             pointer-events: auto; -webkit-appearance: none; appearance: none; 
-            width: 22px; height: 22px; border-radius: 50%; cursor: pointer; 
+            width: 24px; height: 24px; border-radius: 50%; cursor: pointer; 
             border: 2px solid #ffffff; box-shadow: 0 0 8px rgba(0,0,0,0.6);
-            position: relative; top: -7px;
+            position: relative; top: -8px;
         }
         .timelineLeftClass { z-index: 10; }
         .timelineRightClass { z-index: 9; }
@@ -320,8 +321,8 @@
         <div class="timeline-box">
             <div class="dual-slider-container">
                 <div class="slider-track" id="sliderTrackManual"></div>
-                <input type="range" id="timelineLeftManual" class="video-timeline-dual timelineLeftClass" oninput="AppControl.onDualSliderInput('left')">
-                <input type="range" id="timelineRightManual" class="video-timeline-dual timelineRightClass" oninput="AppControl.onDualSliderInput('right')">
+                <input type="range" id="timelineLeftManual" class="video-timeline-dual timelineLeftClass" oninput="AppControl.onDualSliderInput('left')" onpointerdown="AppControl.onSliderPointerDown('left')" onmousedown="AppControl.onSliderPointerDown('left')" ontouchstart="AppControl.onSliderPointerDown('left')">
+                <input type="range" id="timelineRightManual" class="video-timeline-dual timelineRightClass" oninput="AppControl.onDualSliderInput('right')" onpointerdown="AppControl.onSliderPointerDown('right')" onmousedown="AppControl.onSliderPointerDown('right')" ontouchstart="AppControl.onSliderPointerDown('right')">
             </div>
         </div>
 
@@ -392,8 +393,8 @@
         <div class="timeline-box">
             <div class="dual-slider-container">
                 <div class="slider-track" id="sliderTrackAuto"></div>
-                <input type="range" id="timelineLeftAuto" class="video-timeline-dual timelineLeftClass" oninput="AppControl.onDualSliderInput('left')">
-                <input type="range" id="timelineRightAuto" class="video-timeline-dual timelineRightClass" oninput="AppControl.onDualSliderInput('right')">
+                <input type="range" id="timelineLeftAuto" class="video-timeline-dual timelineLeftClass" oninput="AppControl.onDualSliderInput('left')" onpointerdown="AppControl.onSliderPointerDown('left')" onmousedown="AppControl.onSliderPointerDown('left')" ontouchstart="AppControl.onSliderPointerDown('left')">
+                <input type="range" id="timelineRightAuto" class="video-timeline-dual timelineRightClass" oninput="AppControl.onDualSliderInput('right')" onpointerdown="AppControl.onSliderPointerDown('right')" onmousedown="AppControl.onSliderPointerDown('right')" ontouchstart="AppControl.onSliderPointerDown('right')">
             </div>
         </div>
 
@@ -1238,6 +1239,26 @@
                 vM.onloadedmetadata = initMetadataConfig;
                 vA.onloadedmetadata = initMetadataConfig;
             },
+            
+            /* 신규 레이어 추가: 양쪽 볼 터치 씹힘 방지 전용 z-index 인덱서 고속 스위칭 처리 */
+            onSliderPointerDown(side) {
+                const sLM = document.getElementById('timelineLeftManual');
+                const sRM = document.getElementById('timelineRightManual');
+                const sLA = document.getElementById('timelineLeftAuto');
+                const sRA = document.getElementById('timelineRightAuto');
+                
+                let activeL = (this.currentRoom === 'manual') ? sLM : sLA;
+                let activeR = (this.currentRoom === 'manual') ? sRM : sRA;
+
+                if(side === 'left') {
+                    activeL.style.zIndex = "12";
+                    activeR.style.zIndex = "9";
+                } else {
+                    activeL.style.zIndex = "9";
+                    activeR.style.zIndex = "12";
+                }
+            },
+
             onDualSliderInput(side) {
                 if(!vActive || !vActive.src) return;
                 if (!vActive.paused) {
@@ -1253,10 +1274,17 @@
 
                 let valL = parseFloat(activeL.value);
                 let valR = parseFloat(activeR.value);
+                
+                const minGap = 0.01; 
 
-                if (valL > valR) {
-                    if (side === 'left') { activeL.value = valR; valL = valR; }
-                    else { activeR.value = valL; valR = valL; }
+                if (valL > valR - minGap) {
+                    if (side === 'left') { 
+                        valL = Math.max(0, valR - minGap);
+                        activeL.value = valL; 
+                    } else { 
+                        valR = Math.min(vActive.duration, valL + minGap);
+                        activeR.value = valR; 
+                    }
                 }
                 
                 sLM.value = sLA.value = valL;
@@ -1601,11 +1629,26 @@
                 
                 const sLM = document.getElementById('timelineLeftManual');
                 const sRM = document.getElementById('timelineRightManual');
+                const sTM = document.getElementById('sliderTrackManual');
+                
                 const sLA = document.getElementById('timelineLeftAuto');
                 const sRA = document.getElementById('timelineRightAuto');
+                const sTA = document.getElementById('sliderTrackAuto');
                 
-                if(sLM && sRM) { sLM.value = 0; sRM.value = sRM.max || 100; }
-                if(sLA && sRA) { sLA.value = 0; sRA.value = sRA.max || 100; }
+                if(sLM && sRM) { 
+                    sLM.max = sRM.max = 100;
+                    sLM.value = 0; 
+                    sRM.value = 100; 
+                    sLM.style.zIndex = "10";
+                    sRM.style.zIndex = "9";
+                }
+                if(sLA && sRA) { 
+                    sLA.max = sRA.max = 100;
+                    sLA.value = 0; 
+                    sRA.value = 100; 
+                    sLA.style.zIndex = "10";
+                    sRA.style.zIndex = "9";
+                }
                 this.updateTrack();
 
                 document.getElementById('inputStartPointManual').value = "0.00";
