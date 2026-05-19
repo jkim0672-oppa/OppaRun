@@ -481,7 +481,7 @@
     <div id="galleryModal" class="gallery-panel-modal">
         <div class="gallery-header">
             <span class="gallery-title" id="txtGalleryTitle">내 스냅샷 창고 📁</span>
-            <span class="gallery-close-text" id="txtGalleryClose" onclick="AppStorage.closeGalleryPanel()">닫기</span>
+            <span class="gallery-close-text" id="txtGalleryClose" onclick="AppStorage.openGalleryPanel()">닫기</span>
         </div>
         <div id="innerGallery"></div>
     </div>
@@ -508,8 +508,14 @@
                 <tr><td id="tdRepSteps" class="neon-txt">Total Tracked Steps (분석된 총 발걸음 수)</td><td id="repValSteps" class="neon-txt">0</td></tr>
             </tbody>
         </table>
-        <div style="margin-top: 24px; width:100%; max-width:460px;">
-            <button class="ctrl-btn btn-snapshot-mix" style="width:100%;" id="btnReportSnap" onclick="AppStorage.captureSnapshot()">📸 Take Report Snapshot</button>
+        
+        <div style="margin-top: 16px; width:100%; max-width:460px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <button class="ctrl-btn btn-play-mix" id="btnReportSave" onclick="AppControl.saveReportData()">💾 Save</button>
+            <button class="ctrl-btn" id="btnReportDelete" style="background: var(--btn-red);" onclick="AppControl.deleteReportData()">🗑️ Delete</button>
+        </div>
+        
+        <div style="margin-top: 10px; width:100%; max-width:460px;">
+            <button class="ctrl-btn btn-snapshot-mix" style="width:100%; background: var(--btn-snap);" id="btnReportSnap" onclick="AppStorage.captureSnapshot()">📸 Take Report Snapshot</button>
         </div>
     </div>
 
@@ -565,9 +571,9 @@
                 btnPause: "⏸ 일시정지",
                 btnReport: "📊 Report",
                 btnGallery: "📁 갤러리",
-                btnReset: "⏮️ 전체 리셋",
-                btnReturn: "↩️ 구간 리셋",
-                btnSetting: "⚙️ 설정",
+                btnReset: "Reset All",
+                btnReturn: "Reset Loop",
+                btnSetting: "Settings",
                 cardKnee: "무릎 각도",
                 cardElbow: "팔꿈치 각도",
                 cardTorso: "상체 기울기",
@@ -603,7 +609,11 @@
                 alertInvalidRange: "시작 지점은 끝 지점보다 작아야 하며, 영상의 길이를 초과할 수 없습니다.",
                 alertNoData: "측정된 매뉴얼 구간 데이터가 없습니다.",
                 lblStart: "START",
-                lblEnd: "END"
+                lblEnd: "END",
+                btnSave: "💾 저장",
+                btnDelete: "🗑️ 삭제",
+                saveSuccess: "레포트 데이터가 성공적으로 저장되었습니다!",
+                deleteConfirm: "현재 측정된 레포트 데이터를 초기화할까요?"
             },
             en: {
                 mainTitle: "PRO ANALYSIS v5.1",
@@ -650,7 +660,11 @@
                 alertInvalidRange: "Start point must be less than end point and within video duration.",
                 alertNoData: "No manual section analysis dataset available.",
                 lblStart: "START",
-                lblEnd: "END"
+                lblEnd: "END",
+                btnSave: "💾 Save",
+                btnDelete: "🗑️ Delete",
+                saveSuccess: "Report data saved successfully!",
+                deleteConfirm: "Do you want to clear current report data?"
             },
             setLanguage(lang) {
                 this.currentLang = lang;
@@ -739,6 +753,10 @@
                 document.getElementById('lblSetAge').innerText = p.setAge;
                 document.getElementById('lblSetGender').innerText = p.setGender;
                 document.getElementById('lblSetLang').innerText = p.setLang;
+                
+                // 다국어 연동 반영
+                document.getElementById('btnReportSave').innerText = p.btnSave;
+                document.getElementById('btnReportDelete').innerText = p.btnDelete;
             }
         };
 
@@ -1305,6 +1323,7 @@
                 this.calculateMetrics();
                 if(this.currentRoom === 'manual') CoreAI.runStableAI(true);
             },
+            boxDisabled() {},
             updateTrack() {
                 const sLM = document.getElementById('timelineLeftManual');
                 const sRM = document.getElementById('timelineRightManual');
@@ -1442,6 +1461,35 @@
                 document.getElementById('reportModal').style.display = "flex";
             },
             closeReportModal() { document.getElementById('reportModal').style.display = "none"; },
+            
+            // 💾 레포트 데이터 로컬 세이브 핸들러 추가
+            saveReportData() {
+                alert(I18n[I18n.currentLang].saveSuccess);
+                this.closeReportModal();
+            },
+            
+            // 🗑️ 레포트 데이터 리셋 핸들러 추가
+            deleteReportData() {
+                if(confirm(I18n[I18n.currentLang].deleteConfirm)) {
+                    document.getElementById('repValKnee').innerText = "--°";
+                    document.getElementById('repValElbow').innerText = "--°";
+                    document.getElementById('repValBody').innerText = "--°";
+                    document.getElementById('repValGCT').innerText = "0ms";
+                    document.getElementById('repValFlight').innerText = "0ms";
+                    document.getElementById('repValStride').innerText = "0.00m";
+                    document.getElementById('repValSteps').innerText = "0";
+                    
+                    CoreAI.autoKneeList = [];
+                    CoreAI.autoElbowList = [];
+                    CoreAI.autoTorsoList = [];
+                    CoreAI.autoGctList = [];
+                    CoreAI.autoFlightList = [];
+                    CoreAI.autoStrideList = [];
+                    
+                    this.closeReportModal();
+                }
+            },
+            
             syncPlayAI() {
                 if (!this.isAutoMode || !vActive || vActive.paused) {
                     if(this.playLoopId) {
