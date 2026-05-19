@@ -433,7 +433,7 @@
             
             <div class="result-grid-compact" style="flex: 1.6;">
                 <div class="res-card" style="border-left-color: #10b981;"><span class="res-label" id="lblCardKneeA">Knee</span><span class="res-val" id="valKneeA">--°</span><span class="ref-text">160-170°</span></div>
-                <div class="res-card" style="border-left-color: #10b981;"><span class="res-label" id="lblCardElbowA">Elbow</span><span class="res-val" id="valElbowA">--°</span><span class="ref-text">80-90°</span></div>
+                <div class="res-card" style="border-left-color: #10b981;"><span class="res-label" id="lblCardElbowA">Elbow</span><span class="res-val" id="valKneeA">--°</span><span class="ref-text">80-90°</span></div>
                 <div class="res-card" style="border-left-color: #10b981;"><span class="res-label" id="lblCardTorsoA">Torso</span><span class="res-val" id="valBodyA">--°</span><span class="ref-text">5-10°</span></div>
                 
                 <div class="res-card blue-card"><span class="res-label" id="lblGCTA">Avg GCT</span><span class="res-val" id="valGCTA">0ms</span><span class="ref-text">180-220ms</span></div>
@@ -823,16 +823,16 @@
                 if (!res.poseLandmarks) return;
                 
                 if (AppControl.currentRoom === 'manual') {
-                    if (!vActive.paused) {
+                    if (!vActive.paused && this.lastFrameTime === vActive.currentTime) {
                         ctxActive.clearRect(0, 0, cActive.width, cActive.height);
                         return;
                     }
                 } else {
-                    if (vActive.paused && !this.aiTracking) return;
+                    if (vActive.paused && !this.aiTracking && this.lastFrameTime === vActive.currentTime) return;
                 }
 
                 ctxActive.clearRect(0, 0, cActive.width, cActive.height);
-                if (!this.aiTracking && AppControl.currentRoom === 'auto') return;
+                if (!this.aiTracking && AppControl.currentRoom === 'auto' && this.lastFrameTime === vActive.currentTime) return;
                 
                 const dConnectors = getDrawConnectors();
                 if(dConnectors) {
@@ -997,7 +997,7 @@
                     if(vTarget && vTarget.duration) {
                         document.getElementById(overlayId).innerText = vTarget.currentTime.toFixed(2) + "s";
                         
-                        if (this.currentRoom === 'manual') {
+                        if (this.currentRoom === 'manual' && !vTarget.paused) {
                             ctxActive.clearRect(0, 0, cActive.width, cActive.height);
                         }
 
@@ -1012,7 +1012,7 @@
 
                 const targetSeekEnd = () => {
                     if(this.currentRoom === 'manual') {
-                        ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                        CoreAI.runStableAI(true);
                     } else if(this.currentRoom === 'auto' && !this.isAutoMode) {
                         CoreAI.runStableAI(true);
                     }
@@ -1075,7 +1075,7 @@
                     if (this.currentRoom === 'auto') {
                         setTimeout(() => { CoreAI.runStableAI(); }, 60);
                     } else {
-                        setTimeout(() => { ctxActive.clearRect(0, 0, cActive.width, cActive.height); }, 60);
+                        setTimeout(() => { CoreAI.runStableAI(true); }, 60);
                     }
                 }
                 I18n.updateUIStrings();
@@ -1227,7 +1227,7 @@
                     CoreAI.autoElbowList = [];
                     CoreAI.autoTorsoList = [];
 
-                    setTimeout(() => { if(this.currentRoom === 'auto') CoreAI.runStableAI(true); else ctxActive.clearRect(0, 0, cActive.width, cActive.height); }, 150);
+                    setTimeout(() => { if(this.currentRoom === 'auto') CoreAI.runStableAI(true); else CoreAI.runStableAI(true); }, 150);
                 };
 
                 vM.onloadedmetadata = initMetadataConfig;
@@ -1273,7 +1273,6 @@
                 document.getElementById('inputEndPointAuto').value = this.takeoffTime.toFixed(2);
 
                 this.calculateMetrics();
-                if(this.currentRoom === 'manual') ctxActive.clearRect(0, 0, cActive.width, cActive.height);
             },
             onManualTimeInputChange(side) {
                 if(!vActive || !vActive.src) {
@@ -1320,7 +1319,6 @@
                 document.getElementById('timeOverlayAuto').innerText = vActive.currentTime.toFixed(2) + "s";
 
                 this.calculateMetrics();
-                if(this.currentRoom === 'manual') CoreAI.runStableAI(true);
             },
             boxDisabled() {},
             updateTrack() {
@@ -1383,7 +1381,6 @@
 
                 this.updateTrack();
                 this.calculateMetrics();
-                if(this.currentRoom === 'manual') CoreAI.runStableAI(true);
             },
             disabled() {},
             calculateMetrics() {
@@ -1411,7 +1408,7 @@
             closeSettingModal() {
                 this.saveSettings();
                 document.getElementById('settingModal').style.display = "none";
-                setTimeout(() => { if(this.currentRoom === 'auto') CoreAI.runStableAI(true); }, 50);
+                setTimeout(() => { CoreAI.runStableAI(true); }, 50);
             },
             saveSettings() {
                 userHeight = parseFloat(document.getElementById('inputHeight').value) || 175;
@@ -1533,11 +1530,9 @@
                 if (!vActive.paused) {
                     vActive.pause();
                 }
+                
                 vActive.currentTime = Math.max(0, Math.min(vActive.duration, vActive.currentTime + amount));
-                
                 document.getElementById('timelineLeftManual').value = document.getElementById('timelineLeftAuto').value = vActive.currentTime;
-                
-                if(this.currentRoom === 'manual') CoreAI.runStableAI(true);
             },
             resetAll() {
                 vM.pause(); vA.pause();
@@ -1621,7 +1616,6 @@
                 document.getElementById('inputStartPointManual').value = targetTime.toFixed(2);
                 document.getElementById('inputStartPointAuto').value = targetTime.toFixed(2);
                 this.updateTrack();
-                if(this.currentRoom === 'manual') ctxActive.clearRect(0, 0, cActive.width, cActive.height);
             }
         };
 
