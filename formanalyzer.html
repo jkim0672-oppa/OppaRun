@@ -778,12 +778,15 @@
             autoGctList: [],
             autoFlightList: [],
             autoStrideList: [], 
-            lastDetectedContact: null,
+            lastDetectedContact = null,
             lastFrameTime: -1,
 
             autoKneeList: [],
             autoElbowList: [],
             autoTorsoList: [],
+
+            // 원본 보존 법칙 기반 성능 보정 알고리즘용 상태 변수 추가
+            maxBodyHeightSeen: 0, 
 
             init() {
                 if (typeof Pose !== 'undefined') {
@@ -872,9 +875,23 @@
                 this.lastJoints.elbow = { x: lm[14].x * cActive.width, y: lm[14].y * cActive.height };
                 this.lastJoints.hip = { x: lm[24].x * cActive.width, y: lm[24].y * cActive.height };
 
+                // 물리 스케일링 필터링 핵심 로직 구현 단락 시작
                 const hipPixelY = lm[24].y * cActive.height;
                 const anklePixelY = lm[28].y * cActive.height;
                 const bodyPixelHeight = Math.abs(anklePixelY - hipPixelY);
+
+                // 어깨와 골반 중심을 이용한 객체 스케일 실시간 연산 (가장 가까이 다가온 클로즈업 타이밍 탐색용)
+                const shoulderCenterY = (lm[11].y + lm[12].y) / 2 * cActive.height;
+                const hipCenterY = (lm[23].y + lm[24].y) / 2 * cActive.height;
+                const torsoHeight = Math.abs(hipCenterY - shoulderCenterY);
+                const currentBodyXCenter = (lm[23].x + lm[24].x) / 2; // 상체 가로 정렬 필터용 중심 포인트
+
+                if (!isNaN(torsoHeight) && torsoHeight > this.maxBodyHeightSeen) {
+                    this.maxBodyHeightSeen = torsoHeight; // 영상 내에서 가장 카메라와 가깝게 잡힌 볼륨 크기로 자동 업그레이드
+                }
+
+                // 황금 타겟 필터 판단: 최대 크기의 85% 이상 확보되었고, 화면 정중앙 35%~65% 사이를 통과할 때만 True
+                const isOptimalZone = (torsoHeight >= this.maxBodyHeightSeen * 0.85) && (currentBodyXCenter >= 0.35 && currentBodyXCenter <= 0.65);
                 
                 if(!isNaN(bodyPixelHeight) && bodyPixelHeight > 10) {
                     const estimatedLegLengthCm = userHeight * 0.47; 
@@ -893,25 +910,29 @@
                         } else {
                             document.getElementById('valStrideA').innerText = computedStrideMeters.toFixed(2) + "m";
                         }
-                        if(AppControl.isAutoMode && AppControl.currentRoom === 'auto') {
+                        // 수정 포인트: 카메라와 완벽하게 가깝고 정면 정렬인 최적 구간 데이터만 누적 리스트에 허가
+                        if(AppControl.isAutoMode && AppControl.currentRoom === 'auto' && isOptimalZone) {
                             if(this.autoStrideList.length < 1000) this.autoStrideList.push(computedStrideMeters);
                         }
                     }
                 }
 
                 if(AppControl.isAutoMode && AppControl.currentRoom === 'auto') {
-                    if(this.autoKneeList.length < 2000) {
+                    // 수정 포인트: 관절 각도 레포트 데이터 수집도 황금 구역(isOptimalZone) 내부에서만 실행
+                    if(this.autoKneeList.length < 2000 && isOptimalZone) {
                         this.autoKneeList.push(kneeValNum);
                         this.autoElbowList.push(elbowValNum);
                         this.autoTorsoList.push(torsoValNum);
                     }
 
+                    // GCT 분석을 위해 매 발걸음 좌표 트랙킹용 스택 추가 (데이터 필터 처리는 아래 analyzeRunningGCT에서 정교화)
                     this.footDataHistory.push({
                         time: vActive.currentTime,
                         leftHeelY: lm[29].y,
                         leftToeY: lm[31].y,
                         rightHeelY: lm[30].y,
-                        rightToeY: lm[32].y
+                        rightToeY: lm[32].y,
+                        optimal: isOptimalZone // 프레임 가치 기준 지표 전달
                     });
                     if(this.footDataHistory.length > 90) this.footDataHistory.shift();
                     this.analyzeRunningGCT();
@@ -935,6 +956,9 @@
                 let cur = h[len-1];
                 let prev = h[len-2];
                 let pprev = h[len-3];
+
+                // 필터 스위치: 현재 추출 중인 발걸음 구간에 황금 프레임 판정이 믹싱되어 있는지 가드 스위치 처리
+                if(!cur.optimal && !prev.optimal) return;
 
                 let activeLeftY = Math.max(cur.leftHeelY, cur.leftToeY);
                 let prevLeftY = Math.max(prev.leftHeelY, prev.leftToeY);
@@ -1119,6 +1143,7 @@
                     CoreAI.autoKneeList = [];
                     CoreAI.autoElbowList = [];
                     CoreAI.autoTorsoList = [];
+                    CoreAI.maxBodyHeightSeen = 0; // 모드 작동 시 바운딩 박스 최대 스케일 카운터 리셋
 
                     this.contactTime = null;
                     this.takeoffTime = null;
@@ -1232,6 +1257,7 @@
                     CoreAI.autoKneeList = [];
                     CoreAI.autoElbowList = [];
                     CoreAI.autoTorsoList = [];
+                    CoreAI.maxBodyHeightSeen = 0;
 
                     setTimeout(() => { if(this.currentRoom === 'auto') CoreAI.runStableAI(true); else CoreAI.runStableAI(true); }, 150);
                 };
@@ -1240,7 +1266,6 @@
                 vA.onloadedmetadata = initMetadataConfig;
             },
             
-            /* 신규 레이어 추가: 양쪽 볼 터치 씹힘 방지 전용 z-index 인덱서 고속 스위칭 처리 */
             onSliderPointerDown(side) {
                 const sLM = document.getElementById('timelineLeftManual');
                 const sRM = document.getElementById('timelineRightManual');
@@ -1559,6 +1584,7 @@
                     CoreAI.autoGctList = [];
                     CoreAI.autoFlightList = [];
                     CoreAI.autoStrideList = [];
+                    CoreAI.maxBodyHeightSeen = 0;
                     
                     this.closeReportModal();
                 }
@@ -1701,6 +1727,7 @@
                 CoreAI.autoKneeList = [];
                 CoreAI.autoElbowList = [];
                 CoreAI.autoTorsoList = [];
+                CoreAI.maxBodyHeightSeen = 0;
 
                 I18n.updateUIStrings();
             },
