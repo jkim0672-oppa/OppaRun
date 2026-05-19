@@ -779,6 +779,7 @@
             autoFlightList: [],
             autoStrideList: [], 
             lastDetectedContact: null,
+            lastDetectedTakeoff: null, // Flight Time 실측용 변수 추가
             lastFrameTime: -1,
 
             autoKneeList: [],
@@ -944,26 +945,33 @@
                 let prevRightY = Math.max(prev.rightHeelY, prev.rightToeY);
                 let pprevRightY = Math.max(pprev.rightHeelY, pprev.rightToeY);
 
-                if(prevLeftY >= pprevLeftY && cur.leftHeelY <= prev.leftHeelY && AppControl.contactTime === null) {
-                    if(this.lastDetectedContact === null || Math.abs(cur.time - this.lastDetectedContact) > 0.2) {
+                // 미세한 움직임 노이즈를 제어하기 위한 임계값 필터 할당
+                const noiseThresh = 0.0015;
+
+                // 왼쪽 발 착지(Contact) 감지 로직 보정
+                if(prevLeftY >= pprevLeftY && (prevLeftY - activeLeftY) > noiseThresh && AppControl.contactTime === null) {
+                    if(this.lastDetectedContact === null || Math.abs(cur.time - this.lastDetectedContact) > 0.15) {
                         AppControl.syncAutoMark('left', cur.time);
                         this.lastDetectedContact = cur.time;
                     }
                 }
+                // 왼쪽 발 이륙(Takeoff) 감지 로직 보정
                 if(AppControl.contactTime !== null && AppControl.takeoffTime === null) {
-                    if(cur.leftToeY < prev.leftToeY && prev.leftToeY >= pprev.leftToeY) {
+                    if((prev.leftToeY - cur.leftToeY) > noiseThresh && prev.leftToeY >= pprevLeftY) {
                         AppControl.syncAutoMark('right', prev.time);
                     }
                 }
 
-                if(prevRightY >= pprevRightY && cur.rightHeelY <= prev.rightHeelY && AppControl.contactTime === null) {
-                    if(this.lastDetectedContact === null || Math.abs(cur.time - this.lastDetectedContact) > 0.2) {
+                // 오른쪽 발 착지(Contact) 감지 로직 보정
+                if(prevRightY >= pprevRightY && (prevRightY - activeRightY) > noiseThresh && AppControl.contactTime === null) {
+                    if(this.lastDetectedContact === null || Math.abs(cur.time - this.lastDetectedContact) > 0.15) {
                         AppControl.syncAutoMark('left', cur.time);
                         this.lastDetectedContact = cur.time;
                     }
                 }
+                // 오른쪽 발 이륙(Takeoff) 감지 로직 보정
                 if(AppControl.contactTime !== null && AppControl.takeoffTime === null) {
-                    if(cur.rightToeY < prev.rightToeY && prev.rightToeY >= pprev.rightToeY) {
+                    if((prev.rightToeY - cur.rightToeY) > noiseThresh && prev.rightToeY >= pprevRightY) {
                         AppControl.syncAutoMark('right', prev.time);
                     }
                 }
@@ -1115,6 +1123,7 @@
                     CoreAI.autoFlightList = [];
                     CoreAI.autoStrideList = [];
                     CoreAI.lastDetectedContact = null;
+                    CoreAI.lastDetectedTakeoff = null; // 초기화 처리
                     
                     CoreAI.autoKneeList = [];
                     CoreAI.autoElbowList = [];
@@ -1133,6 +1142,15 @@
             syncAutoMark(side, targetTime) {
                 if(side === 'left') {
                     this.contactTime = targetTime;
+                    
+                    // AI 모드 작동시: 이전 Takeoff 지점부터 현재 신규 착지(Contact)까지의 간격을 진짜 Flight Time으로 정밀 계산
+                    if(this.isAutoMode && CoreAI.lastDetectedTakeoff !== null) {
+                        const stepFlight = Math.round((targetTime - CoreAI.lastDetectedTakeoff) * 1000);
+                        if(stepFlight > 30 && stepFlight < 400) {
+                            CoreAI.autoFlightList.push(stepFlight);
+                        }
+                    }
+                    
                     this.takeoffTime = null; 
                     document.getElementById('inputStartPointManual').value = targetTime.toFixed(2);
                     document.getElementById('inputStartPointAuto').value = targetTime.toFixed(2);
@@ -1146,9 +1164,7 @@
                             const stepGct = Math.round((this.takeoffTime - this.contactTime) * 1000);
                             if(stepGct > 50 && stepGct < 500) { 
                                 CoreAI.autoGctList.push(stepGct);
-                                const cycleDuration = 0.70; 
-                                const computedFlight = Math.max(40, Math.round((cycleDuration * 1000) - stepGct));
-                                CoreAI.autoFlightList.push(computedFlight);
+                                CoreAI.lastDetectedTakeoff = targetTime; // 타임스탬프 기록 백업
                             }
                             this.contactTime = null; 
                             this.takeoffTime = null;
@@ -1228,6 +1244,7 @@
                     CoreAI.autoFlightList = [];
                     CoreAI.autoStrideList = [];
                     CoreAI.lastDetectedContact = null;
+                    CoreAI.lastDetectedTakeoff = null;
                     CoreAI.lastFrameTime = -1;
                     CoreAI.autoKneeList = [];
                     CoreAI.autoElbowList = [];
@@ -1240,7 +1257,6 @@
                 vA.onloadedmetadata = initMetadataConfig;
             },
             
-            /* 신규 레이어 추가: 양쪽 볼 터치 씹힘 방지 전용 z-index 인덱서 고속 스위칭 처리 */
             onSliderPointerDown(side) {
                 const sLM = document.getElementById('timelineLeftManual');
                 const sRM = document.getElementById('timelineRightManual');
@@ -1413,26 +1429,30 @@
                 document.getElementById('inputEndPointAuto').value = finalEnd;
 
                 this.updateTrack();
-                this.calculateMetrics();
+                this.calculateMetrics(); markBall
             },
             disabled() {},
             calculateMetrics() {
                 if(CoreAI.autoGctList.length > 0) {
                     const sumGct = CoreAI.autoGctList.reduce((acc, cur) => acc + cur, 0);
-                    const sumFlight = CoreAI.autoFlightList.reduce((acc, cur) => acc + cur, 0);
                     const avgGct = Math.round(sumGct / CoreAI.autoGctList.length);
-                    const avgFlight = Math.round(sumFlight / CoreAI.autoGctList.length);
-                    
                     document.getElementById('valGCTA').innerText = `${avgGct}ms`;
-                    document.getElementById('valFlightA').innerText = `${avgFlight}ms`;
+                    
+                    if(CoreAI.autoFlightList.length > 0) {
+                        const sumFlight = CoreAI.autoFlightList.reduce((acc, cur) => acc + cur, 0);
+                        const avgFlight = Math.round(sumFlight / CoreAI.autoFlightList.length);
+                        document.getElementById('valFlightA').innerText = `${avgFlight}ms`;
+                    }
                 }
                 if (this.contactTime !== null && this.takeoffTime !== null) {
                     const diffMs = Math.round((this.takeoffTime - this.contactTime) * 1000);
                     if(diffMs >= 0) {
                         document.getElementById('valGCTM').innerText = `${diffMs}ms`;
                         
-                        const cycleManualDuration = 0.70; 
-                        const manualFlight = Math.max(40, Math.round((cycleManualDuration * 1000) - diffMs));
+                        // 매뉴얼 계산 시에도 기존 하드코딩 방식 제거하고 상식적인 러닝 팩터 비중 처리
+                        const estimatedStrideHz = 3.0; // 초당 3걸음 기준 
+                        const totalCycleMs = Math.round(1000 / estimatedStrideHz);
+                        const manualFlight = Math.max(40, totalCycleMs - diffMs);
                         document.getElementById('valFlightM').innerText = manualFlight + "ms"; 
                     }
                 }
@@ -1482,13 +1502,15 @@
                 
                 if(CoreAI.autoGctList.length > 0) {
                     const sumGct = CoreAI.autoGctList.reduce((acc, cur) => acc + cur, 0);
-                    const sumFlight = CoreAI.autoFlightList.reduce((acc, cur) => acc + cur, 0);
                     finalGct = Math.round(sumGct / CoreAI.autoGctList.length);
-                    finalFlight = Math.round(sumFlight / CoreAI.autoGctList.length);
-
                     document.getElementById('repValGCT').innerText = finalGct + "ms";
-                    document.getElementById('repValFlight').innerText = finalFlight + "ms";
                     document.getElementById('repValSteps').innerText = CoreAI.autoGctList.length;
+
+                    if(CoreAI.autoFlightList.length > 0) {
+                        const sumFlight = CoreAI.autoFlightList.reduce((acc, cur) => acc + cur, 0);
+                        finalFlight = Math.round(sumFlight / CoreAI.autoFlightList.length);
+                        document.getElementById('repValFlight').innerText = finalFlight + "ms";
+                    }
                 } else {
                     finalGct = parseInt(document.getElementById('valGCTM').innerText) || 0;
                     finalFlight = parseInt(document.getElementById('valFlightM').innerText) || 0;
@@ -1697,6 +1719,7 @@
                 CoreAI.autoFlightList = [];
                 CoreAI.autoStrideList = [];
                 CoreAI.lastDetectedContact = null;
+                CoreAI.lastDetectedTakeoff = null;
                 CoreAI.lastFrameTime = -1;
                 CoreAI.autoKneeList = [];
                 CoreAI.autoElbowList = [];
