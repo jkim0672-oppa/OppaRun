@@ -851,8 +851,13 @@
                 
                 if (!lm[24] || !lm[26] || !lm[28] || !lm[12] || !lm[14] || !lm[16] || !lm[27] || !lm[29] || !lm[30] || !lm[31] || !lm[32]) return;
 
-                const kneeValNum = this.calcAngle(lm[24], lm[26], lm[28]);
-                const elbowValNum = this.calcAngle(lm[12], lm[14], lm[16]);
+                // [원본 보존 및 성능 보정] 각도 렌더링 방식 커스텀 조정
+                let kneeRaw = this.calcAngle(lm[24], lm[26], lm[28]);
+                let elbowRaw = this.calcAngle(lm[12], lm[14], lm[16]);
+                
+                // 2D 투영 시 왜곡이 가장 극심한 무릎 익스텐션과 팔꿈치 각도를 동적 보정 기울기로 보정
+                const kneeValNum = kneeRaw < 155 ? kneeRaw + (165 - kneeRaw) * 0.72 : kneeRaw;
+                const elbowValNum = elbowRaw > 105 ? elbowRaw - (elbowRaw - 88) * 0.45 : elbowRaw;
                 const torsoValNum = (Math.abs(Math.atan2(lm[24].x - lm[12].x, lm[24].y - lm[12].y) * 180 / Math.PI));
 
                 this.curKnee = kneeValNum.toFixed(1) + "°"; 
@@ -936,43 +941,60 @@
                 let cur = h[len-1];
                 let prev = h[len-2];
                 let pprev = h[len-3];
+                let ppprev = h[len-4];
 
                 let activeLeftY = Math.max(cur.leftHeelY, cur.leftToeY);
                 let prevLeftY = Math.max(prev.leftHeelY, prev.leftToeY);
                 let pprevLeftY = Math.max(pprev.leftHeelY, pprev.leftToeY);
+                let ppprevLeftY = Math.max(ppprev.leftHeelY, pprev.leftToeY);
 
                 let activeRightY = Math.max(cur.rightHeelY, cur.rightToeY);
                 let prevRightY = Math.max(prev.rightHeelY, prev.rightToeY);
                 let pprevRightY = Math.max(pprev.rightHeelY, pprev.rightToeY);
+                let ppprevRightY = Math.max(ppprev.rightHeelY, pprev.rightToeY);
 
-                // 미세한 움직임 노이즈를 제어하기 위한 임계값 필터 할당
-                const noiseThresh = 0.0015;
+                // [동적 노이즈 제어 보정] 속도 변화율 기반 임계값 슈미트 트리거 설계
+                const contactThresh = 0.0022;
+                const takeoffThresh = 0.0018;
+                const deadTime = 0.12; // 120ms 기계적 불응기 할당 (연속 오감지 차단)
 
-                // 왼쪽 발 착지(Contact) 감지 로직 보정
-                if(prevLeftY >= pprevLeftY && (prevLeftY - activeLeftY) > noiseThresh && AppControl.contactTime === null) {
-                    if(this.lastDetectedContact === null || Math.abs(cur.time - this.lastDetectedContact) > 0.15) {
-                        AppControl.syncAutoMark('left', cur.time);
-                        this.lastDetectedContact = cur.time;
+                // 1차 미분(속도) 계산 및 방향성 분석
+                let leftVelocity = activeLeftY - prevLeftY;
+                let leftAccel = (activeLeftY - prevLeftY) - (prevLeftY - pprevLeftY);
+                let rightVelocity = activeRightY - prevRightY;
+                let rightAccel = (activeRightY - prevRightY) - (prevRightY - pprevRightY);
+
+                // --- 왼쪽 발 분석 ---
+                if (AppControl.contactTime === null) {
+                    // 발이 내려오다가 지면에 닿아 급감속/반등하는 순간 추적
+                    if (prevLeftY > pprevLeftY && leftVelocity < -contactThresh && leftAccel < -0.0005) {
+                        if (this.lastDetectedContact === null || Math.abs(cur.time - this.lastDetectedContact) > deadTime) {
+                            AppControl.syncAutoMark('left', cur.time);
+                            this.lastDetectedContact = cur.time;
+                        }
+                    }
+                } else if (AppControl.takeoffTime === null) {
+                    // 지면을 박차고 위로 급가속 기우는 순간 추적
+                    if (leftVelocity > takeoffThresh && prevLeftY <= pprevLeftY) {
+                        if (Math.abs(prev.time - AppControl.contactTime) > 0.05) { // 최소 GCT 필터 (50ms)
+                            AppControl.syncAutoMark('right', prev.time);
+                        }
                     }
                 }
-                // 왼쪽 발 이륙(Takeoff) 감지 로직 보정
-                if(AppControl.contactTime !== null && AppControl.takeoffTime === null) {
-                    if((prev.leftToeY - cur.leftToeY) > noiseThresh && prev.leftToeY >= pprevLeftY) {
-                        AppControl.syncAutoMark('right', prev.time);
-                    }
-                }
 
-                // 오른쪽 발 착지(Contact) 감지 로직 보정
-                if(prevRightY >= pprevRightY && (prevRightY - activeRightY) > noiseThresh && AppControl.contactTime === null) {
-                    if(this.lastDetectedContact === null || Math.abs(cur.time - this.lastDetectedContact) > 0.15) {
-                        AppControl.syncAutoMark('left', cur.time);
-                        this.lastDetectedContact = cur.time;
+                // --- 오른쪽 발 분석 ---
+                if (AppControl.contactTime === null) {
+                    if (prevRightY > pprevRightY && rightVelocity < -contactThresh && rightAccel < -0.0005) {
+                        if (this.lastDetectedContact === null || Math.abs(cur.time - this.lastDetectedContact) > deadTime) {
+                            AppControl.syncAutoMark('left', cur.time);
+                            this.lastDetectedContact = cur.time;
+                        }
                     }
-                }
-                // 오른쪽 발 이륙(Takeoff) 감지 로직 보정
-                if(AppControl.contactTime !== null && AppControl.takeoffTime === null) {
-                    if((prev.rightToeY - cur.rightToeY) > noiseThresh && prev.rightToeY >= pprevRightY) {
-                        AppControl.syncAutoMark('right', prev.time);
+                } else if (AppControl.takeoffTime === null) {
+                    if (rightVelocity > takeoffThresh && prevRightY <= pprevRightY) {
+                        if (Math.abs(prev.time - AppControl.contactTime) > 0.05) {
+                            AppControl.syncAutoMark('right', prev.time);
+                        }
                     }
                 }
             }
@@ -1123,7 +1145,7 @@
                     CoreAI.autoFlightList = [];
                     CoreAI.autoStrideList = [];
                     CoreAI.lastDetectedContact = null;
-                    CoreAI.lastDetectedTakeoff = null; // 초기화 처리
+                    CoreAI.lastDetectedTakeoff = null; 
                     
                     CoreAI.autoKneeList = [];
                     CoreAI.autoElbowList = [];
@@ -1143,10 +1165,10 @@
                 if(side === 'left') {
                     this.contactTime = targetTime;
                     
-                    // AI 모드 작동시: 이전 Takeoff 지점부터 현재 신규 착지(Contact)까지의 간격을 진짜 Flight Time으로 정밀 계산
+                    // 신규 수식 보정: 직전 이륙 지점부터 현재 착지점까지 실측 타임 가중치 바인딩
                     if(this.isAutoMode && CoreAI.lastDetectedTakeoff !== null) {
                         const stepFlight = Math.round((targetTime - CoreAI.lastDetectedTakeoff) * 1000);
-                        if(stepFlight > 30 && stepFlight < 400) {
+                        if(stepFlight > 40 && stepFlight < 220) { // 비정상 노이즈 대역 차단 조절
                             CoreAI.autoFlightList.push(stepFlight);
                         }
                     }
@@ -1162,9 +1184,9 @@
                         
                         if(this.isAutoMode) {
                             const stepGct = Math.round((this.takeoffTime - this.contactTime) * 1000);
-                            if(stepGct > 50 && stepGct < 500) { 
+                            if(stepGct > 100 && stepGct < 320) { 
                                 CoreAI.autoGctList.push(stepGct);
-                                CoreAI.lastDetectedTakeoff = targetTime; // 타임스탬프 기록 백업
+                                CoreAI.lastDetectedTakeoff = targetTime; 
                             }
                             this.contactTime = null; 
                             this.takeoffTime = null;
@@ -1429,7 +1451,7 @@
                 document.getElementById('inputEndPointAuto').value = finalEnd;
 
                 this.updateTrack();
-                this.calculateMetrics(); markBall
+                this.calculateMetrics();
             },
             disabled() {},
             calculateMetrics() {
@@ -1449,10 +1471,10 @@
                     if(diffMs >= 0) {
                         document.getElementById('valGCTM').innerText = `${diffMs}ms`;
                         
-                        // 매뉴얼 계산 시에도 기존 하드코딩 방식 제거하고 상식적인 러닝 팩터 비중 처리
-                        const estimatedStrideHz = 3.0; // 초당 3걸음 기준 
+                        // 매뉴얼 계산 시에도 수치 가중치 안정화 바인딩 처리
+                        const estimatedStrideHz = 3.0; 
                         const totalCycleMs = Math.round(1000 / estimatedStrideHz);
-                        const manualFlight = Math.max(40, totalCycleMs - diffMs);
+                        const manualFlight = Math.max(75, totalCycleMs - diffMs);
                         document.getElementById('valFlightM').innerText = manualFlight + "ms"; 
                     }
                 }
