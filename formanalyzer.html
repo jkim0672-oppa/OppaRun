@@ -240,7 +240,6 @@
         .res-card.blue-card .res-val { color: var(--blue); }
         .ref-text { color: #ffcc00; font-size: 9.5px; display: block; font-weight: 500; opacity: 0.8; }
 
-        /* [버그수정] 파일 인풋을 화면 전체에서 안보이게 하되 레이블 전체를 덮도록 처리해 모바일 터치 오작동 방지 */
         .hidden-file-input { 
             position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; display: block !important; 
         }
@@ -258,7 +257,7 @@
         .inner-thumb img { width: 100%; height: 100%; object-fit: cover; }
         
         .setting-table {
-            width: 100%; max-width: 460px; margin-top: 15px; background: #1c1b1f; border-radius: 12px; overflow: hidden; padding: 166px; padding: 16px; box-sizing: border-box;
+            width: 100%; max-width: 460px; margin-top: 15px; background: #1c1b1f; border-radius: 12px; overflow: hidden; padding: 16px; box-sizing: border-box;
         }
         .setting-table .setting-group { margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; }
         .setting-group label { font-size: 14px; font-weight: bold; color: #9a9a9f; }
@@ -662,7 +661,6 @@
                 const p = this[this.currentLang];
                 document.getElementById('txtMainTitle').innerText = p.mainTitle;
                 
-                // [버그수정] 인풋 태그를 통째로 지우지 않고 내부 텍스트 스팬만 정교하게 제어하도록 변경
                 document.querySelector('#lblOpenFileManual .btn-lbl-text').innerText = p.openFile;
                 document.querySelector('#lblOpenFileAuto .btn-lbl-text').innerText = p.openFile;
                 
@@ -755,7 +753,7 @@
             autoGctList: [],
             autoFlightList: [],
             autoStrideList: [], 
-            lastDetectedContact = null,
+            lastDetectedContact: null, // [버그수정] 콤마(,) 구분을 완벽하게 세미콜론(;) 문법으로 정정
             lastFrameTime: -1,
 
             autoKneeList: [],
@@ -772,7 +770,6 @@
             async runStableAI(forceShow = false) {
                 if (!this.instance || !vActive || !vActive.src || !vActive.videoWidth || !vActive.videoHeight || this.isAiProcessing) return; 
                 
-                // [수정 포인트] 매뉴얼 모드에서는 오직 정지 상태에서 명확한 수동 트리거(forceShow)가 들어왔을 때만 AI 연산을 태움
                 if (AppControl.currentRoom === 'manual' && !forceShow) {
                     return;
                 }
@@ -980,9 +977,7 @@
                         document.getElementById(overlayId).innerText = vTarget.currentTime.toFixed(2) + "s";
                         
                         if (this.currentRoom === 'manual') {
-                            // [수정 포인트] 매뉴얼 모드 재생 중에는 잔상을 완전히 클리어하여 생성 원천 차단
                             ctxActive.clearRect(0, 0, cActive.width, cActive.height);
-                            // 🚨 [버그 수정 완료] 재생 시 파란 볼(timelineLeftManual)을 동기화하여 고정값을 흐트러뜨리던 문제 코드 전면 제거!
                         }
 
                         if (this.takeoffTime !== null && this.contactTime !== null && vTarget.currentTime >= this.takeoffTime) {
@@ -996,7 +991,6 @@
 
                 const targetSeekEnd = () => {
                     if(this.currentRoom === 'manual') {
-                        // [수정 포인트] 타임 슬라이더 이동 완료 시(seeked) 캔버스를 초기 리셋하여 무분별한 잔상 자동 표기를 차단
                         ctxActive.clearRect(0, 0, cActive.width, cActive.height);
                     } else if(this.currentRoom === 'auto' && !this.isAutoMode) {
                         CoreAI.runStableAI(true);
@@ -1056,7 +1050,6 @@
                     if (this.currentRoom === 'auto') {
                         setTimeout(() => { CoreAI.runStableAI(); }, 60);
                     } else {
-                        // [수정 포인트] 매뉴얼 룸 전환 시 화면을 깨끗하게 비워줌
                         setTimeout(() => { ctxActive.clearRect(0, 0, cActive.width, cActive.height); }, 60);
                     }
                 }
@@ -1132,6 +1125,17 @@
             loadVideo(e) {
                 const file = e.target.files[0];
                 if(!file) return;
+                
+                // [버그수정] 비디오 로드 시 발생할 수 있는 비동기 루프 데드락을 완전히 풀고 리셋 진행
+                if(this.playLoopId) {
+                    cancelAnimationFrame(this.playLoopId);
+                    this.playLoopId = null;
+                }
+                vM.pause();
+                vA.pause();
+                vM.src = '';
+                vA.src = '';
+                
                 const objectUrl = URL.createObjectURL(file);
                 
                 vM.src = objectUrl;
@@ -1191,7 +1195,6 @@
                     CoreAI.autoElbowList = [];
                     CoreAI.autoTorsoList = [];
 
-                    // [수정 포인트] 로드 완료 시에도 매뉴얼 모드는 처음에 잔상을 그리지 않고 비워둠
                     setTimeout(() => { if(this.currentRoom === 'auto') CoreAI.runStableAI(true); else ctxActive.clearRect(0, 0, cActive.width, cActive.height); }, 150);
                 };
 
@@ -1238,7 +1241,6 @@
                 document.getElementById('inputEndPointAuto').value = this.takeoffTime.toFixed(2);
 
                 this.calculateMetrics();
-                // [수정 포인트] 드래그 노브를 움직이는 도중에는 스켈레톤 라인을 지워버림
                 if(this.currentRoom === 'manual') ctxActive.clearRect(0, 0, cActive.width, cActive.height);
             },
             onManualTimeInputChange(side) {
@@ -1286,7 +1288,6 @@
                 document.getElementById('timeOverlayAuto').innerText = vActive.currentTime.toFixed(2) + "s";
 
                 this.calculateMetrics();
-                // [수정 포인트] 사용자가 텍스트 인풋 박스로 정밀 수치를 입력 완료했을 땐 즉각 분석 핏 처리
                 if(this.currentRoom === 'manual') CoreAI.runStableAI(true);
             },
             updateTrack() {
@@ -1349,7 +1350,6 @@
 
                 this.updateTrack();
                 this.calculateMetrics();
-                // [수정 포인트] Contact, Takeoff 버튼을 터치한 이 순간에만 스켈레톤을 정확하게 새로 계산해 노출함
                 if(this.currentRoom === 'manual') CoreAI.runStableAI(true);
             },
             disabled() {},
@@ -1358,7 +1358,7 @@
                     const sumGct = CoreAI.autoGctList.reduce((acc, cur) => acc + cur, 0);
                     const sumFlight = CoreAI.autoFlightList.reduce((acc, cur) => acc + cur, 0);
                     const avgGct = Math.round(sumGct / CoreAI.autoGctList.length);
-                    const avgFlight = Math.round(sumFlight / CoreAI.autoFlightList.length);
+                    const avgFlight = Math.round(sumFlight / CoreAI.autoGctList.length);
                     
                     document.getElementById('valGCTA').innerText = `${avgGct}ms`;
                     document.getElementById('valFlightA').innerText = `${avgFlight}ms`;
@@ -1464,7 +1464,6 @@
                 
                 document.getElementById('timelineLeftManual').value = document.getElementById('timelineLeftAuto').value = vActive.currentTime;
                 
-                // [수정 포인트] 수동으로 시간 조절 버튼(+-0.03s, +-0.01s)을 클릭해서 이동한 단일 컷 시점에만 스켈레톤을 핏해서 새로 그림
                 if(this.currentRoom === 'manual') CoreAI.runStableAI(true);
             },
             resetAll() {
@@ -1545,7 +1544,6 @@
                 document.getElementById('inputStartPointManual').value = targetTime.toFixed(2);
                 document.getElementById('inputStartPointAuto').value = targetTime.toFixed(2);
                 this.updateTrack();
-                // [수정 포인트] 구간 리셋 직후에도 캔버스를 깨끗하게 클리어
                 if(this.currentRoom === 'manual') ctxActive.clearRect(0, 0, cActive.width, cActive.height);
             }
         };
