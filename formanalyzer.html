@@ -1127,8 +1127,8 @@
                     CoreAI.autoElbowList = [];
                     CoreAI.autoTorsoList = [];
 
-                    if (this.contactTime === null) this.contactTime = 0;
-                    if (this.takeoffTime === null) this.takeoffTime = vActive.duration;
+                    this.contactTime = null;
+                    this.takeoffTime = null;
                     
                     if(vActive.paused) CoreAI.runStableAI(); else this.syncPlayAI();
                 } else {
@@ -1138,27 +1138,28 @@
                 I18n.updateUIStrings();
             },
             syncAutoMark(side, targetTime) {
+                /* [AI 모드 동기화 로직 보정] AI 추적 시 실시간 변수 상태 체인을 가동하도록 개방 */
                 if(side === 'left') {
-                    if (!this.isAutoMode) {
-                        this.contactTime = targetTime;
-                        document.getElementById('inputStartPointManual').value = targetTime.toFixed(2);
-                        document.getElementById('inputStartPointAuto').value = targetTime.toFixed(2);
-                    }
+                    this.contactTime = targetTime;
+                    this.takeoffTime = null; // 신규 세션 시작 시 takeoff 초기화
+                    document.getElementById('inputStartPointManual').value = targetTime.toFixed(2);
+                    document.getElementById('inputStartPointAuto').value = targetTime.toFixed(2);
                 } else {
-                    if(this.isAutoMode) {
-                        const currentStart = this.contactTime || targetTime - 0.2;
-                        const stepGct = Math.round((targetTime - currentStart) * 1000);
-                        if(stepGct > 50 && stepGct < 500) { 
-                            CoreAI.autoGctList.push(stepGct);
-                            const cycleDuration = 0.70; 
-                            const computedFlight = Math.max(40, Math.round((cycleDuration * 1000) - stepGct));
-                            CoreAI.autoFlightList.push(computedFlight);
-                        }
-                    } else {
-                        if(this.contactTime !== null && targetTime > this.contactTime) {
-                            this.takeoffTime = targetTime;
-                            document.getElementById('inputEndPointManual').value = targetTime.toFixed(2);
-                            document.getElementById('inputEndPointAuto').value = targetTime.toFixed(2);
+                    if(this.contactTime !== null && targetTime > this.contactTime) {
+                        this.takeoffTime = targetTime;
+                        document.getElementById('inputEndPointManual').value = targetTime.toFixed(2);
+                        document.getElementById('inputEndPointAuto').value = targetTime.toFixed(2);
+                        
+                        if(this.isAutoMode) {
+                            const stepGct = Math.round((this.takeoffTime - this.contactTime) * 1000);
+                            if(stepGct > 50 && stepGct < 500) { 
+                                CoreAI.autoGctList.push(stepGct);
+                                const cycleDuration = 0.70; 
+                                const computedFlight = Math.max(40, Math.round((cycleDuration * 1000) - stepGct));
+                                CoreAI.autoFlightList.push(computedFlight);
+                            }
+                            this.contactTime = null; // 계산 후 다음 스텝을 위해 사이클 클리어
+                            this.takeoffTime = null;
                         }
                     }
                 }
@@ -1211,8 +1212,8 @@
                     ctxM.clearRect(0, 0, cM.width, cM.height); 
                     ctxA.clearRect(0, 0, cA.width, cA.height); 
                     
-                    this.contactTime = 0;
-                    this.takeoffTime = vActive.duration;
+                    this.contactTime = null;
+                    this.takeoffTime = null;
                     
                     document.getElementById('inputStartPointManual').value = "0.00";
                     document.getElementById('inputEndPointManual').value = vActive.duration.toFixed(2);
@@ -1502,7 +1503,7 @@
                 };
 
                 applyStatusColor('repValKnee', finalKnee, 160, 170, 10);
-                applyStatusColor('repValElbow', finalElbow, 80, 90, 15);
+                applyStatusColor('repValLog', finalElbow, 80, 90, 15);
                 applyStatusColor('repValBody', finalTorso, 5, 10, 3);
                 applyStatusColor('repValGCT', finalGct, 180, 220, 20);
                 applyStatusColor('repValFlight', finalFlight, 70, 100, 15);
