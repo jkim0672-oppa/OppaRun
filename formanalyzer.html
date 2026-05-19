@@ -382,7 +382,7 @@
         <div class="timeline-box">
             <div class="dual-slider-container">
                 <div class="slider-track" id="sliderTrackAuto"></div>
-                <input type="range" id="timelineLeftAuto" class="video-timeline-dual timelineLeftClass" oninput="AppControl.onDualSliderInput('left')">
+                <input type="range" id="timelineLeftAuto" class="video-timeline-dual timelineRightClass" oninput="AppControl.onDualSliderInput('left')">
                 <input type="range" id="timelineRightAuto" class="video-timeline-dual timelineRightClass" oninput="AppControl.onDualSliderInput('right')">
             </div>
         </div>
@@ -753,7 +753,7 @@
             autoGctList: [],
             autoFlightList: [],
             autoStrideList: [], 
-            lastDetectedContact: null, // [버그수정] 콤마(,) 구분을 완벽하게 세미콜론(;) 문법으로 정정
+            lastDetectedContact: null, 
             lastFrameTime: -1,
 
             autoKneeList: [],
@@ -964,7 +964,11 @@
                     document.getElementById('btnPlayManual').innerText = I18n[I18n.currentLang].btnPlay; 
                     document.getElementById('btnPlayAuto').innerText = I18n[I18n.currentLang].btnPlay; 
                     if(this.playLoopId) {
-                        cancelAnimationFrame(this.playLoopId);
+                        if(vActive && vActive.cancelVideoFrameCallback && this.playLoopId !== null) {
+                            vActive.cancelVideoFrameCallback(this.playLoopId);
+                        } else {
+                            cancelAnimationFrame(this.playLoopId);
+                        }
                         this.playLoopId = null;
                     }
                 };
@@ -1005,7 +1009,11 @@
                 
                 if(vActive) vActive.pause();
                 if(this.playLoopId) {
-                    cancelAnimationFrame(this.playLoopId);
+                    if(vActive && vActive.cancelVideoFrameCallback) {
+                        vActive.cancelVideoFrameCallback(this.playLoopId);
+                    } else {
+                        cancelAnimationFrame(this.playLoopId);
+                    }
                     this.playLoopId = null;
                 }
                 
@@ -1063,7 +1071,11 @@
                 }
                 
                 if(this.playLoopId) {
-                    cancelAnimationFrame(this.playLoopId);
+                    if(vActive && vActive.cancelVideoFrameCallback) {
+                        vActive.cancelVideoFrameCallback(this.playLoopId);
+                    } else {
+                        cancelAnimationFrame(this.playLoopId);
+                    }
                     this.playLoopId = null;
                 }
                 
@@ -1126,9 +1138,12 @@
                 const file = e.target.files[0];
                 if(!file) return;
                 
-                // [버그수정] 비디오 로드 시 발생할 수 있는 비동기 루프 데드락을 완전히 풀고 리셋 진행
                 if(this.playLoopId) {
-                    cancelAnimationFrame(this.playLoopId);
+                    if(vActive && vActive.cancelVideoFrameCallback) {
+                        vActive.cancelVideoFrameCallback(this.playLoopId);
+                    } else {
+                        cancelAnimationFrame(this.playLoopId);
+                    }
                     this.playLoopId = null;
                 }
                 vM.pause();
@@ -1267,7 +1282,7 @@
                     document.getElementById('inputStartPointManual').value = (this.contactTime || 0).toFixed(2);
                     document.getElementById('inputEndPointManual').value = (this.takeoffTime || vActive.duration).toFixed(2);
                     document.getElementById('inputStartPointAuto').value = (this.contactTime || 0).toFixed(2);
-                    document.getElementById('inputEndPointAuto').value = (this.takeoffTime || vActive.duration).toFixed(2);
+                    document.getElementById('inputEndPointManual').value = (this.takeoffTime || vActive.duration).toFixed(2);
                     return;
                 }
 
@@ -1430,16 +1445,29 @@
             syncPlayAI() {
                 if (!this.isAutoMode || !vActive || vActive.paused) {
                     if(this.playLoopId) {
-                        cancelAnimationFrame(this.playLoopId);
+                        if(vActive && vActive.cancelVideoFrameCallback) {
+                            vActive.cancelVideoFrameCallback(this.playLoopId);
+                        } else {
+                            cancelAnimationFrame(this.playLoopId);
+                        }
                         this.playLoopId = null;
                     }
                     return;
                 }
-                if (!CoreAI.isAiProcessing) {
-                    CoreAI.runStableAI();
+
+                if(vActive && vActive.requestVideoFrameCallback) {
+                    this.playLoopId = vActive.requestVideoFrameCallback(() => {
+                        if (!CoreAI.isAiProcessing) {
+                            CoreAI.runStableAI();
+                        }
+                        this.syncPlayAI();
+                    });
+                } else {
+                    if (!CoreAI.isAiProcessing) {
+                        CoreAI.runStableAI();
+                    }
+                    this.playLoopId = requestAnimationFrame(() => this.syncPlayAI());
                 }
-                cancelAnimationFrame(this.playLoopId);
-                this.playLoopId = requestAnimationFrame(() => this.syncPlayAI());
             },
             togglePlay() {
                 if(!vActive || !vActive.src) {
@@ -1469,7 +1497,11 @@
             resetAll() {
                 vM.pause(); vA.pause();
                 if(this.playLoopId) {
-                    cancelAnimationFrame(this.playLoopId); 
+                    if(vActive && vActive.cancelVideoFrameCallback) {
+                        vActive.cancelVideoFrameCallback(this.playLoopId);
+                    } else {
+                        cancelAnimationFrame(this.playLoopId);
+                    }
                     this.playLoopId = null;
                 }
                 
