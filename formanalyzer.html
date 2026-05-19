@@ -382,7 +382,7 @@
         <div class="timeline-box">
             <div class="dual-slider-container">
                 <div class="slider-track" id="sliderTrackAuto"></div>
-                <input type="range" id="timelineLeftAuto" class="video-timeline-dual timelineRightClass" oninput="AppControl.onDualSliderInput('left')">
+                <input type="range" id="timelineLeftAuto" class="video-timeline-dual timelineLeftClass" oninput="AppControl.onDualSliderInput('left')">
                 <input type="range" id="timelineRightAuto" class="video-timeline-dual timelineRightClass" oninput="AppControl.onDualSliderInput('right')">
             </div>
         </div>
@@ -1112,12 +1112,9 @@
                     CoreAI.autoElbowList = [];
                     CoreAI.autoTorsoList = [];
 
-                    this.contactTime = null;
-                    this.takeoffTime = null;
-                    document.getElementById('inputStartPointManual').value = "0.00";
-                    document.getElementById('inputEndPointManual').value = "0.00";
-                    document.getElementById('inputStartPointAuto').value = "0.00";
-                    document.getElementById('inputEndPointAuto').value = "0.00";
+                    // [원본 보존 핵심 수정]: 오토분석을 켤 때 기존 설정된 타임라인 구간 정보를 초기화하지 않도록 차단
+                    if (this.contactTime === null) this.contactTime = 0;
+                    if (this.takeoffTime === null) this.takeoffTime = vActive.duration;
                     
                     if(vActive.paused) CoreAI.runStableAI(); else this.syncPlayAI();
                 } else {
@@ -1128,25 +1125,29 @@
             },
             syncAutoMark(side, targetTime) {
                 if(side === 'left') {
-                    this.contactTime = targetTime;
-                    document.getElementById('inputStartPointManual').value = targetTime.toFixed(2);
-                    document.getElementById('inputStartPointAuto').value = targetTime.toFixed(2);
+                    // [수정]: 실시간 수집은 내부 분석을 주 목적으로 하되 화면 세팅값을 덮어쓰지 않도록 백업 처리 가능
+                    if (!this.isAutoMode) {
+                        this.contactTime = targetTime;
+                        document.getElementById('inputStartPointManual').value = targetTime.toFixed(2);
+                        document.getElementById('inputStartPointAuto').value = targetTime.toFixed(2);
+                    }
                 } else {
-                    if(this.contactTime !== null && targetTime > this.contactTime) {
-                        this.takeoffTime = targetTime;
-                        document.getElementById('inputEndPointManual').value = targetTime.toFixed(2);
-                        document.getElementById('inputEndPointAuto').value = targetTime.toFixed(2);
-                        
-                        const stepGct = Math.round((this.takeoffTime - this.contactTime) * 1000);
+                    if(this.isAutoMode) {
+                        // AI 트래킹 모드 중 실시간으로 측정 리스트에만 동적으로 가산
+                        const currentStart = this.contactTime || targetTime - 0.2;
+                        const stepGct = Math.round((targetTime - currentStart) * 1000);
                         if(stepGct > 50 && stepGct < 500) { 
                             CoreAI.autoGctList.push(stepGct);
-                            
                             const cycleDuration = 0.70; 
                             const computedFlight = Math.max(40, Math.round((cycleDuration * 1000) - stepGct));
                             CoreAI.autoFlightList.push(computedFlight);
                         }
-                        this.contactTime = null;
-                        this.takeoffTime = null;
+                    } else {
+                        if(this.contactTime !== null && targetTime > this.contactTime) {
+                            this.takeoffTime = targetTime;
+                            document.getElementById('inputEndPointManual').value = targetTime.toFixed(2);
+                            document.getElementById('inputEndPointAuto').value = targetTime.toFixed(2);
+                        }
                     }
                 }
                 this.calculateMetrics();
@@ -1298,7 +1299,7 @@
                     document.getElementById('inputStartPointManual').value = (this.contactTime || 0).toFixed(2);
                     document.getElementById('inputEndPointManual').value = (this.takeoffTime || vActive.duration).toFixed(2);
                     document.getElementById('inputStartPointAuto').value = (this.contactTime || 0).toFixed(2);
-                    document.getElementById('inputEndPointManual').value = (this.takeoffTime || vActive.duration).toFixed(2);
+                    document.getElementById('inputEndPointAuto').value = (this.takeoffTime || vActive.duration).toFixed(2);
                     return;
                 }
 
