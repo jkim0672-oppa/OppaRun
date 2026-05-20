@@ -248,6 +248,7 @@
         .res-card.blue-card .res-val { color: var(--blue); }
         .ref-text { color: #ffcc00; font-size: 9px; display: block; font-weight: 500; opacity: 0.8; }
 
+        /* 신규 이식: 실시간 데이터 정합 가시성 게이지 바 */
         .gauge-container {
             width: 80%; height: 3px; background: #2c2c2e; border-radius: 2px; margin-top: 3px; overflow: hidden; position: relative;
         }
@@ -256,6 +257,7 @@
         }
         .blue-card .gauge-bar { background: var(--blue); }
 
+        /* 신규 솔루션 룸 스타일 정의 */
         .solution-panel {
             background: var(--panel-bg); border-radius: 20px; padding: 14px; width: 100%; box-sizing: border-box;
             display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; border: 1px solid #2c2c2e;
@@ -492,7 +494,7 @@
                     <span>하체 익스텐션 & 롤링 (Knee Extension)</span>
                     <span id="solTagKnee" class="sol-status-tag" style="background:#3a3a3c; color:#fff;">진단 대기</span>
                 </div>
-                <p id="solDescKnee" class="sol-card-desc">영상을 재생하거나 AI 추적 데이터를 가동하면 무릎 관절 가동 범위와 뒤꿈치 롤링 메커니즘을 분석하여 맞춤형 생체역학 솔루션을 출력합니다.</p>
+                <p id="solDescKnee" class="sol-card-desc">영상을 재생하거나 AI 추적 데이터를 가동하면 오빠의 무릎 관절 가동 범위와 뒤꿈치 롤링 메커니즘을 분석하여 맞춤형 생체역학 솔루션을 출력합니다.</p>
             </div>
 
             <div class="sol-card">
@@ -840,7 +842,6 @@
             lastDetectedContact: null,
             lastDetectedTakeoff: null, 
             lastFrameTime: -1,
-            smoothedStride: 0, 
 
             autoKneeList: [],
             autoElbowList: [],
@@ -857,21 +858,15 @@
                 if (!this.instance || !vActive || !vActive.src || !vActive.videoWidth || !vActive.videoHeight || this.isAiProcessing) return; 
                 
                 if (AppControl.currentRoom === 'manual' && !forceShow) {
-                    ctxActive.clearRect(0, 0, cActive.width, cActive.height);
                     return;
                 }
 
                 if (AppControl.currentRoom === 'auto' && !this.aiTracking && vActive.paused && !forceShow) {
-                    ctxActive.clearRect(0, 0, cActive.width, cActive.height);
-                    return;
-                }
-
-                if (AppControl.currentRoom === 'auto' && !this.aiTracking && !vActive.paused) {
-                    ctxActive.clearRect(0, 0, cActive.width, cActive.height);
                     return;
                 }
 
                 const currentPlaybackTime = vActive.currentTime;
+                // 프레임 스킵 임계 배율 모바일 안정화 스캔 컨트롤 고도화
                 if (!vActive.paused && this.lastFrameTime >= 0 && Math.abs(currentPlaybackTime - this.lastFrameTime) < 0.003) {
                     return; 
                 }
@@ -894,25 +889,22 @@
                 document.getElementById('valElbowM').innerText = "--°";
                 document.getElementById('valBodyM').innerText = "--°";
                 document.getElementById('valStrideM').innerText = "0.00m";
-                this.smoothedStride = 0; 
                 this.updateVisualGauges('manual', 0, 0, 0, 0, 0, 0);
             },
             onResults(res) {
                 if (!res.poseLandmarks) return;
                 
                 if (AppControl.currentRoom === 'manual') {
-                    if (!vActive.paused) {
+                    if (!vActive.paused && this.lastFrameTime === vActive.currentTime) {
                         ctxActive.clearRect(0, 0, cActive.width, cActive.height);
                         return;
                     }
                 } else {
-                    if (!this.aiTracking) {
-                        ctxActive.clearRect(0, 0, cActive.width, cActive.height);
-                        return;
-                    }
+                    if (vActive.paused && !this.aiTracking && this.lastFrameTime === vActive.currentTime) return;
                 }
 
                 ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                if (!this.aiTracking && AppControl.currentRoom === 'auto' && this.lastFrameTime === vActive.currentTime) return;
                 
                 const dConnectors = getDrawConnectors();
                 if(dConnectors) {
@@ -937,6 +929,7 @@
                 let currentFlightVal = 0;
                 let computedStrideMeters = 0;
 
+                // [신규 계측 이식] 스트라이드 연산 처리 파트 백업 가이드화
                 const hipPixelY = lm[24].y * cActive.height;
                 const anklePixelY = lm[28].y * cActive.height;
                 const bodyPixelHeight = Math.abs(anklePixelY - hipPixelY);
@@ -948,16 +941,9 @@
                     const rightAnkleX = lm[28].x * cActive.width;
                     const stridePixelGap = Math.abs(leftAnkleX - rightAnkleX);
                     
-                    let rawStride = (stridePixelGap * cmPerPixel) / 100 * 1.5;
+                    computedStrideMeters = (stridePixelGap * cmPerPixel) / 100 * 1.5;
 
-                    if(!isNaN(rawStride) && isFinite(rawStride) && rawStride > 0.3 && rawStride < 2.5) {
-                        if (this.smoothedStride === 0) {
-                            this.smoothedStride = rawStride;
-                        } else {
-                            this.smoothedStride = (this.smoothedStride * 0.85) + (rawStride * 0.15);
-                        }
-                        computedStrideMeters = this.smoothedStride;
-
+                    if(!isNaN(computedStrideMeters) && isFinite(computedStrideMeters) && computedStrideMeters > 0.3 && computedStrideMeters < 2.5) {
                         if (AppControl.currentRoom === 'manual') {
                             document.getElementById('valStrideM').innerText = computedStrideMeters.toFixed(2) + "m";
                         } else {
@@ -987,6 +973,7 @@
                     this.updateVisualGauges('auto', kneeValNum, elbowValNum, torsoValNum, currentGctVal, currentFlightVal, computedStrideMeters);
                 }
 
+                // 데이터 처리 분기 후 실시간 엔진 솔루션 분석 트리거 호출
                 this.executeAiSolutionLogic(kneeValNum, torsoValNum, currentGctVal, currentFlightVal);
 
                 this.lastJoints.knee = { x: lm[26].x * cActive.width, y: lm[26].y * cActive.height };
@@ -1012,6 +999,7 @@
                 }
             },
 
+            // [신규 비주얼 코딩] 데이터 게이지 비례 바 갱신 함수 구현
             updateVisualGauges(room, knee, elbow, torso, gct, flight, stride) {
                 const targetKnee = document.getElementById(room === 'manual' ? 'gKneeM' : 'gKneeA');
                 const targetElbow = document.getElementById(room === 'manual' ? 'gElbowM' : 'gElbowA');
@@ -1028,6 +1016,7 @@
                 if(targetStride) targetStride.style.width = Math.min(100, Math.max(10, (stride / 2.0) * 100)) + '%';
             },
 
+            // [신규 솔루션 코딩] 실시간 생체역학 데이터 추출 가이드 연산 모듈 심기
             executeAiSolutionLogic(knee, torso, gct, flight) {
                 const tagKnee = document.getElementById('solTagKnee');
                 const descKnee = document.getElementById('solDescKnee');
@@ -1038,17 +1027,19 @@
 
                 if(!tagKnee || !descKnee) return;
 
+                // 1. 하체 익스텐션 & 롤링 판단
                 if(knee >= 160 && knee <= 172) {
                     tagKnee.innerText = "굿 롤링"; tagKnee.style.background = "var(--status-green)"; tagKnee.style.color = "black";
                     descKnee.innerText = `현재 무릎 전개각이 ${knee.toFixed(1)}°로 최적의 스트라이드 구간에 있습니다. 골반의 회전 가동성을 온전히 활용해 지면을 뒤로 밀어내며 완벽한 롤링 타점을 완성하고 계십니다!`;
                 } else if(knee < 160) {
                     tagKnee.innerText = "낮은 리커버리"; tagKnee.style.background = "var(--status-yellow)"; tagKnee.style.color = "black";
-                    descKnee.innerText = `현재 무릎각이 ${knee.toFixed(1)}°로 다리가 다 펴지지 않은 상태에서 조기 리커버리가 일어나고 있습니다. 족저 부하 분산을 위해 가자미근` + `와 고관절을 조금 더 열어 쭉 뻗어주세요.`;
+                    descKnee.innerText = `현재 무릎각이 ${knee.toFixed(1)}°로 다리가 다 펴지지 않은 상태에서 조기 리커버리가 일어나고 있습니다. 족저 부하 분산을 위해 가자미근과 고관절을 조금 더 열어 쭉 뻗어주세요.`;
                 } else {
                     tagKnee.innerText = "오버 스트라이드"; tagKnee.style.background = "var(--status-red)"; tagKnee.style.color = "white";
                     descKnee.innerText = `무릎 익스텐션이 ${knee.toFixed(1)}°로 과도하게 축이 무너져 오버스트라이드 위험이 있습니다. 착지 시 브레이크가 걸려 무릎 슬개골에 충격이 갈 수 있으니 미드풋 롤링에 신경 써보세요!`;
                 }
 
+                // 2. 지면 반발력 역학 관계 판단 (GCT / Flight 조합)
                 if(gct > 0) {
                     if(gct <= 220 && flight >= 70) {
                         tagDynamic.innerText = "엘리트 탄성"; tagDynamic.style.background = "var(--status-green)"; tagDynamic.style.color = "black";
@@ -1062,6 +1053,7 @@
                     }
                 }
 
+                // 3. 상체 체중 이동 각도 판단
                 if(torso >= 5 && torso <= 12) {
                     tagTorso.innerText = "린포워드 안정"; tagTorso.style.background = "var(--status-green)"; tagTorso.style.color = "black";
                     descTorso.innerText = `상체 전경 기울기가 ${torso.toFixed(1)}°로 이상적인 린 포워드(Lean Forward) 자세입니다. 골반이 뒤로 빠지지 않아 중력을 이용해 자연스럽게 가속을 얻는 효율적 스탠스입니다.`;
@@ -1101,9 +1093,9 @@
                 let prevRightY = Math.max(prev.rightHeelY, prev.rightToeY);
                 let pprevRightY = Math.max(pprev.rightHeelY, pprev.rightToeY);
 
-                const contactThresh = 0.0018; 
-                const takeoffThresh = 0.0014; 
-                const deadTime = 0.10; 
+                const contactThresh = 0.0022;
+                const takeoffThresh = 0.0018;
+                const deadTime = 0.12; 
 
                 let leftVelocity = activeLeftY - prevLeftY;
                 let leftAccel = (activeLeftY - prevLeftY) - (prevLeftY - pprevLeftY);
@@ -1111,7 +1103,7 @@
                 let rightAccel = (activeRightY - prevRightY) - (prevRightY - pprevRightY);
 
                 if (AppControl.contactTime === null) {
-                    if (prevLeftY > pprevLeftY && leftVelocity < -contactThresh && leftAccel < -0.0003) {
+                    if (prevLeftY > pprevLeftY && leftVelocity < -contactThresh && leftAccel < -0.0005) {
                         if (this.lastDetectedContact === null || Math.abs(cur.time - this.lastDetectedContact) > deadTime) {
                             AppControl.syncAutoMark('left', cur.time);
                             this.lastDetectedContact = cur.time;
@@ -1119,22 +1111,22 @@
                     }
                 } else if (AppControl.takeoffTime === null) {
                     if (leftVelocity > takeoffThresh && prevLeftY <= pprevLeftY) {
-                        if (Math.abs(prev.time - AppControl.contactTime) > 0.04) { 
+                        if (Math.abs(prev.time - AppControl.contactTime) > 0.05) { 
                             AppControl.syncAutoMark('right', prev.time);
                         }
                     }
                 }
 
                 if (AppControl.contactTime === null) {
-                    if (prevRightY > pprevRightY && rightVelocity < -contactThresh && rightAccel < -0.0003) {
+                    if (prevRightY > pprevRightY && rightVelocity < -contactThresh && rightAccel < -0.0005) {
                         if (this.lastDetectedContact === null || Math.abs(cur.time - this.lastDetectedContact) > deadTime) {
                             AppControl.syncAutoMark('left', cur.time);
                             this.lastDetectedContact = cur.time;
                         }
                     }
                 } else if (AppControl.takeoffTime === null) {
-                    if (rightVelocity > takeoffThresh && rightVelocity > prevRightY && prevRightY <= pprevRightY) {
-                        if (Math.abs(prev.time - AppControl.contactTime) > 0.04) {
+                    if (rightVelocity > takeoffThresh && prevRightY <= pprevRightY) {
+                        if (Math.abs(prev.time - AppControl.contactTime) > 0.05) {
                             AppControl.syncAutoMark('right', prev.time);
                         }
                     }
@@ -1155,24 +1147,18 @@
                     document.getElementById('btnPlayAuto').innerText = I18n[I18n.currentLang].btnPause; 
                     if (this.currentRoom === 'auto' && this.isAutoMode) {
                         this.syncPlayAI();
-                    } else {
-                        ctxActive.clearRect(0, 0, cActive.width, cActive.height);
-                        this.syncNormalPlay();
                     }
                 };
                 const handlerPause = () => { 
                     document.getElementById('btnPlayManual').innerText = I18n[I18n.currentLang].btnPlay; 
                     document.getElementById('btnPlayAuto').innerText = I18n[I18n.currentLang].btnPlay; 
                     if(this.playLoopId) {
-                        if(vActive && vActive.cancelVideoFrameCallback) {
+                        if(vActive && vActive.cancelVideoFrameCallback && this.playLoopId !== null) {
                             vActive.cancelVideoFrameCallback(this.playLoopId);
                         } else {
                             cancelAnimationFrame(this.playLoopId);
                         }
                         this.playLoopId = null;
-                    }
-                    if (this.currentRoom === 'manual' || (this.currentRoom === 'auto' && !this.isAutoMode)) {
-                        ctxActive.clearRect(0, 0, cActive.width, cActive.height);
                     }
                 };
 
@@ -1183,16 +1169,12 @@
                     if(vTarget && vTarget.duration) {
                         document.getElementById(overlayId).innerText = vTarget.currentTime.toFixed(2) + "s";
                         
-                        if (!vTarget.paused && (this.currentRoom === 'manual' || (this.currentRoom === 'auto' && !this.isAutoMode))) {
+                        if (this.currentRoom === 'manual' && !vTarget.paused) {
                             ctxActive.clearRect(0, 0, cActive.width, cActive.height);
                         }
 
                         if (this.takeoffTime !== null && this.contactTime !== null && vTarget.currentTime >= this.takeoffTime) {
                             vTarget.pause();
-                            vTarget.currentTime = this.contactTime;
-                            this.syncSliderUIFromTime(this.contactTime);
-                        } else {
-                            this.syncSliderUIFromTime(vTarget.currentTime);
                         }
                     }
                 };
@@ -1202,9 +1184,9 @@
 
                 const targetSeekEnd = () => {
                     if(this.currentRoom === 'manual') {
-                        ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                        CoreAI.runStableAI(true);
                     } else if(this.currentRoom === 'auto' && !this.isAutoMode) {
-                        ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                        CoreAI.runStableAI(true);
                     }
                 };
                 vM.onseeked = targetSeekEnd;
@@ -1214,8 +1196,7 @@
             switchRoom(roomName) {
                 if(this.currentRoom === roomName) return;
                 
-                if(vM) vM.pause();
-                if(vA) vA.pause();
+                if(vActive) vActive.pause();
                 if(this.playLoopId) {
                     if(vActive && vActive.cancelVideoFrameCallback) {
                         vActive.cancelVideoFrameCallback(this.playLoopId);
@@ -1246,6 +1227,7 @@
                     document.getElementById('autoRoom').classList.add('active-room');
                     document.getElementById('tabAuto').classList.add('active');
                 } else {
+                    // 솔루션 룸 패널 스위칭 분기 바인딩
                     this.currentRoom = 'solution';
                     document.getElementById('solutionRoom').classList.add('active-room');
                     document.getElementById('tabSolution').classList.add('active');
@@ -1272,7 +1254,11 @@
                     }
 
                     this.updateTrack();
-                    ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+                    if (this.currentRoom === 'auto') {
+                        setTimeout(() => { CoreAI.runStableAI(); }, 60);
+                    } else {
+                        setTimeout(() => { CoreAI.runStableAI(true); }, 60);
+                    }
                 }
                 I18n.updateUIStrings();
             },
@@ -1312,18 +1298,10 @@
                     this.contactTime = null;
                     this.takeoffTime = null;
                     
-                    if(vActive.paused) {
-                        CoreAI.runStableAI();
-                    } else {
-                        this.syncPlayAI();
-                    }
+                    if(vActive.paused) CoreAI.runStableAI(); else this.syncPlayAI();
                 } else {
                     btnAutoActive.style.background = "transparent";
                     CoreAI.aiTracking = false;
-                    ctxActive.clearRect(0, 0, cActive.width, cActive.height);
-                    if(!vActive.paused) {
-                        this.syncNormalPlay();
-                    }
                 }
                 I18n.updateUIStrings();
             },
@@ -1337,365 +1315,398 @@
                         }
                     }
                     this.takeoffTime = null; 
+                    document.getElementById('inputStartPointManual').value = targetTime.toFixed(2);
                     document.getElementById('inputStartPointAuto').value = targetTime.toFixed(2);
-                    document.getElementById('timelineLeftAuto').value = targetTime;
                 } else {
-                    this.takeoffTime = targetTime;
-                    if(this.isAutoMode && this.contactTime !== null) {
-                        const stepGct = Math.round((targetTime - this.contactTime) * 1000);
-                        if(stepGct > 80 && stepGct < 450) {
-                            CoreAI.autoGctList.push(stepGct);
-                            this.calcAndDisplayAutoAverages();
+                    if(this.contactTime !== null && targetTime > this.contactTime) {
+                        this.takeoffTime = targetTime;
+                        document.getElementById('inputEndPointManual').value = targetTime.toFixed(2);
+                        document.getElementById('inputEndPointAuto').value = targetTime.toFixed(2);
+                        
+                        if(this.isAutoMode) {
+                            const stepGct = Math.round((this.takeoffTime - this.contactTime) * 1000);
+                            if(stepGct > 100 && stepGct < 320) { 
+                                CoreAI.autoGctList.push(stepGct);
+                                CoreAI.lastDetectedTakeoff = targetTime; 
+                            }
+                            this.contactTime = null; 
+                            this.takeoffTime = null;
                         }
                     }
-                    document.getElementById('inputEndPointAuto').value = targetTime.toFixed(2);
-                    document.getElementById('timelineRightAuto').value = targetTime;
                 }
-                this.updateTrack();
+                this.calculateMetrics();
             },
-            calcAndDisplayAutoAverages() {
-                let avgGct = 0;
-                let avgFlight = 0;
-                if(CoreAI.autoGctList.length > 0) {
-                    avgGct = Math.round(CoreAI.autoGctList.reduce((a,b)=>a+b, 0) / CoreAI.autoGctList.length);
-                    document.getElementById('valGCTA').innerText = avgGct + "ms";
+            loadVideo(e) {
+                const file = e.target.files[0];
+                if(!file) return;
+                
+                if(this.playLoopId) {
+                    if(vActive && vActive.cancelVideoFrameCallback) {
+                        vActive.cancelVideoFrameCallback(this.playLoopId);
+                    } else {
+                        cancelAnimationFrame(this.playLoopId);
+                    }
+                    this.playLoopId = null;
                 }
-                if(CoreAI.autoFlightList.length > 0) {
-                    avgFlight = Math.round(CoreAI.autoFlightList.reduce((a,b)=>a+b, 0) / CoreAI.autoFlightList.length);
-                    document.getElementById('valFlightA').innerText = avgFlight + "ms";
+                vM.pause(); vA.pause();
+                vM.src = ''; vA.src = '';
+                
+                const objectUrl = URL.createObjectURL(file);
+                vM.src = objectUrl;
+                vA.src = objectUrl;
+
+                const initMetadataConfig = () => {
+                    if (!vActive || !vActive.duration || !isFinite(vActive.duration)) return;
+
+                    const sLM = document.getElementById('timelineLeftManual');
+                    const sRM = document.getElementById('timelineRightManual');
+                    const sLA = document.getElementById('timelineLeftAuto');
+                    const sRA = document.getElementById('timelineRightAuto');
+                    
+                    sLM.max = sRM.max = sLA.max = sRA.max = vActive.duration;
+                    sLM.value = sLA.value = 0; 
+                    sRM.value = sRA.value = vActive.duration;
+                    
+                    this.updateTrack();
+                    cM.width = cA.width = vActive.videoWidth; 
+                    cM.height = cA.height = vActive.videoHeight;
+                    
+                    vM.currentTime = 0; vA.currentTime = 0;
+                    
+                    document.getElementById('timeOverlayManual').innerText = "0.00s";
+                    document.getElementById('timeOverlayAuto').innerText = "0.00s";
+                    
+                    ctxM.clearRect(0, 0, cM.width, cM.height); 
+                    ctxA.clearRect(0, 0, cA.width, cA.height); 
+                    
+                    this.contactTime = null; this.takeoffTime = null;
+                    
+                    document.getElementById('inputStartPointManual').value = "0.00";
+                    document.getElementById('inputEndPointManual').value = vActive.duration.toFixed(2);
+                    document.getElementById('inputStartPointAuto').value = "0.00";
+                    document.getElementById('inputEndPointAuto').value = vActive.duration.toFixed(2);
+
+                    CoreAI.clearManualDataDisplay();
+                    document.getElementById('valKneeA').innerText = "--°";
+                    document.getElementById('valElbowA').innerText = "--°";
+                    document.getElementById('valBodyA').innerText = "--°";
+
+                    document.getElementById('valGCTM').innerText = "0ms";
+                    document.getElementById('valFlightM').innerText = "0ms";
+                    document.getElementById('valGCTA').innerText = "0ms";
+                    document.getElementById('valFlightA').innerText = "0ms";
+                    document.getElementById('valStrideA').innerText = "0.00m";
+                    
+                    CoreAI.footDataHistory = [];
+                    CoreAI.autoGctList = [];
+                    CoreAI.autoFlightList = [];
+                    CoreAI.autoStrideList = [];
+                    CoreAI.lastDetectedContact = null;
+                    CoreAI.lastDetectedTakeoff = null;
+                    CoreAI.lastFrameTime = -1;
+                    CoreAI.autoKneeList = [];
+                    CoreAI.autoElbowList = [];
+                    CoreAI.autoTorsoList = [];
+
+                    // 솔루션 플레이스홀더 초기 가이드 리셋 바인딩화
+                    document.getElementById('solTagKnee').innerText = "진단 대기"; document.getElementById('solTagKnee').style.background = "#3a3a3c";
+                    document.getElementById('solTagDynamic').innerText = "진단 대기"; document.getElementById('solTagDynamic').style.background = "#3a3a3c";
+                    document.getElementById('solTagTorso').innerText = "진단 대기"; document.getElementById('solTagTorso').style.background = "#3a3a3c";
+                    document.getElementById('solDescKnee').innerText = "영상을 가동하면 실시간 기하학 분석 텍스트 코칭 레포트가 자동 렌더링됩니다.";
+
+                    setTimeout(() => { CoreAI.runStableAI(true); }, 150);
+                };
+
+                vM.onloadedmetadata = initMetadataConfig;
+                vA.onloadedmetadata = initMetadataConfig;
+            },
+            
+            onSliderPointerDown(side) {
+                const sLM = document.getElementById('timelineLeftManual');
+                const sRM = document.getElementById('timelineRightManual');
+                const sLA = document.getElementById('timelineLeftAuto');
+                const sRA = document.getElementById('timelineRightAuto');
+                
+                let activeL = (this.currentRoom === 'manual') ? sLM : sLA;
+                let activeR = (this.currentRoom === 'manual') ? sRM : sRA;
+
+                if(side === 'left') {
+                    activeL.style.zIndex = "12"; activeR.style.zIndex = "9";
+                } else {
+                    activeL.style.zIndex = "9"; activeR.style.zIndex = "12";
+                }
+            },
+
+            onDualSliderInput(side) {
+                if(!vActive || !vActive.src) return;
+                if (!vActive.paused) vActive.pause();
+                
+                const sLM = document.getElementById('timelineLeftManual');
+                const sRM = document.getElementById('timelineRightManual');
+                const sLA = document.getElementById('timelineLeftAuto');
+                const sRA = document.getElementById('timelineRightAuto');
+
+                let activeL = (this.currentRoom === 'manual') ? sLM : sLA;
+                let activeR = (this.currentRoom === 'manual') ? sRM : sRA;
+
+                let valL = parseFloat(activeL.value);
+                let valR = parseFloat(activeR.value);
+                
+                const minGap = 0.01; 
+
+                if (valL > valR - minGap) {
+                    if (side === 'left') { 
+                        valL = Math.max(0, valR - minGap); activeL.value = valL; 
+                    } else { 
+                        valR = Math.min(vActive.duration, valL + minGap); activeR.value = valR; 
+                    }
                 }
                 
-                let strideVal = parseFloat(document.getElementById('valStrideA').innerText) || 0;
-                let kneeVal = parseFloat(document.getElementById('valKneeA').innerText) || 0;
-                let elbowVal = parseFloat(document.getElementById('valElbowA').innerText) || 0;
-                let torsoVal = parseFloat(document.getElementById('valBodyA').innerText) || 0;
-                CoreAI.updateVisualGauges('auto', kneeVal, elbowVal, torsoVal, avgGct, avgFlight, strideVal);
+                sLM.value = sLA.value = valL;
+                sRM.value = sRA.value = valR;
+                
+                this.updateTrack();
+                const targetTime = (side === 'left') ? valL : valR;
+                vActive.currentTime = targetTime;
+                
+                document.getElementById('timeOverlayManual').innerText = targetTime.toFixed(2) + "s";
+                document.getElementById('timeOverlayAuto').innerText = targetTime.toFixed(2) + "s";
+
+                this.contactTime = valL;
+                this.takeoffTime = valR;
+                
+                document.getElementById('inputStartPointManual').value = this.contactTime.toFixed(2);
+                document.getElementById('inputEndPointManual').value = this.takeoffTime.toFixed(2);
+                document.getElementById('inputStartPointAuto').value = this.contactTime.toFixed(2);
+                document.getElementById('inputEndPointAuto').value = this.takeoffTime.toFixed(2);
+
+                this.calculateMetrics();
+            },
+            onManualTimeInputChange(side) {
+                if(!vActive || !vActive.src) {
+                    AppStorage.triggerCustomConfirm('alertNoVideo');
+                    return;
+                }
+                const sLM = document.getElementById('timelineLeftManual');
+                const sRM = document.getElementById('timelineRightManual');
+                const sLA = document.getElementById('timelineLeftAuto');
+                const sRA = document.getElementById('timelineRightAuto');
+                
+                let inputStart = (this.currentRoom === 'manual') ? 'inputStartPointManual' : 'inputStartPointAuto';
+                let inputEnd = (this.currentRoom === 'manual') ? 'inputEndPointManual' : 'inputEndPointAuto';
+                
+                let valL = parseFloat(document.getElementById(inputStart).value) || 0;
+                let valR = parseFloat(document.getElementById(inputEnd).value) || 0;
+
+                if(valL < 0) valL = 0;
+                if(valR > vActive.duration) valR = vActive.duration;
+
+                if(valL > valR) {
+                    AppStorage.triggerCustomConfirm('alertInvalidRange');
+                    document.getElementById('inputStartPointManual').value = (this.contactTime || 0).toFixed(2);
+                    document.getElementById('inputEndPointManual').value = (this.takeoffTime || vActive.duration).toFixed(2);
+                    document.getElementById('inputStartPointAuto').value = (this.contactTime || 0).toFixed(2);
+                    document.getElementById('inputEndPointAuto').value = (this.takeoffTime || vActive.duration).toFixed(2);
+                    return;
+                }
+
+                this.contactTime = valL; this.takeoffTime = valR;
+                sLM.value = sLA.value = valL;
+                sRM.value = sRA.value = valR;
+                
+                document.getElementById('inputStartPointManual').value = valL.toFixed(2);
+                document.getElementById('inputEndPointManual').value = valR.toFixed(2);
+                document.getElementById('inputStartPointAuto').value = valL.toFixed(2);
+                document.getElementById('inputEndPointAuto').value = valR.toFixed(2);
+
+                this.updateTrack();
+                vActive.currentTime = (side === 'left') ? valL : valR;
+                document.getElementById('timeOverlayManual').innerText = vActive.currentTime.toFixed(2) + "s";
+                document.getElementById('timeOverlayAuto').innerText = vActive.currentTime.toFixed(2) + "s";
+
+                this.calculateMetrics();
+            },
+            updateTrack() {
+                const sLM = document.getElementById('timelineLeftManual');
+                const sRM = document.getElementById('timelineRightManual');
+                const sTM = document.getElementById('sliderTrackManual');
+                
+                const sLA = document.getElementById('timelineLeftAuto');
+                const sRA = document.getElementById('timelineRightAuto');
+                const sTA = document.getElementById('sliderTrackAuto');
+                
+                if(sLM && sRM && sTM) {
+                    const pL = (parseFloat(sLM.value) / (parseFloat(sLM.max) || 1)) * 100;
+                    const pR = (parseFloat(sRM.value) / (parseFloat(sRM.max) || 1)) * 100;
+                    sTM.style.background = `linear-gradient(to right, #333, #333 ${pL}%, var(--blue) ${pL}%, var(--neon) ${pR}%, #333 ${pR}%)`;
+                }
+                if(sLA && sRA && sTA) {
+                    const pL = (parseFloat(sLA.value) / (parseFloat(sLA.max) || 1)) * 100;
+                    const pR = (parseFloat(sRA.value) / (parseFloat(sRA.max) || 1)) * 100;
+                    sTA.style.background = `linear-gradient(to right, #333, #333 ${pL}%, var(--blue) ${pL}%, var(--neon) ${pR}%, #333 ${pR}%)`;
+                }
             },
             markBall(side) {
                 if(!vActive || !vActive.src) {
                     AppStorage.triggerCustomConfirm('alertNoVideo');
                     return;
                 }
-                const cur = vActive.currentTime;
-                if(side === 'left') {
-                    this.contactTime = cur;
-                    document.getElementById('inputStartPointManual').value = cur.toFixed(2);
-                    document.getElementById('timelineLeftManual').value = cur;
+                if (!vActive.paused) vActive.pause();
+
+                const sLM = document.getElementById('timelineLeftManual');
+                const sRM = document.getElementById('timelineRightManual');
+                const sLA = document.getElementById('timelineLeftAuto');
+                const sRA = document.getElementById('timelineRightAuto');
+
+                if (side === 'left') {
+                    if (this.takeoffTime !== null && vActive.currentTime > this.takeoffTime) {
+                        sRM.value = sRA.value = vActive.currentTime; this.takeoffTime = vActive.currentTime;
+                    }
+                    sLM.value = sLA.value = vActive.currentTime; this.contactTime = vActive.currentTime;
                 } else {
-                    this.takeoffTime = cur;
-                    document.getElementById('inputEndPointManual').value = cur.toFixed(2);
-                    document.getElementById('timelineRightManual').value = cur;
+                    if (this.contactTime !== null && vActive.currentTime < this.contactTime) {
+                        sLM.value = sLA.value = vActive.currentTime; this.contactTime = vActive.currentTime;
+                    }
+                    sRM.value = sRA.value = vActive.currentTime; this.takeoffTime = vActive.currentTime;
                 }
+                
+                const finalStart = (this.contactTime !== null) ? this.contactTime.toFixed(2) : "0.00";
+                const finalEnd = (this.takeoffTime !== null) ? this.takeoffTime.toFixed(2) : vActive.duration.toFixed(2);
+                
+                document.getElementById('inputStartPointManual').value = finalStart;
+                document.getElementById('inputEndPointManual').value = finalEnd;
+                document.getElementById('inputStartPointAuto').value = finalStart;
+                document.getElementById('inputEndPointAuto').value = finalEnd;
+
                 this.updateTrack();
-                this.calcManualInterval();
-                CoreAI.runStableAI(true);
+                this.calculateMetrics();
             },
-            calcManualInterval() {
-                if(this.contactTime !== null && this.takeoffTime !== null) {
+            calculateMetrics() {
+                if(CoreAI.autoGctList.length > 0) {
+                    const sumGct = CoreAI.autoGctList.reduce((acc, cur) => acc + cur, 0);
+                    const avgGct = Math.round(sumGct / CoreAI.autoGctList.length);
+                    document.getElementById('valGCTA').innerText = `${avgGct}ms`;
+                    
+                    if(CoreAI.autoFlightList.length > 0) {
+                        const sumFlight = CoreAI.autoFlightList.reduce((acc, cur) => acc + cur, 0);
+                        const avgFlight = Math.round(sumFlight / CoreAI.autoFlightList.length);
+                        document.getElementById('valFlightA').innerText = `${avgFlight}ms`;
+                    }
+                }
+                if (this.contactTime !== null && this.takeoffTime !== null) {
                     const diffMs = Math.round((this.takeoffTime - this.contactTime) * 1000);
                     if(diffMs >= 0) {
-                        const flightMs = Math.round(diffMs * 0.4);
-                        document.getElementById('valGCTM').innerText = diffMs + "ms";
-                        document.getElementById('valFlightM').innerText = flightMs + "ms";
-                        
-                        let strideVal = parseFloat(document.getElementById('valStrideM').innerText) || 0;
-                        let kneeVal = parseFloat(document.getElementById('valKneeM').innerText) || 0;
-                        let elbowVal = parseFloat(document.getElementById('valElbowM').innerText) || 0;
-                        let torsoVal = parseFloat(document.getElementById('valBodyM').innerText) || 0;
-                        CoreAI.updateVisualGauges('manual', kneeVal, elbowVal, torsoVal, diffMs, flightMs, strideVal);
+                        document.getElementById('valGCTM').innerText = `${diffMs}ms`;
+                        const estimatedStrideHz = 3.0; 
+                        const totalCycleMs = Math.round(1000 / estimatedStrideHz);
+                        const manualFlight = Math.max(75, totalCycleMs - diffMs);
+                        document.getElementById('valFlightM').innerText = manualFlight + "ms"; 
                     }
                 }
             },
-            loadVideo(e) {
-                const file = e.target.files[0];
-                if(!file) return;
-                const url = URL.createObjectURL(file);
-                
-                vM.src = url; vA.src = url;
-                vM.load(); vA.load();
-                
-                const initLoadedMeta = (vTarget, leftId, rightId, inStartId, inEndId) => {
-                    vTarget.onloadedmetadata = () => {
-                        const dur = vTarget.duration;
-                        const tLeft = document.getElementById(leftId);
-                        const tRight = document.getElementById(rightId);
-                        
-                        tLeft.min = 0; tLeft.max = dur; tLeft.value = 0;
-                        tRight.min = 0; tRight.max = dur; tRight.value = dur;
-                        
-                        document.getElementById(inStartId).value = "0.00";
-                        document.getElementById(inEndId).value = dur.toFixed(2);
-                        
-                        if(vTarget === vActive) {
-                            this.updateTrack();
-                        }
-                    };
-                };
-
-                initLoadedMeta(vM, 'timelineLeftManual', 'timelineRightManual', 'inputStartPointManual', 'inputEndPointManual');
-                initLoadedMeta(vA, 'timelineLeftAuto', 'timelineRightAuto', 'inputStartPointAuto', 'inputEndPointAuto');
-                
-                this.contactTime = null;
-                this.takeoffTime = null;
-                CoreAI.clearManualDataDisplay();
+            openSettingModal() { document.getElementById('settingModal').style.display = "flex"; },
+            closeSettingModal() {
+                this.saveSettings();
+                document.getElementById('settingModal').style.display = "none";
+                setTimeout(() => { CoreAI.runStableAI(true); }, 50);
             },
-            togglePlay() {
+            saveSettings() {
+                userHeight = parseFloat(document.getElementById('inputHeight').value) || 175;
+                userWeight = parseFloat(document.getElementById('inputWeight').value) || 70;
+                userAge = parseInt(document.getElementById('inputAge').value) || 30;
+                userGender = document.getElementById('selectGender').value;
+            },
+            openReportModal() {
                 if(!vActive || !vActive.src) {
                     AppStorage.triggerCustomConfirm('alertNoVideo');
                     return;
                 }
-                if(vActive.paused) {
-                    if(this.takeoffTime !== null && vActive.currentTime >= this.takeoffTime) {
-                        vActive.currentTime = (this.contactTime !== null) ? this.contactTime : 0;
+
+                let finalKnee = 0, finalElbow = 0, finalTorso = 0;
+                let finalGct = 0, finalFlight = 0, finalStride = 0;
+
+                if(this.currentRoom === 'auto' && CoreAI.autoKneeList.length > 0) {
+                    const sumKnee = CoreAI.autoKneeList.reduce((a, b) => a + b, 0);
+                    const sumElbow = CoreAI.autoElbowList.reduce((a, b) => a + b, 0);
+                    const sumTorso = CoreAI.autoTorsoList.reduce((a, b) => a + b, 0);
+
+                    finalKnee = sumKnee / CoreAI.autoKneeList.length;
+                    finalElbow = sumElbow / CoreAI.autoElbowList.length;
+                    finalTorso = sumTorso / CoreAI.autoTorsoList.length;
+
+                    document.getElementById('repValKnee').innerText = finalKnee.toFixed(1) + "°";
+                    document.getElementById('repValElbow').innerText = finalElbow.toFixed(1) + "°";
+                    document.getElementById('repValBody').innerText = finalTorso.toFixed(1) + "°";
+                } else {
+                    finalKnee = parseFloat(CoreAI.curKnee) || 0;
+                    finalElbow = parseFloat(CoreAI.curElbow) || 0;
+                    finalTorso = parseFloat(CoreAI.curBody) || 0;
+
+                    document.getElementById('repValKnee').innerText = CoreAI.curKnee;
+                    document.getElementById('repValElbow').innerText = CoreAI.curElbow;
+                    document.getElementById('repValBody').innerText = CoreAI.curBody;
+                }
+                
+                if(CoreAI.autoGctList.length > 0) {
+                    const sumGct = CoreAI.autoGctList.reduce((acc, cur) => acc + cur, 0);
+                    finalGct = Math.round(sumGct / CoreAI.autoGctList.length);
+                    document.getElementById('repValGCT').innerText = finalGct + "ms";
+                    document.getElementById('repValSteps').innerText = CoreAI.autoGctList.length;
+
+                    if(CoreAI.autoFlightList.length > 0) {
+                        const sumFlight = CoreAI.autoFlightList.reduce((acc, cur) => acc + cur, 0);
+                        finalFlight = Math.round(sumFlight / CoreAI.autoFlightList.length);
+                        document.getElementById('repValFlight').innerText = finalFlight + "ms";
                     }
-                    vActive.play();
                 } else {
-                    vActive.pause();
-                }
-            },
-            syncPlayAI() {
-                if(!vActive || vActive.paused || !this.isAutoMode) return;
-                CoreAI.runStableAI();
-                
-                if(vActive.requestVideoFrameCallback) {
-                    this.playLoopId = vActive.requestVideoFrameCallback(() => this.syncPlayAI());
-                } else {
-                    this.playLoopId = requestAnimationFrame(() => this.syncPlayAI());
-                }
-            },
-            syncNormalPlay() {
-                if(!vActive || vActive.paused || this.isAutoMode) return;
-                if(vActive.requestVideoFrameCallback) {
-                    this.playLoopId = vActive.requestVideoFrameCallback(() => this.syncNormalPlay());
-                } else {
-                    this.playLoopId = requestAnimationFrame(() => this.syncNormalPlay());
-                }
-            },
-            stepTime(val) {
-                if(!vActive || !vActive.src) return;
-                vActive.currentTime = Math.max(0, Math.min(vActive.duration, vActive.currentTime + val));
-                this.syncSliderUIFromTime(vActive.currentTime);
-                if(this.currentRoom === 'manual') {
-                    CoreAI.runStableAI(true);
-                }
-            },
-            onSliderPointerDown(side) {
-                if(vM) vM.pause();
-                if(vA) vA.pause();
-            },
-            onDualSliderInput(side) {
-                if(!vActive || !vActive.duration) return;
-                const prefix = this.currentRoom === 'manual' ? 'Manual' : 'Auto';
-                const leftVal = parseFloat(document.getElementById('timelineLeft' + prefix).value);
-                const rightVal = parseFloat(document.getElementById('timelineRight' + prefix).value);
+                    finalGct = parseInt(document.getElementById('valGCTM').innerText) || 0;
+                    finalFlight = parseInt(document.getElementById('valFlightM').innerText) || 0;
 
-                if(side === 'left') {
-                    if(leftVal >= rightVal) {
-                        document.getElementById('timelineLeft' + prefix).value = rightVal - 0.01;
-                        return;
-                    }
-                    this.contactTime = leftVal;
-                    document.getElementById('inputStartPoint' + prefix).value = leftVal.toFixed(2);
-                    vActive.currentTime = leftVal;
-                } else {
-                    if(rightVal <= leftVal) {
-                        document.getElementById('timelineRight' + prefix).value = leftVal + 0.01;
-                        return;
-                    }
-                    this.takeoffTime = rightVal;
-                    document.getElementById('inputEndPoint' + prefix).value = rightVal.toFixed(2);
-                    vActive.currentTime = rightVal;
-                }
-                this.updateTrack();
-                if(this.currentRoom === 'manual') {
-                    CoreAI.runStableAI(true);
-                }
-            },
-            onManualTimeInputChange(side) {
-                if(!vActive || !vActive.duration) return;
-                const prefix = this.currentRoom === 'manual' ? 'Manual' : 'Auto';
-                const dur = vActive.duration;
-                
-                let leftVal = parseFloat(document.getElementById('inputStartPoint' + prefix).value) || 0;
-                let rightVal = parseFloat(document.getElementById('inputEndPoint' + prefix).value) || dur;
-
-                if(leftVal < 0) leftVal = 0; if(leftVal > dur) leftVal = dur;
-                if(rightVal < 0) rightVal = 0; if(rightVal > dur) rightVal = dur;
-
-                if(leftVal >= rightVal) {
-                    AppStorage.triggerCustomConfirm('alertInvalidRange');
-                    this.syncSliderUIFromTime(vActive.currentTime);
-                    return;
+                    document.getElementById('repValGCT').innerText = document.getElementById('valGCTM').innerText;
+                    document.getElementById('repValFlight').innerText = document.getElementById('valFlightM').innerText;
+                    document.getElementById('repValSteps').innerText = (this.contactTime !== null && this.takeoffTime !== null) ? "1 (Manual)" : "0";
                 }
 
-                this.contactTime = leftVal;
-                this.takeoffTime = rightVal;
-                
-                document.getElementById('timelineLeft' + prefix).value = leftVal;
-                document.getElementById('timelineRight' + prefix).value = rightVal;
-                
-                this.updateTrack();
-                vActive.currentTime = (side === 'left') ? leftVal : rightVal;
-                if(this.currentRoom === 'manual') {
-                    CoreAI.runStableAI(true);
+                if(CoreAI.autoStrideList.length > 0) {
+                    const sumStride = CoreAI.autoStrideList.reduce((a, b) => a + b, 0);
+                    finalStride = sumStride / CoreAI.autoStrideList.length;
+                    document.getElementById('repValStride').innerText = finalStride.toFixed(2) + "m";
+                } else {
+                    finalStride = parseFloat(document.getElementById('valStrideM').innerText) || 0;
+                    document.getElementById('repValStride').innerText = document.getElementById('valStrideM').innerText;
                 }
-            },
-            syncSliderUIFromTime(time) {
-                const prefix = this.currentRoom === 'manual' ? 'Manual' : 'Auto';
-                const elLeft = document.getElementById('timelineLeft' + prefix);
-                const elRight = document.getElementById('timelineRight' + prefix);
-                
-                if(!elLeft || !elRight) return;
-                
-                if(this.contactTime === null && this.takeoffTime === null) {
-                    elLeft.value = time;
-                }
-            },
-            updateTrack() {
-                const prefix = this.currentRoom === 'manual' ? 'Manual' : 'Auto';
-                const track = document.getElementById('sliderTrack' + prefix);
-                const leftSlider = document.getElementById('timelineLeft' + prefix);
-                const rightSlider = document.getElementById('timelineRight' + prefix);
-                
-                if(!track || !leftSlider || !rightSlider || !vActive || !vActive.duration) return;
-                
-                const dur = vActive.duration;
-                const leftPerc = (leftSlider.value / dur) * 100;
-                const rightPerc = (rightSlider.value / dur) * 100;
-                
-                track.style.background = `linear-gradient(to right, #333 ${leftPerc}%, var(--neon) ${leftPerc}%, var(--neon) ${rightPerc}%, #333 ${rightPerc}%)`;
-            },
-            resetToMark() {
-                if(vM) vM.pause();
-                if(vA) vA.pause();
-                if(this.playLoopId) {
-                    if(vActive && vActive.cancelVideoFrameCallback) {
-                        vActive.cancelVideoFrameCallback(this.playLoopId);
+
+                const applyStatusColor = (elementId, val, min, max, warnOffset = 5) => {
+                    const el = document.getElementById(elementId);
+                    if (!el) return;
+                    el.classList.remove('status-green', 'status-yellow', 'status-red');
+                    if (!val || val === 0) return;
+
+                    if (val >= min && val <= max) {
+                        el.classList.add('status-green');
+                    } else if (val >= (min - warnOffset) && val <= (max + warnOffset)) {
+                        el.classList.add('status-yellow');
                     } else {
-                        cancelAnimationFrame(this.playLoopId);
-                    }
-                    this.playLoopId = null;
-                }
-
-                this.contactTime = null;
-                this.takeoffTime = null;
-                
-                const durM = vM && vM.duration ? vM.duration : 100;
-                const durA = vA && vA.duration ? vA.duration : 100;
-                
-                document.getElementById('timelineLeftManual').value = 0;
-                document.getElementById('timelineRightManual').value = durM;
-                document.getElementById('inputStartPointManual').value = "0.00";
-                document.getElementById('inputEndPointManual').value = durM.toFixed(2);
-
-                document.getElementById('timelineLeftAuto').value = 0;
-                document.getElementById('timelineRightAuto').value = durA;
-                document.getElementById('inputStartPointAuto').value = "0.00";
-                document.getElementById('inputEndPointAuto').value = durA.toFixed(2);
-                
-                if(vM) vM.currentTime = 0;
-                if(vA) vA.currentTime = 0;
-                
-                this.updateTrack();
-                ctxM.clearRect(0, 0, cM.width, cM.height);
-                ctxA.clearRect(0, 0, cA.width, cA.height);
-                CoreAI.clearManualDataDisplay();
-            },
-            resetAll() {
-                if(vM) vM.pause();
-                if(vA) vA.pause();
-                if(this.playLoopId) {
-                    if(vActive && vActive.cancelVideoFrameCallback) {
-                        vActive.cancelVideoFrameCallback(this.playLoopId);
-                    } else {
-                        cancelAnimationFrame(this.playLoopId);
-                    }
-                    this.playLoopId = null;
-                }
-
-                this.contactTime = null;
-                this.takeoffTime = null;
-                
-                const resetRoomTrack = (prefix, dur) => {
-                    const tLeft = document.getElementById('timelineLeft' + prefix);
-                    const tRight = document.getElementById('timelineRight' + prefix);
-                    if(tLeft && tRight) {
-                        tLeft.min = 0; tLeft.max = dur; tLeft.value = 0;
-                        tRight.min = 0; tRight.max = dur; tRight.value = dur;
-                    }
-                    const iStart = document.getElementById('inputStartPoint' + prefix);
-                    const iEnd = document.getElementById('inputEndPoint' + prefix);
-                    if(iStart && iEnd) {
-                        iStart.value = "0.00";
-                        iEnd.value = dur.toFixed(2);
+                        el.classList.add('status-red');
                     }
                 };
 
-                const currentDur = vActive && vActive.duration ? vActive.duration : 100;
-                resetRoomTrack('Manual', currentDur);
-                resetRoomTrack('Auto', currentDur);
-                
-                this.updateTrack();
-                
-                if(vM) vM.currentTime = 0;
-                if(vA) vA.currentTime = 0;
-                
-                ctxM.clearRect(0, 0, cM.width, cM.height);
-                ctxA.clearRect(0, 0, cA.width, cA.height);
+                applyStatusColor('repValKnee', finalKnee, 160, 170, 10);
+                applyStatusColor('repValElbow', finalElbow, 80, 90, 15);
+                applyStatusColor('repValBody', finalTorso, 5, 10, 3);
+                applyStatusColor('repValGCT', finalGct, 180, 220, 20);
+                applyStatusColor('repValFlight', finalFlight, 70, 100, 15);
+                applyStatusColor('repValStride', finalStride, 1.0, 1.4, 0.2);
 
-                document.getElementById('valGCTM').innerText = "0ms";
-                document.getElementById('valFlightM').innerText = "0ms";
-                document.getElementById('valGCTA').innerText = "0ms";
-                document.getElementById('valFlightA').innerText = "0ms";
-                
-                CoreAI.clearManualDataDisplay();
-                
-                CoreAI.autoGctList = []; CoreAI.autoFlightList = []; CoreAI.autoStrideList = [];
-                CoreAI.autoKneeList = []; CoreAI.autoElbowList = []; CoreAI.autoTorsoList = [];
-                CoreAI.footDataHistory = [];
-                
-                document.getElementById('valKneeA').innerText = "--°";
-                document.getElementById('valElbowA').innerText = "--°";
-                document.getElementById('valBodyA').innerText = "--°";
-                document.getElementById('valStrideA').innerText = "0.00m";
-                CoreAI.updateVisualGauges('auto', 0,0,0,0,0,0);
+                document.getElementById('reportModal').style.display = "flex";
             },
-            openSettingModal() { document.getElementById('settingModal').style.display = 'flex'; },
-            closeSettingModal() { document.getElementById('settingModal').style.display = 'none'; },
-            openReportModal() {
-                if(this.currentRoom === 'manual') {
-                    document.getElementById('repValKnee').innerText = document.getElementById('valKneeM').innerText;
-                    document.getElementById('repValElbow').innerText = document.getElementById('valElbowM').innerText;
-                    document.getElementById('repValBody').innerText = document.getElementById('valBodyM').innerText;
-                    document.getElementById('repValGCT').innerText = document.getElementById('valGCTM').innerText;
-                    document.getElementById('repValFlight').innerText = document.getElementById('valFlightM').innerText;
-                    document.getElementById('repValStride').innerText = document.getElementById('valStrideM').innerText;
-                    document.getElementById('repValSteps').innerText = "1";
-                } else {
-                    if(CoreAI.autoKneeList.length > 0) {
-                        const avgK = CoreAI.autoKneeList.reduce((a,b)=>a+b,0)/CoreAI.autoKneeList.length;
-                        document.getElementById('repValKnee').innerText = avgK.toFixed(1) + "°";
-                    } else { document.getElementById('repValKnee').innerText = document.getElementById('valKneeA').innerText; }
-                    
-                    if(CoreAI.autoElbowList.length > 0) {
-                        const avgE = CoreAI.autoElbowList.reduce((a,b)=>a+b,0)/CoreAI.autoElbowList.length;
-                        document.getElementById('repValElbow').innerText = avgE.toFixed(1) + "°";
-                    } else { document.getElementById('repValElbow').innerText = document.getElementById('valElbowA').innerText; }
-                    
-                    if(CoreAI.autoTorsoList.length > 0) {
-                        const avgT = CoreAI.autoTorsoList.reduce((a,b)=>a+b,0)/CoreAI.autoTorsoList.length;
-                        document.getElementById('repValBody').innerText = avgT.toFixed(1) + "°";
-                    } else { document.getElementById('repValBody').innerText = document.getElementById('valBodyA').innerText; }
-                    
-                    document.getElementById('repValGCT').innerText = document.getElementById('valGCTA').innerText;
-                    document.getElementById('repValFlight').innerText = document.getElementById('valFlightA').innerText;
-                    document.getElementById('repValStride').innerText = document.getElementById('valStrideA').innerText;
-                    document.getElementById('repValSteps').innerText = CoreAI.autoGctList.length;
-                }
-                document.getElementById('reportModal').style.display = 'flex';
+            closeReportModal() { document.getElementById('reportModal').style.display = "none"; },
+            
+            saveReportData() {
+                alert(I18n[I18n.currentLang].saveSuccess);
+                this.closeReportModal();
             },
-            closeReportModal() { document.getElementById('reportModal').style.display = 'none'; },
-            saveReportData() { alert(I18n[I18n.currentLang].saveSuccess); this.closeReportModal(); },
+            
             deleteReportData() {
                 if(confirm(I18n[I18n.currentLang].deleteConfirm)) {
                     document.getElementById('repValKnee').innerText = "--°";
@@ -1705,109 +1716,218 @@
                     document.getElementById('repValFlight').innerText = "0ms";
                     document.getElementById('repValStride').innerText = "0.00m";
                     document.getElementById('repValSteps').innerText = "0";
+                    
+                    ['repValKnee', 'repValElbow', 'repValBody', 'repValGCT', 'repValFlight', 'repValStride'].forEach(id => {
+                        const el = document.getElementById(id);
+                        if(el) el.classList.remove('status-green', 'status-yellow', 'status-red');
+                    });
+
+                    CoreAI.autoKneeList = []; CoreAI.autoElbowList = []; CoreAI.autoTorsoList = [];
+                    CoreAI.autoGctList = []; CoreAI.autoFlightList = []; CoreAI.autoStrideList = [];
+                    this.closeReportModal();
                 }
             },
-            saveSettings() {
-                userHeight = parseFloat(document.getElementById('inputHeight').value) || 175;
-                userWeight = parseFloat(document.getElementById('inputWeight').value) || 70;
-                userAge = parseInt(document.getElementById('inputAge').value) || 30;
-                userGender = document.getElementById('selectGender').value;
+            
+            syncPlayAI() {
+                if (!this.isAutoMode || !vActive || vActive.paused) {
+                    if(this.playLoopId) {
+                        if(vActive && vActive.cancelVideoFrameCallback) {
+                            vActive.cancelVideoFrameCallback(this.playLoopId);
+                        } else {
+                            cancelAnimationFrame(this.playLoopId);
+                        }
+                        this.playLoopId = null;
+                    }
+                    return;
+                }
+
+                if(vActive && vActive.requestVideoFrameCallback) {
+                    this.playLoopId = vActive.requestVideoFrameCallback(() => {
+                        if (!CoreAI.isAiProcessing) CoreAI.runStableAI();
+                        this.syncPlayAI();
+                    });
+                } else {
+                    if (!CoreAI.isAiProcessing) CoreAI.runStableAI();
+                    this.playLoopId = requestAnimationFrame(() => this.syncPlayAI());
+                }
+            },
+            togglePlay() {
+                if(!vActive || !vActive.src) {
+                    AppStorage.triggerCustomConfirm('alertNoVideo');
+                    return;
+                }
+                if (vActive.paused) vActive.play(); else vActive.pause();
+            },
+            stepTime(amount) {
+                if(!vActive || !vActive.src) {
+                    AppStorage.triggerCustomConfirm('alertNoVideo');
+                    return;
+                }
+                if (!vActive.paused) vActive.pause();
+                
+                vActive.currentTime = Math.max(0, Math.min(vActive.duration, vActive.currentTime + amount));
+                document.getElementById('timelineLeftManual').value = document.getElementById('timelineLeftAuto').value = vActive.currentTime;
+            },
+            resetAll() {
+                vM.pause(); vA.pause();
+                if(this.playLoopId) {
+                    if(vActive && vActive.cancelVideoFrameCallback) {
+                        vActive.cancelVideoFrameCallback(this.playLoopId);
+                    } else {
+                        cancelAnimationFrame(this.playLoopId);
+                    }
+                    this.playLoopId = null;
+                }
+                
+                vM.currentTime = 0; vA.currentTime = 0;
+                const sLM = document.getElementById('timelineLeftManual');
+                const sRM = document.getElementById('timelineRightManual');
+                const sTM = document.getElementById('sliderTrackManual');
+                const sLA = document.getElementById('timelineLeftAuto');
+                const sRA = document.getElementById('timelineRightAuto');
+                const sTA = document.getElementById('sliderTrackAuto');
+                
+                if(sLM && sRM) { 
+                    sLM.max = sRM.max = 100; sLM.value = 0; sRM.value = 100; 
+                    sLM.style.zIndex = "10"; sRM.style.zIndex = "9";
+                }
+                if(sLA && sRA) { 
+                    sLA.max = sRA.max = 100; sLA.value = 0; sRA.value = 100; 
+                    sLA.style.zIndex = "10"; sRA.style.zIndex = "9";
+                }
+                this.updateTrack();
+
+                document.getElementById('inputStartPointManual').value = "0.00";
+                document.getElementById('inputEndPointManual').value = "0.00";
+                document.getElementById('inputStartPointAuto').value = "0.00";
+                document.getElementById('inputEndPointAuto').value = "0.00";
+
+                CoreAI.curKnee = "--°"; CoreAI.curElbow = "--°"; CoreAI.curBody = "--°";
+                CoreAI.clearManualDataDisplay();
+                document.getElementById('valKneeA').innerText = "--°";
+                document.getElementById('valElbowA').innerText = "--°";
+                document.getElementById('valBodyA').innerText = "--°";
+
+                document.getElementById('valGCTM').innerText = "0ms";
+                document.getElementById('valFlightM').innerText = "0ms";
+                document.getElementById('valGCTA').innerText = "0ms";
+                document.getElementById('valFlightA').innerText = "0ms";
+                document.getElementById('valStrideA').innerText = "0.00m";
+
+                document.getElementById('repValKnee').innerText = "--°";
+                document.getElementById('repValElbow').innerText = "--°";
+                document.getElementById('repValBody').innerText = "--°";
+                document.getElementById('repValGCT').innerText = "0ms";
+                document.getElementById('repValFlight').innerText = "0ms";
+                document.getElementById('repValStride').innerText = "0.00m";
+                document.getElementById('repValSteps').innerText = "0";
+
+                ['repValKnee', 'repValElbow', 'repValBody', 'repValGCT', 'repValFlight', 'repValStride'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if(el) el.classList.remove('status-green', 'status-yellow', 'status-red');
+                });
+
+                ctxM.clearRect(0, 0, cM.width, cM.height);
+                ctxA.clearRect(0, 0, cA.width, cA.height);
+                document.getElementById('innerGallery').innerHTML = "";
+                
+                this.isAutoMode = false;
+                CoreAI.aiTracking = false;
+                document.getElementById('btnAutoMarkActive').style.background = "transparent";
+                
+                this.contactTime = null; this.takeoffTime = null;
+                
+                CoreAI.footDataHistory = []; CoreAI.autoGctList = []; CoreAI.autoFlightList = []; CoreAI.autoStrideList = [];
+                CoreAI.lastDetectedContact = null; CoreAI.lastDetectedTakeoff = null; CoreAI.lastFrameTime = -1;
+                CoreAI.autoKneeList = []; CoreAI.autoElbowList = []; CoreAI.autoTorsoList = [];
+
+                document.getElementById('solTagKnee').innerText = "진단 대기"; document.getElementById('solTagKnee').style.background = "#3a3a3c";
+                document.getElementById('solTagDynamic').innerText = "진단 대기"; document.getElementById('solTagDynamic').style.background = "#3a3a3c";
+                document.getElementById('solTagTorso').innerText = "진단 대기"; document.getElementById('solTagTorso').style.background = "#3a3a3c";
+                document.getElementById('solDescKnee').innerText = "영상을 가동하면 실시간 기하학 분석 텍스트 코칭 레포트가 자동 렌더링됩니다.";
+
+                I18n.updateUIStrings();
+            },
+            resetToMark() {
+                if(!vActive || !vActive.src) return;
+                vActive.pause();
+                
+                const targetTime = (this.contactTime !== null) ? this.contactTime : 0;
+                vActive.currentTime = targetTime;
+                
+                document.getElementById('timelineLeftManual').value = targetTime;
+                document.getElementById('timelineLeftAuto').value = targetTime;
+                document.getElementById('inputStartPointManual').value = targetTime.toFixed(2);
+                document.getElementById('inputEndPointManual').value = targetTime.toFixed(2);
+                this.updateTrack();
             }
         };
 
         const AppStorage = {
-            db: null, currentConfirmType: null, activeSnapshotId: null,
-            init() {
-                const req = indexedDB.open("RunningAnalysisDB", 2);
-                req.onupgradeneeded = (e) => {
-                    let db = e.target.result;
-                    if (!db.objectStoreNames.contains("snapshots")) {
-                        db.createObjectStore("snapshots", { keyPath: "id", autoIncrement: true });
-                    }
-                };
-                req.onsuccess = (e) => { this.db = e.target.result; };
-            },
-            openGalleryPanel() {
-                const modal = document.getElementById('galleryModal');
-                if(modal.style.display === 'flex') { modal.style.display = 'none'; return; }
-                modal.style.display = 'flex';
-                this.drawGalleryThumbs();
-            },
-            drawGalleryThumbs() {
-                const box = document.getElementById('innerGallery');
-                box.innerHTML = "";
-                if(!this.db) return;
-                this.db.transaction("snapshots","readonly").objectStore("snapshots").getAll().onsuccess = (e) => {
-                    const list = e.target.result;
-                    list.forEach(item => {
-                        let div = document.createElement('div');
-                        div.className = "inner-thumb";
-                        div.onclick = () => this.showFullModal(item.id, item.img);
-                        let img = document.createElement('img');
-                        img.src = item.img;
-                        div.appendChild(img);
-                        box.appendChild(div);
-                    });
-                };
-            },
-            showFullModal(id, src) {
-                this.activeSnapshotId = id;
-                document.getElementById('modalImg').src = src;
-                document.getElementById('imgModal').style.display = 'flex';
-            },
-            closeModal() { document.getElementById('imgModal').style.display = 'none'; },
+            targetThumbBox: null, 
+            currentConfirmType: 'deleteSnapshot',
+            
             triggerCustomConfirm(type) {
                 this.currentConfirmType = type;
                 const overlay = document.getElementById('customConfirm');
                 const msg = document.getElementById('txtConfirmMsg');
-                const btnYes = document.getElementById('btnConfirmYes');
-                const btnNo = document.getElementById('btnConfirmNo');
-                
-                const curP = I18n[I18n.currentLang];
-                
-                if(type === 'deleteSnapshot') {
-                    msg.innerHTML = curP.confirmMsg.replace('\n', '<br>');
-                    btnYes.innerText = curP.confirmYes; btnYes.className = "confirm-btn yes";
-                    btnNo.innerText = curP.confirmNo;
-                } else if(type === 'alertNoVideo') {
-                    msg.innerHTML = curP.alertNoVideo;
-                    btnYes.innerText = "확인"; btnYes.className = "confirm-btn no";
-                    btnNo.style.display = "none";
-                } else if(type === 'alertInvalidRange') {
-                    msg.innerHTML = curP.alertInvalidRange;
-                    btnYes.innerText = "확인"; btnYes.className = "confirm-btn no";
-                    btnNo.style.display = "none";
-                } else if(type === 'alertNoData') {
-                    msg.innerHTML = curP.alertNoData;
-                    btnYes.innerText = "확인"; btnYes.className = "confirm-btn no";
-                    btnNo.style.display = "none";
+                const btnContainer = document.getElementById('confirmBtnContainer');
+                const p = I18n[I18n.currentLang];
+
+                overlay.style.display = "flex";
+
+                if (type === 'deleteSnapshot') {
+                    msg.innerHTML = p.confirmMsg.replace('\n', '<br>');
+                    btnContainer.innerHTML = `
+                        <button class="confirm-btn yes" onclick="AppStorage.executeDelete()">${p.confirmYes}</button>
+                        <button class="confirm-btn no" onclick="AppStorage.cancelDelete()">${p.confirmNo}</button>
+                    `;
+                } else if (type === 'alertNoVideo') {
+                    msg.innerHTML = `<span style="color:var(--neon); font-weight:bold;">NOTIFICATION</span><br><br>${p.alertNoVideo}`;
+                    btnContainer.innerHTML = `
+                        <button class="confirm-btn no" style="grid-column: span 2; background:var(--blue);" onclick="AppStorage.cancelDelete()">OK</button>
+                    `;
+                } else if (type === 'alertInvalidRange') {
+                    msg.innerHTML = `<span style="color:#ff453a; font-weight:bold;">RANGE ERROR</span><br><br>${p.alertInvalidRange}`;
+                    btnContainer.innerHTML = `
+                        <button class="confirm-btn no" style="grid-column: span 2; background:#3a3a3c;" onclick="AppStorage.cancelDelete()">OK</button>
+                    `;
                 }
-                overlay.style.display = 'flex';
+            },
+            cancelDelete() { 
+                document.getElementById('customConfirm').style.display = "none"; 
             },
             executeDelete() {
-                if(this.currentConfirmType === 'deleteSnapshot') {
-                    if(this.activeSnapshotId && this.db) {
-                        this.db.transaction("snapshots","readwrite").objectStore("snapshots").delete(this.activeSnapshotId).onsuccess = () => {
-                            this.closeModal(); this.cancelDelete(); this.drawGalleryThumbs();
-                        };
-                    }
-                } else { this.cancelDelete(); }
+                document.getElementById('customConfirm').style.display = "none";
+                if (this.currentConfirmType === 'deleteSnapshot' && this.targetThumbBox) {
+                    this.targetThumbBox.remove();
+                }
+                this.closeModal();
             },
-            cancelDelete() {
-                document.getElementById('customConfirm').style.display = 'none';
-                document.getElementById('btnConfirmNo').style.style = "";
-                document.getElementById('btnConfirmNo').style.display = "block";
-                this.currentConfirmType = null;
-            }
+            renderThumbnail(src) {
+                const gal = document.getElementById('innerGallery');
+                const box = document.createElement('div');
+                box.className = "inner-thumb";
+                const img = document.createElement('img');
+                img.src = src;
+                img.onclick = () => this.openModal(src, box); 
+                box.appendChild(img);
+                gal.insertBefore(box, gal.firstChild); 
+            },
+            openGalleryPanel() { document.getElementById('galleryModal').style.display = "flex"; },
+            closeGalleryPanel() { document.getElementById('galleryModal').style.display = "none"; },
+            openModal(src, thumbBoxPointer) {
+                this.targetThumbBox = thumbBoxPointer; 
+                const modal = document.getElementById('imgModal');
+                modal.style.display = "flex";
+                document.getElementById('modalImg').src = src;
+            },
+            closeModal() { document.getElementById('imgModal').style.display = "none"; this.targetThumbBox = null; }
         };
 
-        window.addEventListener('DOMContentLoaded', () => {
-            CoreAI.init();
-            AppControl.initEvents();
-            AppStorage.init();
-            I18n.updateUIStrings();
-            AppControl.updateTrack();
-        });
+        CoreAI.init();
+        AppControl.initEvents();
+        I18n.updateUIStrings();
     </script>
 </body>
 </html>
