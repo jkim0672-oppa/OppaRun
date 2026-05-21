@@ -327,6 +327,41 @@ padding: 12px; text-align: left; border-bottom: 1px solid #2c2c2e; font-size: 13
 .confirm-btn { height: 38px; border-radius: 8px; font-size: 13px; font-weight: bold; border: none; cursor: pointer; }
 .confirm-btn.yes { background: var(--btn-red); color: white; }
 .confirm-btn.no { background: #3a3a3c; color: #e5e5ea; }
+
+/* 저장목록 모달 */
+.savedlist-modal {
+display: none; position: fixed; z-index: 250; left: 0; top: 0; width: 100%; height: 100%;
+background: rgba(10,10,12,0.99); flex-direction: column; align-items: center;
+padding: 20px 14px; box-sizing: border-box;
+}
+.savedlist-header {
+width: 100%; max-width: 500px; display: flex; justify-content: space-between;
+align-items: center; margin-bottom: 14px; border-bottom: 1px solid #2c2c2e; padding-bottom: 10px; flex-shrink: 0;
+}
+.savedlist-title { color: var(--neon); font-size: 16px; font-weight: bold; margin: 0; }
+.savedlist-back {
+color: #fff; font-size: 13px; font-weight: bold; cursor: pointer;
+background: var(--btn-return); padding: 7px 16px; border-radius: 8px; border: none;
+}
+.savedlist-scroll {
+width: 100%; max-width: 500px; overflow-y: auto; flex: 1; padding-bottom: 20px;
+}
+.saved-card {
+background: var(--card-bg); border-radius: 14px; padding: 14px 16px; margin-bottom: 10px;
+border-left: 4px solid var(--neon); cursor: pointer; position: relative;
+}
+.saved-card-date { font-size: 11px; color: #9a9a9f; margin-bottom: 6px; }
+.saved-card-row { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px; }
+.saved-card-item { font-size: 12px; color: #e5e5ea; }
+.saved-card-item span { font-weight: bold; color: var(--neon); margin-left: 4px; }
+.saved-card-item.blue span { color: var(--blue); }
+.saved-card-del {
+position: absolute; top: 10px; right: 12px;
+background: none; border: none; color: #ff453a; font-size: 16px; cursor: pointer; padding: 2px 6px;
+}
+.savedlist-empty {
+color: #9a9a9f; text-align: center; margin-top: 60px; font-size: 14px; line-height: 2;
+}
 </style>
 </head>
 <body>
@@ -597,8 +632,22 @@ padding: 12px; text-align: left; border-bottom: 1px solid #2c2c2e; font-size: 13
 </table>
 
 <div style="margin-top: 16px; width:100%; max-width:460px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-<button class="ctrl-btn btn-play-mix" id="btnReportSave" onclick="AppControl.saveReportData()">💾 Save</button>
+<button class="ctrl-btn btn-play-mix" id="btnReportSave" onclick="AppControl.saveReportData()">💾 저장하기</button>
 <button class="ctrl-btn" id="btnReportDelete" style="background: var(--btn-red);" onclick="AppControl.deleteReportData()">🗑️ Delete</button>
+</div>
+<div style="margin-top: 8px; width:100%; max-width:460px;">
+<button class="ctrl-btn" style="width:100%; background:#2c2c2e; color:var(--neon); border:1px solid var(--neon);" onclick="AppControl.openSavedList()">📋 저장목록 보기</button>
+</div>
+</div>
+
+<!-- 저장목록 모달 -->
+<div id="savedListModal" class="savedlist-modal">
+<div class="savedlist-header">
+<span class="savedlist-title">📋 저장된 레포트</span>
+<button class="savedlist-back" onclick="AppControl.closeSavedList()">← 메인으로</button>
+</div>
+<div class="savedlist-scroll" id="savedListScroll">
+<div class="savedlist-empty" id="savedListEmpty">저장된 레포트가 없습니다.<br>분석 후 Save 버튼을 눌러 저장해보세요.</div>
 </div>
 </div>
 
@@ -1731,8 +1780,90 @@ document.getElementById('reportModal').style.display = "flex";
 closeReportModal() { document.getElementById('reportModal').style.display = "none"; },
 
 saveReportData() {
-alert(I18n[I18n.currentLang].saveSuccess);
+// 현재 레포트 데이터 수집
+const now = new Date();
+const dateStr = now.toLocaleDateString('ko-KR') + ' ' + String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+const entry = {
+id: now.getTime(),
+date: now.toLocaleDateString('ko-KR', {year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'}),
+knee:   document.getElementById('repValKnee').innerText,
+elbow:  document.getElementById('repValElbow').innerText,
+body:   document.getElementById('repValBody').innerText,
+gct:    document.getElementById('repValGCT').innerText,
+flight: document.getElementById('repValFlight').innerText,
+stride: document.getElementById('repValStride').innerText,
+steps:  document.getElementById('repValSteps').innerText,
+kneeClass:   document.getElementById('repValKnee').className,
+elbowClass:  document.getElementById('repValElbow').className,
+bodyClass:   document.getElementById('repValBody').className,
+gctClass:    document.getElementById('repValGCT').className,
+flightClass: document.getElementById('repValFlight').className,
+strideClass: document.getElementById('repValStride').className,
+};
+
+// 로컬스토리지에 저장
+const saved = JSON.parse(localStorage.getItem('proAnalysisReports') || '[]');
+saved.unshift(entry);
+if(saved.length > 50) saved.pop(); // 최대 50개
+localStorage.setItem('proAnalysisReports', JSON.stringify(saved));
+
+// 레포트 모달 닫고 저장목록 열기
 this.closeReportModal();
+this.openSavedList();
+},
+
+openSavedList() {
+const modal = document.getElementById('savedListModal');
+modal.style.display = 'flex';
+this.renderSavedList();
+},
+
+closeSavedList() {
+document.getElementById('savedListModal').style.display = 'none';
+// 메인화면(Manual 탭)으로 이동
+this.switchRoom('manual');
+},
+
+renderSavedList() {
+const scroll = document.getElementById('savedListScroll');
+const empty = document.getElementById('savedListEmpty');
+const saved = JSON.parse(localStorage.getItem('proAnalysisReports') || '[]');
+
+// 기존 카드 제거 (empty 메시지는 유지)
+Array.from(scroll.querySelectorAll('.saved-card')).forEach(el => el.remove());
+
+if(saved.length === 0) {
+empty.style.display = 'block';
+return;
+}
+empty.style.display = 'none';
+
+saved.forEach((entry, idx) => {
+const card = document.createElement('div');
+card.className = 'saved-card';
+card.innerHTML = `
+<button class="saved-card-del" onclick="AppControl.deleteSavedEntry(${entry.id})">✕</button>
+<div class="saved-card-date">📅 ${entry.date}</div>
+<div class="saved-card-row">
+  <div class="saved-card-item">무릎 <span class="${entry.kneeClass}">${entry.knee}</span></div>
+  <div class="saved-card-item">팔꿈치 <span class="${entry.elbowClass}">${entry.elbow}</span></div>
+  <div class="saved-card-item">상체 <span class="${entry.bodyClass}">${entry.body}</span></div>
+</div>
+<div class="saved-card-row" style="margin-top:5px;">
+  <div class="saved-card-item blue">GCT <span class="${entry.gctClass}">${entry.gct}</span></div>
+  <div class="saved-card-item blue">Flight <span class="${entry.flightClass}">${entry.flight}</span></div>
+  <div class="saved-card-item blue">Stride <span class="${entry.strideClass}">${entry.stride}</span></div>
+  <div class="saved-card-item">Steps <span style="color:var(--neon)">${entry.steps}</span></div>
+</div>`;
+scroll.appendChild(card);
+});
+},
+
+deleteSavedEntry(id) {
+let saved = JSON.parse(localStorage.getItem('proAnalysisReports') || '[]');
+saved = saved.filter(e => e.id !== id);
+localStorage.setItem('proAnalysisReports', JSON.stringify(saved));
+this.renderSavedList();
 },
 
 deleteReportData() {
