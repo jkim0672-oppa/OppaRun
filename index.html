@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Jenny Run Pro - v30.2 (Fresh Start)</title>
+<title>Jenny Run Pro - v30.3 (Detail Data Fixed)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -419,7 +419,7 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 </div>
 
 <script>
-// ==================== 다국어 번역 객체 (7개 언어) ====================
+// ==================== 다국어 번역 객체 ====================
 const translations = {
 en: {
 pace: "PACE", dist: "DIST", time: "TIME", avg: "AVG", cadence: "CADENCE", gct: "GCT", flight: "FLIGHT", cal: "KCAL", start: "START RUNNING", stop: "STOP", resume: "RESUME", finish: "FINISH", run: "RUN", history: "HISTORY", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", selLang: "SELECT LANGUAGE", metro: "RHYTHM ASSISTANT", clear: "CLEAR ALL HISTORY", confirmClear: "Delete all history?", alertCleared: "History cleared.", route: "ROUTE", diag: "DIAG", close: "CLOSE", alt: "ALT",
@@ -916,13 +916,40 @@ this.dom.totalStatsContainer.innerHTML = `<div class="stat-grid-dashboard"><div 
 openDetail(id) {
 const r = storage.loadHistory().find(r => r.id == id);
 if(!r) return;
+const t = translations[storage.getLang()];
+// 지도 표시
 document.getElementById('detail-view').style.display = 'flex';
 if(window.detailMap) window.detailMap.remove();
 window.detailMap = L.map('detail-map').setView([33.7743, -117.9390], 13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(window.detailMap);
-if(r.path && r.path.length) L.polyline(r.path, {color:'#00ff88', weight:5}).addTo(window.detailMap).fitBounds();
-const t = translations[storage.getLang()];
-document.getElementById('detail-data').innerHTML = `<div class="diag-card"><div class="diag-label">${t.totalDist}: ${r.dist} km</div><div class="diag-label">${t.time}: ${r.time}</div><div class="diag-label">${t.avgPaceLabel}: ${r.avgPace}</div></div><div class="detail-btn-row" style="display:flex; gap:10px; margin-top:15px;"><button class="btn-detail-act btn-detail-save" onclick="ui.openSaveConfirmModal(${r.id})">${t.saveBtn}</button><button class="btn-detail-act btn-detail-share" onclick="ui.shareDetailAction(${r.id})">${t.shareBtn}</button></div>`;
+if(r.path && r.path.length) {
+L.polyline(r.path, {color:'#00ff88', weight:5}).addTo(window.detailMap).fitBounds();
+} else {
+window.detailMap.setView([33.7743, -117.9390], 13);
+}
+// 데이터 표시 (수정: detail-data div에 내용 추가)
+document.getElementById('detail-data').innerHTML = `
+<div class="diag-card">
+<div class="diag-label">${t.totalDist}</div>
+<div class="diag-main-val">${r.dist} km</div>
+</div>
+<div class="diag-card">
+<div class="diag-label">${t.time}</div>
+<div class="diag-main-val">${r.time}</div>
+</div>
+<div class="diag-card">
+<div class="diag-label">${t.avgPaceLabel}</div>
+<div class="diag-main-val">${r.avgPace}</div>
+</div>
+<div class="diag-card">
+<div class="diag-label">${t.cadence}</div>
+<div class="diag-main-val">${r.cadence || 0} SPM</div>
+</div>
+<div class="detail-btn-row" style="display:flex; gap:10px; margin-top:15px;">
+<button class="btn-detail-act btn-detail-save" onclick="ui.openSaveConfirmModal(${r.id})">${t.saveBtn}</button>
+<button class="btn-detail-act btn-detail-share" onclick="ui.shareDetailAction(${r.id})">${t.shareBtn}</button>
+</div>
+`;
 }
 closeDetail() { document.getElementById('detail-view').style.display = 'none'; }
 openDiag(id) {
@@ -1024,15 +1051,11 @@ window.addEventListener('devicemotion', (e) => {
 if(this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) this.motion.handleMotion(e);
 });
 this.initMap();
-// 🔥 자동 복구 기능 제거: 항상 새로운 세션으로 시작
 this.clearAndReset();
-// 위치 감시 시작 (GPS)
 if("geolocation" in navigator) navigator.geolocation.watchPosition(p => this.updatePosition(p), err => console.warn(err), {enableHighAccuracy:true, maximumAge:0, timeout:5000});
 }
 clearAndReset() {
-// 임시 세션 삭제
 storage.clearTempSession();
-// 상태 초기화
 this.state.isRunning = false;
 this.state.isPaused = false;
 this.state.isAutoPaused = false;
@@ -1049,7 +1072,6 @@ this.state.lastKmCheckpoint = 0;
 this.state.lastKmSeconds = 0;
 this.state.lastKmAlt = 0;
 this.state.lowSpeedStartTime = null;
-// UI 초기화
 ui.updateRunningDisplay({ pace:"--'--\"", dist:"0.00", time:"00:00", avgPace:"--'--\"", cadence:0, gct:"--", flight:"--" });
 ui.dom.btnStart.style.display = 'block';
 ui.dom.btnStop.style.display = 'none';
@@ -1057,7 +1079,6 @@ ui.dom.afterStop.style.display = 'none';
 ui.dom.pauseStatus.style.display = 'none';
 if (this.timer) clearInterval(this.timer);
 this.timer = null;
-// 지도 초기화 (경로 제거)
 if (this.polyline) this.polyline.setLatLngs([]);
 }
 initMap() {
@@ -1153,7 +1174,6 @@ ui.dom.btnStart.style.display = 'block'; ui.dom.btnStop.style.display = 'none'; 
 ui.updateRunningDisplay({ pace:"--'--\"", dist:"0.00", time:"00:00", avgPace:"--'--\"", cadence:0, gct:"--", flight:"--" });
 ui.updateHistoryList(); ui.updateTotalStats(); ui.showTab('history');
 }
-// checkResume 제거 (더 이상 사용 안 함)
 }
 
 const storage = new RunningStorage();
