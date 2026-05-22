@@ -2475,4 +2475,155 @@ if(sLA && sRA) {
 sLA.max = sRA.max = 100; sLA.value = 0; sRA.value = 100;
 sLA.style.zIndex = "10"; sRA.style.zIndex = "9";
 }
-this.updateTrac
+this.updateTrack();
+
+document.getElementById('inputStartPointManual').value = "0.00";
+document.getElementById('inputEndPointManual').value = "0.00";
+document.getElementById('inputStartPointAuto').value = "0.00";
+document.getElementById('inputEndPointAuto').value = "0.00";
+
+CoreAI.curKnee = "--°"; CoreAI.curElbow = "--°"; CoreAI.curBody = "--°";
+CoreAI.clearManualDataDisplay();
+document.getElementById('valKneeA').innerText = "--°";
+document.getElementById('valElbowA').innerText = "--°";
+document.getElementById('valBodyA').innerText = "--°";
+
+document.getElementById('valGCTM').innerText = "0ms";
+document.getElementById('valFlightM').innerText = "0ms";
+document.getElementById('valGCTA').innerText = "0ms";
+document.getElementById('valFlightA').innerText = "0ms";
+document.getElementById('valStrideA').innerText = "0.00m";
+
+document.getElementById('repValKnee').innerText = "--°";
+document.getElementById('repValElbow').innerText = "--°";
+document.getElementById('repValBody').innerText = "--°";
+document.getElementById('repValGCT').innerText = "0ms";
+document.getElementById('repValFlight').innerText = "0ms";
+document.getElementById('repValStride').innerText = "0.00m";
+document.getElementById('repValSteps').innerText = "0";
+
+['repValKnee', 'repValElbow', 'repValBody', 'repValGCT', 'repValFlight', 'repValStride'].forEach(id => {
+const el = document.getElementById(id);
+if(el) el.classList.remove('status-green', 'status-yellow', 'status-red');
+});
+
+ctxM.clearRect(0, 0, cM.width, cM.height);
+ctxA.clearRect(0, 0, cA.width, cA.height);
+document.getElementById('innerGallery').innerHTML = "";
+
+this.isAutoMode = false;
+CoreAI.aiTracking = false;
+document.getElementById('btnAutoMarkActive').style.background = "transparent";
+
+this.contactTime = null; this.takeoffTime = null;
+
+CoreAI.footDataHistory = []; CoreAI.autoGctList = []; CoreAI.autoFlightList = []; CoreAI.autoStrideList = [];
+CoreAI.lastDetectedContact = null; CoreAI.lastDetectedTakeoff = null; CoreAI.lastFrameTime = -1;
+CoreAI.autoKneeList = []; CoreAI.autoElbowList = []; CoreAI.autoTorsoList = [];
+CoreAI._leftYBuf = []; CoreAI._rightYBuf = [];
+
+const p = I18n[I18n.currentLang];
+document.getElementById('solTagKnee').innerText = p.solTagWait; document.getElementById('solTagKnee').style.background = "#3a3a3c";
+document.getElementById('solTagDynamic').innerText = p.solTagWait; document.getElementById('solTagDynamic').style.background = "#3a3a3c";
+document.getElementById('solTagTorso').innerText = p.solTagWait; document.getElementById('solTagTorso').style.background = "#3a3a3c";
+document.getElementById('solDescKnee').innerText = p.solKneeDesc;
+document.getElementById('solDescDynamic').innerText = p.solDynamicDesc;
+document.getElementById('solDescTorso').innerText = p.solTorsoDesc;
+
+I18n.updateUIStrings();
+},
+
+resetToMark() {
+if(!vActive || !vActive.src) return;
+vActive.pause();
+
+const targetTime = (this.contactTime !== null) ? this.contactTime : 0;
+const endTime = (this.takeoffTime !== null) ? this.takeoffTime : (vActive.duration || 0);
+vActive.currentTime = targetTime;
+
+document.getElementById('timelineLeftManual').value = targetTime;
+document.getElementById('timelineLeftAuto').value = targetTime;
+document.getElementById('timelineRightManual').value = endTime;
+document.getElementById('timelineRightAuto').value = endTime;
+
+document.getElementById('inputStartPointManual').value = targetTime.toFixed(2);
+document.getElementById('inputEndPointManual').value = endTime.toFixed(2);
+document.getElementById('inputStartPointAuto').value = targetTime.toFixed(2);
+document.getElementById('inputEndPointAuto').value = endTime.toFixed(2);
+
+const tStr = targetTime.toFixed(2) + "s";
+document.getElementById('timeOverlayManual').innerText = tStr;
+document.getElementById('timeOverlayAuto').innerText = tStr;
+
+this.updateTrack();
+}
+};
+
+const AppStorage = {
+targetThumbBox: null,
+currentConfirmType: 'deleteSnapshot',
+
+triggerCustomConfirm(type) {
+this.currentConfirmType = type;
+const overlay = document.getElementById('customConfirm');
+const msg = document.getElementById('txtConfirmMsg');
+const btnContainer = document.getElementById('confirmBtnContainer');
+const p = I18n[I18n.currentLang];
+
+overlay.style.display = "flex";
+
+if (type === 'deleteSnapshot') {
+msg.innerHTML = p.confirmMsg.replace('\n', '<br>');
+btnContainer.innerHTML = `<button class="confirm-btn yes" onclick="AppStorage.executeDelete()">${p.confirmYes}</button>
+<button class="confirm-btn no" onclick="AppStorage.cancelDelete()">${p.confirmNo}</button>`;
+} else if (type === 'alertNoVideo') {
+msg.innerHTML = `<span style="color:var(--neon); font-weight:bold;">NOTIFICATION</span><br><br>${p.alertNoVideo}`;
+btnContainer.innerHTML = `<button class="confirm-btn no" style="grid-column: span 2; background:var(--blue);" onclick="AppStorage.cancelDelete()">OK</button>`;
+} else if (type === 'alertInvalidRange') {
+msg.innerHTML = `<span style="color:#ff453a; font-weight:bold;">RANGE ERROR</span><br><br>${p.alertInvalidRange}`;
+btnContainer.innerHTML = `<button class="confirm-btn no" style="grid-column: span 2; background:#3a3a3c;" onclick="AppStorage.cancelDelete()">OK</button>`;
+}
+},
+cancelDelete() {
+document.getElementById('customConfirm').style.display = "none";
+},
+executeDelete() {
+document.getElementById('customConfirm').style.display = "none";
+if (this.currentConfirmType === 'deleteSnapshot' && this.targetThumbBox) {
+this.targetThumbBox.remove();
+}
+this.closeModal();
+},
+renderThumbnail(src) {
+const gal = document.getElementById('innerGallery');
+const box = document.createElement('div');
+box.className = "inner-thumb";
+const img = document.createElement('img');
+img.src = src;
+img.onclick = () => this.openModal(src, box);
+box.appendChild(img);
+gal.insertBefore(box, gal.firstChild);
+},
+openGalleryPanel() { document.getElementById('galleryModal').style.display = "flex"; },
+closeGalleryPanel() { document.getElementById('galleryModal').style.display = "none"; },
+openModal(src, thumbBoxPointer) {
+this.targetThumbBox = thumbBoxPointer;
+const modal = document.getElementById('imgModal');
+modal.style.display = "flex";
+document.getElementById('modalImg').src = src;
+},
+closeModal() { document.getElementById('imgModal').style.display = "none"; this.targetThumbBox = null; }
+};
+
+CoreAI.init();
+AppControl.initEvents();
+const _savedLang = localStorage.getItem('proAnalysisLang');
+if(_savedLang && I18n[_savedLang]) {
+I18n.currentLang = _savedLang;
+const sel = document.getElementById('selectLang');
+if(sel) sel.value = _savedLang;
+}
+I18n.updateUIStrings();
+</script>
+</body>
+</html>
