@@ -15,19 +15,17 @@
 --card-bg: #1e1e1e; --text-main: #ffffff; --text-dim: #999999; --danger: #ff4444;
 --warning: #ffcc00; --good: #00ff88;
 }
-* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+• { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 body {
 margin: 0; background: var(--bg); color: var(--text-main);
 font-family: -apple-system, system-ui, sans-serif; height: 100vh; height: 100svh;
 display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none;
 -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
-/* [FIX MAP 2] 모바일 브라우저 주소창/하단바 영역 확보 */
-padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-#map-area { flex-shrink: 0; width: 100%; display: block; }
-#map-container { height: 160px; border-bottom: 2px solid #222; position: relative; }
-#map { height: 160px; width: 100%; background: #111; }
+#map-area { flex-shrink: 0; width: 100%; }
+#map-container { height: 18vh; min-height: 140px; border-bottom: 2px solid #222; position: relative; }
+#map { height: 100%; width: 100%; background: #111; }
 
 .btn-map-theme {
 position: absolute; bottom: 10px; right: 10px; z-index: 1000;
@@ -46,7 +44,7 @@ filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
 
 .status-bar { text-align: center; color: var(--warning); font-size: 11px; padding: 6px; background: #0a0a0a; font-weight: 900; border-bottom: 1px solid #222; letter-spacing: 0.5px; }
 
-.main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; min-height: 0; }
+.main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
 
 .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px; flex-shrink: 0; }
 
@@ -217,6 +215,14 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 </div>
 </div>
 
+<div id="map-area">
+<div id="map-container">
+<div id="map"></div>
+<button id="map-theme-toggle" class="btn-map-theme" onclick="ui.toggleMapTheme()">🌙</button>
+</div>
+<div id="status" class="status-bar">GPS INITIALIZING... | ALT: --m</div>
+</div>
+
 <div id="detail-view">
 <button class="close-detail" onclick="ui.closeDetail()">CLOSE</button>
 <div id="detail-map" style="height: 40%; border-bottom: 1px solid #222;"></div>
@@ -257,14 +263,6 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 <div style="padding: 0 15px;">
 <button id="btn-metro-toggle" class="btn-act" style="background:var(--primary); color:#000;" onclick="metro.toggle()">START</button>
 </div>
-</div>
-
-<div id="map-area">
-<div id="map-container">
-<div id="map"></div>
-<button id="map-theme-toggle" class="btn-map-theme" onclick="ui.toggleMapTheme()">🌙</button>
-</div>
-<div id="status" class="status-bar">GPS INITIALIZING... | ALT: --m</div>
 </div>
 
 <div id="run-view" class="main-content">
@@ -692,9 +690,7 @@ this.dom.historyView.style.display = (tab === 'history' ? 'flex' : 'none');
 document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 document.getElementById('tab-' + tab).classList.add('active');
 if(tab === 'history') this.updateHistoryList();
-// [FIX MAP 3] tab 전환 시 레이아웃 재계산 완료 후 invalidateSize 실행
-// 100ms → 300ms: 모바일에서 display:block 반영까지 시간 필요
-if(tab === 'run' && app.map) setTimeout(() => app.map.invalidateSize(), 300);
+if(tab === 'run' && app.map) setTimeout(() => app.map.invalidateSize(), 100);
 }
 
 showSubTab(sub) {
@@ -1278,17 +1274,11 @@ this.lastStepTime = 0; this.isFeetOnGround = false; this.gctAccumulator = 0; thi
 reset() { this.lastStepTime = 0; this.isFeetOnGround = false; this.gctAccumulator = 0; this.gctCount = 0; }
 handleMotion(e) {
 let acc = e.accelerationIncludingGravity; if (!acc || acc.z === null) return;
-// [FIX A] acc.x*acc.x 연산자 누락 수정 (acc.xacc.x → acc.x*acc.x)
-let force = Math.sqrt(acc.x*acc.x + acc.y*acc.y + acc.z*acc.z); let now = Date.now();
+let force = Math.sqrt(acc.xacc.x + acc.yacc.y + acc.z*acc.z); let now = Date.now();
 if (force > 12.5 && (now - this.lastStepTime) > 230) {
-// [FIX B] lastStepTime=0 초기값일 때 cycleTime = Date.now() (~17조ms) 버그 수정
-// 첫 스텝은 lastStepTime 기록만 하고 GCT 계산 건너뜀
-let cycleTime = this.lastStepTime > 0 ? now - this.lastStepTime : 0;
-this.lastStepTime = now;
+let cycleTime = now - this.lastStepTime; this.lastStepTime = now;
 let result = { cycleTime, gct: 0, flight: 0 };
-// [FIX C] cycleTime 유효 범위 가드 (0 < cycleTime < 2000ms)
-// 비정상 큰 값이 gctAccumulator에 누적되어 통계가 오염되는 것 방지
-if (this.isFeetOnGround && cycleTime > 0 && cycleTime < 2000) {
+if (this.isFeetOnGround) {
 let currentGCT = Math.round(cycleTime * 0.35); this.gctAccumulator += currentGCT; this.gctCount++;
 result.gct = Math.round(this.gctAccumulator / this.gctCount);
 result.flight = Math.round(((cycleTime - result.gct) / cycleTime) * 100);
@@ -1327,21 +1317,13 @@ navigator.geolocation.watchPosition((p) => this.updatePosition(p),
 }
 
 initMap() {
-// 지도는 DOM+CSS 렌더링 완료 후 생성해야 Leaflet이 컨테이너 크기를 정확히 읽음
 setTimeout(() => {
-const mapEl = document.getElementById('map');
-if (!mapEl || mapEl.offsetWidth === 0) {
-  // 컨테이너가 아직 0px → 추가 대기 후 재시도
-  setTimeout(() => this.initMap(), 300);
-  return;
-}
 this.map = L.map('map', {zoomControl: false, attributionControl: false}).setView([33.7743, -117.9390], 16);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(this.map);
 this.marker = L.marker([33.7743, -117.9390], {icon: L.divIcon({className:'loc', html:'<div style="background:#007bff; border:2px solid #fff; border-radius:50%; width:14px; height:14px;"></div>'})}).addTo(this.map);
 this.polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(this.map);
 ui.applyMapTheme(storage.getMapTheme());
-this.map.invalidateSize();
-}, 600);
+}, 500);
 }
 
 async requestWakeLock() {
