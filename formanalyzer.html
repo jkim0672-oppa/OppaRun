@@ -295,7 +295,6 @@ width: 100%; max-width: 460px; margin-top: 15px; background: #1c1b1f; border-rad
 .setting-input { background: #252428; border: 1px solid #2c2c2e; color: #fff; padding: 8px 12px; border-radius: 8px; width: 100px; text-align: center; font-weight: bold; font-size: 14px; }
 .setting-select { background: #252428; border: 1px solid #2c2c2e; color: var(--neon); padding: 8px 12px; border-radius: 8px; width: 126px; text-align: center; font-weight: bold; font-size: 14px; }
 
-/* FIX: 레포트 모달 - 상단 여백 줄이고 상단 정렬 */
 #reportModal {
 overflow-y: auto !important;
 padding-bottom: 40px !important;
@@ -618,7 +617,6 @@ color: #9a9a9f; text-align: center; margin-top: 60px; font-size: 14px; line-heig
 <div id="innerGallery"></div>
 </div>
 
-<!-- FIX: reportModal 스크롤 가능 + 상단 여백 축소 -->
 <div id="reportModal" class="gallery-panel-modal" style="background: rgba(15, 15, 17, 0.99); overflow-y: auto; justify-content: flex-start; padding-top: 10px;">
 <div class="gallery-header">
 <span class="gallery-title" id="txtReportTitle">RUNNING REPORT</span>
@@ -707,10 +705,27 @@ let userWeight = 70;
 let userAge = 30;
 let userGender = 'male';
 
+// ─────────────────────────────────────────────
+// [FIX BUG 1] playLoopId 취소 헬퍼 통합
+// requestVideoFrameCallback / cancelVideoFrameCallback vs rAF 혼용 시
+// 항상 올바른 API로 취소하도록 단일 헬퍼로 처리
+// ─────────────────────────────────────────────
+function cancelPlayLoop(video, loopId) {
+  if (loopId === null || loopId === undefined) return;
+  try {
+    if (video && video.cancelVideoFrameCallback) {
+      video.cancelVideoFrameCallback(loopId);
+    } else {
+      cancelAnimationFrame(loopId);
+    }
+  } catch(e) {
+    // silent: 이미 취소되었거나 invalid ID
+  }
+}
+
 const I18n = {
 currentLang: 'ko',
 
-// ========== 언어팩 (솔루션 포함) ==========
 ko: {
 mainTitle: "PRO ANALYSIS v5.6",
 openFile: "📁 비디오 열기",
@@ -767,7 +782,6 @@ savedListEmpty: "저장된 레포트가 없습니다.\n분석 후 저장 버튼�
 savedListView: "📋 저장목록 보기",
 aiStart: "AI 실시간 추적 시작",
 aiStop: "AI 분석 중단하기",
-// 솔루션 패널
 solutionTitle: "BIOMECHANICS REALTIME SOLUTION ⚡",
 solKneeTitle: "하체 익스텐션 & 롤링 (Knee Extension)",
 solKneeDesc: "영상을 재생하거나 AI 추적 데이터를 가동하면 오빠의 무릎 관절 가동 범위와 뒤꿈치 롤링 메커니즘을 분석하여 맞춤형 생체역학 솔루션을 출력합니다.",
@@ -1166,8 +1180,7 @@ solDynamicDesc: "ग्राउंड कॉन्टैक्ट टाइम 
 solTorsoTitle: "ऊपरी शरीर संतुलन और कोण (धड़ झुकाव)",
 solTorsoDesc: "धड़ झुकाव कोण की सटीक निगरानी करता है।",
 solTagWait: "निदान प्रतीक्षा"
-}
-,
+},
 
 setLanguage(lang) {
 this.currentLang = lang;
@@ -1181,7 +1194,6 @@ updateUIStrings() {
 const p = this[this.currentLang];
 if(!p) return;
 
-// 기본 텍스트
 document.getElementById('txtMainTitle').innerText = p.mainTitle;
 document.querySelector('#lblOpenFileManual .btn-lbl-text').innerText = p.openFile;
 document.querySelector('#lblOpenFileAuto .btn-lbl-text').innerText = p.openFile;
@@ -1237,7 +1249,6 @@ document.getElementById('btnConfirmYes').innerText = p.confirmYes;
 document.getElementById('btnConfirmNo').innerText = p.confirmNo;
 }
 
-// 레포트 모달
 document.getElementById('txtReportTitle').innerText = p.reportTitle;
 document.getElementById('txtReportClose').innerText = p.galleryClose;
 document.getElementById('thMetric').innerText = p.thMetric;
@@ -1251,7 +1262,6 @@ document.getElementById('tdRepFlight').innerText = p.repFlight;
 document.getElementById('tdRepStride').innerText = p.repStride;
 document.getElementById('tdRepSteps').innerText = p.repSteps;
 
-// 설정 모달
 document.getElementById('txtSettingTitle').innerText = p.settingTitle;
 document.getElementById('txtSettingClose').innerText = p.settingClose;
 document.getElementById('lblSetHeight').innerText = p.setHeight;
@@ -1263,7 +1273,6 @@ document.getElementById('lblSetLang').innerText = p.setLang;
 document.getElementById('btnReportSave').innerText = p.btnSave;
 document.getElementById('btnReportDelete').innerText = p.btnDelete;
 
-// 저장목록
 const savedTitle = document.getElementById('savedListTitle');
 const savedBack = document.getElementById('savedListBack');
 const savedViewBtn = document.getElementById('btnSavedListView');
@@ -1274,7 +1283,6 @@ if(savedViewBtn) savedViewBtn.innerText = p.savedListView;
 const emptyEl = document.getElementById('savedListEmpty');
 if(emptyEl) emptyEl.innerHTML = p.savedListEmpty.replace('\n','<br>');
 
-// 솔루션 패널 (추가된 부분)
 const solutionTitleSpan = document.getElementById('solutionRoomTitle');
 if(solutionTitleSpan) solutionTitleSpan.innerText = p.solutionTitle;
 document.getElementById('solCardTitleKnee').innerText = p.solKneeTitle;
@@ -1284,7 +1292,6 @@ document.getElementById('solDescDynamic').innerText = p.solDynamicDesc;
 document.getElementById('solCardTitleTorso').innerText = p.solTorsoTitle;
 document.getElementById('solDescTorso').innerText = p.solTorsoDesc;
 
-// 상태 태그는 "진단 대기" 등 - 수치가 업데이트될 때 동적으로 바뀌므로 기본값만 설정 (초기)
 const tagKnee = document.getElementById('solTagKnee');
 const tagDynamic = document.getElementById('solTagDynamic');
 const tagTorso = document.getElementById('solTagTorso');
@@ -1309,6 +1316,13 @@ lastDetectedContact: null,
 lastDetectedTakeoff: null,
 lastFrameTime: -1,
 
+// ─────────────────────────────────────────────
+// [IMPROVE] 발목 Y좌표 이동평균 버퍼 (노이즈 감소)
+// ─────────────────────────────────────────────
+_leftYBuf: [],
+_rightYBuf: [],
+_bufSize: 4,
+
 autoKneeList: [],
 autoElbowList: [],
 autoTorsoList: [],
@@ -1320,6 +1334,7 @@ this.instance.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.5, smoo
 this.instance.onResults(this.onResults.bind(this));
 }
 },
+
 async runStableAI(forceShow = false) {
 if (!this.instance || !vActive || !vActive.src || !vActive.videoWidth || !vActive.videoHeight || this.isAiProcessing) return;
 
@@ -1328,7 +1343,9 @@ if (AppControl.currentRoom === 'manual' && !forceShow) return;
 if (AppControl.currentRoom === 'auto' && !this.aiTracking && vActive.paused && !forceShow) return;
 
 const currentPlaybackTime = vActive.currentTime;
-if (!vActive.paused && this.lastFrameTime >= 0 && Math.abs(currentPlaybackTime - this.lastFrameTime) < 0.003) return;
+// [FIX BUG 8] lastFrameTime 비교를 정밀화 - 0.003s보다 짧은 차이는 스킵하되
+// forceShow(seek 후 수동 갱신)는 항상 허용
+if (!forceShow && !vActive.paused && this.lastFrameTime >= 0 && Math.abs(currentPlaybackTime - this.lastFrameTime) < 0.003) return;
 
 try {
 this.isAiProcessing = true;
@@ -1343,6 +1360,7 @@ console.log("Frame Skip Control Catch Block Triggered");
 this.isAiProcessing = false;
 }
 },
+
 clearManualDataDisplay() {
 document.getElementById('valKneeM').innerText = "--°";
 document.getElementById('valElbowM').innerText = "--°";
@@ -1350,20 +1368,23 @@ document.getElementById('valBodyM').innerText = "--°";
 document.getElementById('valStrideM').innerText = "0.00m";
 this.updateVisualGauges('manual', 0, 0, 0, 0, 0, 0);
 },
+
 onResults(res) {
 if (!res.poseLandmarks) return;
 
+// [FIX BUG 8] manual room: 정지 상태에서도 forceShow=true로 호출된 경우 렌더링 허용
+// paused && not forceShow 상태에서 lastFrameTime 동일하면 skip은 runStableAI에서 처리
 if (AppControl.currentRoom === 'manual') {
 if (!vActive.paused && this.lastFrameTime === vActive.currentTime) {
 ctxActive.clearRect(0, 0, cActive.width, cActive.height);
 return;
 }
 } else {
+// auto room: 정지 && aiTracking 아님 && 동일 프레임 → skip
 if (vActive.paused && !this.aiTracking && this.lastFrameTime === vActive.currentTime) return;
 }
 
 ctxActive.clearRect(0, 0, cActive.width, cActive.height);
-if (!this.aiTracking && AppControl.currentRoom === 'auto' && this.lastFrameTime === vActive.currentTime) return;
 
 const dConnectors = getDrawConnectors();
 if(dConnectors) {
@@ -1386,22 +1407,32 @@ this.curBody = torsoValNum.toFixed(1) + "°";
 
 let currentGctVal = 0;
 let currentFlightVal = 0;
-let computedStrideMeters = 0;
 
+// ─────────────────────────────────────────────
+// [FIX BUG 9 + IMPROVE] 보폭 계산 개선
+// 키/성별 기반 레그 길이 비율 + 동적 보정 계수
+// ─────────────────────────────────────────────
+let computedStrideMeters = 0;
 const hipPixelY = lm[24].y * cActive.height;
 const anklePixelY = lm[28].y * cActive.height;
 const bodyPixelHeight = Math.abs(anklePixelY - hipPixelY);
 
 if(!isNaN(bodyPixelHeight) && bodyPixelHeight > 10) {
-const estimatedLegLengthCm = userHeight * 0.47;
+// 성별별 레그 길이 비율 (생체역학 표준: 남성 0.47, 여성 0.46)
+const legRatio = (userGender === 'female') ? 0.46 : 0.47;
+const estimatedLegLengthCm = userHeight * legRatio;
 const cmPerPixel = estimatedLegLengthCm / bodyPixelHeight;
+
 const leftAnkleX = lm[27].x * cActive.width;
 const rightAnkleX = lm[28].x * cActive.width;
 const stridePixelGap = Math.abs(leftAnkleX - rightAnkleX);
 
-computedStrideMeters = (stridePixelGap * cmPerPixel) / 100 * 1.5;
+// [IMPROVE] 보정 계수: 고정 1.5 → 키 기반 동적 계산
+// 170cm 기준 1.5, 키 차이에 따라 ±0.05 보정
+const baseStrideCorrection = 1.5 + (userHeight - 170) * 0.003;
+computedStrideMeters = (stridePixelGap * cmPerPixel) / 100 * baseStrideCorrection;
 
-if(!isNaN(computedStrideMeters) && isFinite(computedStrideMeters) && computedStrideMeters > 0.3 && computedStrideMeters < 2.5) {
+if(!isNaN(computedStrideMeters) && isFinite(computedStrideMeters) && computedStrideMeters > 0.3 && computedStrideMeters < 2.8) {
 if (AppControl.currentRoom === 'manual') {
 document.getElementById('valStrideM').innerText = computedStrideMeters.toFixed(2) + "m";
 } else {
@@ -1446,10 +1477,16 @@ this.autoTorsoList.push(torsoValNum);
 
 this.footDataHistory.push({
 time: vActive.currentTime,
+// [IMPROVE] 발끝과 뒤꿈치 모두 수집하여 더 정밀한 접지 판정
 leftHeelY: lm[29].y,
 leftToeY: lm[31].y,
 rightHeelY: lm[30].y,
-rightToeY: lm[32].y
+rightToeY: lm[32].y,
+// [IMPROVE] X좌표도 수집 - 발 속도 벡터 계산용
+leftAnkleX: lm[27].x,
+rightAnkleX: lm[28].x,
+leftAnkleY: lm[27].y,
+rightAnkleY: lm[28].y
 });
 if(this.footDataHistory.length > 90) this.footDataHistory.shift();
 this.analyzeRunningGCT();
@@ -1538,59 +1575,123 @@ if (mag1 === 0 || mag2 === 0) return 0;
 let rad = Math.acos(Math.max(-1.0, Math.min(1.0, dot / (mag1 * mag2))));
 return rad * 180 / Math.PI;
 },
+
+// ─────────────────────────────────────────────
+// [FIX BUG 4 + BUG 10 + IMPROVE] GCT 자동 감지 전면 개선
+//
+// 기존 문제:
+//   - 왼발/오른발 판정이 각각 독립적으로 contactTime 덮어쓰기 가능 (race condition)
+//   - 고정 threshold가 fps에 무관하게 적용됨
+//   - takeoff deadTime 미적용
+//
+// 개선:
+//   - 이동평균(MA) 스무딩으로 노이즈 제거 후 판정
+//   - 발목 Y속도(velocity) 기반 접지/이지 판정 (발끝/뒤꿈치 최댓값 사용)
+//   - 실제 프레임 간격(dt)을 이용한 속도 정규화 (fps 독립)
+//   - 왼발 오른발 각각 독립 상태머신 → 먼저 이벤트 발생한 쪽만 처리
+//   - contact deadTime + takeoff deadTime 모두 적용
+// ─────────────────────────────────────────────
+_movingAvg(buf, newVal, size) {
+buf.push(newVal);
+if (buf.length > size) buf.shift();
+return buf.reduce((a, b) => a + b, 0) / buf.length;
+},
+
 analyzeRunningGCT() {
-if(this.footDataHistory.length < 5) return;
 const h = this.footDataHistory;
+if(h.length < 4) return;
+
 const len = h.length;
+const cur  = h[len-1];
+const prev = h[len-2];
+const pp   = h[len-3];
 
-let cur = h[len-1];
-let prev = h[len-2];
-let pprev = h[len-3];
+// 실제 프레임 간격(dt) 계산으로 fps 정규화
+const dt = Math.max(0.001, cur.time - prev.time);
+const dtPrev = Math.max(0.001, prev.time - pp.time);
 
-let activeLeftY = Math.max(cur.leftHeelY, cur.leftToeY);
-let prevLeftY = Math.max(prev.leftHeelY, prev.leftToeY);
-let pprevLeftY = Math.max(pprev.leftHeelY, pprev.leftToeY);
+// 발목 복합 Y: 뒤꿈치·발끝 최댓값 (바닥에 가까울수록 큰 값)
+const leftY   = Math.max(cur.leftHeelY,  cur.leftToeY);
+const leftYp  = Math.max(prev.leftHeelY, prev.leftToeY);
+const leftYpp = Math.max(pp.leftHeelY,   pp.leftToeY);
 
-let activeRightY = Math.max(cur.rightHeelY, cur.rightToeY);
-let prevRightY = Math.max(prev.rightHeelY, prev.rightToeY);
-let pprevRightY = Math.max(pprev.rightHeelY, pprev.rightToeY);
+const rightY   = Math.max(cur.rightHeelY,  cur.rightToeY);
+const rightYp  = Math.max(prev.rightHeelY, prev.rightToeY);
+const rightYpp = Math.max(pp.rightHeelY,   pp.rightToeY);
 
-const contactThresh = 0.0022;
-const takeoffThresh = 0.0018;
-const deadTime = 0.12;
+// [IMPROVE] 이동평균 스무딩
+const leftSmooth  = this._movingAvg(this._leftYBuf,  leftY,  this._bufSize);
+const rightSmooth = this._movingAvg(this._rightYBuf, rightY, this._bufSize);
 
-let leftVelocity = activeLeftY - prevLeftY;
-let leftAccel = (activeLeftY - prevLeftY) - (prevLeftY - pprevLeftY);
-let rightVelocity = activeRightY - prevRightY;
-let rightAccel = (activeRightY - prevRightY) - (prevRightY - pprevRightY);
+// fps 정규화 속도 (단위: Y/s)
+const leftVel   = (leftY  - leftYp)  / dt;
+const leftVelP  = (leftYp - leftYpp) / dtPrev;
+const rightVel  = (rightY  - rightYp)  / dt;
+const rightVelP = (rightYp - rightYpp) / dtPrev;
 
+// [FIX BUG 10] 속도 임계값: fps 정규화 기준
+// 접지(발이 아래로): 이전 프레임보다 빠르게 하강 후 감속 = 피크 통과
+// 이지(발이 위로 ): 상승 속도 임계 초과
+const contactVelThresh =  0.08;  // Y/s 기준
+const takeoffVelThresh = -0.06;  // Y/s (상승 = 음수)
+const deadTimeContact  =  0.12;  // 접지 쿨다운 (s)
+const deadTimeTakeoff  =  0.05;  // 이지 쿨다운 (s)
+
+// ─── 상태머신: contact 미설정 → 접지 감지 ───
 if (AppControl.contactTime === null) {
-if (prevLeftY > pprevLeftY && leftVelocity < -contactThresh && leftAccel < -0.0005) {
-if (this.lastDetectedContact === null || Math.abs(cur.time - this.lastDetectedContact) > deadTime) {
-AppControl.syncAutoMark('left', cur.time);
-this.lastDetectedContact = cur.time;
-}
-}
-} else if (AppControl.takeoffTime === null) {
-if (leftVelocity > takeoffThresh && prevLeftY <= pprevLeftY) {
-if (Math.abs(prev.time - AppControl.contactTime) > 0.05) {
-AppControl.syncAutoMark('right', prev.time);
-}
-}
+let detected = false;
+let detectedTime = null;
+
+// 왼발 접지: 하강 피크 (속도가 양→감소 전환, 이전 속도 > threshold)
+if (!detected && leftVelP > contactVelThresh && leftVel < leftVelP * 0.5) {
+  const tCandidate = prev.time;
+  if (this.lastDetectedContact === null || (tCandidate - this.lastDetectedContact) > deadTimeContact) {
+    detected = true;
+    detectedTime = tCandidate;
+  }
 }
 
-if (AppControl.contactTime === null) {
-if (prevRightY > pprevRightY && rightVelocity < -contactThresh && rightAccel < -0.0005) {
-if (this.lastDetectedContact === null || Math.abs(cur.time - this.lastDetectedContact) > deadTime) {
-AppControl.syncAutoMark('left', cur.time);
-this.lastDetectedContact = cur.time;
+// 오른발 접지
+if (!detected && rightVelP > contactVelThresh && rightVel < rightVelP * 0.5) {
+  const tCandidate = prev.time;
+  if (this.lastDetectedContact === null || (tCandidate - this.lastDetectedContact) > deadTimeContact) {
+    detected = true;
+    detectedTime = tCandidate;
+  }
 }
+
+if (detected && detectedTime !== null) {
+  AppControl.syncAutoMark('left', detectedTime);
+  this.lastDetectedContact = detectedTime;
 }
+
+// ─── 상태머신: contact 설정됨 → 이지 감지 ───
 } else if (AppControl.takeoffTime === null) {
-if (rightVelocity > takeoffThresh && prevRightY <= pprevRightY) {
-if (Math.abs(prev.time - AppControl.contactTime) > 0.05) {
-AppControl.syncAutoMark('right', prev.time);
+let liftoff = false;
+let liftoffTime = null;
+
+// 왼발 이지: 명확한 상승 속도 초과
+if (!liftoff && leftVel < takeoffVelThresh && leftVelP >= takeoffVelThresh) {
+  const tCandidate = cur.time;
+  const elapsed = tCandidate - AppControl.contactTime;
+  if (elapsed > 0.06 && elapsed < 0.45) {
+    liftoff = true;
+    liftoffTime = tCandidate;
+  }
 }
+
+// 오른발 이지
+if (!liftoff && rightVel < takeoffVelThresh && rightVelP >= takeoffVelThresh) {
+  const tCandidate = cur.time;
+  const elapsed = tCandidate - AppControl.contactTime;
+  if (elapsed > 0.06 && elapsed < 0.45) {
+    liftoff = true;
+    liftoffTime = tCandidate;
+  }
+}
+
+if (liftoff && liftoffTime !== null) {
+  AppControl.syncAutoMark('right', liftoffTime);
 }
 }
 }
@@ -1598,10 +1699,18 @@ AppControl.syncAutoMark('right', prev.time);
 
 const AppControl = {
 playLoopId: null,
+_playLoopVideo: null, // [FIX BUG 1] 어떤 video로 loop 걸었는지 추적
 isAutoMode: false,
 contactTime: null,
 takeoffTime: null,
 currentRoom: 'manual',
+
+// [FIX BUG 1] 통합 취소 래퍼
+_cancelCurrentLoop() {
+  cancelPlayLoop(this._playLoopVideo || vActive, this.playLoopId);
+  this.playLoopId = null;
+  this._playLoopVideo = null;
+},
 
 initEvents() {
 const handlerPlay = () => {
@@ -1614,22 +1723,18 @@ this.syncPlayAI();
 const handlerPause = () => {
 document.getElementById('btnPlayManual').innerText = I18n[I18n.currentLang].btnPlay;
 document.getElementById('btnPlayAuto').innerText = I18n[I18n.currentLang].btnPlay;
-if(this.playLoopId) {
-if(vActive && vActive.cancelVideoFrameCallback && this.playLoopId !== null) {
-vActive.cancelVideoFrameCallback(this.playLoopId);
-} else {
-cancelAnimationFrame(this.playLoopId);
-}
-this.playLoopId = null;
-}
+this._cancelCurrentLoop();
 };
 
 vM.onplay = handlerPlay; vM.onpause = handlerPause;
 vA.onplay = handlerPlay; vA.onpause = handlerPause;
 
-const timeUpdateSync = (vTarget, overlayId) => {
+// [FIX BUG 2] timeUpdateSync: timeOverlay 항상 양쪽 업데이트
+const timeUpdateSync = (vTarget) => {
 if(vTarget && vTarget.duration) {
-document.getElementById(overlayId).innerText = vTarget.currentTime.toFixed(2) + "s";
+const tStr = vTarget.currentTime.toFixed(2) + "s";
+document.getElementById('timeOverlayManual').innerText = tStr;
+document.getElementById('timeOverlayAuto').innerText = tStr;
 
 if (this.currentRoom === 'manual' && !vTarget.paused) {
 ctxActive.clearRect(0, 0, cActive.width, cActive.height);
@@ -1641,8 +1746,8 @@ vTarget.pause();
 }
 };
 
-vM.ontimeupdate = () => timeUpdateSync(vM, 'timeOverlayManual');
-vA.ontimeupdate = () => timeUpdateSync(vA, 'timeOverlayAuto');
+vM.ontimeupdate = () => timeUpdateSync(vM);
+vA.ontimeupdate = () => timeUpdateSync(vA);
 
 const targetSeekEnd = () => {
 if(this.currentRoom === 'manual') {
@@ -1659,14 +1764,7 @@ switchRoom(roomName) {
 if(this.currentRoom === roomName) return;
 
 if(vActive) vActive.pause();
-if(this.playLoopId) {
-if(vActive && vActive.cancelVideoFrameCallback) {
-vActive.cancelVideoFrameCallback(this.playLoopId);
-} else {
-cancelAnimationFrame(this.playLoopId);
-}
-this.playLoopId = null;
-}
+this._cancelCurrentLoop();
 
 document.getElementById('manualRoom').classList.remove('active-room');
 document.getElementById('autoRoom').classList.remove('active-room');
@@ -1678,6 +1776,8 @@ document.getElementById('tabSolution').classList.remove('active');
 
 const savedTime = vActive ? vActive.currentTime : 0;
 
+// [FIX BUG 7] solution 탭에서도 previousRoom vActive 유지
+// (solution은 별도 video 없으므로 vActive 변경하지 않음)
 if(roomName === 'manual') {
 this.currentRoom = 'manual';
 vActive = vM; cActive = cM; ctxActive = ctxM;
@@ -1689,6 +1789,7 @@ vActive = vA; cActive = cA; ctxActive = ctxA;
 document.getElementById('autoRoom').classList.add('active-room');
 document.getElementById('tabAuto').classList.add('active');
 } else {
+// solution room: vActive 변경하지 않고 그대로 유지
 this.currentRoom = 'solution';
 document.getElementById('solutionRoom').classList.add('active-room');
 document.getElementById('tabSolution').classList.add('active');
@@ -1730,14 +1831,7 @@ AppStorage.triggerCustomConfirm('alertNoVideo');
 return;
 }
 
-if(this.playLoopId) {
-if(vActive && vActive.cancelVideoFrameCallback) {
-vActive.cancelVideoFrameCallback(this.playLoopId);
-} else {
-cancelAnimationFrame(this.playLoopId);
-}
-this.playLoopId = null;
-}
+this._cancelCurrentLoop();
 
 this.isAutoMode = !this.isAutoMode;
 const btnAutoActive = document.getElementById('btnAutoMarkActive');
@@ -1751,6 +1845,9 @@ CoreAI.autoFlightList = [];
 CoreAI.autoStrideList = [];
 CoreAI.lastDetectedContact = null;
 CoreAI.lastDetectedTakeoff = null;
+// [IMPROVE] 이동평균 버퍼도 초기화
+CoreAI._leftYBuf = [];
+CoreAI._rightYBuf = [];
 
 CoreAI.autoKneeList = [];
 CoreAI.autoElbowList = [];
@@ -1766,6 +1863,7 @@ CoreAI.aiTracking = false;
 }
 I18n.updateUIStrings();
 },
+
 syncAutoMark(side, targetTime) {
 if(side === 'left') {
 this.contactTime = targetTime;
@@ -1786,7 +1884,7 @@ document.getElementById('inputEndPointAuto').value = targetTime.toFixed(2);
 
 if(this.isAutoMode) {
 const stepGct = Math.round((this.takeoffTime - this.contactTime) * 1000);
-if(stepGct > 100 && stepGct < 320) {
+if(stepGct > 80 && stepGct < 350) { // [IMPROVE] 범위 살짝 확장
 CoreAI.autoGctList.push(stepGct);
 CoreAI.lastDetectedTakeoff = targetTime;
 }
@@ -1797,18 +1895,12 @@ this.takeoffTime = null;
 }
 this.calculateMetrics();
 },
+
 loadVideo(e) {
 const file = e.target.files[0];
 if(!file) return;
 
-if(this.playLoopId) {
-if(vActive && vActive.cancelVideoFrameCallback) {
-vActive.cancelVideoFrameCallback(this.playLoopId);
-} else {
-cancelAnimationFrame(this.playLoopId);
-}
-this.playLoopId = null;
-}
+this._cancelCurrentLoop();
 vM.pause(); vA.pause();
 vM.src = ''; vA.src = '';
 
@@ -1816,8 +1908,14 @@ const objectUrl = URL.createObjectURL(file);
 vM.src = objectUrl;
 vA.src = objectUrl;
 
+// [FIX BUG 6] onloadedmetadata 중복 실행 방지
+// vM 한 번만 등록하고 처리 완료 플래그로 재진입 차단
+let metaInitDone = false;
+
 const initMetadataConfig = () => {
+if (metaInitDone) return;
 if (!vActive || !vActive.duration || !isFinite(vActive.duration)) return;
+metaInitDone = true;
 
 const sLM = document.getElementById('timelineLeftManual');
 const sRM = document.getElementById('timelineRightManual');
@@ -1868,8 +1966,9 @@ CoreAI.lastFrameTime = -1;
 CoreAI.autoKneeList = [];
 CoreAI.autoElbowList = [];
 CoreAI.autoTorsoList = [];
+CoreAI._leftYBuf = [];
+CoreAI._rightYBuf = [];
 
-// 솔루션 초기화 (언어팩 적용)
 const p = I18n[I18n.currentLang];
 document.getElementById('solTagKnee').innerText = p.solTagWait; document.getElementById('solTagKnee').style.background = "#3a3a3c";
 document.getElementById('solTagDynamic').innerText = p.solTagWait; document.getElementById('solTagDynamic').style.background = "#3a3a3c";
@@ -1881,6 +1980,7 @@ document.getElementById('solDescTorso').innerText = p.solTorsoDesc;
 setTimeout(() => { CoreAI.runStableAI(true); }, 150);
 };
 
+// [FIX BUG 6] 두 비디오 모두 등록하되 metaInitDone 플래그로 한 번만 실행
 vM.onloadedmetadata = initMetadataConfig;
 vA.onloadedmetadata = initMetadataConfig;
 },
@@ -1933,6 +2033,7 @@ this.updateTrack();
 const targetTime = (side === 'left') ? valL : valR;
 vActive.currentTime = targetTime;
 
+// [FIX BUG 2] timeOverlay 양쪽 모두 업데이트
 document.getElementById('timeOverlayManual').innerText = targetTime.toFixed(2) + "s";
 document.getElementById('timeOverlayAuto').innerText = targetTime.toFixed(2) + "s";
 
@@ -1946,13 +2047,9 @@ document.getElementById('inputEndPointManual').value = endStr;
 document.getElementById('inputStartPointAuto').value = startStr;
 document.getElementById('inputEndPointAuto').value = endStr;
 
-const visibleSpeedM = document.getElementById('speedSelectManualVisible');
-const visibleSpeedA = document.getElementById('speedSelectAutoVisible');
-if(visibleSpeedM && vActive) visibleSpeedM.value = document.getElementById('speedSelectManual').value;
-if(visibleSpeedA && vActive) visibleSpeedA.value = document.getElementById('speedSelectAuto').value;
-
 this.calculateMetrics();
 },
+
 onManualTimeInputChange(side) {
 if(!vActive || !vActive.src) {
 AppStorage.triggerCustomConfirm('alertNoVideo');
@@ -1992,11 +2089,16 @@ document.getElementById('inputEndPointAuto').value = valR.toFixed(2);
 
 this.updateTrack();
 vActive.currentTime = (side === 'left') ? valL : valR;
-document.getElementById('timeOverlayManual').innerText = vActive.currentTime.toFixed(2) + "s";
-document.getElementById('timeOverlayAuto').innerText = vActive.currentTime.toFixed(2) + "s";
+
+// [FIX BUG 2] timeOverlay 항상 양쪽 업데이트
+const tStr = vActive.currentTime.toFixed(2) + "s";
+document.getElementById('timeOverlayManual').innerText = tStr;
+document.getElementById('timeOverlayAuto').innerText = tStr;
 
 this.calculateMetrics();
 },
+
+// [FIX BUG 3] updateTrack: Manual + Auto 슬라이더 트랙 모두 업데이트
 updateTrack() {
 const sLM = document.getElementById('timelineLeftManual');
 const sRM = document.getElementById('timelineRightManual');
@@ -2006,12 +2108,18 @@ const sLA = document.getElementById('timelineLeftAuto');
 const sRA = document.getElementById('timelineRightAuto');
 const sTA = document.getElementById('sliderTrackAuto');
 
-if(sLM && sRM && sTM) {
-const pL = (parseFloat(sLM.value) / (parseFloat(sLM.max) || 1)) * 100;
-const pR = (parseFloat(sRM.value) / (parseFloat(sRM.max) || 1)) * 100;
-sTM.style.background = `linear-gradient(to right, #333, #333 ${pL}%, var(--blue) ${pL}%, var(--blue) ${pR}%, #333 ${pR}%, #333 100%)`;
-}
+const buildGradient = (sL, sR) => {
+const maxVal = parseFloat(sL.max) || 1;
+const pL = (parseFloat(sL.value) / maxVal) * 100;
+const pR = (parseFloat(sR.value) / maxVal) * 100;
+return `linear-gradient(to right, #333, #333 ${pL}%, var(--blue) ${pL}%, var(--blue) ${pR}%, #333 ${pR}%, #333 100%)`;
+};
+
+if(sLM && sRM && sTM) sTM.style.background = buildGradient(sLM, sRM);
+// [FIX BUG 3] Auto 트랙도 항상 업데이트
+if(sLA && sRA && sTA) sTA.style.background = buildGradient(sLA, sRA);
 },
+
 markBall(side) {
 if(!vActive || !vActive.src) {
 AppStorage.triggerCustomConfirm('alertNoVideo');
@@ -2050,23 +2158,52 @@ if(this.takeoffTime !== null) { sRM.value = sRA.value = this.takeoffTime; }
 this.updateTrack();
 this.calculateMetrics();
 },
+
+// ─────────────────────────────────────────────
+// [FIX BUG 5] calculateMetrics 개선
+// Manual GCT Flight 계산:
+//   - estimatedStrideHz 고정 3.0 제거
+//   - 실제 GCT에서 생체역학 기반 Flight 추정
+//   - 엘리트 러너 Flight ratio 0.32~0.40 적용
+// ─────────────────────────────────────────────
 calculateMetrics() {
 if(CoreAI.autoGctList.length > 0) {
 const sumGct = CoreAI.autoGctList.reduce((acc, cur) => acc + cur, 0);
 const avgGct = Math.round(sumGct / CoreAI.autoGctList.length);
 document.getElementById('valGCTA').innerText = `${avgGct}ms`;
+
+const gA = parseInt(avgGct) || 0;
+const gB = parseInt(document.getElementById('valGCTA').innerText) || 0;
+this.updateVisualGaugesGCT('auto', gA || gB);
+
 if(CoreAI.autoFlightList.length > 0) {
 const sumFlight = CoreAI.autoFlightList.reduce((acc, cur) => acc + cur, 0);
 const avgFlight = Math.round(sumFlight / CoreAI.autoFlightList.length);
 document.getElementById('valFlightA').innerText = `${avgFlight}ms`;
-} } if (this.contactTime !== null && this.takeoffTime !== null) { const diffMs = Math.round((this.takeoffTime - this.contactTime) * 1000); if(diffMs >= 0) { document.getElementById('valGCTM').innerText = `${diffMs}ms`;
-const estimatedStrideHz = 3.0;
-const totalCycleMs = Math.round(1000 / estimatedStrideHz);
-const manualFlight = Math.max(75, totalCycleMs - diffMs);
-document.getElementById('valFlightM').innerText = manualFlight + "ms";
+}
+}
+
+if (this.contactTime !== null && this.takeoffTime !== null) {
+const diffMs = Math.round((this.takeoffTime - this.contactTime) * 1000);
+if(diffMs >= 0) {
+document.getElementById('valGCTM').innerText = `${diffMs}ms`;
+
+// [FIX BUG 5] Flight 추정: 생체역학 기반
+// 총 보폭 주기 = GCT + Flight + GCT(반대발) ≈ 보폭주기
+// 엘리트 기준 GCT:Flight 비율 ≈ 2.5~3.0 : 1
+// 보수적으로 GCT * 0.38 을 Flight으로 추정
+const estimatedFlight = Math.round(Math.max(50, Math.min(150, diffMs * 0.38)));
+document.getElementById('valFlightM').innerText = estimatedFlight + "ms";
 }
 }
 },
+
+// 내부 헬퍼: auto GCT 게이지 별도 업데이트
+updateVisualGaugesGCT(room, gct) {
+const el = document.getElementById(room === 'auto' ? 'gGCTA' : 'gGCTM');
+if(el) el.style.width = Math.min(100, Math.max(10, (gct / 300) * 100)) + '%';
+},
+
 openSettingModal() { document.getElementById('settingModal').style.display = "flex"; },
 closeSettingModal() {
 this.saveSettings();
@@ -2080,7 +2217,6 @@ userAge = parseInt(document.getElementById('inputAge').value) || 30;
 userGender = document.getElementById('selectGender').value;
 },
 openReportModal() {
-// FIX: 비디오 없으면 저장목록으로 이동
 if(!vActive || !vActive.src || !vActive.duration) {
 this.openSavedList();
 return;
@@ -2162,7 +2298,6 @@ applyStatusColor('repValGCT', finalGct, 180, 220, 20);
 applyStatusColor('repValFlight', finalFlight, 70, 100, 15);
 applyStatusColor('repValStride', finalStride, 1.0, 1.4, 0.2);
 
-// FIX: 레포트 열 때 번역 다시 적용
 I18n.updateUIStrings();
 document.getElementById('reportModal').style.display = "flex";
 },
@@ -2271,29 +2406,28 @@ this.closeReportModal();
 }
 },
 
+// [FIX BUG 1] syncPlayAI: _playLoopVideo 추적으로 올바른 API 취소 보장
 syncPlayAI() {
 if (!this.isAutoMode || !vActive || vActive.paused) {
-if(this.playLoopId) {
-if(vActive && vActive.cancelVideoFrameCallback) {
-vActive.cancelVideoFrameCallback(this.playLoopId);
-} else {
-cancelAnimationFrame(this.playLoopId);
-}
-this.playLoopId = null;
-}
+this._cancelCurrentLoop();
 return;
 }
 
-if(vActive && vActive.requestVideoFrameCallback) {
-this.playLoopId = vActive.requestVideoFrameCallback(() => {
+const loopVideo = vActive; // 현재 루프에서 사용할 video 참조 고정
+this._playLoopVideo = loopVideo;
+
+if(loopVideo.requestVideoFrameCallback) {
+this.playLoopId = loopVideo.requestVideoFrameCallback(() => {
 if (!CoreAI.isAiProcessing) CoreAI.runStableAI();
 this.syncPlayAI();
 });
 } else {
 if (!CoreAI.isAiProcessing) CoreAI.runStableAI();
 this.playLoopId = requestAnimationFrame(() => this.syncPlayAI());
+this._playLoopVideo = null; // rAF는 video 참조 불필요
 }
 },
+
 togglePlay() {
 if(!vActive || !vActive.src) {
 AppStorage.triggerCustomConfirm('alertNoVideo');
@@ -2301,6 +2435,8 @@ return;
 }
 if (vActive.paused) vActive.play(); else vActive.pause();
 },
+
+// [FIX BUG 2] stepTime: timeOverlay + 양쪽 슬라이더 모두 동기화
 stepTime(amount) {
 if(!vActive || !vActive.src) {
 AppStorage.triggerCustomConfirm('alertNoVideo');
@@ -2308,19 +2444,22 @@ return;
 }
 if (!vActive.paused) vActive.pause();
 
-vActive.currentTime = Math.max(0, Math.min(vActive.duration, vActive.currentTime + amount));
-document.getElementById('timelineLeftManual').value = document.getElementById('timelineLeftAuto').value = vActive.currentTime;
+const newTime = Math.max(0, Math.min(vActive.duration, vActive.currentTime + amount));
+vActive.currentTime = newTime;
+
+// 양쪽 슬라이더 동기화
+document.getElementById('timelineLeftManual').value = newTime;
+document.getElementById('timelineLeftAuto').value = newTime;
+
+// timeOverlay 즉시 업데이트
+const tStr = newTime.toFixed(2) + "s";
+document.getElementById('timeOverlayManual').innerText = tStr;
+document.getElementById('timeOverlayAuto').innerText = tStr;
 },
+
 resetAll() {
 vM.pause(); vA.pause();
-if(this.playLoopId) {
-if(vActive && vActive.cancelVideoFrameCallback) {
-vActive.cancelVideoFrameCallback(this.playLoopId);
-} else {
-cancelAnimationFrame(this.playLoopId);
-}
-this.playLoopId = null;
-}
+this._cancelCurrentLoop();
 
 vM.currentTime = 0; vA.currentTime = 0;
 const sLM = document.getElementById('timelineLeftManual');
@@ -2336,153 +2475,4 @@ if(sLA && sRA) {
 sLA.max = sRA.max = 100; sLA.value = 0; sRA.value = 100;
 sLA.style.zIndex = "10"; sRA.style.zIndex = "9";
 }
-this.updateTrack();
-
-document.getElementById('inputStartPointManual').value = "0.00";
-document.getElementById('inputEndPointManual').value = "0.00";
-document.getElementById('inputStartPointAuto').value = "0.00";
-document.getElementById('inputEndPointAuto').value = "0.00";
-
-CoreAI.curKnee = "--°"; CoreAI.curElbow = "--°"; CoreAI.curBody = "--°";
-CoreAI.clearManualDataDisplay();
-document.getElementById('valKneeA').innerText = "--°";
-document.getElementById('valElbowA').innerText = "--°";
-document.getElementById('valBodyA').innerText = "--°";
-
-document.getElementById('valGCTM').innerText = "0ms";
-document.getElementById('valFlightM').innerText = "0ms";
-document.getElementById('valGCTA').innerText = "0ms";
-document.getElementById('valFlightA').innerText = "0ms";
-document.getElementById('valStrideA').innerText = "0.00m";
-
-document.getElementById('repValKnee').innerText = "--°";
-document.getElementById('repValElbow').innerText = "--°";
-document.getElementById('repValBody').innerText = "--°";
-document.getElementById('repValGCT').innerText = "0ms";
-document.getElementById('repValFlight').innerText = "0ms";
-document.getElementById('repValStride').innerText = "0.00m";
-document.getElementById('repValSteps').innerText = "0";
-
-['repValKnee', 'repValElbow', 'repValBody', 'repValGCT', 'repValFlight', 'repValStride'].forEach(id => {
-const el = document.getElementById(id);
-if(el) el.classList.remove('status-green', 'status-yellow', 'status-red');
-});
-
-ctxM.clearRect(0, 0, cM.width, cM.height);
-ctxA.clearRect(0, 0, cA.width, cA.height);
-document.getElementById('innerGallery').innerHTML = "";
-
-this.isAutoMode = false;
-CoreAI.aiTracking = false;
-document.getElementById('btnAutoMarkActive').style.background = "transparent";
-
-this.contactTime = null; this.takeoffTime = null;
-
-CoreAI.footDataHistory = []; CoreAI.autoGctList = []; CoreAI.autoFlightList = []; CoreAI.autoStrideList = [];
-CoreAI.lastDetectedContact = null; CoreAI.lastDetectedTakeoff = null; CoreAI.lastFrameTime = -1;
-CoreAI.autoKneeList = []; CoreAI.autoElbowList = []; CoreAI.autoTorsoList = [];
-
-// 솔루션 패널 기본값 언어화
-const p = I18n[I18n.currentLang];
-document.getElementById('solTagKnee').innerText = p.solTagWait; document.getElementById('solTagKnee').style.background = "#3a3a3c";
-document.getElementById('solTagDynamic').innerText = p.solTagWait; document.getElementById('solTagDynamic').style.background = "#3a3a3c";
-document.getElementById('solTagTorso').innerText = p.solTagWait; document.getElementById('solTagTorso').style.background = "#3a3a3c";
-document.getElementById('solDescKnee').innerText = p.solKneeDesc;
-document.getElementById('solDescDynamic').innerText = p.solDynamicDesc;
-document.getElementById('solDescTorso').innerText = p.solTorsoDesc;
-
-I18n.updateUIStrings();
-},
-resetToMark() {
-if(!vActive || !vActive.src) return;
-vActive.pause();
-
-const targetTime = (this.contactTime !== null) ? this.contactTime : 0;
-const endTime = (this.takeoffTime !== null) ? this.takeoffTime : (vActive.duration || 0);
-vActive.currentTime = targetTime;
-
-document.getElementById('timelineLeftManual').value = targetTime;
-document.getElementById('timelineLeftAuto').value = targetTime;
-document.getElementById('timelineRightManual').value = endTime;
-document.getElementById('timelineRightAuto').value = endTime;
-
-document.getElementById('inputStartPointManual').value = targetTime.toFixed(2);
-document.getElementById('inputEndPointManual').value = endTime.toFixed(2);
-document.getElementById('inputStartPointAuto').value = targetTime.toFixed(2);
-document.getElementById('inputEndPointAuto').value = endTime.toFixed(2);
-
-document.getElementById('timeOverlayManual').innerText = targetTime.toFixed(2) + "s";
-document.getElementById('timeOverlayAuto').innerText = targetTime.toFixed(2) + "s";
-
-this.updateTrack();
-}
-};
-
-const AppStorage = {
-targetThumbBox: null,
-currentConfirmType: 'deleteSnapshot',
-
-triggerCustomConfirm(type) {
-this.currentConfirmType = type;
-const overlay = document.getElementById('customConfirm');
-const msg = document.getElementById('txtConfirmMsg');
-const btnContainer = document.getElementById('confirmBtnContainer');
-const p = I18n[I18n.currentLang];
-
-overlay.style.display = "flex";
-
-if (type === 'deleteSnapshot') {
-msg.innerHTML = p.confirmMsg.replace('\n', '<br>');
-btnContainer.innerHTML = `<button class="confirm-btn yes" onclick="AppStorage.executeDelete()">${p.confirmYes}</button>
-<button class="confirm-btn no" onclick="AppStorage.cancelDelete()">${p.confirmNo}</button>`;
-} else if (type === 'alertNoVideo') {
-msg.innerHTML = `<span style="color:var(--neon); font-weight:bold;">NOTIFICATION</span><br><br>${p.alertNoVideo}`;
-btnContainer.innerHTML = `<button class="confirm-btn no" style="grid-column: span 2; background:var(--blue);" onclick="AppStorage.cancelDelete()">OK</button>`;
-} else if (type === 'alertInvalidRange') {
-msg.innerHTML = `<span style="color:#ff453a; font-weight:bold;">RANGE ERROR</span><br><br>${p.alertInvalidRange}`;
-btnContainer.innerHTML = `<button class="confirm-btn no" style="grid-column: span 2; background:#3a3a3c;" onclick="AppStorage.cancelDelete()">OK</button>`;
-}
-},
-cancelDelete() {
-document.getElementById('customConfirm').style.display = "none";
-},
-executeDelete() {
-document.getElementById('customConfirm').style.display = "none";
-if (this.currentConfirmType === 'deleteSnapshot' && this.targetThumbBox) {
-this.targetThumbBox.remove();
-}
-this.closeModal();
-},
-renderThumbnail(src) {
-const gal = document.getElementById('innerGallery');
-const box = document.createElement('div');
-box.className = "inner-thumb";
-const img = document.createElement('img');
-img.src = src;
-img.onclick = () => this.openModal(src, box);
-box.appendChild(img);
-gal.insertBefore(box, gal.firstChild);
-},
-openGalleryPanel() { document.getElementById('galleryModal').style.display = "flex"; },
-closeGalleryPanel() { document.getElementById('galleryModal').style.display = "none"; },
-openModal(src, thumbBoxPointer) {
-this.targetThumbBox = thumbBoxPointer;
-const modal = document.getElementById('imgModal');
-modal.style.display = "flex";
-document.getElementById('modalImg').src = src;
-},
-closeModal() { document.getElementById('imgModal').style.display = "none"; this.targetThumbBox = null; }
-};
-
-CoreAI.init();
-AppControl.initEvents();
-const _savedLang = localStorage.getItem('proAnalysisLang');
-if(_savedLang && I18n[_savedLang]) {
-I18n.currentLang = _savedLang;
-const sel = document.getElementById('selectLang');
-if(sel) sel.value = _savedLang;
-}
-I18n.updateUIStrings();
-</script>
-</body>
-</html>
+this.updateTrac
