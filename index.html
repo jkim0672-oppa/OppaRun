@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Jenny Run Pro - v30.0 (Multi-Language)</title>
+<title>Jenny Run Pro - v30.1 (Color Border Restored)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -52,7 +52,7 @@ filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
 .card-main { grid-column: span 3; border: 2.5px solid var(--primary); height: 88px; position: relative; margin-bottom: 2px; }
 
 .label { font-size: 9px; color: var(--text-dim); font-weight: 900; margin-bottom: 4px; text-transform: uppercase; }
-.value { font-size: 19px; font-weight: 900; }
+.value { font-size: 19px; font-weight: 900; transition: color 0.2s ease; }
 .value-large { font-size: 40px; color: var(--primary); font-weight: 900; line-height: 1; }
 
 .auto-pause-label { position: absolute; top: 10px; left: 10px; font-size: 10px; color: var(--danger); font-weight: 900; background: rgba(255,68,68,0.2); padding: 4px 8px; border-radius: 6px; display: none; z-index: 10; border: 1px solid var(--danger); }
@@ -419,7 +419,7 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 </div>
 
 <script>
-// ==================== 다국어 번역 객체 (7개 언어) ====================
+// ==================== 다국어 번역 객체 ====================
 const translations = {
 en: {
 pace: "PACE", dist: "DIST", time: "TIME", avg: "AVG", cadence: "CADENCE", gct: "GCT", flight: "FLIGHT", cal: "KCAL", start: "START RUNNING", stop: "STOP", resume: "RESUME", finish: "FINISH", run: "RUN", history: "HISTORY", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", selLang: "SELECT LANGUAGE", metro: "RHYTHM ASSISTANT", clear: "CLEAR ALL HISTORY", confirmClear: "Delete all history?", alertCleared: "History cleared.", route: "ROUTE", diag: "DIAG", close: "CLOSE", alt: "ALT",
@@ -578,7 +578,8 @@ gct: document.getElementById('gct'), flight: document.getElementById('flight'), 
 quickMetro: document.getElementById('quick-metro'), runView: document.getElementById('run-view'), historyView: document.getElementById('history-view'),
 historyList: document.getElementById('history-list'), totalStatsContainer: document.getElementById('total-stats-container'),
 btnStart: document.getElementById('btn-start'), btnStop: document.getElementById('btn-stop'), afterStop: document.getElementById('after-stop'),
-btnResume: document.getElementById('btn-resume'), btnFinish: document.getElementById('btn-finish'), menuBpmDisplay: document.getElementById('menu-bpm-display')
+btnResume: document.getElementById('btn-resume'), btnFinish: document.getElementById('btn-finish'), menuBpmDisplay: document.getElementById('menu-bpm-display'),
+cardCadence: document.getElementById('card-cadence'), cardGct: document.getElementById('card-gct'), cardFlight: document.getElementById('card-flight')
 };
 this.detailMap = null;
 this.currentStatFilter = 'weekly';
@@ -586,25 +587,62 @@ this.pendingDeleteId = null;
 this.pendingSaveId = null;
 }
 
+// 색상 레벨 판정 (권장 수치 기반)
+getCadenceLevel(val) {
+if (val >= 180) return 'good';
+if (val >= 170) return 'warning';
+return 'danger';
+}
+getGctLevel(val) {
+if (val <= 240) return 'good';
+if (val <= 270) return 'warning';
+return 'danger';
+}
+getFlightLevel(val) {
+if (val >= 30) return 'good';
+if (val >= 20) return 'warning';
+return 'danger';
+}
+
+// 카드 테두리와 글자색 업데이트
+updateCardColor(el, level) {
+if (!el) return;
+const colors = { good: 'var(--good)', warning: 'var(--warning)', danger: 'var(--danger)', normal: '#333' };
+el.style.borderColor = colors[level];
+const valEl = el.querySelector('.value');
+if (valEl) valEl.style.color = colors[level];
+}
+
 updateRunningDisplay(data) {
 if (data.pace !== undefined) this.dom.curPace.textContent = data.pace;
 if (data.dist !== undefined) this.dom.dist.textContent = data.dist;
 if (data.time !== undefined) this.dom.time.textContent = data.time;
 if (data.avgPace !== undefined) this.dom.avgPace.textContent = data.avgPace;
-if (data.cadence !== undefined) this.dom.cadence.textContent = data.cadence;
-if (data.gct !== undefined) this.dom.gct.textContent = data.gct;
-if (data.flight !== undefined) this.dom.flight.textContent = data.flight;
+
+// 케이던스 업데이트 및 색상 적용
+if (data.cadence !== undefined) {
+let cad = data.cadence;
+if (isNaN(cad) || cad > 300) cad = 0; // 비정상값 필터
+this.dom.cadence.textContent = cad;
+const level = this.getCadenceLevel(cad);
+this.updateCardColor(this.dom.cardCadence, level);
 }
-
-getCadenceLevel(val) { if (val >= 180) return 'good'; if (val >= 170) return 'warning'; return 'danger'; }
-getGctLevel(val) { if (val <= 240) return 'good'; if (val <= 270) return 'warning'; return 'danger'; }
-getFlightLevel(val) { if (val >= 30) return 'good'; if (val >= 20) return 'warning'; return 'danger'; }
-
-updateCardColor(el, level) {
-const colors = { good: 'var(--good)', warning: 'var(--warning)', danger: 'var(--danger)', normal: '#333' };
-el.style.borderColor = colors[level];
-const valEl = el.querySelector('.value');
-if (valEl) valEl.style.color = colors[level];
+// GCT 업데이트 및 색상 적용
+if (data.gct !== undefined) {
+let gctVal = data.gct;
+if (isNaN(gctVal)) gctVal = 0;
+this.dom.gct.textContent = gctVal;
+const level = this.getGctLevel(gctVal);
+this.updateCardColor(this.dom.cardGct, level);
+}
+// FLIGHT 업데이트 및 색상 적용
+if (data.flight !== undefined) {
+let flightVal = data.flight;
+if (isNaN(flightVal)) flightVal = 0;
+this.dom.flight.textContent = flightVal;
+const level = this.getFlightLevel(flightVal);
+this.updateCardColor(this.dom.cardFlight, level);
+}
 }
 
 showTab(tab) {
@@ -1047,7 +1085,8 @@ storage.saveTempSession(this.state);
 formatPace(kmh) { if(!kmh || kmh<0.5) return "--'--\""; let s=3600/kmh; return `${Math.floor(s/60)}'${String(Math.floor(s%60)).padStart(2,'0')}"`; }
 updateMetrics(data) {
 this.state.steps++; this.state.stepCount++; this.state.totalGct += data.gct; this.state.totalFlight += data.flight;
-let cad = Math.round((this.state.steps / (this.state.seconds||1)) * 60);
+let seconds = this.state.seconds || 1;
+let cad = Math.min(300, Math.round((this.state.steps / seconds) * 60)); // 최대 300 제한
 ui.updateRunningDisplay({cadence: cad, gct: data.gct, flight: data.flight});
 }
 async onStart() {
@@ -1072,7 +1111,7 @@ ui.updateRunningDisplay({time: `${String(m).padStart(2,'0')}:${String(s).padStar
 onStop() { this.state.isPaused = true; ui.dom.btnStop.style.display = 'none'; ui.dom.afterStop.style.display = 'flex'; }
 onResume() { this.state.isPaused = false; ui.dom.afterStop.style.display = 'none'; ui.dom.btnStop.style.display = 'block'; }
 onFinish() {
-const avgCadence = Math.round((this.state.steps / (this.state.seconds||1)) * 60);
+const avgCadence = Math.min(300, Math.round((this.state.steps / (this.state.seconds||1)) * 60));
 const avgGct = this.state.stepCount > 0 ? Math.round(this.state.totalGct / this.state.stepCount) : 0;
 const avgFlight = this.state.stepCount > 0 ? Math.round(this.state.totalFlight / this.state.stepCount) : 0;
 const record = {
@@ -1138,4 +1177,4 @@ ui.dom.dimmerOverlay.onclick = () => ui.toggleDim(false);
 };
 </script>
 </body>
-</html>
+  </html>
