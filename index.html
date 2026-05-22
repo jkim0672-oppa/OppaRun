@@ -25,9 +25,9 @@ display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: no
 padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-#map-area { flex-shrink: 0; width: 100%; }
-#map-container { height: 18vh; min-height: 140px; border-bottom: 2px solid #222; position: relative; }
-#map { height: 100%; width: 100%; background: #111; }
+#map-area { flex-shrink: 0; width: 100%; display: block; }
+#map-container { height: 160px; border-bottom: 2px solid #222; position: relative; }
+#map { height: 160px; width: 100%; background: #111; }
 
 .btn-map-theme {
 position: absolute; bottom: 10px; right: 10px; z-index: 1000;
@@ -259,9 +259,6 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 </div>
 </div>
 
-<div id="run-view" class="main-content">
-<!-- [FIX 2] map-area를 run-view 안으로 이동 -->
-<!-- showTab에서 run-view와 함께 show/hide 되어야 지도 정상 표시 -->
 <div id="map-area">
 <div id="map-container">
 <div id="map"></div>
@@ -269,6 +266,8 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 </div>
 <div id="status" class="status-bar">GPS INITIALIZING... | ALT: --m</div>
 </div>
+
+<div id="run-view" class="main-content">
 <div class="dashboard">
 <div class="card card-main">
 <div id="pause-status" class="auto-pause-label">AUTO PAUSED</div>
@@ -688,7 +687,7 @@ if (valEl) valEl.style.color = colors[level];
 showTab(tab) {
 this.closeDetail(); this.closeDiag(); this.closeMetronome();
 this.dom.runView.style.display = (tab === 'run' ? 'flex' : 'none');
-// [FIX 3] map-area는 run-view 내부이므로 별도 토글 불필요
+this.dom.mapArea.style.display = (tab === 'run' ? 'block' : 'none');
 this.dom.historyView.style.display = (tab === 'history' ? 'flex' : 'none');
 document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 document.getElementById('tab-' + tab).classList.add('active');
@@ -1328,16 +1327,21 @@ navigator.geolocation.watchPosition((p) => this.updatePosition(p),
 }
 
 initMap() {
+// 지도는 DOM+CSS 렌더링 완료 후 생성해야 Leaflet이 컨테이너 크기를 정확히 읽음
 setTimeout(() => {
+const mapEl = document.getElementById('map');
+if (!mapEl || mapEl.offsetWidth === 0) {
+  // 컨테이너가 아직 0px → 추가 대기 후 재시도
+  setTimeout(() => this.initMap(), 300);
+  return;
+}
 this.map = L.map('map', {zoomControl: false, attributionControl: false}).setView([33.7743, -117.9390], 16);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(this.map);
 this.marker = L.marker([33.7743, -117.9390], {icon: L.divIcon({className:'loc', html:'<div style="background:#007bff; border:2px solid #fff; border-radius:50%; width:14px; height:14px;"></div>'})}).addTo(this.map);
 this.polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(this.map);
 ui.applyMapTheme(storage.getMapTheme());
-// [FIX MAP 1] 초기 렌더링 시 컨테이너 크기 강제 재계산
-// Leaflet은 생성 시점에 컨테이너가 0x0이거나 숨겨진 상태면 타일을 로드하지 않음
-setTimeout(() => { if(this.map) this.map.invalidateSize(); }, 200);
-}, 500);
+this.map.invalidateSize();
+}, 600);
 }
 
 async requestWakeLock() {
