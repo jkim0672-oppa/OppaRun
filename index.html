@@ -472,7 +472,9 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 TOUCH SKELETON TO ACTIVATE FULL FORM DIAGNOSIS
 </div>
 </div>
-<button class="btn-launch-full-diagnosis" onclick="return false;">LAUNCH FULL DIAGNOSIS APP</button>
+<button class="btn-launch-full-diagnosis" onclick="alert(storage.getLang() === 'ko' ? '외장 인공지능 모션 진단 모듈을 동기화합니다.' : 'Launching external full form diagnosis module...')">
+LAUNCH FULL DIAGNOSIS APP
+</button>
 </div>
 </div>
 <div id="sub-page-settings" class="sub-page">
@@ -635,7 +637,7 @@ getGender() { return localStorage.getItem(this.GENDER_KEY) || 'male'; }
 setGender(gender) { localStorage.setItem(this.GENDER_KEY, gender); }
 }
 
-// ======================== UIManager ========================
+// ======================== UIManager (수정됨) ========================
 class UIManager {
 constructor() {
 this.dom = {
@@ -682,7 +684,7 @@ else if (paceSeconds <= 300) met = 10.5;
 else if (paceSeconds <= 330) met = 10.0;
 else if (paceSeconds <= 360) met = 9.0;
 else if (paceSeconds <= 420) met = 8.0;
-const inclineBonus = 1 + (Math.max(0, totalAltitudeGain) / 1000) * 0.1;
+const inclineBonus = 1 + (Math.max(0, totalAltitudeGain) / 1000);
 let genderBonus = 1.0;
 if (gender === 'male') genderBonus = 1.05;
 if (gender === 'female') genderBonus = 0.95;
@@ -690,7 +692,8 @@ const hours = distanceKm / (3600 / paceSeconds);
 return Math.round(met * weightKg * hours * genderBonus * inclineBonus);
 }
 parsePaceToSeconds(paceStr) {
-if (!paceStr || paceStr === `--'--"`) return 360;
+// 수정: 따옴표 이스케이프 및 안전한 파싱
+if (!paceStr || paceStr === "--'--\"") return 360;
 const parts = paceStr.replace('"', '').split("'");
 const min = parseInt(parts[0]) || 5;
 const sec = parseInt(parts[1]) || 0;
@@ -721,20 +724,21 @@ const displayDist = unit === 'km' ? distKm.toFixed(2) : (distKm * 0.621371).toFi
 this.dom.dist.textContent = displayDist;
 }
 const pacePerKm = this.dom.curPace.textContent;
-if(pacePerKm && pacePerKm !== `--'--"`) {
+if(pacePerKm && pacePerKm !== "--'--\"") {
 this.dom.curPace.textContent = this.convertPace(pacePerKm, unit);
 }
 const avgPace = this.dom.avgPace.textContent;
-if(avgPace && avgPace !== `--'--"`) {
+if(avgPace && avgPace !== "--'--\"") {
 this.dom.avgPace.textContent = this.convertPace(avgPace, unit);
 }
 }
+// 수정: 올바른 단위 변환 로직
 convertPace(paceStr, toUnit) {
-if(!paceStr || paceStr === `--'--"`) return `--'--"`;
+if(!paceStr || paceStr === "--'--\"") return "--'--\"";
 const parts = paceStr.replace('"', '').split("'");
 const min = parseInt(parts[0]);
 const sec = parseInt(parts[1]);
-if(isNaN(min) || isNaN(sec)) return `--'--"`;
+if(isNaN(min) || isNaN(sec)) return "--'--\"";
 const totalSecPerKm = min * 60 + sec;
 if(toUnit === 'mile') {
 const totalSecPerMile = totalSecPerKm * 1.609344;
@@ -742,6 +746,7 @@ const newMin = Math.floor(totalSecPerMile / 60);
 const newSec = Math.round(totalSecPerMile % 60);
 return newMin + "'" + String(newSec).padStart(2,'0') + '"';
 } else {
+// mile -> km: 1 mile = 1.609344 km 이므로 pace(sec/mile) -> pace(sec/km)는 나누기
 const totalSecPerKmBack = totalSecPerKm / 1.609344;
 const newMin = Math.floor(totalSecPerKmBack / 60);
 const newSec = Math.round(totalSecPerKmBack % 60);
@@ -791,10 +796,11 @@ getCadenceLevel(val) { if (val >= 180) return 'good'; if (val >= 170) return 'wa
 getGctLevel(val) { if (val <= 240) return 'good'; if (val <= 270) return 'warning'; return 'danger'; }
 getFlightLevel(val) { if (val >= 30) return 'good'; if (val >= 20) return 'warning'; return 'danger'; }
 updateCardColor(el, level) {
+// 수정: warning 키 추가
 const colors = { good: 'var(--good)', warning: 'var(--warning)', danger: 'var(--danger)', normal: '#333' };
-if(el) el.style.borderColor = colors[level];
+if(el) el.style.borderColor = colors[level] || colors.normal;
 const valEl = el ? el.querySelector('.value') : null;
-if (valEl) valEl.style.color = colors[level];
+if (valEl) valEl.style.color = colors[level] || colors.normal;
 }
 showTab(tab) {
 this.closeDetail(); this.closeDiag(); this.closeMetronome();
@@ -849,21 +855,15 @@ dropdownOptions.innerHTML = '<div class="dropdown-option precision-option" style
 this.loadPrecisionDashboard("");
 return;
 }
+// 수정: shortDate 내 따옴표 이스케이프
 dropdownOptions.innerHTML = h.map((r) => {
-const shortDate = this.formatDateForDisplay(r.date);
-return '<div class="dropdown-option precision-option" onclick="ui.selectPrecisionRecord(' + r.id + ', '' + shortDate.replace(/'/g, "\\'") + '')">' + shortDate + '</div>';
+let shortDate = r.date.split(' (')[0].replace(', ', ' ');
+let escapedDate = shortDate.replace(/'/g, "\\'");
+return '<div class="dropdown-option precision-option" onclick="ui.selectPrecisionRecord(' + r.id + ', \'' + escapedDate + '\')">' + shortDate + '</div>';
 }).join('');
-const defaultDateText = this.formatDateForDisplay(h[0].date);
+const defaultDateText = h[0].date.split(' (')[0].replace(', ', ' ');
 currentSelectText.textContent = defaultDateText;
 this.loadPrecisionDashboard(h[0].id);
-}
-formatDateForDisplay(dateISOorString) {
-if (!dateISOorString) return "";
-let d = new Date(dateISOorString);
-if (isNaN(d.getTime())) {
-return dateISOorString.split('T')[0];
-}
-return d.toLocaleDateString();
 }
 selectPrecisionRecord(recordId, dateText) {
 const currentText = document.getElementById('current-precision-record-text');
@@ -1054,13 +1054,13 @@ const container = document.getElementById(type + '-options');
 if(!container) return;
 let html = '';
 if (type === 'height') {
-html += '<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit('height', '' + (unit === 'cm' ? 'inch' : 'cm') + '')">SWITCH TO ' + (unit === 'cm' ? 'INCH' : 'CM') + '</div>';
+html += '<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit(\'height\', \'' + (unit === 'cm' ? 'inch' : 'cm') + '\')">SWITCH TO ' + (unit === 'cm' ? 'INCH' : 'CM') + '</div>';
 const min = unit === 'cm' ? 140 : 55, max = unit === 'cm' ? 210 : 83;
-for (let i = min; i <= max; i++) html += '<div class="dropdown-option" onclick="ui.setProfile('height', ' + i + ', '' + unit + '')">' + i + ' ' + unit + '</div>';
+for (let i = min; i <= max; i++) html += '<div class="dropdown-option" onclick="ui.setProfile(\'height\', ' + i + ', \'' + unit + '\')">' + i + ' ' + unit + '</div>';
 } else {
-html += '<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit('weight', '' + (unit === 'kg' ? 'lb' : 'kg') + '')">SWITCH TO ' + (unit === 'kg' ? 'LB' : 'KG') + '</div>';
+html += '<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit(\'weight\', \'' + (unit === 'kg' ? 'lb' : 'kg') + '\')">SWITCH TO ' + (unit === 'kg' ? 'LB' : 'KG') + '</div>';
 const min = unit === 'kg' ? 40 : 130, max = unit === 'kg' ? 130 : 286;
-for (let i = min; i <= max; i++) html += '<div class="dropdown-option" onclick="ui.setProfile('weight', ' + i + ', '' + unit + '')">' + i + ' ' + unit + '</div>';
+for (let i = min; i <= max; i++) html += '<div class="dropdown-option" onclick="ui.setProfile(\'weight\', ' + i + ', \'' + unit + '\')">' + i + ' ' + unit + '</div>';
 }
 container.innerHTML = html;
 }
@@ -1129,23 +1129,9 @@ closeSaveConfirmModal(isConfirmed) {
 const modal = document.getElementById('save-confirm-modal');
 if(modal) modal.style.display = 'none';
 if (isConfirmed && this.pendingSaveId !== null) {
-const history = storage.loadHistory();
-const record = history.find(r => r.id === this.pendingSaveId);
-if (record) {
-const dataStr = JSON.stringify(record, null, 2);
-const blob = new Blob([dataStr], {type: "application/json"});
-const url = URL.createObjectURL(blob);
-const a = document.createElement('a');
-a.href = url;
-a.download = `opparun_record_${record.id}.json`;
-document.body.appendChild(a);
-a.click();
-document.body.removeChild(a);
-URL.revokeObjectURL(url);
 const lang = storage.getLang();
 const t = translations[lang] || translations['en'];
 alert(t.saveSuccessMsg);
-}
 }
 this.pendingSaveId = null;
 }
@@ -1158,13 +1144,12 @@ let displayDist = parseFloat(r.dist);
 if(this.currentUnit === 'mile') displayDist = displayDist * 0.621371;
 const distStr = displayDist.toFixed(2);
 const unitStr = this.currentUnit === 'km' ? 'KM' : 'MI';
-let displayPace = r.avgPace || r.pace || `--'--"`;
-if(displayPace !== `--'--"` && this.currentUnit === 'mile') {
+let displayPace = r.avgPace || r.pace || "--'--\"";
+if(displayPace !== "--'--\"" && this.currentUnit === 'mile') {
 displayPace = this.convertPace(displayPace, 'mile');
 }
-const displayDate = this.formatDateForDisplay(r.date);
 return '<div class="history-item">' +
-'<div class="h-date">' + displayDate + '</div>' +
+'<div class="h-date">' + r.date + '</div>' +
 '<div class="h-actions">' +
 '<button class="btn-h-sub" onclick="ui.openDetail(' + r.id + ')">' + t.route + '</button>' +
 '<button class="btn-h-sub" onclick="ui.openDiag(' + r.id + ')">' + t.diag + '</button>' +
@@ -1201,7 +1186,7 @@ return '<div class="history-item">' +
 }
 getCadenceColor(v) { const l = this.getCadenceLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
 getGctColor(v) { const l = this.getGctLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
-getFlightColor(v) { const l = this.getFlightLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--danger)':'var(--danger)'; }
+getFlightColor(v) { const l = this.getFlightLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; } // 수정됨
 changeStatFilter(filterType) {
 this.currentStatFilter = filterType;
 document.querySelectorAll('.stat-filter-btn').forEach(btn => btn.classList.remove('active'));
@@ -1224,7 +1209,6 @@ if (this.currentStatFilter === 'monthly') limitDays = 30;
 if (this.currentStatFilter === 'yearly') limitDays = 365;
 const filteredHistory = h.filter(r => {
 const recordDate = new Date(r.date);
-if (isNaN(recordDate.getTime())) return false;
 const diffTime = Math.abs(now - recordDate);
 const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 return diffDays <= limitDays;
@@ -1266,7 +1250,7 @@ if(!isNaN(flightVal)) { sumFlight += flightVal; countFlight++; }
 }
 if(r.alt !== undefined && typeof r.alt === 'number' && !isNaN(r.alt)) { sumAlt += r.alt; countAlt++; }
 });
-let avgPaceStr = `--'--"`;
+let avgPaceStr = "--'--\"";
 if (totalDist > 0 && totalSeconds > 0) {
 let avgKmh = totalDist / (totalSeconds / 3600);
 let s = 3600 / avgKmh;
@@ -1303,6 +1287,8 @@ this.detailMap = L.map('detail-map', {zoomControl: false, attributionControl: fa
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(this.detailMap);
 if (storage.getMapTheme() === 'dark') detailMapDiv.classList.add('dark-map-layer');
 else detailMapDiv.classList.remove('dark-map-layer');
+// 수정: 지도 크기 재조정
+setTimeout(() => { if(this.detailMap) this.detailMap.invalidateSize(); }, 200);
 }
 if (record.path && record.path.length > 0 && this.detailMap) {
 let poly = L.polyline(record.path, {color: 'var(--primary)', weight: 5}).addTo(this.detailMap);
@@ -1341,7 +1327,7 @@ splitLogsHtml +=
 '</div>';
 }); } else { let baseAlt = record.alt || 0;
 let recordDist = record.dist;
-let recordPace = record.avgPace || record.pace || `--'--"`;
+let recordPace = record.avgPace || record.pace || "--'--\"";
 if(this.currentUnit === 'mile') {
 recordDist = (parseFloat(recordDist) * 0.621371).toFixed(2);
 recordPace = this.convertPace(recordPace, 'mile');
@@ -1358,13 +1344,14 @@ let dynamicsHtml = '<div class="detail-log-box" style="margin-top:12px;">' +
 '<div class="detail-log-item"><span>' + (t.avgCadence || "Average Cadence") + '</span><span>' + (record.cadence || 0) + ' SPM.</span></div>' +
 '</div>';
 let buttonRowHtml = '<div class="detail-btn-row">' +
-'<button class="btn-detail-act btn-detail-save" onclick="ui.openSaveConfirmModal(' + record.id + ')">💾 ' + (t.saveBtn || "SAVE") + '</button>' +
+'<button class="btn-detail-act btn-detail-save" onclick="ui.saveDetailAction(' + record.id + ')">💾 ' + (t.saveBtn || "SAVE") + '</button>' +
 '<button class="btn-detail-act btn-detail-share" onclick="ui.shareDetailAction(' + record.id + ')">🔗 ' + (t.shareBtn || "SHARE") + '</button>' +
 '</div>';
 const detailData = document.getElementById('detail-data');
 if(detailData) detailData.innerHTML = splitLogsHtml + dynamicsHtml + buttonRowHtml;
 }
 closeDetail() { const dv = document.getElementById('detail-view'); if(dv) dv.style.display = 'none'; }
+saveDetailAction(id) { this.openSaveConfirmModal(id); }
 shareDetailAction(id) {
 const h = storage.loadHistory();
 const record = h.find(r => r.id === id);
@@ -1390,7 +1377,7 @@ const lang = storage.getLang();
 const t = translations[lang];
 const diagView = document.getElementById('diag-view');
 const diagDate = document.getElementById('diag-view-date');
-if(diagDate) diagDate.textContent = this.formatDateForDisplay(r.date);
+if(diagDate) diagDate.textContent = r.date;
 if(diagView) diagView.style.display = 'flex';
 let gctComment = "";
 if(r.gct > 240) {
@@ -1444,7 +1431,7 @@ reset() { this.lastStepTime = 0; this.isFeetOnGround = false; this.gctAccumulato
 handleMotion(e) { let acc = e.accelerationIncludingGravity; if (!acc || acc.z === null) return; let force = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z); let now = Date.now(); if (force > 12.5 && (now - this.lastStepTime) > 230) { let cycleTime = now - this.lastStepTime; this.lastStepTime = now; let result = { cycleTime, gct: 0, flight: 0 }; if (this.isFeetOnGround) { let currentGCT = Math.round(cycleTime * 0.35); this.gctAccumulator += currentGCT; this.gctCount++; result.gct = Math.round(this.gctAccumulator / this.gctCount); result.flight = Math.round(((cycleTime - result.gct) / cycleTime) * 100); } this.isFeetOnGround = true; this.onStep(result); } }
 }
 
-// ======================== OppaRunApp (개선 버전) ========================
+// ======================== OppaRunApp (수정됨: lastPosTimestamp 초기값 + splits 중복 방지) ========================
 class OppaRunApp {
 constructor() {
 this.state = {
@@ -1453,7 +1440,7 @@ seconds: 0, steps: 0, totalDist: 0, lastPos: null, pathCoords: [],
 currentAlt: 0, lowSpeedStartTime: null, wakeLock: null,
 maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
 splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
-lastPosTimestamp: 0
+lastPosTimestamp: Date.now()  // 수정: 초기값을 현재 시간으로
 };
 this.map = null; this.marker = null; this.polyline = null; this.timer = null;
 this.motion = new MotionManager((data) => this.updateMetrics(data));
@@ -1465,6 +1452,7 @@ if ('wakeLock' in navigator) {
 try {
 if (this.state.wakeLock) await this.state.wakeLock.release().catch(()=>{});
 this.state.wakeLock = await navigator.wakeLock.request('screen');
+console.log('WakeLock 활성화');
 } catch (err) { console.log('WakeLock 실패:', err); }
 }
 }
@@ -1534,7 +1522,7 @@ if (!this.state.isAutoPaused && accuracy < 40) {
 if (this.state.lastPos) {
 let d = this.map.distance(this.state.lastPos, pos) / 1000;
 let timeDelta = (Date.now() - (this.state.lastPosTimestamp || Date.now())) / 1000;
-let maxJump = (speedKmh > 25) ? 0.015 : 0.01;
+let maxJump = (speedKmh > 25) ? 0.2 : 0.12;
 if (d > 0.002 && d < maxJump) {
 this.state.totalDist += d;
 this.state.pathCoords.push(pos);
@@ -1554,7 +1542,7 @@ this.state.lastKmSeconds = this.state.seconds;
 this.state.lastKmAlt = this.state.currentAlt;
 }
 } else if (timeDelta > 4 && d < 0.5) {
-let corrected = Math.min(d, 0.06);
+let corrected = Math.min(d, 0.08);
 this.state.totalDist += corrected;
 this.state.pathCoords.push(pos);
 if(this.polyline) this.polyline.setLatLngs(this.state.pathCoords);
@@ -1570,7 +1558,6 @@ const currentPaceStr = this.formatPace(speedKmh);
 const avgKmh = this.state.seconds > 0 ? (this.state.totalDist / (this.state.seconds / 3600)) : 0;
 ui.updateRunningDisplay({ pace: currentPaceStr, avgPace: this.formatPace(avgKmh) });
 }
-}
 storage.saveTempSession(this.state);
 }
 }
@@ -1582,7 +1569,7 @@ this.state.totalFlight += data.flight || 0;
 let cadVal = Math.round((this.state.steps / (this.state.seconds || 1)) * 60);
 ui.updateRunningDisplay({cadence: cadVal, gct: data.gct || 0, flight: data.flight || 0});
 }
-formatPace(kmh) { if (!kmh || kmh < 0.5) return `--'--"`; let s = 3600 / kmh; return Math.floor(s/60) + "'" + String(Math.floor(s%60)).padStart(2,'0') + '"'; }
+formatPace(kmh) { if (!kmh || kmh < 0.5) return "--'--\""; let s = 3600 / kmh; return Math.floor(s/60) + "'" + String(Math.floor(s%60)).padStart(2,'0') + '"'; }
 onStart() {
 if(this.timer) clearInterval(this.timer);
 this.state.isRunning = true;
@@ -1652,7 +1639,8 @@ const calculatedKcal = ui.calculateCalories(weightKg, this.state.totalDist, avgP
 const avgCadence = this.state.seconds > 0 ? Math.round((this.state.steps / this.state.seconds) * 60) : 0;
 const avgGct = this.state.stepCount > 0 ? Math.round(this.state.totalGct / this.state.stepCount) : 0;
 const avgFlight = this.state.stepCount > 0 ? Math.round(this.state.totalFlight / this.state.stepCount) : 0;
-if (this.state.totalDist > this.state.lastKmCheckpoint && this.state.seconds > this.state.lastKmSeconds) {
+// 수정: 마지막 구간 중복 저장 방지 (0.01km 이상 남았을 때만 추가)
+if (this.state.totalDist > this.state.lastKmCheckpoint + 0.01 && this.state.seconds > this.state.lastKmSeconds) {
 let splitDuration = this.state.seconds - this.state.lastKmSeconds;
 let min = Math.floor(splitDuration / 60);
 let sec = splitDuration % 60;
@@ -1661,10 +1649,10 @@ this.state.splits.push({ km: parseFloat(this.state.totalDist).toFixed(2), pace: 
 }
 const record = {
 id: Date.now(),
-date: new Date().toISOString(),
+date: new Date().toLocaleString(),
 dist: this.state.totalDist.toFixed(2),
 time: ui.dom.time ? ui.dom.time.textContent : "00:00",
-avgPace: ui.dom.avgPace ? ui.dom.avgPace.textContent : `--'--"`,
+avgPace: ui.dom.avgPace ? ui.dom.avgPace.textContent : "--'--\"",
 cadence: avgCadence,
 gct: avgGct,
 flight: avgFlight,
