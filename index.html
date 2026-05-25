@@ -9,7 +9,22 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Jenny Run Pro" />
 <meta name="theme-color" content="#000000" />
-<link rel="manifest" id="dynamic-manifest">
+<link rel="manifest" href="data:application/json;charset=utf-8,{
+"name": "Jenny Run Pro",
+"short_name": "JennyRun",
+"description": "Running Tracker",
+"start_url": ".",
+"display": "standalone",
+"background_color": "%23000000",
+"theme_color": "%23000000",
+"orientation": "portrait",
+"icons": [{
+"src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%23000'/%3E%3Ctext x='96' y='130' font-size='120' text-anchor='middle' fill='%2300ff88'%3E🏃%3C/text%3E%3C/svg%3E",
+"sizes": "192x192",
+"type": "image/svg+xml"
+}]
+}" />
+
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
@@ -18,7 +33,7 @@
 --card-bg: #1e1e1e; --text-main: #ffffff; --text-dim: #999999; --danger: #ff4444;
 --warning: #ffcc00; --good: #00ff88;
 }
-* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+• { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 body {
 margin: 0; background: var(--bg); color: var(--text-main);
 font-family: -apple-system, system-ui, sans-serif; height: 100vh; height: 100svh;
@@ -522,29 +537,6 @@ infoTabTheory: "이론 가이드", infoTabPrecision: "폼 정밀 분석실"
 }
 };
 
-// ========== PWA 매니페스트 (Blob URL로 제공, 주소창 숨김) ==========
-(function setupPWA() {
-  const manifestObj = {
-    name: "Jenny Run Pro",
-    short_name: "JennyRun",
-    description: "Running Tracker",
-    start_url: ".",
-    display: "standalone",
-    background_color: "#000000",
-    theme_color: "#000000",
-    orientation: "portrait",
-    icons: [{
-      src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%23000'/%3E%3Ctext x='96' y='130' font-size='120' text-anchor='middle' fill='%2300ff88'%3E🏃%3C/text%3E%3C/svg%3E",
-      sizes: "192x192",
-      type: "image/svg+xml"
-    }]
-  };
-  const manifestBlob = new Blob([JSON.stringify(manifestObj)], {type: 'application/json'});
-  const manifestURL = URL.createObjectURL(manifestBlob);
-  const manifestLink = document.querySelector('#dynamic-manifest');
-  if (manifestLink) manifestLink.href = manifestURL;
-})();
-
 // ========== RunningStorage (원본 유지) ==========
 class RunningStorage {
 constructor() {
@@ -641,6 +633,7 @@ this.btnMetroToggle = document.getElementById('btn-metro-toggle');
 this.currentUnit = storage.getUnit();
 this.currentGender = storage.getGender();
 this.dimActive = false; // DIM 상태
+// DIM 버튼 이벤트 연결
 const dimBtn = document.getElementById('btn-dim');
 if (dimBtn) dimBtn.onclick = () => this.toggleDim();
 }
@@ -1368,6 +1361,7 @@ try {
 if (this.state.wakeLock && this.state.wakeLock.released === false) return;
 this.state.wakeLock = await navigator.wakeLock.request('screen');
 this.state.wakeLock.addEventListener('release', () => {
+// 자동으로 해제되면 즉시 재요청
 if (document.visibilityState === 'visible') this.requestWakeLock();
 });
 } catch (err) { console.log('WakeLock 실패:', err); }
@@ -1414,6 +1408,7 @@ crossOrigin: true
 this.marker = L.marker([37.5665, 126.9780], {icon: L.divIcon({className:'loc', html:'<div style="background:#007bff; border:2px solid #fff; border-radius:50%; width:14px; height:14px;"></div>'})}).addTo(this.map);
 this.polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(this.map);
 ui.applyMapTheme(storage.getMapTheme());
+// 지도 크기 강제 재계산 (검은 화면 방지)
 setTimeout(() => { if(this.map) this.map.invalidateSize(); }, 200);
 setTimeout(() => { if(this.map) this.map.invalidateSize(); }, 800);
 }, 300);
@@ -1621,6 +1616,7 @@ navigator.geolocation.watchPosition((p) => this.updatePosition(p),
 (err) => console.warn("GPS Error", err),
 {enableHighAccuracy: true, maximumAge: 0, timeout: 5000});
 }
+// visibilitychange는 하단 전역 리스너에서 처리
 } catch(e) { console.error("App init error", e); }
 }
 }
@@ -1636,31 +1632,23 @@ app.init();
 ui.changeLanguage(storage.getLang());
 ui.setUnit(storage.getUnit());
 ui.setGender(storage.getGender());
+// 앱 시작 즉시 화면 꺼짐 방지
 app.requestWakeLock();
-
-// ========== PWA 서비스 워커 등록 (주소창 숨김을 위해 필수) ==========
+// PWA Service Worker 등록 (크롬 홈화면 추가 시 주소창 제거)
 if ('serviceWorker' in navigator) {
-  const swCode = `
-    self.addEventListener('install', event => {
-      self.skipWaiting();
-    });
-    self.addEventListener('activate', event => {
-      event.waitUntil(clients.claim());
-    });
-    self.addEventListener('fetch', event => {
-      event.respondWith(
-        fetch(event.request).catch(() => new Response(''))
-      );
-    });
-  `;
-  const swBlob = new Blob([swCode], {type: 'application/javascript'});
-  const swUrl = URL.createObjectURL(swBlob);
-  navigator.serviceWorker.register(swUrl, {scope: '/'}).catch(err => console.log('SW registration failed:', err));
+const swCode = self.addEventListener('install', e =&gt; self.skipWaiting()); self.addEventListener('activate', e =&gt; e.waitUntil(clients.claim())); self.addEventListener('fetch', e =&gt; e.respondWith(fetch(e.request).catch(() =&gt; new Response(''))));;
+const blob = new Blob([swCode], {type: 'application/javascript'});
+const swUrl = URL.createObjectURL(blob);
+navigator.serviceWorker.register(swUrl, {scope: '/'}).catch(() => {
+navigator.serviceWorker.register(swUrl).catch(()=>{});
+});
 }
 };
 document.addEventListener('visibilitychange', () => {
 if (document.visibilityState === 'visible') {
+// 화면이 다시 켜지면 무조건 WakeLock 재요청
 app.requestWakeLock();
+// 러닝 중이고 타이머가 멈춰있으면 재시작
 if (app && app.state && app.state.isRunning && !app.timer && !app.state.isPaused && !app.state.isAutoPaused) {
 app.timer = setInterval(() => {
 if (app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
@@ -1671,6 +1659,7 @@ ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padSt
 }
 }, 1000);
 }
+// DIM이 켜져 있었으면 유지
 if (ui && ui.dimActive) {
 const overlay = document.getElementById('dimmer-overlay');
 if (overlay) overlay.style.display = 'flex';
@@ -1679,4 +1668,4 @@ if (overlay) overlay.style.display = 'flex';
 });
 </script>
 </body>
-  </html>
+</html>
