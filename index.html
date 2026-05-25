@@ -24,7 +24,7 @@ display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: no
 }
 
 #map-area { flex-shrink: 0; width: 100%; }
-#map-container { height: 14vh; min-height: 100px; border-bottom: 2px solid #222; position: relative; }
+#map-container { height: 18vh; min-height: 130px; border-bottom: 2px solid #222; position: relative; }
 #map { height: 100%; width: 100%; background: #111; }
 
 .btn-map-theme {
@@ -1338,10 +1338,14 @@ this.wakeLockInterval = null;
 this.silentAudio = null;
 }
 async requestWakeLock() {
-if ('wakeLock' in navigator && this.state.isRunning) {
+if ('wakeLock' in navigator) {
 try {
-if (this.state.wakeLock) await this.state.wakeLock.release().catch(()=>{});
+if (this.state.wakeLock && this.state.wakeLock.released === false) return;
 this.state.wakeLock = await navigator.wakeLock.request('screen');
+this.state.wakeLock.addEventListener('release', () => {
+// 자동으로 해제되면 즉시 재요청
+if (document.visibilityState === 'visible') this.requestWakeLock();
+});
 } catch (err) { console.log('WakeLock 실패:', err); }
 }
 }
@@ -1610,14 +1614,15 @@ app.init();
 ui.changeLanguage(storage.getLang());
 ui.setUnit(storage.getUnit());
 ui.setGender(storage.getGender());
+// 앱 시작 즉시 화면 꺼짐 방지
+app.requestWakeLock();
 };
 document.addEventListener('visibilitychange', () => {
 if (document.visibilityState === 'visible') {
-// 화면이 다시 켜졌을 때 복원
-if (app && app.state && app.state.isRunning) {
+// 화면이 다시 켜지면 무조건 WakeLock 재요청
 app.requestWakeLock();
-// 타이머가 멈춰 있으면 재시작
-if (!app.timer && !app.state.isPaused && !app.state.isAutoPaused) {
+// 러닝 중이고 타이머가 멈춰있으면 재시작
+if (app && app.state && app.state.isRunning && !app.timer && !app.state.isPaused && !app.state.isAutoPaused) {
 app.timer = setInterval(() => {
 if (app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
 app.state.seconds++;
@@ -1626,7 +1631,6 @@ let s = app.state.seconds % 60;
 ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')});
 }
 }, 1000);
-}
 }
 // DIM이 켜져 있었으면 유지
 if (ui && ui.dimActive) {
@@ -1637,4 +1641,4 @@ if (overlay) overlay.style.display = 'flex';
 });
 </script>
 </body>
-  </html>
+</html>
