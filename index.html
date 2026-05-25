@@ -9,22 +9,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Jenny Run Pro" />
 <meta name="theme-color" content="#000000" />
-<link rel="manifest" href="data:application/json;charset=utf-8,{
-&quot;name&quot;: &quot;Jenny Run Pro&quot;,
-&quot;short_name&quot;: &quot;JennyRun&quot;,
-&quot;description&quot;: &quot;Running Tracker&quot;,
-&quot;start_url&quot;: &quot;.&quot;,
-&quot;display&quot;: &quot;standalone&quot;,
-&quot;background_color&quot;: &quot;%23000000&quot;,
-&quot;theme_color&quot;: &quot;%23000000&quot;,
-&quot;orientation&quot;: &quot;portrait&quot;,
-&quot;icons&quot;: [{
-&quot;src&quot;: &quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%23000'/%3E%3Ctext x='96' y='130' font-size='120' text-anchor='middle' fill='%2300ff88'%3E🏃%3C/text%3E%3C/svg%3E&quot;,
-&quot;sizes&quot;: &quot;192x192&quot;,
-&quot;type&quot;: &quot;image/svg+xml&quot;
-}]
-}" />
-
+<link rel="manifest" id="dynamic-manifest">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
@@ -537,6 +522,29 @@ infoTabTheory: "이론 가이드", infoTabPrecision: "폼 정밀 분석실"
 }
 };
 
+// ========== PWA 매니페스트 (Blob URL로 제공, 주소창 숨김) ==========
+(function setupPWA() {
+  const manifestObj = {
+    name: "Jenny Run Pro",
+    short_name: "JennyRun",
+    description: "Running Tracker",
+    start_url: ".",
+    display: "standalone",
+    background_color: "#000000",
+    theme_color: "#000000",
+    orientation: "portrait",
+    icons: [{
+      src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%23000'/%3E%3Ctext x='96' y='130' font-size='120' text-anchor='middle' fill='%2300ff88'%3E🏃%3C/text%3E%3C/svg%3E",
+      sizes: "192x192",
+      type: "image/svg+xml"
+    }]
+  };
+  const manifestBlob = new Blob([JSON.stringify(manifestObj)], {type: 'application/json'});
+  const manifestURL = URL.createObjectURL(manifestBlob);
+  const manifestLink = document.querySelector('#dynamic-manifest');
+  if (manifestLink) manifestLink.href = manifestURL;
+})();
+
 // ========== RunningStorage (원본 유지) ==========
 class RunningStorage {
 constructor() {
@@ -594,7 +602,7 @@ getGender() { return localStorage.getItem(this.GENDER_KEY) || 'male'; }
 setGender(gender) { localStorage.setItem(this.GENDER_KEY, gender); }
 }
 
-// ========== UIManager ==========
+// ========== UIManager (DIM 토글 기능 추가 및 오류 수정) ==========
 class UIManager {
 constructor() {
 this.dom = {
@@ -632,7 +640,7 @@ this.menuBpmDisplay = document.getElementById('menu-bpm-display');
 this.btnMetroToggle = document.getElementById('btn-metro-toggle');
 this.currentUnit = storage.getUnit();
 this.currentGender = storage.getGender();
-this.dimActive = false;
+this.dimActive = false; // DIM 상태
 const dimBtn = document.getElementById('btn-dim');
 if (dimBtn) dimBtn.onclick = () => this.toggleDim();
 }
@@ -654,7 +662,7 @@ return Math.round(met * weightKg * hours * genderBonus * inclineBonus);
 }
 
 parsePaceToSeconds(paceStr) {
-if (!paceStr || paceStr === "--'--\"") return 360;
+if (!paceStr || paceStr === "--'--"") return 360;
 const parts = paceStr.replace('"', '').split("'");
 const min = parseInt(parts[0]) || 5;
 const sec = parseInt(parts[1]) || 0;
@@ -685,19 +693,19 @@ if(!isNaN(distKm)) {
 const displayDist = unit === 'km' ? distKm.toFixed(2) : (distKm * 0.621371).toFixed(2);
 this.dom.dist.textContent = displayDist;
 }
-if(this.dom.curPace.textContent && this.dom.curPace.textContent !== "--'--\"") {
+if(this.dom.curPace.textContent && this.dom.curPace.textContent !== "--'--"") {
 this.dom.curPace.textContent = this.convertPace(this.dom.curPace.textContent, unit);
 }
-if(this.dom.avgPace.textContent && this.dom.avgPace.textContent !== "--'--\"") {
+if(this.dom.avgPace.textContent && this.dom.avgPace.textContent !== "--'--"") {
 this.dom.avgPace.textContent = this.convertPace(this.dom.avgPace.textContent, unit);
 }
 }
 convertPace(paceStr, toUnit) {
-if(!paceStr || paceStr === "--'--\"") return "--'--\"";
+if(!paceStr || paceStr === "--'--"") return "--'--"";
 const parts = paceStr.replace('"', '').split("'");
 const min = parseInt(parts[0]);
 const sec = parseInt(parts[1]);
-if(isNaN(min) || isNaN(sec)) return "--'--\"";
+if(isNaN(min) || isNaN(sec)) return "--'--"";
 const totalSecPerKm = min * 60 + sec;
 if(toUnit === 'mile') {
 const totalSecPerMile = totalSecPerKm * 1.609344;
@@ -814,8 +822,8 @@ return;
 }
 dropdownOptions.innerHTML = h.map((r) => {
 let shortDate = r.date.split(' (')[0].replace(', ', ' ');
-let escapedDate = shortDate.replace(/'/g, "\\'");
-return '<div class="dropdown-option precision-option" onclick="ui.selectPrecisionRecord(' + r.id + ', \'' + escapedDate + '\')">' + shortDate + '</div>';
+let escapedDate = shortDate.replace(/'/g, "'");
+return '<div class="dropdown-option precision-option" onclick="ui.selectPrecisionRecord(' + r.id + ', '' + escapedDate + '')">' + shortDate + '</div>';
 }).join('');
 const defaultDateText = h[0].date.split(' (')[0].replace(', ', ' ');
 currentSelectText.textContent = defaultDateText;
@@ -984,6 +992,8 @@ if(precisionArea && precisionArea.style.display === 'flex') {
 this.buildPrecisionSelector();
 }
 }
+
+// DIM 토글 (버튼으로 ON, 오버레이 터치로 OFF)
 toggleDim() {
 this.dimActive = !this.dimActive;
 const overlay = this.dom.dimmerOverlay;
@@ -1001,6 +1011,7 @@ this.dimActive = false;
 const overlay = this.dom.dimmerOverlay;
 if (overlay) overlay.style.display = 'none';
 }
+
 toggleDropdown(id) {
 const opt = document.getElementById(id); const isOpen = opt && opt.style.display === 'block';
 document.querySelectorAll('.dropdown-options, .precision-dropdown-options').forEach(d => d.style.display = 'none');
@@ -1020,13 +1031,13 @@ const container = document.getElementById(type + '-options');
 if(!container) return;
 let html = '';
 if (type === 'height') {
-html += '<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit(\'height\', \'' + (unit === 'cm' ? 'inch' : 'cm') + '\')">SWITCH TO ' + (unit === 'cm' ? 'INCH' : 'CM') + '</div>';
+html += '<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit('height', '' + (unit === 'cm' ? 'inch' : 'cm') + '')">SWITCH TO ' + (unit === 'cm' ? 'INCH' : 'CM') + '</div>';
 const min = unit === 'cm' ? 140 : 55, max = unit === 'cm' ? 210 : 83;
-for (let i = min; i <= max; i++) html += '<div class="dropdown-option" onclick="ui.setProfile(\'height\', ' + i + ', \'' + unit + '\')">' + i + ' ' + unit + '</div>';
+for (let i = min; i <= max; i++) html += '<div class="dropdown-option" onclick="ui.setProfile('height', ' + i + ', '' + unit + '')">' + i + ' ' + unit + '</div>';
 } else {
-html += '<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit(\'weight\', \'' + (unit === 'kg' ? 'lb' : 'kg') + '\')">SWITCH TO ' + (unit === 'kg' ? 'LB' : 'KG') + '</div>';
+html += '<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit('weight', '' + (unit === 'kg' ? 'lb' : 'kg') + '')">SWITCH TO ' + (unit === 'kg' ? 'LB' : 'KG') + '</div>';
 const min = unit === 'kg' ? 40 : 130, max = unit === 'kg' ? 130 : 286;
-for (let i = min; i <= max; i++) html += '<div class="dropdown-option" onclick="ui.setProfile(\'weight\', ' + i + ', \'' + unit + '\')">' + i + ' ' + unit + '</div>';
+for (let i = min; i <= max; i++) html += '<div class="dropdown-option" onclick="ui.setProfile('weight', ' + i + ', '' + unit + '')">' + i + ' ' + unit + '</div>';
 }
 container.innerHTML = html;
 }
@@ -1110,8 +1121,8 @@ let displayDist = parseFloat(r.dist);
 if(this.currentUnit === 'mile') displayDist = displayDist * 0.621371;
 const distStr = displayDist.toFixed(2);
 const unitStr = this.currentUnit === 'km' ? 'KM' : 'MI';
-let displayPace = r.avgPace || r.pace || "--'--\"";
-if(displayPace !== "--'--\"" && this.currentUnit === 'mile') {
+let displayPace = r.avgPace || r.pace || "--'--"";
+if(displayPace !== "--'--"" && this.currentUnit === 'mile') {
 displayPace = this.convertPace(displayPace, 'mile');
 }
 return '<div class="history-item">' +
@@ -1183,7 +1194,7 @@ if(r.gct && r.gct !== '--') { const gctVal = parseInt(r.gct,10); if(!isNaN(gctVa
 if(r.flight && r.flight !== '--') { const flightVal = parseInt(r.flight,10); if(!isNaN(flightVal)) { sumFlight += flightVal; countFlight++; } }
 if(r.alt !== undefined && typeof r.alt === 'number' && !isNaN(r.alt)) { sumAlt += r.alt; countAlt++; }
 });
-let avgPaceStr = "--'--\"";
+let avgPaceStr = "--'--"";
 if (totalDist > 0 && totalSeconds > 0) {
 let avgKmh = totalDist / (totalSeconds / 3600);
 let s = 3600 / avgKmh;
@@ -1250,7 +1261,7 @@ splitPace = this.convertPace(split.pace, 'mile');
 splitLogsHtml += '<div class="detail-log-item"><span>■ ' + splitDist + (this.currentUnit === 'km' ? ' km' : ' mi') + ' :</span><span>' + (t.splitPace || "Pace") + ' ' + splitPace + ' | ' + (t.splitAlt || "Alt") + ' ' + (split.altFrom || 0) + 'm → ' + (split.altTo || 0) + 'm (' + (split.altDiff >= 0 ? '▲' : '▼') + Math.abs(split.altDiff || 0) + 'm).</span></div>';
 }); } else { let baseAlt = record.alt || 0;
 let recordDist = record.dist;
-let recordPace = record.avgPace || record.pace || "--'--\"";
+let recordPace = record.avgPace || record.pace || "--'--"";
 if(this.currentUnit === 'mile') {
 recordDist = (parseFloat(recordDist) * 0.621371).toFixed(2);
 recordPace = this.convertPace(recordPace, 'mile');
@@ -1318,7 +1329,7 @@ contentArea.innerHTML =
 closeDiag() { const dv = document.getElementById('diag-view'); if(dv) dv.style.display = 'none'; }
 }
 
-// ========== MetroEngine ==========
+// ========== MetroEngine (원본 유지) ==========
 class MetroEngine {
 constructor() { this.audioCtx = null; this.nextTickTime = 0; this.timerID = null; this.isPlaying = false; this.currentBeat = 0; }
 init() { if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
@@ -1328,14 +1339,14 @@ async toggle() { await this.init(); if (this.isPlaying) { clearTimeout(this.time
 updateDisplay() { const bpmInput = document.getElementById('metro-bpm'); const bpm = bpmInput ? bpmInput.value : 175; if(ui.dom.metroBpmVal) ui.dom.metroBpmVal.textContent = bpm; if(this.isPlaying && ui.menuBpmDisplay) ui.menuBpmDisplay.textContent = bpm; }
 }
 
-// ========== MotionManager ==========
+// ========== MotionManager (원본 유지) ==========
 class MotionManager {
 constructor(onStepCallback) { this.onStep = onStepCallback; this.lastStepTime = 0; this.isFeetOnGround = false; this.gctAccumulator = 0; this.gctCount = 0; }
 reset() { this.lastStepTime = 0; this.isFeetOnGround = false; this.gctAccumulator = 0; this.gctCount = 0; }
 handleMotion(e) { let acc = e.accelerationIncludingGravity; if (!acc || acc.z === null) return; let force = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z); let now = Date.now(); if (force > 12.5 && (now - this.lastStepTime) > 230) { let cycleTime = now - this.lastStepTime; this.lastStepTime = now; let result = { cycleTime, gct: 0, flight: 0 }; if (this.isFeetOnGround) { let currentGCT = Math.round(cycleTime * 0.35); this.gctAccumulator += currentGCT; this.gctCount++; result.gct = Math.round(this.gctAccumulator / this.gctCount); result.flight = Math.round(((cycleTime - result.gct) / cycleTime) * 100); } this.isFeetOnGround = true; this.onStep(result); } }
 }
 
-// ========== OppaRunApp ==========
+// ========== OppaRunApp (WakeLock 안정화, 초기 먹통 방지) ==========
 class OppaRunApp {
 constructor() {
 this.state = {
@@ -1480,7 +1491,7 @@ this.state.totalFlight += data.flight || 0;
 let cadVal = Math.round((this.state.steps / (this.state.seconds || 1)) * 60);
 ui.updateRunningDisplay({cadence: cadVal, gct: data.gct || 0, flight: data.flight || 0});
 }
-formatPace(kmh) { if (!kmh || kmh < 0.5) return "--'--\""; let s = 3600 / kmh; return Math.floor(s/60) + "'" + String(Math.floor(s%60)).padStart(2,'0') + '"'; }
+formatPace(kmh) { if (!kmh || kmh < 0.5) return "--'--""; let s = 3600 / kmh; return Math.floor(s/60) + "'" + String(Math.floor(s%60)).padStart(2,'0') + '"'; }
 onStart() {
 if(this.timer) clearInterval(this.timer);
 this.state.isRunning = true;
@@ -1562,7 +1573,7 @@ id: Date.now(),
 date: new Date().toLocaleString(),
 dist: this.state.totalDist.toFixed(2),
 time: ui.dom.time ? ui.dom.time.textContent : "00:00",
-avgPace: ui.dom.avgPace ? ui.dom.avgPace.textContent : "--'--\"",
+avgPace: ui.dom.avgPace ? ui.dom.avgPace.textContent : "--'--"",
 cadence: avgCadence,
 gct: avgGct,
 flight: avgFlight,
@@ -1626,7 +1637,26 @@ ui.changeLanguage(storage.getLang());
 ui.setUnit(storage.getUnit());
 ui.setGender(storage.getGender());
 app.requestWakeLock();
-// 서비스 워커를 등록하지 않음 (매니페스트 standalone만으로 주소창 제거 가능)
+
+// ========== PWA 서비스 워커 등록 (주소창 숨김을 위해 필수) ==========
+if ('serviceWorker' in navigator) {
+  const swCode = `
+    self.addEventListener('install', event => {
+      self.skipWaiting();
+    });
+    self.addEventListener('activate', event => {
+      event.waitUntil(clients.claim());
+    });
+    self.addEventListener('fetch', event => {
+      event.respondWith(
+        fetch(event.request).catch(() => new Response(''))
+      );
+    });
+  `;
+  const swBlob = new Blob([swCode], {type: 'application/javascript'});
+  const swUrl = URL.createObjectURL(swBlob);
+  navigator.serviceWorker.register(swUrl, {scope: '/'}).catch(err => console.log('SW registration failed:', err));
+}
 };
 document.addEventListener('visibilitychange', () => {
 if (document.visibilityState === 'visible') {
@@ -1649,4 +1679,4 @@ if (overlay) overlay.style.display = 'flex';
 });
 </script>
 </body>
-</html>
+  </html>
