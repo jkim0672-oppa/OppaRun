@@ -223,27 +223,27 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 
 /* 수정된 DIM 오버레이 (반투명, 터치 통과) */
 #dimmer-overlay {
-  position: fixed;
-  top: 0; left: 0;
-  width: 100%; height: 100%;
-  background: rgba(0, 0, 0, 0.85);
-  pointer-events: none;
-  z-index: 99999;
-  display: none;
-  justify-content: center;
-  align-items: center;
-  font-size: 13px;
-  font-weight: 600;
-  color: #aaa;
-  text-align: center;
-  backdrop-filter: blur(2px);
-  flex-direction: column;
+position: fixed;
+top: 0; left: 0;
+width: 100%; height: 100%;
+background: rgba(0, 0, 0, 0.85);
+pointer-events: none;
+z-index: 99999;
+display: none;
+justify-content: center;
+align-items: center;
+font-size: 13px;
+font-weight: 600;
+color: #aaa;
+text-align: center;
+backdrop-filter: blur(2px);
+flex-direction: column;
 }
 .dim-message {
-  background: rgba(0,0,0,0.6);
-  padding: 8px 16px;
-  border-radius: 30px;
-  font-size: 12px;
+background: rgba(0,0,0,0.6);
+padding: 8px 16px;
+border-radius: 30px;
+font-size: 12px;
 }
 </style>
 </head>
@@ -251,7 +251,7 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 
 <!-- 반투명 DIM 오버레이 -->
 <div id="dimmer-overlay">
-  <div class="dim-message">🌙 어두운 모드 활성화 (터치 가능)</div>
+<div class="dim-message">🌙 어두운 모드 활성화 (터치 가능)</div>
 </div>
 
 <div id="confirm-modal" class="custom-confirm-overlay">
@@ -574,7 +574,7 @@ getGender() { return localStorage.getItem(this.GENDER_KEY) || 'male'; }
 setGender(gender) { localStorage.setItem(this.GENDER_KEY, gender); }
 }
 
-// ========== UIManager (DIM 토글 기능 추가 및 오류 수정) ==========
+// ========== UIManager (DIM 동작 변경 + WakeLock 보조) ==========
 class UIManager {
 constructor() {
 this.dom = {
@@ -612,10 +612,45 @@ this.menuBpmDisplay = document.getElementById('menu-bpm-display');
 this.btnMetroToggle = document.getElementById('btn-metro-toggle');
 this.currentUnit = storage.getUnit();
 this.currentGender = storage.getGender();
-this.dimActive = false; // DIM 상태
-// DIM 버튼 이벤트 연결
+this.dimActive = false;
+this.dimTouchHandler = null;
+this.dimJustActivated = false;
 const dimBtn = document.getElementById('btn-dim');
-if (dimBtn) dimBtn.onclick = () => this.toggleDim();
+if (dimBtn) dimBtn.onclick = () => this.turnDimOn();
+}
+
+// DIM 켜기 (버튼 전용)
+turnDimOn() {
+if (this.dimActive) return; // 이미 켜져 있으면 무시
+this.dimActive = true;
+const overlay = this.dom.dimmerOverlay;
+if (overlay) overlay.style.display = 'flex';
+if (app.state.isRunning) app.requestWakeLock();
+// 윈도우 클릭 리스너 등록 (한 번만)
+if (!this.dimTouchHandler) {
+this.dimTouchHandler = (e) => {
+// 방금 켜진 직후 클릭은 무시 (버튼 클릭 이벤트와 중복 방지)
+if (this.dimJustActivated) return;
+if (this.dimActive) this.turnDimOff();
+};
+window.addEventListener('click', this.dimTouchHandler);
+}
+// 방금 켜짐 플래그 (100ms 동안 무시)
+this.dimJustActivated = true;
+setTimeout(() => { this.dimJustActivated = false; }, 100);
+}
+
+// DIM 끄기 (화면 터치 시)
+turnDimOff() {
+if (!this.dimActive) return;
+this.dimActive = false;
+const overlay = this.dom.dimmerOverlay;
+if (overlay) overlay.style.display = 'none';
+if (this.dimTouchHandler) {
+window.removeEventListener('click', this.dimTouchHandler);
+this.dimTouchHandler = null;
+}
+// WakeLock은 러닝 상태에 따라 유지 (app.requestWakeLock에서 관리)
 }
 
 calculateCalories(weightKg, distanceKm, paceSeconds, totalAltitudeGain, gender) {
@@ -635,7 +670,7 @@ return Math.round(met * weightKg * hours * genderBonus * inclineBonus);
 }
 
 parsePaceToSeconds(paceStr) {
-if (!paceStr || paceStr === "--'--\"") return 360;
+if (!paceStr || paceStr === "--'--"") return 360;
 const parts = paceStr.replace('"', '').split("'");
 const min = parseInt(parts[0]) || 5;
 const sec = parseInt(parts[1]) || 0;
@@ -666,19 +701,19 @@ if(!isNaN(distKm)) {
 const displayDist = unit === 'km' ? distKm.toFixed(2) : (distKm * 0.621371).toFixed(2);
 this.dom.dist.textContent = displayDist;
 }
-if(this.dom.curPace.textContent && this.dom.curPace.textContent !== "--'--\"") {
+if(this.dom.curPace.textContent && this.dom.curPace.textContent !== "--'--"") {
 this.dom.curPace.textContent = this.convertPace(this.dom.curPace.textContent, unit);
 }
-if(this.dom.avgPace.textContent && this.dom.avgPace.textContent !== "--'--\"") {
+if(this.dom.avgPace.textContent && this.dom.avgPace.textContent !== "--'--"") {
 this.dom.avgPace.textContent = this.convertPace(this.dom.avgPace.textContent, unit);
 }
 }
 convertPace(paceStr, toUnit) {
-if(!paceStr || paceStr === "--'--\"") return "--'--\"";
+if(!paceStr || paceStr === "--'--"") return "--'--"";
 const parts = paceStr.replace('"', '').split("'");
 const min = parseInt(parts[0]);
 const sec = parseInt(parts[1]);
-if(isNaN(min) || isNaN(sec)) return "--'--\"";
+if(isNaN(min) || isNaN(sec)) return "--'--"";
 const totalSecPerKm = min * 60 + sec;
 if(toUnit === 'mile') {
 const totalSecPerMile = totalSecPerKm * 1.609344;
@@ -795,8 +830,8 @@ return;
 }
 dropdownOptions.innerHTML = h.map((r) => {
 let shortDate = r.date.split(' (')[0].replace(', ', ' ');
-let escapedDate = shortDate.replace(/'/g, "\\'");
-return '<div class="dropdown-option precision-option" onclick="ui.selectPrecisionRecord(' + r.id + ', \'' + escapedDate + '\')">' + shortDate + '</div>';
+let escapedDate = shortDate.replace(/'/g, "\'");
+return '<div class="dropdown-option precision-option" onclick="ui.selectPrecisionRecord(' + r.id + ', '' + escapedDate + '')">' + shortDate + '</div>';
 }).join('');
 const defaultDateText = h[0].date.split(' (')[0].replace(', ', ' ');
 currentSelectText.textContent = defaultDateText;
@@ -966,20 +1001,6 @@ this.buildPrecisionSelector();
 }
 }
 
-// 새로운 DIM 토글 (반투명 + 터치 가능)
-toggleDim() {
-this.dimActive = !this.dimActive;
-const overlay = this.dom.dimmerOverlay;
-if (!overlay) return;
-if (this.dimActive) {
-overlay.style.display = 'flex';
-// WakeLock 유지 (화면 꺼짐 방지)
-if (app.state.isRunning) app.requestWakeLock();
-} else {
-overlay.style.display = 'none';
-}
-}
-
 toggleDropdown(id) {
 const opt = document.getElementById(id); const isOpen = opt && opt.style.display === 'block';
 document.querySelectorAll('.dropdown-options, .precision-dropdown-options').forEach(d => d.style.display = 'none');
@@ -999,13 +1020,13 @@ const container = document.getElementById(type + '-options');
 if(!container) return;
 let html = '';
 if (type === 'height') {
-html += '<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit(\'height\', \'' + (unit === 'cm' ? 'inch' : 'cm') + '\')">SWITCH TO ' + (unit === 'cm' ? 'INCH' : 'CM') + '</div>';
+html += '<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit('height', '' + (unit === 'cm' ? 'inch' : 'cm') + '')">SWITCH TO ' + (unit === 'cm' ? 'INCH' : 'CM') + '</div>';
 const min = unit === 'cm' ? 140 : 55, max = unit === 'cm' ? 210 : 83;
-for (let i = min; i <= max; i++) html += '<div class="dropdown-option" onclick="ui.setProfile(\'height\', ' + i + ', \'' + unit + '\')">' + i + ' ' + unit + '</div>';
+for (let i = min; i <= max; i++) html += '<div class="dropdown-option" onclick="ui.setProfile('height', ' + i + ', '' + unit + '')">' + i + ' ' + unit + '</div>';
 } else {
-html += '<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit(\'weight\', \'' + (unit === 'kg' ? 'lb' : 'kg') + '\')">SWITCH TO ' + (unit === 'kg' ? 'LB' : 'KG') + '</div>';
+html += '<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit('weight', '' + (unit === 'kg' ? 'lb' : 'kg') + '')">SWITCH TO ' + (unit === 'kg' ? 'LB' : 'KG') + '</div>';
 const min = unit === 'kg' ? 40 : 130, max = unit === 'kg' ? 130 : 286;
-for (let i = min; i <= max; i++) html += '<div class="dropdown-option" onclick="ui.setProfile(\'weight\', ' + i + ', \'' + unit + '\')">' + i + ' ' + unit + '</div>';
+for (let i = min; i <= max; i++) html += '<div class="dropdown-option" onclick="ui.setProfile('weight', ' + i + ', '' + unit + '')">' + i + ' ' + unit + '</div>';
 }
 container.innerHTML = html;
 }
@@ -1089,8 +1110,8 @@ let displayDist = parseFloat(r.dist);
 if(this.currentUnit === 'mile') displayDist = displayDist * 0.621371;
 const distStr = displayDist.toFixed(2);
 const unitStr = this.currentUnit === 'km' ? 'KM' : 'MI';
-let displayPace = r.avgPace || r.pace || "--'--\"";
-if(displayPace !== "--'--\"" && this.currentUnit === 'mile') {
+let displayPace = r.avgPace || r.pace || "--'--"";
+if(displayPace !== "--'--"" && this.currentUnit === 'mile') {
 displayPace = this.convertPace(displayPace, 'mile');
 }
 return '<div class="history-item">' +
@@ -1162,7 +1183,7 @@ if(r.gct && r.gct !== '--') { const gctVal = parseInt(r.gct,10); if(!isNaN(gctVa
 if(r.flight && r.flight !== '--') { const flightVal = parseInt(r.flight,10); if(!isNaN(flightVal)) { sumFlight += flightVal; countFlight++; } }
 if(r.alt !== undefined && typeof r.alt === 'number' && !isNaN(r.alt)) { sumAlt += r.alt; countAlt++; }
 });
-let avgPaceStr = "--'--\"";
+let avgPaceStr = "--'--"";
 if (totalDist > 0 && totalSeconds > 0) {
 let avgKmh = totalDist / (totalSeconds / 3600);
 let s = 3600 / avgKmh;
@@ -1229,7 +1250,7 @@ splitPace = this.convertPace(split.pace, 'mile');
 splitLogsHtml += '<div class="detail-log-item"><span>■ ' + splitDist + (this.currentUnit === 'km' ? ' km' : ' mi') + ' :</span><span>' + (t.splitPace || "Pace") + ' ' + splitPace + ' | ' + (t.splitAlt || "Alt") + ' ' + (split.altFrom || 0) + 'm → ' + (split.altTo || 0) + 'm (' + (split.altDiff >= 0 ? '▲' : '▼') + Math.abs(split.altDiff || 0) + 'm).</span></div>';
 }); } else { let baseAlt = record.alt || 0;
 let recordDist = record.dist;
-let recordPace = record.avgPace || record.pace || "--'--\"";
+let recordPace = record.avgPace || record.pace || "--'--"";
 if(this.currentUnit === 'mile') {
 recordDist = (parseFloat(recordDist) * 0.621371).toFixed(2);
 recordPace = this.convertPace(recordPace, 'mile');
@@ -1314,7 +1335,7 @@ reset() { this.lastStepTime = 0; this.isFeetOnGround = false; this.gctAccumulato
 handleMotion(e) { let acc = e.accelerationIncludingGravity; if (!acc || acc.z === null) return; let force = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z); let now = Date.now(); if (force > 12.5 && (now - this.lastStepTime) > 230) { let cycleTime = now - this.lastStepTime; this.lastStepTime = now; let result = { cycleTime, gct: 0, flight: 0 }; if (this.isFeetOnGround) { let currentGCT = Math.round(cycleTime * 0.35); this.gctAccumulator += currentGCT; this.gctCount++; result.gct = Math.round(this.gctAccumulator / this.gctCount); result.flight = Math.round(((cycleTime - result.gct) / cycleTime) * 100); } this.isFeetOnGround = true; this.onStep(result); } }
 }
 
-// ========== OppaRunApp (WakeLock 안정화, 초기 먹통 방지) ==========
+// ========== OppaRunApp (WakeLock 안정화 강화) ==========
 class OppaRunApp {
 constructor() {
 this.state = {
@@ -1335,6 +1356,11 @@ if ('wakeLock' in navigator && this.state.isRunning) {
 try {
 if (this.state.wakeLock) await this.state.wakeLock.release().catch(()=>{});
 this.state.wakeLock = await navigator.wakeLock.request('screen');
+// 해제 시 자동 재요청
+this.state.wakeLock.addEventListener('release', () => {
+console.log('WakeLock released, re-requesting...');
+setTimeout(() => this.requestWakeLock(), 1000);
+});
 } catch (err) { console.log('WakeLock 실패:', err); }
 }
 }
@@ -1451,7 +1477,7 @@ this.state.totalFlight += data.flight || 0;
 let cadVal = Math.round((this.state.steps / (this.state.seconds || 1)) * 60);
 ui.updateRunningDisplay({cadence: cadVal, gct: data.gct || 0, flight: data.flight || 0});
 }
-formatPace(kmh) { if (!kmh || kmh < 0.5) return "--'--\""; let s = 3600 / kmh; return Math.floor(s/60) + "'" + String(Math.floor(s%60)).padStart(2,'0') + '"'; }
+formatPace(kmh) { if (!kmh || kmh < 0.5) return "--'--""; let s = 3600 / kmh; return Math.floor(s/60) + "'" + String(Math.floor(s%60)).padStart(2,'0') + '"'; }
 onStart() {
 if(this.timer) clearInterval(this.timer);
 this.state.isRunning = true;
@@ -1533,7 +1559,7 @@ id: Date.now(),
 date: new Date().toLocaleString(),
 dist: this.state.totalDist.toFixed(2),
 time: ui.dom.time ? ui.dom.time.textContent : "00:00",
-avgPace: ui.dom.avgPace ? ui.dom.avgPace.textContent : "--'--\"",
+avgPace: ui.dom.avgPace ? ui.dom.avgPace.textContent : "--'--"",
 cadence: avgCadence,
 gct: avgGct,
 flight: avgFlight,
@@ -1605,7 +1631,6 @@ if (app.state.isRunning && document.visibilityState === 'visible') {
 app.requestWakeLock();
 }
 });
-// DIM 오버레이 터치 방지 (pointer-events:none 이므로 아무 동작 없음 - 그대로 유지)
 </script>
 </body>
 </html>
