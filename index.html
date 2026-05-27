@@ -9,12 +9,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Jenny Run Pro" />
 <meta name="theme-color" content="#000000" />
+
+<!-- 수정된 manifest (scope, start_url 명시) -->
 <link rel="manifest" href="data:application/json;charset=utf-8,{
   &quot;name&quot;: &quot;Jenny Run Pro&quot;,
   &quot;short_name&quot;: &quot;JennyRun&quot;,
   &quot;description&quot;: &quot;Running Tracker&quot;,
-  &quot;start_url&quot;: &quot;./&quot;,
-  &quot;scope&quot;: &quot;./&quot;,
+  &quot;start_url&quot;: &quot;/&quot;,
+  &quot;scope&quot;: &quot;/&quot;,
   &quot;display&quot;: &quot;standalone&quot;,
   &quot;background_color&quot;: &quot;#000000&quot;,
   &quot;theme_color&quot;: &quot;#000000&quot;,
@@ -25,8 +27,110 @@
     &quot;type&quot;: &quot;image/svg+xml&quot;
   }]
 }" />
+
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- 추가 디버그 및 안정성 스크립트 (원본 훼손 없음) -->
+<script>
+(function() {
+  // ========== GPS 권한 처리 ==========
+  if (navigator.permissions) {
+    navigator.permissions.query({ name: 'geolocation' }).then(result => {
+      if (result.state === 'denied') {
+        window.addEventListener('load', () => {
+          const statusDiv = document.getElementById('status');
+          if (statusDiv) statusDiv.textContent = '⚠️ GPS 권한 필요 | 설정에서 허용하세요';
+        });
+      }
+    }).catch(() => {});
+  }
+
+  // ========== 디버그 모니터 (배포 시 제거 권장) ==========
+  window.__DEBUG_LOG = [];
+  function log(tag, data) {
+    const entry = { tag, data, time: Date.now() };
+    window.__DEBUG_LOG.push(entry);
+    console.log(`[DEBUG] ${tag}`, data);
+    if (window.__DEBUG_LOG.length > 200) window.__DEBUG_LOG.shift();
+  }
+
+  window.onerror = function(msg, url, line, col, error) {
+    log('GLOBAL_ERROR', { msg, url, line, col, stack: error?.stack });
+    return false;
+  };
+  window.addEventListener('unhandledrejection', e => {
+    log('UNHANDLED_REJECTION', { reason: e.reason?.toString() });
+  });
+
+  // 주요 함수 감싸기 (나중에 앱 객체가 준비되면)
+  const wrapMethod = (obj, methodName, label) => {
+    if (!obj || typeof obj[methodName] !== 'function') return;
+    const original = obj[methodName];
+    obj[methodName] = function(...args) {
+      log(`${label}_ENTER`, { args: args.map(a => typeof a) });
+      try {
+        const result = original.apply(this, args);
+        log(`${label}_EXIT`, {});
+        return result;
+      } catch (e) {
+        log(`${label}_ERROR`, { error: e.message });
+        throw e;
+      }
+    };
+  };
+
+  setTimeout(() => {
+    if (window.app) {
+      wrapMethod(window.app, 'init', 'APP_INIT');
+      wrapMethod(window.app, 'updatePosition', 'UPDATE_POS');
+      wrapMethod(window.app, 'onStart', 'ON_START');
+    }
+    if (window.ui) {
+      wrapMethod(window.ui, 'updateRunningDisplay', 'UI_DISPLAY');
+      wrapMethod(window.ui, 'showTab', 'UI_TAB');
+    }
+    if (window.storage) {
+      wrapMethod(window.storage, 'loadTempSession', 'STORAGE_LOAD');
+      wrapMethod(window.storage, 'saveTempSession', 'STORAGE_SAVE');
+    }
+    log('MONITORING_ACTIVE', 'Functions wrapped');
+  }, 500);
+
+  let lastHeartbeat = Date.now();
+  setInterval(() => {
+    const now = Date.now();
+    if (now - lastHeartbeat > 15000) log('HEARTBEAT_MISS', { last: lastHeartbeat, now });
+    lastHeartbeat = now;
+    if (window.app && window.app.state) {
+      log('STATE_SNAPSHOT', { isRunning: window.app.state.isRunning, seconds: window.app.state.seconds });
+    }
+  }, 10000);
+
+  // 디버그 버튼 (좌측 하단)
+  window.addEventListener('load', () => {
+    const btn = document.createElement('button');
+    btn.textContent = '🐞';
+    btn.style.position = 'fixed';
+    btn.style.bottom = '10px';
+    btn.style.left = '10px';
+    btn.style.zIndex = '99999';
+    btn.style.background = '#333';
+    btn.style.color = '#0f0';
+    btn.style.border = '1px solid #0f0';
+    btn.style.borderRadius = '20px';
+    btn.style.padding = '5px 10px';
+    btn.style.fontSize = '12px';
+    btn.style.cursor = 'pointer';
+    btn.onclick = () => {
+      const logs = window.__DEBUG_LOG.map(l => `${new Date(l.time).toLocaleTimeString()} [${l.tag}] ${JSON.stringify(l.data)}`).join('\n');
+      alert(logs.slice(0, 3000));
+    };
+    document.body.appendChild(btn);
+  });
+})();
+</script>
+
 <style>
 :root {
 --primary: #00ff88; --bg: #000000;
@@ -40,9 +144,11 @@ font-family: -apple-system, system-ui, sans-serif; height: 100vh; height: 100svh
 display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none;
 -webkit-font-smoothing: antialiased;
 }
+
 #map-area { flex-shrink: 0; width: 100%; }
 #map-container { height: 18vh; min-height: 130px; border-bottom: 2px solid #222; position: relative; }
 #map { height: 100%; width: 100%; background: #111; }
+
 .btn-map-theme {
 position: absolute; bottom: 10px; right: 10px; z-index: 1000;
 width: 36px; height: 36px; border-radius: 50%;
@@ -53,40 +159,56 @@ cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.5);
 transition: all 0.2s ease;
 }
 .btn-map-theme:active { transform: scale(0.9); background: #333; }
+
 .dark-map-layer {
 filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
 }
+
 .status-bar { text-align: center; color: var(--warning); font-size: 11px; padding: 6px; background: #0a0a0a; font-weight: 900; border-bottom: 1px solid #222; letter-spacing: 0.5px; }
+
 .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+
 .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; padding: 6px; flex-shrink: 0; }
+
 .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #333; height: 78px; padding: 0; transition: border-color 0.3s ease; }
 .card-main { grid-column: span 3; border: 2.5px solid var(--primary); height: 82px; position: relative; margin-bottom: 2px; }
+
 .label { font-size: 9px; color: var(--text-dim); font-weight: 900; margin-bottom: 4px; text-transform: uppercase; }
 .value { font-size: 19px; font-weight: 900; }
 .value-large { font-size: 40px; color: var(--primary); font-weight: 900; line-height: 1; }
+
 .auto-pause-label { position: absolute; top: 10px; left: 10px; font-size: 10px; color: var(--danger); font-weight: 900; background: rgba(255,68,68,0.2); padding: 4px 8px; border-radius: 6px; display: none; z-index: 10; border: 1px solid var(--danger); }
+
 .btn-quick-metro { position: absolute; bottom: 10px; right: 10px; background: #333; border: 1px solid #444; color: #999; font-size: 10px; padding: 7px 11px; border-radius: 8px; font-weight: 900; transition: 0.2s; }
+
 .controls { padding: 8px 15px; display: flex; justify-content: center; align-items: center; height: 70px; margin-top: auto; margin-bottom: 80px; flex-shrink: 0; }
 .btn-act { width: 100%; height: 60px; border-radius: 30px; border: none; font-weight: 900; font-size: 20px; cursor: pointer; }
+
 .history-nav { display: flex; gap: 6px; padding: 10px 8px; background: #000; border-bottom: 1px solid #111; flex-shrink: 0; }
 .sub-btn { flex: 1; padding: 12px 0; border: 1px solid #444; background: #2a2a2a; color: #aaa; border-radius: 8px; font-size: 11px; font-weight: 900; text-align: center; }
 .sub-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
 .sub-page { display: none; flex-direction: column; flex: 1; overflow-y: auto; padding-bottom: 100px; }
+
 .history-item { background: var(--card-bg); border-radius: 15px; padding: 15px; margin: 10px 12px; border: 1px solid #444; position: relative; }
 .h-date { font-size: 12px; color: var(--primary); font-weight: 900; margin-bottom: 10px; letter-spacing: 0.5px; opacity: 0.8; }
 .h-actions { position: absolute; top: 12px; right: 12px; display: flex; gap: 6px; }
 .btn-h-sub { background: #333; border: 1px solid #555; color: var(--primary); font-size: 10px; padding: 6px 10px; border-radius: 6px; font-weight: 900; cursor: pointer; }
+
 .btn-h-delete { background: #333; border: 1px solid #555; color: var(--danger); font-size: 10px; padding: 6px 10px; border-radius: 6px; font-weight: 900; cursor: pointer; position: absolute; bottom: 12px; right: 12px; }
+
 .h-main-stats { display: flex; align-items: baseline; gap: 15px; margin-bottom: 12px; border-bottom: 1px solid #333; padding-bottom: 12px; }
 .h-val-big { font-size: 22px; font-weight: 900; color: #fff; }
 .h-val-unit { font-size: 11px; color: var(--primary); margin-left: 2px; }
+
 .h-details-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding-bottom: 5px; }
 .h-det-box { display: flex; flex-direction: column; }
 .h-det-label { font-size: 8px; color: var(--text-dim); font-weight: 900; margin-bottom: 2px; }
 .h-det-val { font-size: 13px; font-weight: 900; color: #eee; }
+
 .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 80px; background: #000; display: flex; border-top: 1px solid #222; align-items: stretch; padding-bottom: env(safe-area-inset-bottom); z-index: 30000; }
 .tab-bar .tab-btn { flex: 1; background: none; border: none; color: #444; font-size: 16px; font-weight: 900; cursor: pointer; letter-spacing: 1px; }
 .tab-bar .tab-btn.active { color: var(--primary); text-decoration: underline; text-underline-offset: 8px; }
+
 #diag-view, #metronome-view, #detail-view { position: fixed; top: 0; left: 0; width: 100%; bottom: 80px; background: var(--bg); z-index: 5000; display: none; flex-direction: column; overflow-y: auto; }
 .diag-header { padding: 35px 20px 15px; border-bottom: 1px solid #222; }
 .diag-card { background: #1a1a1a; border-radius: 12px; padding: 16px; margin: 8px 15px; border: 1.5px solid #333; }
@@ -95,34 +217,46 @@ filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
 .diag-main-val { font-size: 20px; font-weight: 900; color: #ffffff; letter-spacing: -0.3px; }
 .diag-ref { font-size: 11px; color: var(--warning); font-weight: 800; }
 .diag-tip { font-size: 13px; color: #ffffff; line-height: 1.6; font-weight: 600; padding-top: 12px; border-top: 1px solid #2a2a2a; word-break: keep-all; }
+
 .close-detail { position: absolute; top: 20px; right: 20px; z-index: 20001; background: var(--primary); color: #000; border: none; padding: 8px 16px; border-radius: 20px; font-weight: 900; font-size: 12px; }
+
 .recovery-highlight { color: var(--primary); font-size: 26px; font-weight: 900; margin: 10px 0; display: block; letter-spacing: -0.5px; }
+
 .settings-container { padding: 20px; }
 .settings-group { margin-bottom: 25px; position: relative; }
 .settings-label { font-size: 11px; color: var(--primary); font-weight: 900; margin-bottom: 10px; letter-spacing: 1px; text-transform: uppercase; }
 .dropdown-select { background: #2a2a2a; color: #fff; border: 1.5px solid #444; padding: 18px; border-radius: 12px; font-size: 16px; font-weight: 800; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
 .dropdown-options { display: none; position: absolute; top: 105%; left: 0; width: 100%; background: #2a2a2a; border: 1.5px solid #444; border-radius: 12px; z-index: 1000; overflow-y: auto; max-height: 250px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+
 .precision-dropdown-options { display: none; position: absolute; top: 105%; right: 0; width: 160px; background: #2a2a2a; border: 1.5px solid #444; border-radius: 12px; z-index: 2000; overflow-y: auto; max-height: 200px; box-shadow: 0 5px 20px rgba(0,0,0,0.6); }
+
 .dropdown-option { padding: 18px; font-size: 16px; font-weight: 800; border-bottom: 1px solid #333; cursor: pointer; color: #fff; }
 .dropdown-option:last-child { border-bottom: none; }
 .dropdown-option:active { background: #333; }
+
 .precision-option { padding: 10px 14px; font-size: 12px; font-weight: 800; text-align: left; }
+
 .profile-row { display: flex; gap: 10px; margin-bottom: 25px; }
 .profile-col { flex: 1; position: relative; }
 .mini-select { padding: 12px; font-size: 14px; }
+
 .unit-toggle-row { display: flex; gap: 10px; margin-top: 10px; }
 .unit-btn { flex: 1; padding: 12px; background: #2a2a2a; border: 1.5px solid #444; border-radius: 12px; color: #aaa; font-weight: 900; font-size: 14px; text-align: center; cursor: pointer; }
 .unit-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
+
 .gender-toggle-row { display: flex; gap: 10px; margin-top: 10px; }
 .gender-btn { flex: 1; padding: 12px; background: #2a2a2a; border: 1.5px solid #444; border-radius: 12px; color: #aaa; font-weight: 900; font-size: 14px; text-align: center; cursor: pointer; }
 .gender-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
+
 #metro-bpm-val { font-size: 40px; font-weight: 900; text-align: center; color: var(--primary); margin: 5px 0; }
 .metro-slider { width: 100%; accent-color: var(--primary); margin: 10px 0; height: 4px; }
+
 .pace-marker {
 background: rgba(0,0,0,0.85); border: 1px solid var(--primary); border-radius: 6px;
 color: #fff; font-size: 9px; font-weight: 900; text-align: center; line-height: 16px;
 box-shadow: 0 0 6px rgba(0,255,136,0.5); white-space: nowrap; padding: 0 4px;
 }
+
 .detail-log-box {
 background: #111; border: 1px solid #222; border-radius: 10px; padding: 12px;
 margin-top: 10px; font-family: -apple-system, system-ui;
@@ -132,12 +266,14 @@ margin-top: 10px; font-family: -apple-system, system-ui;
 .detail-log-item span { color: #ffffff; }
 .detail-log-item span:first-child { color: var(--primary) !important; }
 .detail-log-item:last-child { border-bottom: none; }
+
 .detail-btn-row { display: flex; gap: 10px; margin-top: 15px; margin-bottom: 25px; }
 .btn-detail-act { flex: 1; height: 48px; border-radius: 24px; font-weight: 900; font-size: 14px; cursor: pointer; border: none; display: flex; align-items: center; justify-content: center; gap: 6px; transition: background 0.2s ease; }
 .btn-detail-save { background: #222; color: var(--primary); border: 1.5px solid #444; }
 .btn-detail-save:active { background: #333; }
 .btn-detail-share { background: var(--primary); color: #000; }
 .btn-detail-share:active { opacity: 0.9; }
+
 .stat-filter-nav { display: flex; gap: 5px; padding: 10px 12px 5px 12px; background: #000; flex-shrink: 0; }
 .stat-filter-btn { flex: 1; padding: 10px 0; border: 1px solid #333; background: #161616; color: #888; border-radius: 8px; font-size: 11px; font-weight: 900; text-align: center; cursor: pointer; }
 .stat-filter-btn.active { border-color: var(--primary); color: var(--primary); background: rgba(0,255,136,0.05); }
@@ -161,7 +297,9 @@ font-size: 18px;
 word-break: break-all;
 line-height: 1.3;
 }
+
 .info-visual-box { font-size: 24px; margin-bottom: 8px; display: flex; align-items: center; justify-content: flex-start; }
+
 .custom-confirm-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 999999; display: none; justify-content: center; align-items: center; padding: 20px; }
 .custom-confirm-box { background: #1a1a1a; border: 2px solid #333; border-radius: 16px; width: 100%; max-width: 320px; padding: 22px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
 .custom-confirm-msg { font-size: 15px; font-weight: 800; color: #ffffff; margin-bottom: 22px; line-height: 1.5; word-break: keep-all; }
@@ -170,14 +308,18 @@ line-height: 1.3;
 .btn-confirm-cancel { background: #333; color: #aaa; border: 1px solid #444; }
 .btn-confirm-delete { background: var(--danger); color: #fff; }
 .btn-confirm-save { background: var(--primary); color: #000; }
+
 .info-tab-nav { display: flex; gap: 6px; padding: 0 0 12px 0; background: #000; flex-shrink: 0; width: 100%; }
 .info-sub-btn { flex: 1; padding: 12px 0; border: 1px solid #333; background: #161616; color: #888; border-radius: 8px; font-size: 11px; font-weight: 900; text-align: center; cursor: pointer; }
 .info-sub-btn.active { background: rgba(0,255,136,0.1); color: var(--primary); border-color: var(--primary); }
+
 #sub-page-info.sub-page { height: 100%; padding-bottom: 120px; }
+
 .precision-dashboard { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; margin-bottom: 12px; }
 .precision-card { background: #1a1a1a; border-radius: 12px; padding: 10px; border: 1px solid #333; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 62px; }
 .precision-label { font-size: 9px; color: var(--text-dim); font-weight: 900; margin-bottom: 4px; text-transform: uppercase; text-align: center; }
 .precision-value { font-size: 17px; font-weight: 900; color: #ffffff; }
+
 .skeleton-graphic-container {
 background: #111111; border: 1.5px solid #2a2a2a; border-radius: 14px;
 padding: 16px; position: relative; width: calc(100% - 35px); height: 260px;
@@ -190,6 +332,7 @@ border-radius: 6px; padding: 5px 8px; min-width: 95px; font-family: sans-serif;
 .skeleton-ind-title { font-size: 8px; color: var(--good); font-weight: 900; text-transform: uppercase; margin-bottom: 1px; letter-spacing: 0.3px; }
 .skeleton-ind-val { font-size: 13px; color: #fff; font-weight: 900; line-height: 1.2; }
 .skeleton-ind-ref { font-size: 8px; color: var(--warning); font-weight: 700; opacity: 0.9; }
+
 .btn-launch-full-diagnosis {
 width: 100%; height: 46px; border-radius: 12px; border: 1.5px solid var(--good);
 background: rgba(0, 255, 136, 0.04); color: var(--good); font-size: 14px;
@@ -199,6 +342,8 @@ display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 1
 .btn-launch-full-diagnosis:active {
 transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6px rgba(0, 255, 136, 0.2);
 }
+
+/* DIM 오버레이 - 터치로 해제 가능 */
 #dimmer-overlay {
 position: fixed;
 top: 0; left: 0;
@@ -227,9 +372,11 @@ pointer-events: none;
 </style>
 </head>
 <body>
+
 <div id="dimmer-overlay" onclick="ui.dismissDim()">
 <div class="dim-message">🌙 어두운 모드 활성화 (터치하면 해제)</div>
 </div>
+
 <div id="confirm-modal" class="custom-confirm-overlay">
 <div class="custom-confirm-box">
 <div id="confirm-modal-msg" class="custom-confirm-msg">Are you sure you want to delete this record?</div>
@@ -239,6 +386,7 @@ pointer-events: none;
 </div>
 </div>
 </div>
+
 <div id="save-confirm-modal" class="custom-confirm-overlay">
 <div class="custom-confirm-box">
 <div id="save-confirm-modal-msg" class="custom-confirm-msg">Are you sure you want to save this running record?</div>
@@ -248,6 +396,7 @@ pointer-events: none;
 </div>
 </div>
 </div>
+
 <div id="map-area">
 <div id="map-container">
 <div id="map"></div>
@@ -255,11 +404,13 @@ pointer-events: none;
 </div>
 <div id="status" class="status-bar">GPS INITIALIZING... | ALT: --m</div>
 </div>
+
 <div id="detail-view">
 <button class="close-detail" onclick="ui.closeDetail()">CLOSE</button>
 <div id="detail-map" style="height: 40%; border-bottom: 1px solid #222;"></div>
 <div id="detail-data" style="padding: 12px 15px; overflow-y: auto;"></div>
 </div>
+
 <div id="diag-view">
 <button class="close-detail" onclick="ui.closeDiag()">CLOSE</button>
 <div class="diag-header">
@@ -268,6 +419,7 @@ pointer-events: none;
 </div>
 <div id="diag-content-area"></div>
 </div>
+
 <div id="metronome-view">
 <button class="close-detail" onclick="ui.closeMetronome()">CLOSE</button>
 <div class="diag-header">
@@ -294,6 +446,7 @@ pointer-events: none;
 <button id="btn-metro-toggle" class="btn-act" style="background:var(--primary); color:#000;" onclick="metro.toggle()">START</button>
 </div>
 </div>
+
 <div id="run-view" class="main-content">
 <div class="dashboard">
 <div class="card card-main">
@@ -319,6 +472,7 @@ pointer-events: none;
 </div>
 </div>
 </div>
+
 <div id="history-view" class="main-content" style="display:none;">
 <div class="history-nav">
 <button id="sub-tab-list" class="sub-btn active" onclick="ui.showSubTab('list')">LIST</button>
@@ -327,6 +481,7 @@ pointer-events: none;
 <button id="sub-tab-settings" class="sub-btn" onclick="ui.showSubTab('settings')">SETTINGS</button>
 </div>
 <div id="sub-page-list" class="sub-page" style="display: flex;"><div id="history-list"></div></div>
+
 <div id="sub-page-total" class="sub-page">
 <div class="stat-filter-nav">
 <button id="stat-filter-weekly" class="stat-filter-btn active" onclick="ui.changeStatFilter('weekly')">WEEKLY</button>
@@ -335,11 +490,13 @@ pointer-events: none;
 </div>
 <div id="total-stats-container" style="flex: 1; overflow-y: auto; width: 100%;"></div>
 </div>
+
 <div id="sub-page-info" class="sub-page" style="padding: 20px 12px 120px 12px; gap: 10px;">
 <div class="info-tab-nav">
 <button id="info-sub-tab-theory" class="info-sub-btn active" onclick="ui.toggleInfoSubTab('theory')"><span id="info-tab-theory-label">이론 가이드</span></button>
 <button id="info-sub-tab-precision" class="info-sub-btn" onclick="ui.toggleInfoSubTab('precision')"><span id="info-tab-precision-label">폼 정밀 분석실</span></button>
 </div>
+
 <div id="info-theory-area" style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
 <div class="diag-card"><div id="info-cadence-title" style="color:var(--primary); font-weight:900; margin-bottom:5px;">CADENCE</div><div id="info-cadence-desc" style="font-size:12px; color:#ccc;">Recommended 170~185 BPM.</div></div>
 <div class="diag-card"><div id="info-power-title" style="color:var(--primary); font-weight:900; margin-bottom:5px;">POWER</div><div id="info-power-desc" style="font-size:12px; color:#ccc;">Use hips and glutes.</div></div>
@@ -348,6 +505,7 @@ pointer-events: none;
 <div class="diag-card"><div id="info-rolling-title" style="color:var(--primary); font-weight:900; margin-bottom:5px;">KNEE LEADING & ROLLING</div><div id="info-rolling-desc" style="font-size:12px; color:#ccc;">Drive forward with your knees. Focus on smooth ankle rolling.</div></div>
 <div class="diag-card"><div id="info-posture-title" style="color:var(--primary); font-weight:900; margin-bottom:5px;">POSTURE & BREATHING</div><div id="info-posture-desc" style="font-size:12px; color:#ccc;">Keep your chest open and shoulders relaxed. Look straight ahead.</div></div>
 </div>
+
 <div id="info-precision-analysis-area" style="display: none; flex-direction: column; width: 100%; flex: 1;">
 <div class="diag-card" style="margin: 0 0 10px 0; position: relative; flex: 1.2; display: flex; flex-direction: column; justify-content: space-between;">
 <div>
@@ -411,1168 +569,1176 @@ pointer-events: none;
 <div class="profile-row"><div class="profile-col"><div id="label-height" class="settings-label">HEIGHT</div><div class="dropdown-select mini-select" onclick="ui.toggleDropdown('height-options')"><span id="current-height">175 cm</span><span style="font-size:8px; color:var(--primary);">▼</span></div><div id="height-options" class="dropdown-options"></div></div><div class="profile-col"><div id="label-weight" class="settings-label">WEIGHT</div><div class="dropdown-select mini-select" onclick="ui.toggleDropdown('weight-options')"><span id="current-weight">70 kg</span><span style="font-size:8px; color:var(--primary);">▼</span></div><div id="weight-options" class="dropdown-options"></div></div></div>
 <div class="settings-group"><div id="label-metronome" class="settings-label">RHYTHM ASSISTANT</div><div class="dropdown-select" onclick="ui.openMetronome()"><span id="label-metro-menu">Metronome</span><span id="menu-bpm-display" style="font-size:12px; color:var(--primary);">OFF</span></div></div>
 <button id="btn-clear-history" style="background:#2a2a2a; color:var(--danger); border:1.5px solid #444; padding:18px; border-radius:12px; width:100%; font-weight:900; font-size:14px; margin-top:20px;" onclick="storage.clearHistory()">CLEAR ALL HISTORY</button>
+<!-- 개인정보처리방침 링크 추가 -->
 <div style="margin-top: 20px; text-align: center;">
   <a href="https://yourdomain.com/privacy" target="_blank" style="color: #666; font-size: 10px; text-decoration: none;">Privacy Policy</a>
 </div>
 </div>
 </div>
 </div>
+
 <div class="tab-bar">
 <button id="tab-run" class="tab-btn active" onclick="ui.showTab('run')">RUN</button>
 <button id="tab-history" class="tab-btn" onclick="ui.showTab('history')">HISTORY</button>
 </div>
+
 <script>
-// translations 객체 (전체 포함 - 생략 가능하나 실제로는 필요)
+// ========== 번역 객체 (원본 유지) ==========
 const translations = {
-  en: { pace: "PACE", dist: "DIST", time: "TIME", avg: "AVG", cadence: "CADENCE", gct: "GCT", flight: "FLIGHT", cal: "KCAL", start: "START RUNNING", stop: "STOP", resume: "RESUME", finish: "FINISH", run: "RUN", history: "HISTORY", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", selLang: "SELECT LANGUAGE", unitLabel: "DISTANCE UNIT", genderLabel: "GENDER", metro: "RHYTHM ASSISTANT", clear: "CLEAR ALL HISTORY", confirmClear: "Are you sure?", alertCleared: "History cleared.", route: "ROUTE", diag: "DIAG", close: "CLOSE", alt: "ALT",
-    metroTitle: "METRONOME", metroDesc: "Perfect your cadence.", metroAccent: "ACCENT FIRST BEAT", noRec: "NO RECORDS", totalStats: "LIFETIME STATS", runs: "RUNS", autoPaused: "AUTO PAUSED", wake: "TAP TO WAKE",
-    infC: "CADENCE", infCD: "Recommended 170~185 BPM.", infP: "POWER", infPD: "Use hips and glutes.", infS: "STRIKE", infSD: "Midfoot and center of gravity.",
-    infO: "VERTICAL OSCILLATION", infOD: "Minimize bouncing. Keep energy moving forward, not up.",
-    infR: "KNEE LEADING & ROLLING", infRD: "Drive forward with your knees. Focus on smooth ankle rolling.",
-    infPost: "POSTURE & BREATHING", infPostD: "Keep your chest open and shoulders relaxed. Look straight ahead.",
-    height: "HEIGHT", weight: "WEIGHT",
-    diagTitle: "RUN DIAGNOSIS", diagDyna: "RUNNING DYNAMICS", diagBalance: "CADENCE & PACE", diagRecov: "RECOVERY GUIDE",
-    splitTitle: "SPLIT DISTANCE ANALYTICS.", splitPace: "Pace", splitAlt: "Altitude",
-    summaryTitle: "■ RUNNING DYNAMICS SUMMARY.", avgGct: "Average GCT :", avgFlight: "Average Flight Time :", avgCadence: "Average Cadence :",
-    statWeekly: "WEEKLY", statMonthly: "MONTHLY", statYearly: "YEARLY", totalDist: "TOTAL DISTANCE", runCount: "RUNS COUNT", avgPaceLabel: "AVG PACE", totalCal: "TOTAL CALORIES",
-    periodSummary: "■ PERIOD DYNAMICS SUMMARY.", avgAlt: "Average Altitude :",
-    deleteBtn: "DELETE", confirmSingleDelete: "Are you sure you want to delete this running record?", cancelModal: "CANCEL",
-    saveBtn: "SAVE", shareBtn: "SHARE",
-    confirmSingleSave: "Are you sure you want to save this running record to your device?",
-    saveSuccessMsg: "Record data has been successfully saved!",
-    infoTabTheory: "Theory Guide", infoTabPrecision: "Form Analysis Lab"
-  },
-  ko: {
-    pace: "페이스", dist: "거리", time: "시간", avg: "평균", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", cal: "칼로리", start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료", run: "러닝", history: "기록", list: "목록", total: "통계", info: "정보", settings: "설정", selLang: "언어 설정", unitLabel: "거리 단위", genderLabel: "성별", metro: "리듬 어시스턴트", clear: "전체 기록 삭제", confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.", route: "경로", diag: "진단", close: "닫기", alt: "고도",
-    metroTitle: "메트로놈", metroDesc: "러닝 리듬을 일정하게 유지하세요.", metroAccent: "첫 박자 강조", noRec: "기록 없음", totalStats: "누적 통계", runs: "러닝 횟수", autoPaused: "자동 일시정지", wake: "화면을 깨우려면 터치하세요",
-    infC: "케이던스", infCD: "170~185 BPM을 권장합니다.", infP: "파워", infPD: "골반과 둔근을 사용하세요.", infS: "착지", infSD: "미드풋과 무게중심 착지를 신경쓰세요.",
-    infO: "수직 진폭", infOD: "불필요한 상하 바운싱을 줄여 에너지가 위가 아닌 앞으로만 향하게 하세요.",
-    infR: "무릎 리딩 & 롤링", infRD: "무릎을 앞으로 툭툭 던지듯 리딩하고 매끄러운 발구름(롤링)에 집중하세요.",
-    infPost: "자세 & 호흡", infPostD: "가슴을 활짝 열고 어깨를 릴랙스하세요. 시선은 정면 멀리 유지합니다.",
-    height: "신장", weight: "체중",
-    diagTitle: "러닝 정밀 진단", diagDyna: "러닝 다이내믹스 분석", diagBalance: "페이스 & 케이던스 밸런스", diagRecov: "부상 방지 및 리커버리",
-    splitTitle: "구간별 고도 및 페이스 상세 기록.", splitPace: "페이스", splitAlt: "고도",
-    summaryTitle: "■ 러닝 다이내믹스 종합 요약.", avgGct: "평균 지면 접촉 시간 :", avgFlight: "평균 체공 시간 비율 :", avgCadence: "평균 케이던스 수치 :",
-    statWeekly: "주간 통계", statMonthly: "월간 통계", statYearly: "연간 통계", totalDist: "총 누적 거리", runCount: "러닝 횟수", avgPaceLabel: "평균 페이스", totalCal: "총 소모 칼로리",
-    periodSummary: "■ 해당 기간 다이내믹스 평균 요약.", avgAlt: "평균 주행 고도 :",
-    deleteBtn: "삭제", confirmSingleDelete: "이 러닝 기록을 정말로 삭제할까요?", cancelModal: "취소",
-    saveBtn: "저장", shareBtn: "공유",
-    confirmSingleSave: "이 러닝 기록 데이터를 기기에 정말 저장할까요?",
-    saveSuccessMsg: "기록 데이터가 기기에 안전하게 저장되었습니다!",
-    infoTabTheory: "이론 가이드", infoTabPrecision: "폼 정밀 분석실"
-  }
+en: {
+pace: "PACE", dist: "DIST", time: "TIME", avg: "AVG", cadence: "CADENCE", gct: "GCT", flight: "FLIGHT", cal: "KCAL", start: "START RUNNING", stop: "STOP", resume: "RESUME", finish: "FINISH", run: "RUN", history: "HISTORY", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", selLang: "SELECT LANGUAGE", unitLabel: "DISTANCE UNIT", genderLabel: "GENDER", metro: "RHYTHM ASSISTANT", clear: "CLEAR ALL HISTORY", confirmClear: "Are you sure?", alertCleared: "History cleared.", route: "ROUTE", diag: "DIAG", close: "CLOSE", alt: "ALT",
+metroTitle: "METRONOME", metroDesc: "Perfect your cadence.", metroAccent: "ACCENT FIRST BEAT", noRec: "NO RECORDS", totalStats: "LIFETIME STATS", runs: "RUNS", autoPaused: "AUTO PAUSED", wake: "TAP TO WAKE",
+infC: "CADENCE", infCD: "Recommended 170~185 BPM.", infP: "POWER", infPD: "Use hips and glutes.", infS: "STRIKE", infSD: "Midfoot and center of gravity.",
+infO: "VERTICAL OSCILLATION", infOD: "Minimize bouncing. Keep energy moving forward, not up.",
+infR: "KNEE LEADING & ROLLING", infRD: "Drive forward with your knees. Focus on smooth ankle rolling.",
+infPost: "POSTURE & BREATHING", infPostD: "Keep your chest open and shoulders relaxed. Look straight ahead.",
+height: "HEIGHT", weight: "WEIGHT",
+diagTitle: "RUN DIAGNOSIS", diagDyna: "RUNNING DYNAMICS", diagBalance: "CADENCE & PACE", diagRecov: "RECOVERY GUIDE",
+splitTitle: "SPLIT DISTANCE ANALYTICS.", splitPace: "Pace", splitAlt: "Altitude",
+summaryTitle: "■ RUNNING DYNAMICS SUMMARY.", avgGct: "Average GCT :", avgFlight: "Average Flight Time :", avgCadence: "Average Cadence :",
+statWeekly: "WEEKLY", statMonthly: "MONTHLY", statYearly: "YEARLY", totalDist: "TOTAL DISTANCE", runCount: "RUNS COUNT", avgPaceLabel: "AVG PACE", totalCal: "TOTAL CALORIES",
+periodSummary: "■ PERIOD DYNAMICS SUMMARY.", avgAlt: "Average Altitude :",
+deleteBtn: "DELETE", confirmSingleDelete: "Are you sure you want to delete this running record?", cancelModal: "CANCEL",
+saveBtn: "SAVE", shareBtn: "SHARE",
+confirmSingleSave: "Are you sure you want to save this running record to your device?",
+saveSuccessMsg: "Record data has been successfully saved!",
+infoTabTheory: "Theory Guide", infoTabPrecision: "Form Analysis Lab"
+},
+ko: {
+pace: "페이스", dist: "거리", time: "시간", avg: "평균", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", cal: "칼로리", start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료", run: "러닝", history: "기록", list: "목록", total: "통계", info: "정보", settings: "설정", selLang: "언어 설정", unitLabel: "거리 단위", genderLabel: "성별", metro: "리듬 어시스턴트", clear: "전체 기록 삭제", confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.", route: "경로", diag: "진단", close: "닫기", alt: "고도",
+metroTitle: "메트로놈", metroDesc: "러닝 리듬을 일정하게 유지하세요.", metroAccent: "첫 박자 강조", noRec: "기록 없음", totalStats: "누적 통계", runs: "러닝 횟수", autoPaused: "자동 일시정지", wake: "화면을 깨우려면 터치하세요",
+infC: "케이던스", infCD: "170~185 BPM을 권장합니다.", infP: "파워", infPD: "골반과 둔근을 사용하세요.", infS: "착지", infSD: "미드풋과 무게중심 착지를 신경쓰세요.",
+infO: "수직 진폭", infOD: "불필요한 상하 바운싱을 줄여 에너지가 위가 아닌 앞으로만 향하게 하세요.",
+infR: "무릎 리딩 & 롤링", infRD: "무릎을 앞으로 툭툭 던지듯 리딩하고 매끄러운 발구름(롤링)에 집중하세요.",
+infPost: "자세 & 호흡", infPostD: "가슴을 활짝 열고 어깨를 릴랙스하세요. 시선은 정면 멀리 유지합니다.",
+height: "신장", weight: "체중",
+diagTitle: "러닝 정밀 진단", diagDyna: "러닝 다이내믹스 분석", diagBalance: "페이스 & 케이던스 밸런스", diagRecov: "부상 방지 및 리커버리",
+splitTitle: "구간별 고도 및 페이스 상세 기록.", splitPace: "페이스", splitAlt: "고도",
+summaryTitle: "■ 러닝 다이내믹스 종합 요약.", avgGct: "평균 지면 접촉 시간 :", avgFlight: "평균 체공 시간 비율 :", avgCadence: "평균 케이던스 수치 :",
+statWeekly: "주간 통계", statMonthly: "월간 통계", statYearly: "연간 통계", totalDist: "총 누적 거리", runCount: "러닝 횟수", avgPaceLabel: "평균 페이스", totalCal: "총 소모 칼로리",
+periodSummary: "■ 해당 기간 다이내믹스 평균 요약.", avgAlt: "평균 주행 고도 :",
+deleteBtn: "삭제", confirmSingleDelete: "이 러닝 기록을 정말로 삭제할까요?", cancelModal: "취소",
+saveBtn: "저장", shareBtn: "공유",
+confirmSingleSave: "이 러닝 기록 데이터를 기기에 정말 저장할까요?",
+saveSuccessMsg: "기록 데이터가 기기에 안전하게 저장되었습니다!",
+infoTabTheory: "이론 가이드", infoTabPrecision: "폼 정밀 분석실"
+}
 };
 
-// ========== RunningStorage 클래스 ==========
+// ========== RunningStorage (원본 유지) ==========
 class RunningStorage {
-  constructor() {
-    this.HISTORY_KEY = 'oppaRunHistory';
-    this.PROFILE_KEY = 'oppaRunProfile';
-    this.LANG_KEY = 'oppaRunLang';
-    this.TEMP_SESSION_KEY = 'oppaRunTempSession';
-    this.MAP_THEME_KEY = 'oppaRunMapTheme';
-    this.UNIT_KEY = 'oppaRunUnit';
-    this.GENDER_KEY = 'oppaRunGender';
-  }
-  saveRecord(record) {
-    const history = this.loadHistory();
-    history.unshift(record);
-    localStorage.setItem(this.HISTORY_KEY, JSON.stringify(history));
-    this.clearTempSession();
-  }
-  loadHistory() {
-    const data = localStorage.getItem(this.HISTORY_KEY);
-    return data ? JSON.parse(data) : [];
-  }
-  deleteRecord(id) {
-    let history = this.loadHistory();
-    history = history.filter(record => record.id !== id);
-    localStorage.setItem(this.HISTORY_KEY, JSON.stringify(history));
-  }
-  clearHistory() {
-    const lang = this.getLang();
-    if (confirm(translations[lang].confirmClear)) {
-      localStorage.removeItem(this.HISTORY_KEY);
-      ui.updateHistoryList();
-      ui.updateTotalStats();
-      alert(translations[lang].alertCleared);
-    }
-  }
-  saveTempSession(data) { localStorage.setItem(this.TEMP_SESSION_KEY, JSON.stringify(data)); }
-  loadTempSession() {
-    const data = localStorage.getItem(this.TEMP_SESSION_KEY);
-    return data ? JSON.parse(data) : null;
-  }
-  clearTempSession() { localStorage.removeItem(this.TEMP_SESSION_KEY); }
-  saveProfile(profile) { localStorage.setItem(this.PROFILE_KEY, JSON.stringify(profile)); }
-  loadProfile() {
-    const defaultProfile = { h: 175, hu: "cm", w: 70, wu: "kg" };
-    const data = localStorage.getItem(this.PROFILE_KEY);
-    return data ? JSON.parse(data) : defaultProfile;
-  }
-  getLang() { return localStorage.getItem(this.LANG_KEY) || 'en'; }
-  setLang(lang) { localStorage.setItem(this.LANG_KEY, lang); }
-  getMapTheme() { return localStorage.getItem(this.MAP_THEME_KEY) || 'light'; }
-  setMapTheme(theme) { localStorage.setItem(this.MAP_THEME_KEY, theme); }
-  getUnit() { return localStorage.getItem(this.UNIT_KEY) || 'km'; }
-  setUnit(unit) { localStorage.setItem(this.UNIT_KEY, unit); }
-  getGender() { return localStorage.getItem(this.GENDER_KEY) || 'male'; }
-  setGender(gender) { localStorage.setItem(this.GENDER_KEY, gender); }
+constructor() {
+this.HISTORY_KEY = 'oppaRunHistory';
+this.PROFILE_KEY = 'oppaRunProfile';
+this.LANG_KEY = 'oppaRunLang';
+this.TEMP_SESSION_KEY = 'oppaRunTempSession';
+this.MAP_THEME_KEY = 'oppaRunMapTheme';
+this.UNIT_KEY = 'oppaRunUnit';
+this.GENDER_KEY = 'oppaRunGender';
+}
+saveRecord(record) {
+const history = this.loadHistory();
+history.unshift(record);
+localStorage.setItem(this.HISTORY_KEY, JSON.stringify(history));
+this.clearTempSession();
+}
+loadHistory() {
+const data = localStorage.getItem(this.HISTORY_KEY);
+return data ? JSON.parse(data) : [];
+}
+deleteRecord(id) {
+let history = this.loadHistory();
+history = history.filter(record => record.id !== id);
+localStorage.setItem(this.HISTORY_KEY, JSON.stringify(history));
+}
+clearHistory() {
+const lang = this.getLang();
+if (confirm(translations[lang].confirmClear)) {
+localStorage.removeItem(this.HISTORY_KEY);
+ui.updateHistoryList();
+ui.updateTotalStats();
+alert(translations[lang].alertCleared);
+}
+}
+saveTempSession(data) { localStorage.setItem(this.TEMP_SESSION_KEY, JSON.stringify(data)); }
+loadTempSession() {
+const data = localStorage.getItem(this.TEMP_SESSION_KEY);
+return data ? JSON.parse(data) : null;
+}
+clearTempSession() { localStorage.removeItem(this.TEMP_SESSION_KEY); }
+saveProfile(profile) { localStorage.setItem(this.PROFILE_KEY, JSON.stringify(profile)); }
+loadProfile() {
+const defaultProfile = { h: 175, hu: "cm", w: 70, wu: "kg" };
+const data = localStorage.getItem(this.PROFILE_KEY);
+return data ? JSON.parse(data) : defaultProfile;
+}
+getLang() { return localStorage.getItem(this.LANG_KEY) || 'en'; }
+setLang(lang) { localStorage.setItem(this.LANG_KEY, lang); }
+getMapTheme() { return localStorage.getItem(this.MAP_THEME_KEY) || 'light'; }
+setMapTheme(theme) { localStorage.setItem(this.MAP_THEME_KEY, theme); }
+getUnit() { return localStorage.getItem(this.UNIT_KEY) || 'km'; }
+setUnit(unit) { localStorage.setItem(this.UNIT_KEY, unit); }
+getGender() { return localStorage.getItem(this.GENDER_KEY) || 'male'; }
+setGender(gender) { localStorage.setItem(this.GENDER_KEY, gender); }
 }
 
-// ========== UIManager 클래스 ==========
+// ========== UIManager ==========
 class UIManager {
-  constructor() {
-    this.dom = {
-      status: document.getElementById('status'),
-      curPace: document.getElementById('curPace'),
-      dist: document.getElementById('dist'),
-      time: document.getElementById('time'),
-      avgPace: document.getElementById('avgPace'),
-      cadence: document.getElementById('cadence'),
-      gct: document.getElementById('gct'),
-      flight: document.getElementById('flight'),
-      cardCadence: document.getElementById('card-cadence'),
-      cardGct: document.getElementById('card-gct'),
-      cardFlight: document.getElementById('card-flight'),
-      pauseStatus: document.getElementById('pause-status'),
-      quickMetro: document.getElementById('quick-metro'),
-      runView: document.getElementById('run-view'),
-      mapArea: document.getElementById('map-area'),
-      historyView: document.getElementById('history-view'),
-      historyList: document.getElementById('history-list'),
-      totalStatsContainer: document.getElementById('total-stats-container'),
-      dimmerOverlay: document.getElementById('dimmer-overlay'),
-      metroBpmVal: document.getElementById('metro-bpm-val'),
-      btnStart: document.getElementById('btn-start'),
-      btnStop: document.getElementById('btn-stop'),
-      afterStop: document.getElementById('after-stop'),
-      mapThemeToggle: document.getElementById('map-theme-toggle'),
-      unitDist: document.getElementById('unit-dist')
-    };
-    this.detailMap = null;
-    this.currentStatFilter = 'weekly';
-    this.pendingDeleteId = null;
-    this.pendingSaveId = null;
-    this.menuBpmDisplay = document.getElementById('menu-bpm-display');
-    this.btnMetroToggle = document.getElementById('btn-metro-toggle');
-    this.currentUnit = storage.getUnit();
-    this.currentGender = storage.getGender();
-    this.dimActive = false;
-    const dimBtn = document.getElementById('btn-dim');
-    if (dimBtn) dimBtn.onclick = () => this.toggleDim();
-  }
-
-  calculateCalories(weightKg, distanceKm, paceSeconds, totalAltitudeGain, gender) {
-    let met = 7.0;
-    if (paceSeconds <= 240) met = 12.0;
-    else if (paceSeconds <= 270) met = 11.0;
-    else if (paceSeconds <= 300) met = 10.5;
-    else if (paceSeconds <= 330) met = 10.0;
-    else if (paceSeconds <= 360) met = 9.0;
-    else if (paceSeconds <= 420) met = 8.0;
-    const inclineBonus = 1 + (Math.max(0, totalAltitudeGain) / 1000);
-    let genderBonus = 1.0;
-    if (gender === 'male') genderBonus = 1.05;
-    if (gender === 'female') genderBonus = 0.95;
-    const hours = distanceKm / (3600 / paceSeconds);
-    return Math.round(met * weightKg * hours * genderBonus * inclineBonus);
-  }
-
-  // 수정된 올바른 parsePaceToSeconds 함수
-  parsePaceToSeconds(paceStr) {
-    if (!paceStr || paceStr === "--'--") return 360;
-    const parts = paceStr.replace('"', '').split("'");
-    const min = parseInt(parts[0]) || 5;
-    const sec = parseInt(parts[1]) || 0;
-    return min * 60 + sec;
-  }
-
-  setGender(gender) {
-    this.currentGender = gender;
-    storage.setGender(gender);
-    document.getElementById('gender-male').classList.toggle('active', gender === 'male');
-    document.getElementById('gender-female').classList.toggle('active', gender === 'female');
-  }
-  setUnit(unit) {
-    this.currentUnit = unit;
-    storage.setUnit(unit);
-    document.getElementById('unit-km').classList.toggle('active', unit === 'km');
-    document.getElementById('unit-mile').classList.toggle('active', unit === 'mile');
-    this.applyUnitToDisplay();
-    this.updateHistoryList();
-    this.updateTotalStats();
-  }
-  applyUnitToDisplay() {
-    const unit = this.currentUnit;
-    const unitText = unit === 'km' ? ' KM' : ' MI';
-    if(this.dom.unitDist) this.dom.unitDist.textContent = unitText;
-    const distKm = parseFloat(this.dom.dist.textContent);
-    if(!isNaN(distKm)) {
-      const displayDist = unit === 'km' ? distKm.toFixed(2) : (distKm * 0.621371).toFixed(2);
-      this.dom.dist.textContent = displayDist;
-    }
-    if(this.dom.curPace.textContent && this.dom.curPace.textContent !== "--'--") {
-      this.dom.curPace.textContent = this.convertPace(this.dom.curPace.textContent, unit);
-    }
-    if(this.dom.avgPace.textContent && this.dom.avgPace.textContent !== "--'--") {
-      this.dom.avgPace.textContent = this.convertPace(this.dom.avgPace.textContent, unit);
-    }
-  }
-  convertPace(paceStr, toUnit) {
-    if(!paceStr || paceStr === "--'--") return "--'--";
-    const parts = paceStr.replace('"', '').split("'");
-    const min = parseInt(parts[0]);
-    const sec = parseInt(parts[1]);
-    if(isNaN(min) || isNaN(sec)) return "--'--";
-    const totalSecPerKm = min * 60 + sec;
-    if(toUnit === 'mile') {
-      const totalSecPerMile = totalSecPerKm * 1.609344;
-      const newMin = Math.floor(totalSecPerMile / 60);
-      const newSec = Math.round(totalSecPerMile % 60);
-      return newMin + "'" + String(newSec).padStart(2,'0') + '"';
-    } else {
-      const totalSecPerKmBack = totalSecPerKm / 1.609344;
-      const newMin = Math.floor(totalSecPerKmBack / 60);
-      const newSec = Math.round(totalSecPerKmBack % 60);
-      return newMin + "'" + String(newSec).padStart(2,'0') + '"';
-    }
-  }
-  toggleMapTheme() {
-    const currentTheme = storage.getMapTheme();
-    const nextTheme = currentTheme === 'light' ? 'dark' : 'light';
-    storage.setMapTheme(nextTheme);
-    this.applyMapTheme(nextTheme);
-  }
-  applyMapTheme(theme) {
-    const mapEl = document.getElementById('map');
-    if (!mapEl) return;
-    if (theme === 'dark') {
-      mapEl.classList.add('dark-map-layer');
-      if (this.dom.mapThemeToggle) this.dom.mapThemeToggle.textContent = '☀️';
-    } else {
-      mapEl.classList.remove('dark-map-layer');
-      if (this.dom.mapThemeToggle) this.dom.mapThemeToggle.textContent = '🌙';
-    }
-  }
-  updateRunningDisplay(data) {
-    if (data.pace !== undefined) this.dom.curPace.textContent = this.convertPace(data.pace, this.currentUnit);
-    if (data.dist !== undefined) {
-      const distKm = parseFloat(data.dist);
-      const displayDist = this.currentUnit === 'km' ? distKm.toFixed(2) : (distKm * 0.621371).toFixed(2);
-      this.dom.dist.textContent = displayDist;
-    }
-    if (data.time !== undefined) this.dom.time.textContent = data.time;
-    if (data.avgPace !== undefined) this.dom.avgPace.textContent = this.convertPace(data.avgPace, this.currentUnit);
-    if (data.cadence !== undefined) {
-      this.dom.cadence.textContent = data.cadence;
-      this.updateCardColor(this.dom.cardCadence, this.getCadenceLevel(data.cadence));
-    }
-    if (data.gct !== undefined) {
-      this.dom.gct.textContent = data.gct;
-      this.updateCardColor(this.dom.cardGct, this.getGctLevel(data.gct));
-    }
-    if (data.flight !== undefined) {
-      this.dom.flight.textContent = data.flight;
-      this.updateCardColor(this.dom.cardFlight, this.getFlightLevel(data.flight));
-    }
-  }
-  getCadenceLevel(val) { if (val >= 180) return 'good'; if (val >= 170) return 'warning'; return 'danger'; }
-  getGctLevel(val) { if (val <= 240) return 'good'; if (val <= 270) return 'warning'; return 'danger'; }
-  getFlightLevel(val) { if (val >= 30) return 'good'; if (val >= 20) return 'warning'; return 'danger'; }
-  updateCardColor(el, level) {
-    const colors = { good: 'var(--good)', warning: 'var(--warning)', danger: 'var(--danger)', normal: '#333' };
-    if(el) el.style.borderColor = colors[level] || colors.normal;
-    const valEl = el ? el.querySelector('.value') : null;
-    if (valEl) valEl.style.color = colors[level] || colors.normal;
-  }
-  showTab(tab) {
-    this.closeDetail(); this.closeDiag(); this.closeMetronome();
-    this.dom.runView.style.display = (tab === 'run' ? 'flex' : 'none');
-    this.dom.mapArea.style.display = (tab === 'run' ? 'block' : 'none');
-    this.dom.historyView.style.display = (tab === 'history' ? 'flex' : 'none');
-    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    const tabBtn = document.getElementById('tab-' + tab);
-    if(tabBtn) tabBtn.classList.add('active');
-    if(tab === 'history') this.updateHistoryList();
-    if(tab === 'run' && app.map) setTimeout(() => app.map.invalidateSize(), 100);
-  }
-  showSubTab(sub) {
-    document.querySelectorAll('.sub-btn').forEach(b => b.classList.remove('active'));
-    const subBtn = document.getElementById('sub-tab-' + sub);
-    if(subBtn) subBtn.classList.add('active');
-    document.querySelectorAll('.sub-page').forEach(p => p.style.display = 'none');
-    const subPage = document.getElementById('sub-page-' + sub);
-    if(subPage) subPage.style.display = 'flex';
-    if(sub === 'list') this.updateHistoryList();
-    if(sub === 'total') this.updateTotalStats();
-    if(sub === 'info') this.toggleInfoSubTab('theory');
-    if(sub === 'settings') this.initProfileDropdowns();
-  }
-  toggleInfoSubTab(target) {
-    const theoryBtn = document.getElementById('info-sub-tab-theory');
-    const precisionBtn = document.getElementById('info-sub-tab-precision');
-    const theoryArea = document.getElementById('info-theory-area');
-    const precisionArea = document.getElementById('info-precision-analysis-area');
-    if (target === 'theory' && theoryBtn && precisionBtn && theoryArea && precisionArea) {
-      theoryBtn.classList.add('active');
-      precisionBtn.classList.remove('active');
-      theoryArea.style.display = 'flex';
-      precisionArea.style.display = 'none';
-    } else if (target === 'precision' && theoryBtn && precisionBtn && theoryArea && precisionArea) {
-      precisionBtn.classList.add('active');
-      theoryBtn.classList.remove('active');
-      theoryArea.style.display = 'none';
-      precisionArea.style.display = 'flex';
-      this.buildPrecisionSelector();
-    }
-  }
-  buildPrecisionSelector() {
-    const h = storage.loadHistory();
-    const dropdownOptions = document.getElementById('precision-record-dropdown-options');
-    const currentSelectText = document.getElementById('current-precision-record-text');
-    const isKo = (storage.getLang() === 'ko');
-    if (!dropdownOptions || !currentSelectText) return;
-    if (h.length === 0) {
-      currentSelectText.textContent = isKo ? "기록 없음" : "NO RECORDS";
-      dropdownOptions.innerHTML = '<div class="dropdown-option precision-option" style="color: #666; text-align:center;">' + (isKo ? "기록 없음" : "NO RECORDS") + '</div>';
-      this.loadPrecisionDashboard("");
-      return;
-    }
-    dropdownOptions.innerHTML = h.map((r) => {
-      let shortDate = r.date.split(' (')[0].replace(', ', ' ');
-      let escapedDate = shortDate.replace(/'/g, "'");
-      return '<div class="dropdown-option precision-option" onclick="ui.selectPrecisionRecord(' + r.id + ', '' + escapedDate + '')">' + shortDate + '</div>';
-    }).join('');
-    const defaultDateText = h[0].date.split(' (')[0].replace(', ', ' ');
-    currentSelectText.textContent = defaultDateText;
-    this.loadPrecisionDashboard(h[0].id);
-  }
-  selectPrecisionRecord(recordId, dateText) {
-    const currentText = document.getElementById('current-precision-record-text');
-    if(currentText) currentText.textContent = dateText;
-    this.loadPrecisionDashboard(recordId);
-    const dropdown = document.getElementById('precision-record-dropdown-options');
-    if(dropdown) dropdown.style.display = 'none';
-  }
-  loadPrecisionDashboard(recordId) {
-    const isKo = (storage.getLang() === 'ko');
-    if (!recordId) {
-      const setText = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
-      setText('precision-cadence', '-- SPM');
-      setText('precision-cadence-bal', '-- %');
-      setText('precision-gct', '-- ms');
-      setText('precision-gct-bal', '-- %');
-      setText('precision-flight', '-- %');
-      setText('precision-vert-ratio', '-- %');
-      setText('precision-alt', '-- m');
-      setText('precision-stride', '-- m');
-      const fb = document.getElementById('precision-feedback-text');
-      if(fb) fb.textContent = isKo ? "기록이 존재하지 않습니다." : "No records found.";
-      return;
-    }
-    const h = storage.loadHistory();
-    const record = h.find(r => r.id == recordId);
-    if (record) {
-      const cadence = record.cadence || 170;
-      const gct = record.gct && record.gct !== '--' ? parseInt(record.gct) : 250;
-      const flight = record.flight && record.flight !== '--' ? parseInt(record.flight) : 25;
-      const alt = record.alt || 0;
-      let speedKmh = 12;
-      if (record.avgPace && record.avgPace.includes("'")) {
-        const parts = record.avgPace.replace('"', '').split("'");
-        const min = parseInt(parts[0]) || 5;
-        const sec = parseInt(parts[1]) || 0;
-        if(min > 0) speedKmh = 60 / (min + (sec / 60));
-      }
-      const strideCalculated = ((speedKmh / 3.6) / (cadence / 60)).toFixed(2);
-      const vertRatioCalculated = (7.5 - (cadence - 160) * 0.05).toFixed(1);
-      const setVal = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
-      setVal('precision-cadence', cadence + ' SPM');
-      const cadEl = document.getElementById('precision-cadence');
-      if(cadEl) cadEl.style.color = this.getCadenceColor(cadence);
-      setVal('precision-cadence-bal', (record.cadenceBal ? record.cadenceBal : '50:50') + ' %');
-      setVal('precision-gct', gct + ' ms');
-      const gctEl = document.getElementById('precision-gct');
-      if(gctEl) gctEl.style.color = this.getGctColor(gct);
-      setVal('precision-gct-bal', (record.gctBal ? record.gctBal : '50:50') + ' %');
-      setVal('precision-flight', flight + ' %');
-      const flightEl = document.getElementById('precision-flight');
-      if(flightEl) flightEl.style.color = this.getFlightColor(flight);
-      setVal('precision-vert-ratio', (record.vertRatio ? record.vertRatio : vertRatioCalculated) + ' %');
-      setVal('precision-alt', alt + ' m');
-      setVal('precision-stride', (record.stride ? record.stride : strideCalculated) + ' m');
-      let feedback = "";
-      if (gct > 240 || cadence < 170) {
-        feedback = isKo ? "지면 접촉(GCT)이 늘어지고 피치가 낮아 충격 부하가 발생할 수 있습니다. 메트로놈 비트에 리듬을 동기화하세요!" : "Prolonged GCT and low cadence increase impact loading. Sync with metronome rhythm!";
-      } else {
-        feedback = isKo ? "훌륭한 다이내믹스 밸런스입니다! 지면 반발력을 수평 추진력으로 전환하고 있습니다." : "Outstanding running dynamics symmetry! Efficient ground reaction force conversion.";
-      }
-      const fb = document.getElementById('precision-feedback-text');
-      if(fb) fb.innerHTML = feedback;
-    }
-  }
-  changeLanguage(lang) {
-    storage.setLang(lang);
-    const t = translations[lang] || translations['en'];
-    ['pace','dist','time','avg','cadence','gct','flight'].forEach(id => {
-      const el = document.getElementById('label-'+id); if(el) el.textContent = t[id];
-    });
-    if(this.dom.btnStart) this.dom.btnStart.textContent = t.start;
-    if(this.dom.btnStop) this.dom.btnStop.textContent = t.stop;
-    const resumeBtn = document.getElementById('btn-resume');
-    const finishBtn = document.getElementById('btn-finish');
-    if(resumeBtn) resumeBtn.textContent = t.resume;
-    if(finishBtn) finishBtn.textContent = t.finish;
-    const tabRun = document.getElementById('tab-run');
-    const tabHistory = document.getElementById('tab-history');
-    if(tabRun) tabRun.textContent = t.run;
-    if(tabHistory) tabHistory.textContent = t.history;
-    const subList = document.getElementById('sub-tab-list');
-    const subTotal = document.getElementById('sub-tab-total');
-    const subInfo = document.getElementById('sub-tab-info');
-    const subSettings = document.getElementById('sub-tab-settings');
-    if(subList) subList.textContent = t.list;
-    if(subTotal) subTotal.textContent = t.total;
-    if(subInfo) subInfo.textContent = t.info;
-    if(subSettings) subSettings.textContent = t.settings;
-    const langLabel = document.getElementById('label-select-lang');
-    if(langLabel) langLabel.textContent = t.selLang;
-    const unitLabel = document.getElementById('label-unit');
-    if(unitLabel) unitLabel.textContent = t.unitLabel;
-    const genderLabel = document.getElementById('label-gender');
-    if(genderLabel) genderLabel.textContent = t.genderLabel;
-    const metroLabel = document.getElementById('label-metronome');
-    if(metroLabel) metroLabel.textContent = t.metro;
-    const clearBtn = document.getElementById('btn-clear-history');
-    if(clearBtn) clearBtn.textContent = t.clear;
-    const heightLabel = document.getElementById('label-height');
-    if(heightLabel) heightLabel.textContent = t.height;
-    const weightLabel = document.getElementById('label-weight');
-    if(weightLabel) weightLabel.textContent = t.weight;
-    const metroMenu = document.getElementById('label-metro-menu');
-    if(metroMenu) metroMenu.textContent = t.metroTitle;
-    const infoC = document.getElementById('info-cadence-title');
-    if(infoC) infoC.textContent = t.infC;
-    const infoCD = document.getElementById('info-cadence-desc');
-    if(infoCD) infoCD.textContent = t.infCD;
-    const infoP = document.getElementById('info-power-title');
-    if(infoP) infoP.textContent = t.infP;
-    const infoPD = document.getElementById('info-power-desc');
-    if(infoPD) infoPD.textContent = t.infPD;
-    const infoS = document.getElementById('info-strike-title');
-    if(infoS) infoS.textContent = t.infS;
-    const infoSD = document.getElementById('info-strike-desc');
-    if(infoSD) infoSD.textContent = t.infSD;
-    const infoO = document.getElementById('info-oscillation-title');
-    if(infoO) infoO.textContent = t.infO;
-    const infoOD = document.getElementById('info-oscillation-desc');
-    if(infoOD) infoOD.textContent = t.infOD;
-    const infoR = document.getElementById('info-rolling-title');
-    if(infoR) infoR.textContent = t.infR;
-    const infoRD = document.getElementById('info-rolling-desc');
-    if(infoRD) infoRD.textContent = t.infRD;
-    const infoPost = document.getElementById('info-posture-title');
-    if(infoPost) infoPost.textContent = t.infPost;
-    const infoPostD = document.getElementById('info-posture-desc');
-    if(infoPostD) infoPostD.textContent = t.infPostD;
-    const metroTitle = document.getElementById('metro-title');
-    if(metroTitle) metroTitle.textContent = t.metroTitle;
-    const metroDesc = document.getElementById('metro-desc');
-    if(metroDesc) metroDesc.textContent = t.metroDesc;
-    const metroAccent = document.getElementById('metro-accent-label');
-    if(metroAccent) metroAccent.textContent = t.metroAccent;
-    const diagTitle = document.getElementById('diag-view-title');
-    if(diagTitle) diagTitle.textContent = t.diagTitle;
-    if(this.btnMetroToggle) this.btnMetroToggle.textContent = metro.isPlaying ? t.stop : t.start;
-    if(this.dom.dimmerOverlay) this.dom.dimmerOverlay.querySelector('.dim-message').textContent = (lang === 'ko' ? '🌙 어두운 모드 활성화 (터치하면 해제)' : '🌙 Dark mode active (tap to dismiss)');
-    if(this.dom.pauseStatus) this.dom.pauseStatus.textContent = t.autoPaused;
-    const statWeekly = document.getElementById('stat-filter-weekly');
-    const statMonthly = document.getElementById('stat-filter-monthly');
-    const statYearly = document.getElementById('stat-filter-yearly');
-    if(statWeekly) statWeekly.textContent = t.statWeekly;
-    if(statMonthly) statMonthly.textContent = t.statMonthly;
-    if(statYearly) statYearly.textContent = t.statYearly;
-    const isKo = (lang === 'ko');
-    const pLabels = ['p-label-cadence', 'p-label-cadence-bal', 'p-label-gct', 'p-label-gct-bal', 'p-label-flight', 'p-label-vert', 'p-label-alt', 'p-label-stride'];
-    const pKo = ["케이던스 (CAD)", "케이던스 밸런스", "지면 접촉 (GCT)", "GCT 밸런스", "체공 시간 (FLIGHT)", "수직진폭 비율", "주행 고도 (ALT)", "스트라이드 보폭"];
-    const pEn = ["CADENCE", "CADENCE BAL", "GCT TIME", "GCT BAL", "FLIGHT TIME", "VERT RATIO", "ALTITUDE", "STRIDE LENGTH"];
-    pLabels.forEach((id, idx) => { const el = document.getElementById(id); if(el) el.textContent = isKo ? pKo[idx] : pEn[idx]; });
-    const langMap = { en: "English (US)", ko: "한국어 (KR)" };
-    const currentLang = document.getElementById('current-lang-text');
-    if(currentLang) currentLang.textContent = langMap[lang];
-    const theoryLabel = document.getElementById('info-tab-theory-label');
-    const precisionLabel = document.getElementById('info-tab-precision-label');
-    if(theoryLabel) theoryLabel.textContent = t.infoTabTheory;
-    if(precisionLabel) precisionLabel.textContent = t.infoTabPrecision;
-    this.updateHistoryList(); this.updateTotalStats(); this.updateQuickMetroBtn();
-    const precisionArea = document.getElementById('info-precision-analysis-area');
-    if(precisionArea && precisionArea.style.display === 'flex') {
-      this.buildPrecisionSelector();
-    }
-  }
-  toggleDim() {
-    this.dimActive = !this.dimActive;
-    const overlay = this.dom.dimmerOverlay;
-    if (!overlay) return;
-    if (this.dimActive) {
-      overlay.style.display = 'flex';
-      if (app && app.state && app.state.isRunning) app.requestWakeLock();
-    } else {
-      overlay.style.display = 'none';
-    }
-  }
-  dismissDim() {
-    if (!this.dimActive) return;
-    this.dimActive = false;
-    const overlay = this.dom.dimmerOverlay;
-    if (overlay) overlay.style.display = 'none';
-  }
-  toggleDropdown(id) {
-    const opt = document.getElementById(id); const isOpen = opt && opt.style.display === 'block';
-    document.querySelectorAll('.dropdown-options, .precision-dropdown-options').forEach(d => d.style.display = 'none');
-    if(opt) opt.style.display = isOpen ? 'none' : 'block';
-  }
-  selectLang(lang) { this.changeLanguage(lang); this.toggleDropdown('dropdown-options'); }
-  initProfileDropdowns() {
-    const p = storage.loadProfile();
-    const heightEl = document.getElementById('current-height');
-    const weightEl = document.getElementById('current-weight');
-    if(heightEl) heightEl.textContent = p.h + ' ' + p.hu;
-    if(weightEl) weightEl.textContent = p.w + ' ' + p.wu;
-    this.renderProfileOptions('height', p.hu); this.renderProfileOptions('weight', p.wu);
-  }
-  renderProfileOptions(type, unit) {
-    const container = document.getElementById(type + '-options');
-    if(!container) return;
-    let html = '';
-    if (type === 'height') {
-      html += '<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit('height', '' + (unit === 'cm' ? 'inch' : 'cm') + '')">SWITCH TO ' + (unit === 'cm' ? 'INCH' : 'CM') + '</div>';
-      const min = unit === 'cm' ? 140 : 55, max = unit === 'cm' ? 210 : 83;
-      for (let i = min; i <= max; i++) html += '<div class="dropdown-option" onclick="ui.setProfile('height', ' + i + ', '' + unit + '')">' + i + ' ' + unit + '</div>';
-    } else {
-      html += '<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit('weight', '' + (unit === 'kg' ? 'lb' : 'kg') + '')">SWITCH TO ' + (unit === 'kg' ? 'LB' : 'KG') + '</div>';
-      const min = unit === 'kg' ? 40 : 130, max = unit === 'kg' ? 130 : 286;
-      for (let i = min; i <= max; i++) html += '<div class="dropdown-option" onclick="ui.setProfile('weight', ' + i + ', '' + unit + '')">' + i + ' ' + unit + '</div>';
-    }
-    container.innerHTML = html;
-  }
-  changeUnit(type, nextUnit) {
-    const p = storage.loadProfile();
-    if (type === 'height') { p.h = nextUnit === 'inch' ? Math.round(p.h / 2.54) : Math.round(p.h * 2.54); p.hu = nextUnit; }
-    else { p.w = nextUnit === 'lb' ? Math.round(p.w * 2.20462) : Math.round(p.w / 2.20462); p.wu = nextUnit; }
-    storage.saveProfile(p); this.initProfileDropdowns();
-  }
-  setProfile(type, val, unit) {
-    const p = storage.loadProfile();
-    if (type === 'height') { p.h = val; p.hu = unit; } else { p.w = val; p.wu = unit; }
-    storage.saveProfile(p); this.initProfileDropdowns(); this.toggleDropdown(type + '-options');
-    this.updateTotalStats();
-  }
-  openMetronome() { const mv = document.getElementById('metronome-view'); if(mv) mv.style.display = 'flex'; }
-  closeMetronome() { const mv = document.getElementById('metronome-view'); if(mv) mv.style.display = 'none'; }
-  updateQuickMetroBtn() {
-    const btn = this.dom.quickMetro;
-    if(!btn) return;
-    if(metro.isPlaying) {
-      btn.textContent = "METRO ON"; btn.style.background = "var(--primary)"; btn.style.color = "#000"; btn.style.borderColor = "var(--primary)";
-      if(this.menuBpmDisplay) this.menuBpmDisplay.textContent = document.getElementById('metro-bpm').value;
-    } else {
-      btn.textContent = "METRO OFF"; btn.style.background = "#333"; btn.style.color = "#999"; btn.style.borderColor = "#444";
-      if(this.menuBpmDisplay) this.menuBpmDisplay.textContent = "OFF";
-    }
-  }
-  openConfirmModal(id) {
-    this.pendingDeleteId = id;
-    const lang = storage.getLang();
-    const t = translations[lang] || translations['en'];
-    const msgEl = document.getElementById('confirm-modal-msg');
-    const cancelBtn = document.getElementById('btn-confirm-cancel');
-    const deleteBtn = document.getElementById('btn-confirm-delete');
-    const modal = document.getElementById('confirm-modal');
-    if(msgEl) msgEl.textContent = t.confirmSingleDelete;
-    if(cancelBtn) cancelBtn.textContent = t.cancelModal;
-    if(deleteBtn) deleteBtn.textContent = t.deleteBtn;
-    if(modal) modal.style.display = 'flex';
-  }
-  closeConfirmModal(isConfirmed) {
-    const modal = document.getElementById('confirm-modal');
-    if(modal) modal.style.display = 'none';
-    if (isConfirmed && this.pendingDeleteId !== null) {
-      storage.deleteRecord(this.pendingDeleteId);
-      this.updateHistoryList();
-      this.updateTotalStats();
-    }
-    this.pendingDeleteId = null;
-  }
-  openSaveConfirmModal(id) {
-    this.pendingSaveId = id;
-    const lang = storage.getLang();
-    const t = translations[lang] || translations['en'];
-    const msgEl = document.getElementById('save-confirm-modal-msg');
-    const cancelBtn = document.getElementById('btn-save-confirm-cancel');
-    const saveBtn = document.getElementById('btn-save-confirm-save');
-    const modal = document.getElementById('save-confirm-modal');
-    if(msgEl) msgEl.textContent = t.confirmSingleSave;
-    if(cancelBtn) cancelBtn.textContent = t.cancelModal;
-    if(saveBtn) saveBtn.textContent = t.saveBtn;
-    if(modal) modal.style.display = 'flex';
-  }
-  closeSaveConfirmModal(isConfirmed) {
-    const modal = document.getElementById('save-confirm-modal');
-    if(modal) modal.style.display = 'none';
-    if (isConfirmed && this.pendingSaveId !== null) {
-      const lang = storage.getLang();
-      const t = translations[lang] || translations['en'];
-      alert(t.saveSuccessMsg);
-    }
-    this.pendingSaveId = null;
-  }
-  updateHistoryList() {
-    const h = storage.loadHistory(); const lang = storage.getLang(); const t = translations[lang] || translations['en'];
-    if (!this.dom.historyList) return;
-    if (h.length === 0) { this.dom.historyList.innerHTML = '<div style="text-align:center; padding:50px; color:#444; font-weight:900;">' + t.noRec + '</div>'; return; }
-    this.dom.historyList.innerHTML = h.map(r => {
-      let displayDist = parseFloat(r.dist);
-      if(this.currentUnit === 'mile') displayDist = displayDist * 0.621371;
-      const distStr = displayDist.toFixed(2);
-      const unitStr = this.currentUnit === 'km' ? 'KM' : 'MI';
-      let displayPace = r.avgPace || r.pace || "--'--";
-      if(displayPace !== "--'--" && this.currentUnit === 'mile') {
-        displayPace = this.convertPace(displayPace, 'mile');
-      }
-      return '<div class="history-item">' +
-        '<div class="h-date">' + r.date + '</div>' +
-        '<div class="h-actions">' +
-        '<button class="btn-h-sub" onclick="ui.openDetail(' + r.id + ')">' + t.route + '</button>' +
-        '<button class="btn-h-sub" onclick="ui.openDiag(' + r.id + ')">' + t.diag + '</button>' +
-        '</div>' +
-        '<div class="h-main-stats">' +
-        '<div class="h-val-big">' + distStr + ' <span style="font-size:11px">' + unitStr + '</span></div>' +
-        '<div style="font-size:10px; color:#888; font-weight:800; margin-left:auto;">ALT: <span style="color:var(--primary)">' + (r.alt || '0') + '</span>m</div>' +
-        '</div>' +
-        '<div class="h-details-grid">' +
-        '<div class="h-det-box"><div class="h-det-label">' + t.pace + '</div><div class="h-det-val">' + displayPace + '</div></div>' +
-        '<div class="h-det-box"><div class="h-det-label">' + t.cadence + '</div><div class="h-det-val" style="color:' + this.getCadenceColor(r.cadence) + '">' + (r.cadence || 0) + '</div></div>' +
-        '<div class="h-det-box"><div class="h-det-label">' + t.cal + '</div><div class="h-det-val">' + (r.kcal || 0) + '</div></div>' +
-        '<div class="h-det-box"><div class="h-det-label">' + t.gct + '</div><div class="h-det-val" style="color:' + this.getGctColor(r.gct) + '">' + (r.gct || '--') + ' <span style="font-size:7px">MS</span></div></div>' +
-        '<div class="h-det-box"><div class="h-det-label">' + t.flight + '</div><div class="h-det-val" style="color:' + this.getFlightColor(r.flight) + '">' + (r.flight || '--') + ' <span style="font-size:7px">%</span></div></div>' +
-        '</div>' +
-        '<button class="btn-h-delete" onclick="ui.openConfirmModal(' + r.id + ')">' + t.deleteBtn + '</button>' +
-        '</div>';
-    }).join('');
-  }
-  getCadenceColor(v) { const l = this.getCadenceLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
-  getGctColor(v) { const l = this.getGctLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
-  getFlightColor(v) { const l = this.getFlightLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
-  changeStatFilter(filterType) {
-    this.currentStatFilter = filterType;
-    document.querySelectorAll('.stat-filter-btn').forEach(btn => btn.classList.remove('active'));
-    const activeBtn = document.getElementById('stat-filter-' + filterType);
-    if(activeBtn) activeBtn.classList.add('active');
-    this.updateTotalStats();
-  }
-  updateTotalStats() {
-    const h = storage.loadHistory();
-    const lang = storage.getLang();
-    const t = translations[lang] || translations['en'];
-    if (!this.dom.totalStatsContainer) return;
-    if (h.length === 0) {
-      this.dom.totalStatsContainer.innerHTML = '<div style="text-align:center; padding:50px; color:#444; font-weight:900;">' + t.noRec + '</div>';
-      return;
-    }
-    const now = new Date();
-    let limitDays = 7;
-    if (this.currentStatFilter === 'monthly') limitDays = 30;
-    if (this.currentStatFilter === 'yearly') limitDays = 365;
-    const filteredHistory = h.filter(r => {
-      const recordDate = new Date(r.date);
-      const diffTime = Math.abs(now - recordDate);
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      return diffDays <= limitDays;
-    });
-    if (filteredHistory.length === 0) {
-      this.dom.totalStatsContainer.innerHTML = '<div style="text-align:center; padding:50px; color:#444; font-weight:900;">' + t.noRec + '</div>';
-      return;
-    }
-    let totalDist = 0, totalRuns = filteredHistory.length, totalKcal = 0, totalSeconds = 0;
-    let sumCadence = 0, countCadence = 0, sumGct = 0, countGct = 0, sumFlight = 0, countFlight = 0, sumAlt = 0, countAlt = 0;
-    filteredHistory.forEach(r => {
-      totalDist += parseFloat(r.dist) || 0;
-      totalKcal += parseInt(r.kcal) || 0;
-      if(r.time && typeof r.time === 'string') {
-        const parts = r.time.split(':');
-        if(parts.length === 2) totalSeconds += (parseInt(parts[0],10)*60)+parseInt(parts[1],10);
-        else if(parts.length === 3) totalSeconds += (parseInt(parts[0],10)*3600)+(parseInt(parts[1],10)*60)+parseInt(parts[2],10);
-      }
-      if(r.cadence && typeof r.cadence === 'number' && !isNaN(r.cadence)) { sumCadence += r.cadence; countCadence++; }
-      if(r.gct && r.gct !== '--') { const gctVal = parseInt(r.gct,10); if(!isNaN(gctVal)) { sumGct += gctVal; countGct++; } }
-      if(r.flight && r.flight !== '--') { const flightVal = parseInt(r.flight,10); if(!isNaN(flightVal)) { sumFlight += flightVal; countFlight++; } }
-      if(r.alt !== undefined && typeof r.alt === 'number' && !isNaN(r.alt)) { sumAlt += r.alt; countAlt++; }
-    });
-    let avgPaceStr = "--'--";
-    if (totalDist > 0 && totalSeconds > 0) {
-      let avgKmh = totalDist / (totalSeconds / 3600);
-      let s = 3600 / avgKmh;
-      avgPaceStr = Math.floor(s/60) + "'" + String(Math.floor(s%60)).padStart(2,'0') + '"';
-      if(this.currentUnit === 'mile') avgPaceStr = this.convertPace(avgPaceStr, 'mile');
-    }
-    const avgCadenceResult = countCadence > 0 ? Math.round(sumCadence / countCadence) : 0;
-    const avgGctResult = countGct > 0 ? Math.round(sumGct / countGct) : '--';
-    const avgFlightResult = countFlight > 0 ? Math.round(sumFlight / countFlight) : '--';
-    const avgAltResult = countAlt > 0 ? Math.round(sumAlt / countAlt) : 0;
-    const totalDistDisplay = this.currentUnit === 'km' ? totalDist.toFixed(2) : (totalDist * 0.621371).toFixed(2);
-    const unitLabel = this.currentUnit === 'km' ? 'km' : 'mi';
-    this.dom.totalStatsContainer.innerHTML =
-      '<div class="stat-grid-dashboard">' +
-      '<div class="card"><div class="label">' + t.totalDist + '</div><div class="value" style="color:var(--primary); font-size:20px;">' + totalDistDisplay + ' ' + unitLabel + '</div></div>' +
-      '<div class="card"><div class="label">' + t.runCount + '</div><div class="value" style="font-size:20px;">' + totalRuns + '</div></div>' +
-      '<div class="card"><div class="label">' + t.avgPaceLabel + '</div><div class="value" style="font-size:20px;">' + avgPaceStr + '</div></div>' +
-      '<div class="card"><div class="label">' + t.totalCal + '</div><div class="value" style="font-size:20px;">' + totalKcal + ' kcal</div></div>' +
-      '<div class="card"><div class="label">' + (t.avgGct || "Average GCT").replace(' :', '') + '</div><div class="value" style="font-size:20px;">' + avgGctResult + ' <span style="font-size:11px">ms</span></div></div>' +
-      '<div class="card"><div class="label">' + (t.avgFlight || "Average Flight").replace(' :', '') + '</div><div class="value" style="font-size:20px;">' + avgFlightResult + ' <span style="font-size:11px">%</span></div></div>' +
-      '<div class="card"><div class="label">' + (t.avgCadence || "Average Cadence").replace(' :', '') + '</div><div class="value" style="font-size:20px;">' + avgCadenceResult + ' <span style="font-size:11px">SPM</span></div></div>' +
-      '<div class="card"><div class="label">' + (t.avgAlt || "Average Altitude").replace(' :', '') + '</div><div class="value" style="font-size:20px;">' + avgAltResult + ' <span style="font-size:11px">m</span></div></div>' +
-      '</div>';
-  }
-  openDetail(id) {
-    const h = storage.loadHistory(); const record = h.find(r => r.id === id); if (!record) return;
-    const lang = storage.getLang(); const t = translations[lang] || translations['en'];
-    const detailView = document.getElementById('detail-view');
-    if(detailView) detailView.style.display = 'flex';
-    if (this.detailMap) this.detailMap.remove();
-    const detailMapDiv = document.getElementById('detail-map');
-    if(detailMapDiv) {
-      this.detailMap = L.map('detail-map', {zoomControl: false, attributionControl: false});
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(this.detailMap);
-      if (storage.getMapTheme() === 'dark') detailMapDiv.classList.add('dark-map-layer');
-      else detailMapDiv.classList.remove('dark-map-layer');
-      setTimeout(() => { if(this.detailMap) this.detailMap.invalidateSize(); }, 200);
-    }
-    if (record.path && record.path.length > 0 && this.detailMap) {
-      let poly = L.polyline(record.path, {color: 'var(--primary)', weight: 5}).addTo(this.detailMap);
-      this.detailMap.fitBounds(poly.getBounds());
-    }
-    if (record.splits && record.splits.length > 0 && this.detailMap) {
-      record.splits.forEach(split => {
-        if (split.coord) {
-          let splitDist = split.km;
-          if(this.currentUnit === 'mile') splitDist = (splitDist * 0.621371).toFixed(2);
-          let splitPace = split.pace;
-          if(this.currentUnit === 'mile') splitPace = this.convertPace(split.pace, 'mile');
-          L.marker(split.coord, {
-            icon: L.divIcon({ className: 'pace-marker', html: splitDist + (this.currentUnit === 'km' ? 'k' : 'm') + ': ' + splitPace, iconSize: [75, 16], iconAnchor: [37, 8] })
-          }).addTo(this.detailMap);
-        }
-      });
-    }
-    let splitLogsHtml = '<div class="detail-log-box"><div class="detail-log-title">' + (t.splitTitle || "SPLIT ANALYTICS") + '</div>';
-    if (record.splits && record.splits.length > 0) { record.splits.forEach(split => {
-      let splitDist = split.km;
-      let splitPace = split.pace;
-      if(this.currentUnit === 'mile') {
-        splitDist = (splitDist * 0.621371).toFixed(2);
-        splitPace = this.convertPace(split.pace, 'mile');
-      }
-      splitLogsHtml += '<div class="detail-log-item"><span>■ ' + splitDist + (this.currentUnit === 'km' ? ' km' : ' mi') + ' :</span><span>' + (t.splitPace || "Pace") + ' ' + splitPace + ' | ' + (t.splitAlt || "Alt") + ' ' + (split.altFrom || 0) + 'm → ' + (split.altTo || 0) + 'm (' + (split.altDiff >= 0 ? '▲' : '▼') + Math.abs(split.altDiff || 0) + 'm).</span></div>';
-    }); } else { let baseAlt = record.alt || 0;
-      let recordDist = record.dist;
-      let recordPace = record.avgPace || record.pace || "--'--";
-      if(this.currentUnit === 'mile') {
-        recordDist = (parseFloat(recordDist) * 0.621371).toFixed(2);
-        recordPace = this.convertPace(recordPace, 'mile');
-      }
-      splitLogsHtml += '<div class="detail-log-item" style="color: #ffffff; font-weight: 700;"><span>■ ' + recordDist + (this.currentUnit === 'km' ? ' km' : ' mi') + ' :</span><span>' + (t.splitPace || "Pace") + ' <b>' + recordPace + '</b> | ' + (t.splitAlt || "Alt") + ' <b>' + baseAlt + 'm</b> → <b>' + baseAlt + 'm</b> (▲0m).</span></div>'; } splitLogsHtml += '</div>';
-    let dynamicsHtml = '<div class="detail-log-box" style="margin-top:12px;"><div class="detail-log-title" style="color:var(--warning)">' + (t.summaryTitle || "DYNAMICS SUMMARY") + '</div>' +
-      '<div class="detail-log-item"><span>' + (t.avgGct || "Average GCT") + '</span><span>' + (record.gct || '--') + ' ms.</span></div>' +
-      '<div class="detail-log-item"><span>' + (t.avgFlight || "Average Flight") + '</span><span>' + (record.flight || '--') + ' %.</span></div>' +
-      '<div class="detail-log-item"><span>' + (t.avgCadence || "Average Cadence") + '</span><span>' + (record.cadence || 0) + ' SPM.</span></div></div>';
-    let buttonRowHtml = '<div class="detail-btn-row"><button class="btn-detail-act btn-detail-save" onclick="ui.saveDetailAction(' + record.id + ')">💾 ' + (t.saveBtn || "SAVE") + '</button><button class="btn-detail-act btn-detail-share" onclick="ui.shareDetailAction(' + record.id + ')">🔗 ' + (t.shareBtn || "SHARE") + '</button></div>';
-    const detailData = document.getElementById('detail-data');
-    if(detailData) detailData.innerHTML = splitLogsHtml + dynamicsHtml + buttonRowHtml;
-  }
-  closeDetail() { const dv = document.getElementById('detail-view'); if(dv) dv.style.display = 'none'; }
-  saveDetailAction(id) { this.openSaveConfirmModal(id); }
-  shareDetailAction(id) {
-    const h = storage.loadHistory();
-    const record = h.find(r => r.id === id);
-    if (!record) return;
-    let displayDist = parseFloat(record.dist);
-    if(this.currentUnit === 'mile') displayDist = displayDist * 0.621371;
-    let displayPace = record.avgPace || record.pace;
-    if(displayPace && this.currentUnit === 'mile') displayPace = this.convertPace(displayPace, 'mile');
-    const unitText = this.currentUnit === 'km' ? 'KM' : 'MI';
-    const shareText = 'OppaRun Pro 🏃‍♂️\nDistance: ' + displayDist.toFixed(2) + ' ' + unitText + '\nTime: ' + record.time + '\nPace: ' + displayPace;
-    if (navigator.share) {
-      navigator.share({ title: 'OppaRun Pro Running Record', text: shareText, url: window.location.href }).catch(err => console.log(err));
-    } else {
-      navigator.clipboard.writeText(shareText);
-      alert(storage.getLang() === 'ko' ? "러닝 데이터 요약 정보가 클립보드에 복사되었습니다!" : "Running dynamics summary copied to clipboard!");
-    }
-  }
-  openDiag(id) {
-    const h = storage.loadHistory();
-    const r = h.find(rec => rec.id === id);
-    if (!r) return;
-    const lang = storage.getLang();
-    const t = translations[lang];
-    const diagView = document.getElementById('diag-view');
-    const diagDate = document.getElementById('diag-view-date');
-    if(diagDate) diagDate.textContent = r.date;
-    if(diagView) diagView.style.display = 'flex';
-    let gctComment = (r.gct > 240) ? (lang === 'ko' ? "지면 접촉 시간이 다소 깁니다. 발을 빠르게 회수하세요." : "Ground contact time is prolonged. Focus on quick pull-off.") : (lang === 'ko' ? "매우 뛰어난 탄력성입니다." : "Excellent movement elasticity.");
-    let cadComment = (r.cadence >= 175) ? (lang === 'ko' ? "이상적인 보폭 빈도입니다." : "Optimal step frequency.") : (lang === 'ko' ? "케이던스가 다소 낮습니다. 메트로놈에 맞춰보세요." : "Slightly low cadence. Sync with metronome.");
-    let isShortDistance = parseFloat(r.dist) < 0.1;
-    let recovHighlightHTML = "";
-    let recovComment = "";
-    if (isShortDistance) {
-      recovHighlightHTML = '<span class="recovery-highlight" style="font-size: 16px; color: var(--danger);">DIAGNOSIS OMITTED</span>';
-      recovComment = (lang === 'ko') ? "100미터 미만 주행으로 회복 시간 진단이 제공되지 않습니다." : "Distance under 100m, recovery analysis not provided.";
-    } else {
-      let recovHours = Math.round(parseFloat(r.dist) * 2.5);
-      if (recovHours < 12) recovHours = 12;
-      recovHighlightHTML = '<span class="recovery-highlight">' + recovHours + ' Hours</span>';
-      recovComment = (lang === 'ko') ? '다음 고강도 주행 전까지 최소 <b>' + recovHours + '시간</b>의 리커버리를 권장합니다.' : 'A minimum recovery window of <b>' + recovHours + ' hours</b> is recommended.';
-    }
-    const contentArea = document.getElementById('diag-content-area');
-    if(contentArea) {
-      contentArea.innerHTML =
-        '<div class="diag-card"><div class="diag-label">' + (t.diagDyna || "DYNAMICS") + '</div><div class="diag-val-group"><div class="diag-main-val">GCT: ' + r.gct + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
-        '<div class="diag-card"><div class="diag-label">' + (t.diagBalance || "BALANCE") + '</div><div class="diag-val-group"><div class="diag-main-val">CAD: ' + (r.cadence || 0) + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div></div>' +
-        '<div class="diag-card"><div class="diag-label">' + (t.diagRecov || "RECOVERY") + '</div>' + recovHighlightHTML + '<div class="diag-tip">' + recovComment + '</div></div>';
-    }
-  }
-  closeDiag() { const dv = document.getElementById('diag-view'); if(dv) dv.style.display = 'none'; }
+constructor() {
+this.dom = {
+status: document.getElementById('status'),
+curPace: document.getElementById('curPace'),
+dist: document.getElementById('dist'),
+time: document.getElementById('time'),
+avgPace: document.getElementById('avgPace'),
+cadence: document.getElementById('cadence'),
+gct: document.getElementById('gct'),
+flight: document.getElementById('flight'),
+cardCadence: document.getElementById('card-cadence'),
+cardGct: document.getElementById('card-gct'),
+cardFlight: document.getElementById('card-flight'),
+pauseStatus: document.getElementById('pause-status'),
+quickMetro: document.getElementById('quick-metro'),
+runView: document.getElementById('run-view'),
+mapArea: document.getElementById('map-area'),
+historyView: document.getElementById('history-view'),
+historyList: document.getElementById('history-list'),
+totalStatsContainer: document.getElementById('total-stats-container'),
+dimmerOverlay: document.getElementById('dimmer-overlay'),
+metroBpmVal: document.getElementById('metro-bpm-val'),
+btnStart: document.getElementById('btn-start'),
+btnStop: document.getElementById('btn-stop'),
+afterStop: document.getElementById('after-stop'),
+mapThemeToggle: document.getElementById('map-theme-toggle'),
+unitDist: document.getElementById('unit-dist')
+};
+this.detailMap = null;
+this.currentStatFilter = 'weekly';
+this.pendingDeleteId = null;
+this.pendingSaveId = null;
+this.menuBpmDisplay = document.getElementById('menu-bpm-display');
+this.btnMetroToggle = document.getElementById('btn-metro-toggle');
+this.currentUnit = storage.getUnit();
+this.currentGender = storage.getGender();
+this.dimActive = false;
+const dimBtn = document.getElementById('btn-dim');
+if (dimBtn) dimBtn.onclick = () => this.toggleDim();
 }
 
-// ========== MetroEngine 클래스 ==========
+calculateCalories(weightKg, distanceKm, paceSeconds, totalAltitudeGain, gender) {
+let met = 7.0;
+if (paceSeconds <= 240) met = 12.0;
+else if (paceSeconds <= 270) met = 11.0;
+else if (paceSeconds <= 300) met = 10.5;
+else if (paceSeconds <= 330) met = 10.0;
+else if (paceSeconds <= 360) met = 9.0;
+else if (paceSeconds <= 420) met = 8.0;
+const inclineBonus = 1 + (Math.max(0, totalAltitudeGain) / 1000);
+let genderBonus = 1.0;
+if (gender === 'male') genderBonus = 1.05;
+if (gender === 'female') genderBonus = 0.95;
+const hours = distanceKm / (3600 / paceSeconds);
+return Math.round(met * weightKg * hours * genderBonus * inclineBonus);
+}
+
+parsePaceToSeconds(paceStr) {
+  if (!paceStr || paceStr === "--'--"") return 360;
+  const parts = paceStr.replace('"', '').split("'");
+  const min = parseInt(parts[0]) || 5;
+  const sec = parseInt(parts[1]) || 0;
+  return min * 60 + sec;
+}
+
+setGender(gender) {
+this.currentGender = gender;
+storage.setGender(gender);
+document.getElementById('gender-male').classList.toggle('active', gender === 'male');
+document.getElementById('gender-female').classList.toggle('active', gender === 'female');
+}
+setUnit(unit) {
+this.currentUnit = unit;
+storage.setUnit(unit);
+document.getElementById('unit-km').classList.toggle('active', unit === 'km');
+document.getElementById('unit-mile').classList.toggle('active', unit === 'mile');
+this.applyUnitToDisplay();
+this.updateHistoryList();
+this.updateTotalStats();
+}
+applyUnitToDisplay() {
+const unit = this.currentUnit;
+const unitText = unit === 'km' ? ' KM' : ' MI';
+if(this.dom.unitDist) this.dom.unitDist.textContent = unitText;
+const distKm = parseFloat(this.dom.dist.textContent);
+if(!isNaN(distKm)) {
+const displayDist = unit === 'km' ? distKm.toFixed(2) : (distKm * 0.621371).toFixed(2);
+this.dom.dist.textContent = displayDist;
+}
+if(this.dom.curPace.textContent && this.dom.curPace.textContent !== "--'--"") {
+this.dom.curPace.textContent = this.convertPace(this.dom.curPace.textContent, unit);
+}
+if(this.dom.avgPace.textContent && this.dom.avgPace.textContent !== "--'--"") {
+this.dom.avgPace.textContent = this.convertPace(this.dom.avgPace.textContent, unit);
+}
+}
+convertPace(paceStr, toUnit) {
+if(!paceStr || paceStr === "--'--"") return "--'--"";
+const parts = paceStr.replace('"', '').split("'");
+const min = parseInt(parts[0]);
+const sec = parseInt(parts[1]);
+if(isNaN(min) || isNaN(sec)) return "--'--"";
+const totalSecPerKm = min * 60 + sec;
+if(toUnit === 'mile') {
+const totalSecPerMile = totalSecPerKm * 1.609344;
+const newMin = Math.floor(totalSecPerMile / 60);
+const newSec = Math.round(totalSecPerMile % 60);
+return newMin + "'" + String(newSec).padStart(2,'0') + '"';
+} else {
+const totalSecPerKmBack = totalSecPerKm / 1.609344;
+const newMin = Math.floor(totalSecPerKmBack / 60);
+const newSec = Math.round(totalSecPerKmBack % 60);
+return newMin + "'" + String(newSec).padStart(2,'0') + '"';
+}
+}
+toggleMapTheme() {
+const currentTheme = storage.getMapTheme();
+const nextTheme = currentTheme === 'light' ? 'dark' : 'light';
+storage.setMapTheme(nextTheme);
+this.applyMapTheme(nextTheme);
+}
+applyMapTheme(theme) {
+const mapEl = document.getElementById('map');
+if (!mapEl) return;
+if (theme === 'dark') {
+mapEl.classList.add('dark-map-layer');
+if (this.dom.mapThemeToggle) this.dom.mapThemeToggle.textContent = '☀️';
+} else {
+mapEl.classList.remove('dark-map-layer');
+if (this.dom.mapThemeToggle) this.dom.mapThemeToggle.textContent = '🌙';
+}
+}
+updateRunningDisplay(data) {
+if (data.pace !== undefined) this.dom.curPace.textContent = this.convertPace(data.pace, this.currentUnit);
+if (data.dist !== undefined) {
+const distKm = parseFloat(data.dist);
+const displayDist = this.currentUnit === 'km' ? distKm.toFixed(2) : (distKm * 0.621371).toFixed(2);
+this.dom.dist.textContent = displayDist;
+}
+if (data.time !== undefined) this.dom.time.textContent = data.time;
+if (data.avgPace !== undefined) this.dom.avgPace.textContent = this.convertPace(data.avgPace, this.currentUnit);
+if (data.cadence !== undefined) {
+this.dom.cadence.textContent = data.cadence;
+this.updateCardColor(this.dom.cardCadence, this.getCadenceLevel(data.cadence));
+}
+if (data.gct !== undefined) {
+this.dom.gct.textContent = data.gct;
+this.updateCardColor(this.dom.cardGct, this.getGctLevel(data.gct));
+}
+if (data.flight !== undefined) {
+this.dom.flight.textContent = data.flight;
+this.updateCardColor(this.dom.cardFlight, this.getFlightLevel(data.flight));
+}
+}
+getCadenceLevel(val) { if (val >= 180) return 'good'; if (val >= 170) return 'warning'; return 'danger'; }
+getGctLevel(val) { if (val <= 240) return 'good'; if (val <= 270) return 'warning'; return 'danger'; }
+getFlightLevel(val) { if (val >= 30) return 'good'; if (val >= 20) return 'warning'; return 'danger'; }
+updateCardColor(el, level) {
+const colors = { good: 'var(--good)', warning: 'var(--warning)', danger: 'var(--danger)', normal: '#333' };
+if(el) el.style.borderColor = colors[level] || colors.normal;
+const valEl = el ? el.querySelector('.value') : null;
+if (valEl) valEl.style.color = colors[level] || colors.normal;
+}
+showTab(tab) {
+this.closeDetail(); this.closeDiag(); this.closeMetronome();
+this.dom.runView.style.display = (tab === 'run' ? 'flex' : 'none');
+this.dom.mapArea.style.display = (tab === 'run' ? 'block' : 'none');
+this.dom.historyView.style.display = (tab === 'history' ? 'flex' : 'none');
+document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+const tabBtn = document.getElementById('tab-' + tab);
+if(tabBtn) tabBtn.classList.add('active');
+if(tab === 'history') this.updateHistoryList();
+if(tab === 'run' && app.map) setTimeout(() => app.map.invalidateSize(), 100);
+}
+showSubTab(sub) {
+document.querySelectorAll('.sub-btn').forEach(b => b.classList.remove('active'));
+const subBtn = document.getElementById('sub-tab-' + sub);
+if(subBtn) subBtn.classList.add('active');
+document.querySelectorAll('.sub-page').forEach(p => p.style.display = 'none');
+const subPage = document.getElementById('sub-page-' + sub);
+if(subPage) subPage.style.display = 'flex';
+if(sub === 'list') this.updateHistoryList();
+if(sub === 'total') this.updateTotalStats();
+if(sub === 'info') this.toggleInfoSubTab('theory');
+if(sub === 'settings') this.initProfileDropdowns();
+}
+toggleInfoSubTab(target) {
+const theoryBtn = document.getElementById('info-sub-tab-theory');
+const precisionBtn = document.getElementById('info-sub-tab-precision');
+const theoryArea = document.getElementById('info-theory-area');
+const precisionArea = document.getElementById('info-precision-analysis-area');
+if (target === 'theory' && theoryBtn && precisionBtn && theoryArea && precisionArea) {
+theoryBtn.classList.add('active');
+precisionBtn.classList.remove('active');
+theoryArea.style.display = 'flex';
+precisionArea.style.display = 'none';
+} else if (target === 'precision' && theoryBtn && precisionBtn && theoryArea && precisionArea) {
+precisionBtn.classList.add('active');
+theoryBtn.classList.remove('active');
+theoryArea.style.display = 'none';
+precisionArea.style.display = 'flex';
+this.buildPrecisionSelector();
+}
+}
+buildPrecisionSelector() {
+const h = storage.loadHistory();
+const dropdownOptions = document.getElementById('precision-record-dropdown-options');
+const currentSelectText = document.getElementById('current-precision-record-text');
+const isKo = (storage.getLang() === 'ko');
+if (!dropdownOptions || !currentSelectText) return;
+if (h.length === 0) {
+currentSelectText.textContent = isKo ? "기록 없음" : "NO RECORDS";
+dropdownOptions.innerHTML = '<div class="dropdown-option precision-option" style="color: #666; text-align:center;">' + (isKo ? "기록 없음" : "NO RECORDS") + '</div>';
+this.loadPrecisionDashboard("");
+return;
+}
+dropdownOptions.innerHTML = h.map((r) => {
+let shortDate = r.date.split(' (')[0].replace(', ', ' ');
+let escapedDate = shortDate.replace(/'/g, "'");
+return '<div class="dropdown-option precision-option" onclick="ui.selectPrecisionRecord(' + r.id + ', '' + escapedDate + '')">' + shortDate + '</div>';
+}).join('');
+const defaultDateText = h[0].date.split(' (')[0].replace(', ', ' ');
+currentSelectText.textContent = defaultDateText;
+this.loadPrecisionDashboard(h[0].id);
+}
+selectPrecisionRecord(recordId, dateText) {
+const currentText = document.getElementById('current-precision-record-text');
+if(currentText) currentText.textContent = dateText;
+this.loadPrecisionDashboard(recordId);
+const dropdown = document.getElementById('precision-record-dropdown-options');
+if(dropdown) dropdown.style.display = 'none';
+}
+loadPrecisionDashboard(recordId) {
+const isKo = (storage.getLang() === 'ko');
+if (!recordId) {
+const setText = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
+setText('precision-cadence', '-- SPM');
+setText('precision-cadence-bal', '-- %');
+setText('precision-gct', '-- ms');
+setText('precision-gct-bal', '-- %');
+setText('precision-flight', '-- %');
+setText('precision-vert-ratio', '-- %');
+setText('precision-alt', '-- m');
+setText('precision-stride', '-- m');
+const fb = document.getElementById('precision-feedback-text');
+if(fb) fb.textContent = isKo ? "기록이 존재하지 않습니다." : "No records found.";
+return;
+}
+const h = storage.loadHistory();
+const record = h.find(r => r.id == recordId);
+if (record) {
+const cadence = record.cadence || 170;
+const gct = record.gct && record.gct !== '--' ? parseInt(record.gct) : 250;
+const flight = record.flight && record.flight !== '--' ? parseInt(record.flight) : 25;
+const alt = record.alt || 0;
+let speedKmh = 12;
+if (record.avgPace && record.avgPace.includes("'")) {
+const parts = record.avgPace.replace('"', '').split("'");
+const min = parseInt(parts[0]) || 5;
+const sec = parseInt(parts[1]) || 0;
+if(min > 0) speedKmh = 60 / (min + (sec / 60));
+}
+const strideCalculated = ((speedKmh / 3.6) / (cadence / 60)).toFixed(2);
+const vertRatioCalculated = (7.5 - (cadence - 160) * 0.05).toFixed(1);
+const setVal = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
+setVal('precision-cadence', cadence + ' SPM');
+const cadEl = document.getElementById('precision-cadence');
+if(cadEl) cadEl.style.color = this.getCadenceColor(cadence);
+setVal('precision-cadence-bal', (record.cadenceBal ? record.cadenceBal : '50:50') + ' %');
+setVal('precision-gct', gct + ' ms');
+const gctEl = document.getElementById('precision-gct');
+if(gctEl) gctEl.style.color = this.getGctColor(gct);
+setVal('precision-gct-bal', (record.gctBal ? record.gctBal : '50:50') + ' %');
+setVal('precision-flight', flight + ' %');
+const flightEl = document.getElementById('precision-flight');
+if(flightEl) flightEl.style.color = this.getFlightColor(flight);
+setVal('precision-vert-ratio', (record.vertRatio ? record.vertRatio : vertRatioCalculated) + ' %');
+setVal('precision-alt', alt + ' m');
+setVal('precision-stride', (record.stride ? record.stride : strideCalculated) + ' m');
+let feedback = "";
+if (gct > 240 || cadence < 170) {
+feedback = isKo ? "지면 접촉(GCT)이 늘어지고 피치가 낮아 충격 부하가 발생할 수 있습니다. 메트로놈 비트에 리듬을 동기화하세요!" : "Prolonged GCT and low cadence increase impact loading. Sync with metronome rhythm!";
+} else {
+feedback = isKo ? "훌륭한 다이내믹스 밸런스입니다! 지면 반발력을 수평 추진력으로 전환하고 있습니다." : "Outstanding running dynamics symmetry! Efficient ground reaction force conversion.";
+}
+const fb = document.getElementById('precision-feedback-text');
+if(fb) fb.innerHTML = feedback;
+}
+}
+changeLanguage(lang) {
+storage.setLang(lang);
+const t = translations[lang] || translations['en'];
+['pace','dist','time','avg','cadence','gct','flight'].forEach(id => {
+const el = document.getElementById('label-'+id); if(el) el.textContent = t[id];
+});
+if(this.dom.btnStart) this.dom.btnStart.textContent = t.start;
+if(this.dom.btnStop) this.dom.btnStop.textContent = t.stop;
+const resumeBtn = document.getElementById('btn-resume');
+const finishBtn = document.getElementById('btn-finish');
+if(resumeBtn) resumeBtn.textContent = t.resume;
+if(finishBtn) finishBtn.textContent = t.finish;
+const tabRun = document.getElementById('tab-run');
+const tabHistory = document.getElementById('tab-history');
+if(tabRun) tabRun.textContent = t.run;
+if(tabHistory) tabHistory.textContent = t.history;
+const subList = document.getElementById('sub-tab-list');
+const subTotal = document.getElementById('sub-tab-total');
+const subInfo = document.getElementById('sub-tab-info');
+const subSettings = document.getElementById('sub-tab-settings');
+if(subList) subList.textContent = t.list;
+if(subTotal) subTotal.textContent = t.total;
+if(subInfo) subInfo.textContent = t.info;
+if(subSettings) subSettings.textContent = t.settings;
+const langLabel = document.getElementById('label-select-lang');
+if(langLabel) langLabel.textContent = t.selLang;
+const unitLabel = document.getElementById('label-unit');
+if(unitLabel) unitLabel.textContent = t.unitLabel;
+const genderLabel = document.getElementById('label-gender');
+if(genderLabel) genderLabel.textContent = t.genderLabel;
+const metroLabel = document.getElementById('label-metronome');
+if(metroLabel) metroLabel.textContent = t.metro;
+const clearBtn = document.getElementById('btn-clear-history');
+if(clearBtn) clearBtn.textContent = t.clear;
+const heightLabel = document.getElementById('label-height');
+if(heightLabel) heightLabel.textContent = t.height;
+const weightLabel = document.getElementById('label-weight');
+if(weightLabel) weightLabel.textContent = t.weight;
+const metroMenu = document.getElementById('label-metro-menu');
+if(metroMenu) metroMenu.textContent = t.metroTitle;
+const infoC = document.getElementById('info-cadence-title');
+if(infoC) infoC.textContent = t.infC;
+const infoCD = document.getElementById('info-cadence-desc');
+if(infoCD) infoCD.textContent = t.infCD;
+const infoP = document.getElementById('info-power-title');
+if(infoP) infoP.textContent = t.infP;
+const infoPD = document.getElementById('info-power-desc');
+if(infoPD) infoPD.textContent = t.infPD;
+const infoS = document.getElementById('info-strike-title');
+if(infoS) infoS.textContent = t.infS;
+const infoSD = document.getElementById('info-strike-desc');
+if(infoSD) infoSD.textContent = t.infSD;
+const infoO = document.getElementById('info-oscillation-title');
+if(infoO) infoO.textContent = t.infO;
+const infoOD = document.getElementById('info-oscillation-desc');
+if(infoOD) infoOD.textContent = t.infOD;
+const infoR = document.getElementById('info-rolling-title');
+if(infoR) infoR.textContent = t.infR;
+const infoRD = document.getElementById('info-rolling-desc');
+if(infoRD) infoRD.textContent = t.infRD;
+const infoPost = document.getElementById('info-posture-title');
+if(infoPost) infoPost.textContent = t.infPost;
+const infoPostD = document.getElementById('info-posture-desc');
+if(infoPostD) infoPostD.textContent = t.infPostD;
+const metroTitle = document.getElementById('metro-title');
+if(metroTitle) metroTitle.textContent = t.metroTitle;
+const metroDesc = document.getElementById('metro-desc');
+if(metroDesc) metroDesc.textContent = t.metroDesc;
+const metroAccent = document.getElementById('metro-accent-label');
+if(metroAccent) metroAccent.textContent = t.metroAccent;
+const diagTitle = document.getElementById('diag-view-title');
+if(diagTitle) diagTitle.textContent = t.diagTitle;
+if(this.btnMetroToggle) this.btnMetroToggle.textContent = metro.isPlaying ? t.stop : t.start;
+if(this.dom.dimmerOverlay) this.dom.dimmerOverlay.querySelector('.dim-message').textContent = (lang === 'ko' ? '🌙 어두운 모드 활성화 (터치하면 해제)' : '🌙 Dark mode active (tap to dismiss)');
+if(this.dom.pauseStatus) this.dom.pauseStatus.textContent = t.autoPaused;
+const statWeekly = document.getElementById('stat-filter-weekly');
+const statMonthly = document.getElementById('stat-filter-monthly');
+const statYearly = document.getElementById('stat-filter-yearly');
+if(statWeekly) statWeekly.textContent = t.statWeekly;
+if(statMonthly) statMonthly.textContent = t.statMonthly;
+if(statYearly) statYearly.textContent = t.statYearly;
+const isKo = (lang === 'ko');
+const pLabels = ['p-label-cadence', 'p-label-cadence-bal', 'p-label-gct', 'p-label-gct-bal', 'p-label-flight', 'p-label-vert', 'p-label-alt', 'p-label-stride'];
+const pKo = ["케이던스 (CAD)", "케이던스 밸런스", "지면 접촉 (GCT)", "GCT 밸런스", "체공 시간 (FLIGHT)", "수직진폭 비율", "주행 고도 (ALT)", "스트라이드 보폭"];
+const pEn = ["CADENCE", "CADENCE BAL", "GCT TIME", "GCT BAL", "FLIGHT TIME", "VERT RATIO", "ALTITUDE", "STRIDE LENGTH"];
+pLabels.forEach((id, idx) => { const el = document.getElementById(id); if(el) el.textContent = isKo ? pKo[idx] : pEn[idx]; });
+const langMap = { en: "English (US)", ko: "한국어 (KR)" };
+const currentLang = document.getElementById('current-lang-text');
+if(currentLang) currentLang.textContent = langMap[lang];
+const theoryLabel = document.getElementById('info-tab-theory-label');
+const precisionLabel = document.getElementById('info-tab-precision-label');
+if(theoryLabel) theoryLabel.textContent = t.infoTabTheory;
+if(precisionLabel) precisionLabel.textContent = t.infoTabPrecision;
+this.updateHistoryList(); this.updateTotalStats(); this.updateQuickMetroBtn();
+const precisionArea = document.getElementById('info-precision-analysis-area');
+if(precisionArea && precisionArea.style.display === 'flex') {
+this.buildPrecisionSelector();
+}
+}
+
+// DIM 토글
+toggleDim() {
+this.dimActive = !this.dimActive;
+const overlay = this.dom.dimmerOverlay;
+if (!overlay) return;
+if (this.dimActive) {
+overlay.style.display = 'flex';
+if (app && app.state && app.state.isRunning) app.requestWakeLock();
+} else {
+overlay.style.display = 'none';
+}
+}
+dismissDim() {
+if (!this.dimActive) return;
+this.dimActive = false;
+const overlay = this.dom.dimmerOverlay;
+if (overlay) overlay.style.display = 'none';
+}
+
+toggleDropdown(id) {
+const opt = document.getElementById(id); const isOpen = opt && opt.style.display === 'block';
+document.querySelectorAll('.dropdown-options, .precision-dropdown-options').forEach(d => d.style.display = 'none');
+if(opt) opt.style.display = isOpen ? 'none' : 'block';
+}
+selectLang(lang) { this.changeLanguage(lang); this.toggleDropdown('dropdown-options'); }
+initProfileDropdowns() {
+const p = storage.loadProfile();
+const heightEl = document.getElementById('current-height');
+const weightEl = document.getElementById('current-weight');
+if(heightEl) heightEl.textContent = p.h + ' ' + p.hu;
+if(weightEl) weightEl.textContent = p.w + ' ' + p.wu;
+this.renderProfileOptions('height', p.hu); this.renderProfileOptions('weight', p.wu);
+}
+renderProfileOptions(type, unit) {
+const container = document.getElementById(type + '-options');
+if(!container) return;
+let html = '';
+if (type === 'height') {
+html += '<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit('height', '' + (unit === 'cm' ? 'inch' : 'cm') + '')">SWITCH TO ' + (unit === 'cm' ? 'INCH' : 'CM') + '</div>';
+const min = unit === 'cm' ? 140 : 55, max = unit === 'cm' ? 210 : 83;
+for (let i = min; i <= max; i++) html += '<div class="dropdown-option" onclick="ui.setProfile('height', ' + i + ', '' + unit + '')">' + i + ' ' + unit + '</div>';
+} else {
+html += '<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit('weight', '' + (unit === 'kg' ? 'lb' : 'kg') + '')">SWITCH TO ' + (unit === 'kg' ? 'LB' : 'KG') + '</div>';
+const min = unit === 'kg' ? 40 : 130, max = unit === 'kg' ? 130 : 286;
+for (let i = min; i <= max; i++) html += '<div class="dropdown-option" onclick="ui.setProfile('weight', ' + i + ', '' + unit + '')">' + i + ' ' + unit + '</div>';
+}
+container.innerHTML = html;
+}
+changeUnit(type, nextUnit) {
+const p = storage.loadProfile();
+if (type === 'height') { p.h = nextUnit === 'inch' ? Math.round(p.h / 2.54) : Math.round(p.h * 2.54); p.hu = nextUnit; }
+else { p.w = nextUnit === 'lb' ? Math.round(p.w * 2.20462) : Math.round(p.w / 2.20462); p.wu = nextUnit; }
+storage.saveProfile(p); this.initProfileDropdowns();
+}
+setProfile(type, val, unit) {
+const p = storage.loadProfile();
+if (type === 'height') { p.h = val; p.hu = unit; } else { p.w = val; p.wu = unit; }
+storage.saveProfile(p); this.initProfileDropdowns(); this.toggleDropdown(type + '-options');
+this.updateTotalStats();
+}
+openMetronome() { const mv = document.getElementById('metronome-view'); if(mv) mv.style.display = 'flex'; }
+closeMetronome() { const mv = document.getElementById('metronome-view'); if(mv) mv.style.display = 'none'; }
+updateQuickMetroBtn() {
+const btn = this.dom.quickMetro;
+if(!btn) return;
+if(metro.isPlaying) {
+btn.textContent = "METRO ON"; btn.style.background = "var(--primary)"; btn.style.color = "#000"; btn.style.borderColor = "var(--primary)";
+if(this.menuBpmDisplay) this.menuBpmDisplay.textContent = document.getElementById('metro-bpm').value;
+} else {
+btn.textContent = "METRO OFF"; btn.style.background = "#333"; btn.style.color = "#999"; btn.style.borderColor = "#444";
+if(this.menuBpmDisplay) this.menuBpmDisplay.textContent = "OFF";
+}
+}
+openConfirmModal(id) {
+this.pendingDeleteId = id;
+const lang = storage.getLang();
+const t = translations[lang] || translations['en'];
+const msgEl = document.getElementById('confirm-modal-msg');
+const cancelBtn = document.getElementById('btn-confirm-cancel');
+const deleteBtn = document.getElementById('btn-confirm-delete');
+const modal = document.getElementById('confirm-modal');
+if(msgEl) msgEl.textContent = t.confirmSingleDelete;
+if(cancelBtn) cancelBtn.textContent = t.cancelModal;
+if(deleteBtn) deleteBtn.textContent = t.deleteBtn;
+if(modal) modal.style.display = 'flex';
+}
+closeConfirmModal(isConfirmed) {
+const modal = document.getElementById('confirm-modal');
+if(modal) modal.style.display = 'none';
+if (isConfirmed && this.pendingDeleteId !== null) {
+storage.deleteRecord(this.pendingDeleteId);
+this.updateHistoryList();
+this.updateTotalStats();
+}
+this.pendingDeleteId = null;
+}
+openSaveConfirmModal(id) {
+this.pendingSaveId = id;
+const lang = storage.getLang();
+const t = translations[lang] || translations['en'];
+const msgEl = document.getElementById('save-confirm-modal-msg');
+const cancelBtn = document.getElementById('btn-save-confirm-cancel');
+const saveBtn = document.getElementById('btn-save-confirm-save');
+const modal = document.getElementById('save-confirm-modal');
+if(msgEl) msgEl.textContent = t.confirmSingleSave;
+if(cancelBtn) cancelBtn.textContent = t.cancelModal;
+if(saveBtn) saveBtn.textContent = t.saveBtn;
+if(modal) modal.style.display = 'flex';
+}
+closeSaveConfirmModal(isConfirmed) {
+const modal = document.getElementById('save-confirm-modal');
+if(modal) modal.style.display = 'none';
+if (isConfirmed && this.pendingSaveId !== null) {
+const lang = storage.getLang();
+const t = translations[lang] || translations['en'];
+alert(t.saveSuccessMsg);
+}
+this.pendingSaveId = null;
+}
+updateHistoryList() {
+const h = storage.loadHistory(); const lang = storage.getLang(); const t = translations[lang] || translations['en'];
+if (!this.dom.historyList) return;
+if (h.length === 0) { this.dom.historyList.innerHTML = '<div style="text-align:center; padding:50px; color:#444; font-weight:900;">' + t.noRec + '</div>'; return; }
+this.dom.historyList.innerHTML = h.map(r => {
+let displayDist = parseFloat(r.dist);
+if(this.currentUnit === 'mile') displayDist = displayDist * 0.621371;
+const distStr = displayDist.toFixed(2);
+const unitStr = this.currentUnit === 'km' ? 'KM' : 'MI';
+let displayPace = r.avgPace || r.pace || "--'--"";
+if(displayPace !== "--'--"" && this.currentUnit === 'mile') {
+displayPace = this.convertPace(displayPace, 'mile');
+}
+return '<div class="history-item">' +
+'<div class="h-date">' + r.date + '</div>' +
+'<div class="h-actions">' +
+'<button class="btn-h-sub" onclick="ui.openDetail(' + r.id + ')">' + t.route + '</button>' +
+'<button class="btn-h-sub" onclick="ui.openDiag(' + r.id + ')">' + t.diag + '</button>' +
+'</div>' +
+'<div class="h-main-stats">' +
+'<div class="h-val-big">' + distStr + ' <span style="font-size:11px">' + unitStr + '</span></div>' +
+'<div style="font-size:10px; color:#888; font-weight:800; margin-left:auto;">ALT: <span style="color:var(--primary)">' + (r.alt || '0') + '</span>m</div>' +
+'</div>' +
+'<div class="h-details-grid">' +
+'<div class="h-det-box"><div class="h-det-label">' + t.pace + '</div><div class="h-det-val">' + displayPace + '</div></div>' +
+'<div class="h-det-box"><div class="h-det-label">' + t.cadence + '</div><div class="h-det-val" style="color:' + this.getCadenceColor(r.cadence) + '">' + (r.cadence || 0) + '</div></div>' +
+'<div class="h-det-box"><div class="h-det-label">' + t.cal + '</div><div class="h-det-val">' + (r.kcal || 0) + '</div></div>' +
+'<div class="h-det-box"><div class="h-det-label">' + t.gct + '</div><div class="h-det-val" style="color:' + this.getGctColor(r.gct) + '">' + (r.gct || '--') + ' <span style="font-size:7px">MS</span></div></div>' +
+'<div class="h-det-box"><div class="h-det-label">' + t.flight + '</div><div class="h-det-val" style="color:' + this.getFlightColor(r.flight) + '">' + (r.flight || '--') + ' <span style="font-size:7px">%</span></div></div>' +
+'</div>' +
+'<button class="btn-h-delete" onclick="ui.openConfirmModal(' + r.id + ')">' + t.deleteBtn + '</button>' +
+'</div>';
+}).join('');
+}
+getCadenceColor(v) { const l = this.getCadenceLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
+getGctColor(v) { const l = this.getGctLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
+getFlightColor(v) { const l = this.getFlightLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
+changeStatFilter(filterType) {
+this.currentStatFilter = filterType;
+document.querySelectorAll('.stat-filter-btn').forEach(btn => btn.classList.remove('active'));
+const activeBtn = document.getElementById('stat-filter-' + filterType);
+if(activeBtn) activeBtn.classList.add('active');
+this.updateTotalStats();
+}
+updateTotalStats() {
+const h = storage.loadHistory();
+const lang = storage.getLang();
+const t = translations[lang] || translations['en'];
+if (!this.dom.totalStatsContainer) return;
+if (h.length === 0) {
+this.dom.totalStatsContainer.innerHTML = '<div style="text-align:center; padding:50px; color:#444; font-weight:900;">' + t.noRec + '</div>';
+return;
+}
+const now = new Date();
+let limitDays = 7;
+if (this.currentStatFilter === 'monthly') limitDays = 30;
+if (this.currentStatFilter === 'yearly') limitDays = 365;
+const filteredHistory = h.filter(r => {
+const recordDate = new Date(r.date);
+const diffTime = Math.abs(now - recordDate);
+const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+return diffDays <= limitDays;
+});
+if (filteredHistory.length === 0) {
+this.dom.totalStatsContainer.innerHTML = '<div style="text-align:center; padding:50px; color:#444; font-weight:900;">' + t.noRec + '</div>';
+return;
+}
+let totalDist = 0, totalRuns = filteredHistory.length, totalKcal = 0, totalSeconds = 0;
+let sumCadence = 0, countCadence = 0, sumGct = 0, countGct = 0, sumFlight = 0, countFlight = 0, sumAlt = 0, countAlt = 0;
+filteredHistory.forEach(r => {
+totalDist += parseFloat(r.dist) || 0;
+totalKcal += parseInt(r.kcal) || 0;
+if(r.time && typeof r.time === 'string') {
+const parts = r.time.split(':');
+if(parts.length === 2) totalSeconds += (parseInt(parts[0],10)*60)+parseInt(parts[1],10);
+else if(parts.length === 3) totalSeconds += (parseInt(parts[0],10)*3600)+(parseInt(parts[1],10)*60)+parseInt(parts[2],10);
+}
+if(r.cadence && typeof r.cadence === 'number' && !isNaN(r.cadence)) { sumCadence += r.cadence; countCadence++; }
+if(r.gct && r.gct !== '--') { const gctVal = parseInt(r.gct,10); if(!isNaN(gctVal)) { sumGct += gctVal; countGct++; } }
+if(r.flight && r.flight !== '--') { const flightVal = parseInt(r.flight,10); if(!isNaN(flightVal)) { sumFlight += flightVal; countFlight++; } }
+if(r.alt !== undefined && typeof r.alt === 'number' && !isNaN(r.alt)) { sumAlt += r.alt; countAlt++; }
+});
+let avgPaceStr = "--'--"";
+if (totalDist > 0 && totalSeconds > 0) {
+let avgKmh = totalDist / (totalSeconds / 3600);
+let s = 3600 / avgKmh;
+avgPaceStr = Math.floor(s/60) + "'" + String(Math.floor(s%60)).padStart(2,'0') + '"';
+if(this.currentUnit === 'mile') avgPaceStr = this.convertPace(avgPaceStr, 'mile');
+}
+const avgCadenceResult = countCadence > 0 ? Math.round(sumCadence / countCadence) : 0;
+const avgGctResult = countGct > 0 ? Math.round(sumGct / countGct) : '--';
+const avgFlightResult = countFlight > 0 ? Math.round(sumFlight / countFlight) : '--';
+const avgAltResult = countAlt > 0 ? Math.round(sumAlt / countAlt) : 0;
+const totalDistDisplay = this.currentUnit === 'km' ? totalDist.toFixed(2) : (totalDist * 0.621371).toFixed(2);
+const unitLabel = this.currentUnit === 'km' ? 'km' : 'mi';
+this.dom.totalStatsContainer.innerHTML =
+'<div class="stat-grid-dashboard">' +
+'<div class="card"><div class="label">' + t.totalDist + '</div><div class="value" style="color:var(--primary); font-size:20px;">' + totalDistDisplay + ' ' + unitLabel + '</div></div>' +
+'<div class="card"><div class="label">' + t.runCount + '</div><div class="value" style="font-size:20px;">' + totalRuns + '</div></div>' +
+'<div class="card"><div class="label">' + t.avgPaceLabel + '</div><div class="value" style="font-size:20px;">' + avgPaceStr + '</div></div>' +
+'<div class="card"><div class="label">' + t.totalCal + '</div><div class="value" style="font-size:20px;">' + totalKcal + ' kcal</div></div>' +
+'<div class="card"><div class="label">' + (t.avgGct || "Average GCT").replace(' :', '') + '</div><div class="value" style="font-size:20px;">' + avgGctResult + ' <span style="font-size:11px">ms</span></div></div>' +
+'<div class="card"><div class="label">' + (t.avgFlight || "Average Flight").replace(' :', '') + '</div><div class="value" style="font-size:20px;">' + avgFlightResult + ' <span style="font-size:11px">%</span></div></div>' +
+'<div class="card"><div class="label">' + (t.avgCadence || "Average Cadence").replace(' :', '') + '</div><div class="value" style="font-size:20px;">' + avgCadenceResult + ' <span style="font-size:11px">SPM</span></div></div>' +
+'<div class="card"><div class="label">' + (t.avgAlt || "Average Altitude").replace(' :', '') + '</div><div class="value" style="font-size:20px;">' + avgAltResult + ' <span style="font-size:11px">m</span></div></div>' +
+'</div>';
+}
+openDetail(id) {
+const h = storage.loadHistory(); const record = h.find(r => r.id === id); if (!record) return;
+const lang = storage.getLang(); const t = translations[lang] || translations['en'];
+const detailView = document.getElementById('detail-view');
+if(detailView) detailView.style.display = 'flex';
+if (this.detailMap) this.detailMap.remove();
+const detailMapDiv = document.getElementById('detail-map');
+if(detailMapDiv) {
+this.detailMap = L.map('detail-map', {zoomControl: false, attributionControl: false});
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(this.detailMap);
+if (storage.getMapTheme() === 'dark') detailMapDiv.classList.add('dark-map-layer');
+else detailMapDiv.classList.remove('dark-map-layer');
+setTimeout(() => { if(this.detailMap) this.detailMap.invalidateSize(); }, 200);
+}
+if (record.path && record.path.length > 0 && this.detailMap) {
+let poly = L.polyline(record.path, {color: 'var(--primary)', weight: 5}).addTo(this.detailMap);
+this.detailMap.fitBounds(poly.getBounds());
+}
+if (record.splits && record.splits.length > 0 && this.detailMap) {
+record.splits.forEach(split => {
+if (split.coord) {
+let splitDist = split.km;
+if(this.currentUnit === 'mile') splitDist = (splitDist * 0.621371).toFixed(2);
+let splitPace = split.pace;
+if(this.currentUnit === 'mile') splitPace = this.convertPace(split.pace, 'mile');
+L.marker(split.coord, {
+icon: L.divIcon({ className: 'pace-marker', html: splitDist + (this.currentUnit === 'km' ? 'k' : 'm') + ': ' + splitPace, iconSize: [75, 16], iconAnchor: [37, 8] })
+}).addTo(this.detailMap);
+}
+});
+}
+let splitLogsHtml = '<div class="detail-log-box"><div class="detail-log-title">' + (t.splitTitle || "SPLIT ANALYTICS") + '</div>';
+if (record.splits && record.splits.length > 0) { record.splits.forEach(split => {
+let splitDist = split.km;
+let splitPace = split.pace;
+if(this.currentUnit === 'mile') {
+splitDist = (splitDist * 0.621371).toFixed(2);
+splitPace = this.convertPace(split.pace, 'mile');
+}
+splitLogsHtml += '<div class="detail-log-item"><span>■ ' + splitDist + (this.currentUnit === 'km' ? ' km' : ' mi') + ' :</span><span>' + (t.splitPace || "Pace") + ' ' + splitPace + ' | ' + (t.splitAlt || "Alt") + ' ' + (split.altFrom || 0) + 'm → ' + (split.altTo || 0) + 'm (' + (split.altDiff >= 0 ? '▲' : '▼') + Math.abs(split.altDiff || 0) + 'm).</span></div>';
+}); } else { let baseAlt = record.alt || 0;
+let recordDist = record.dist;
+let recordPace = record.avgPace || record.pace || "--'--"";
+if(this.currentUnit === 'mile') {
+recordDist = (parseFloat(recordDist) * 0.621371).toFixed(2);
+recordPace = this.convertPace(recordPace, 'mile');
+}
+splitLogsHtml += '<div class="detail-log-item" style="color: #ffffff; font-weight: 700;"><span>■ ' + recordDist + (this.currentUnit === 'km' ? ' km' : ' mi') + ' :</span><span>' + (t.splitPace || "Pace") + ' <b>' + recordPace + '</b> | ' + (t.splitAlt || "Alt") + ' <b>' + baseAlt + 'm</b> → <b>' + baseAlt + 'm</b> (▲0m).</span></div>'; } splitLogsHtml += '</div>';
+let dynamicsHtml = '<div class="detail-log-box" style="margin-top:12px;"><div class="detail-log-title" style="color:var(--warning)">' + (t.summaryTitle || "DYNAMICS SUMMARY") + '</div>' +
+'<div class="detail-log-item"><span>' + (t.avgGct || "Average GCT") + '</span><span>' + (record.gct || '--') + ' ms.</span></div>' +
+'<div class="detail-log-item"><span>' + (t.avgFlight || "Average Flight") + '</span><span>' + (record.flight || '--') + ' %.</span></div>' +
+'<div class="detail-log-item"><span>' + (t.avgCadence || "Average Cadence") + '</span><span>' + (record.cadence || 0) + ' SPM.</span></div></div>';
+let buttonRowHtml = '<div class="detail-btn-row"><button class="btn-detail-act btn-detail-save" onclick="ui.saveDetailAction(' + record.id + ')">💾 ' + (t.saveBtn || "SAVE") + '</button><button class="btn-detail-act btn-detail-share" onclick="ui.shareDetailAction(' + record.id + ')">🔗 ' + (t.shareBtn || "SHARE") + '</button></div>';
+const detailData = document.getElementById('detail-data');
+if(detailData) detailData.innerHTML = splitLogsHtml + dynamicsHtml + buttonRowHtml;
+}
+closeDetail() { const dv = document.getElementById('detail-view'); if(dv) dv.style.display = 'none'; }
+saveDetailAction(id) { this.openSaveConfirmModal(id); }
+shareDetailAction(id) {
+const h = storage.loadHistory();
+const record = h.find(r => r.id === id);
+if (!record) return;
+let displayDist = parseFloat(record.dist);
+if(this.currentUnit === 'mile') displayDist = displayDist * 0.621371;
+let displayPace = record.avgPace || record.pace;
+if(displayPace && this.currentUnit === 'mile') displayPace = this.convertPace(displayPace, 'mile');
+const unitText = this.currentUnit === 'km' ? 'KM' : 'MI';
+const shareText = 'OppaRun Pro 🏃‍♂️\nDistance: ' + displayDist.toFixed(2) + ' ' + unitText + '\nTime: ' + record.time + '\nPace: ' + displayPace;
+if (navigator.share) {
+navigator.share({ title: 'OppaRun Pro Running Record', text: shareText, url: window.location.href }).catch(err => console.log(err));
+} else {
+navigator.clipboard.writeText(shareText);
+alert(storage.getLang() === 'ko' ? "러닝 데이터 요약 정보가 클립보드에 복사되었습니다!" : "Running dynamics summary copied to clipboard!");
+}
+}
+openDiag(id) {
+const h = storage.loadHistory();
+const r = h.find(rec => rec.id === id);
+if (!r) return;
+const lang = storage.getLang();
+const t = translations[lang];
+const diagView = document.getElementById('diag-view');
+const diagDate = document.getElementById('diag-view-date');
+if(diagDate) diagDate.textContent = r.date;
+if(diagView) diagView.style.display = 'flex';
+let gctComment = (r.gct > 240) ? (lang === 'ko' ? "지면 접촉 시간이 다소 깁니다. 발을 빠르게 회수하세요." : "Ground contact time is prolonged. Focus on quick pull-off.") : (lang === 'ko' ? "매우 뛰어난 탄력성입니다." : "Excellent movement elasticity.");
+let cadComment = (r.cadence >= 175) ? (lang === 'ko' ? "이상적인 보폭 빈도입니다." : "Optimal step frequency.") : (lang === 'ko' ? "케이던스가 다소 낮습니다. 메트로놈에 맞춰보세요." : "Slightly low cadence. Sync with metronome.");
+let isShortDistance = parseFloat(r.dist) < 0.1;
+let recovHighlightHTML = "";
+let recovComment = "";
+if (isShortDistance) {
+recovHighlightHTML = '<span class="recovery-highlight" style="font-size: 16px; color: var(--danger);">DIAGNOSIS OMITTED</span>';
+recovComment = (lang === 'ko') ? "100미터 미만 주행으로 회복 시간 진단이 제공되지 않습니다." : "Distance under 100m, recovery analysis not provided.";
+} else {
+let recovHours = Math.round(parseFloat(r.dist) * 2.5);
+if (recovHours < 12) recovHours = 12;
+recovHighlightHTML = '<span class="recovery-highlight">' + recovHours + ' Hours</span>';
+recovComment = (lang === 'ko') ? '다음 고강도 주행 전까지 최소 <b>' + recovHours + '시간</b>의 리커버리를 권장합니다.' : 'A minimum recovery window of <b>' + recovHours + ' hours</b> is recommended.';
+}
+const contentArea = document.getElementById('diag-content-area');
+if(contentArea) {
+contentArea.innerHTML =
+'<div class="diag-card"><div class="diag-label">' + (t.diagDyna || "DYNAMICS") + '</div><div class="diag-val-group"><div class="diag-main-val">GCT: ' + r.gct + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagBalance || "BALANCE") + '</div><div class="diag-val-group"><div class="diag-main-val">CAD: ' + (r.cadence || 0) + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagRecov || "RECOVERY") + '</div>' + recovHighlightHTML + '<div class="diag-tip">' + recovComment + '</div></div>';
+}
+}
+closeDiag() { const dv = document.getElementById('diag-view'); if(dv) dv.style.display = 'none'; }
+}
+
+// ========== MetroEngine ==========
 class MetroEngine {
-  constructor() { this.audioCtx = null; this.nextTickTime = 0; this.timerID = null; this.isPlaying = false; this.currentBeat = 0; }
-  init() { if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
-  async playClick() { if (!this.audioCtx) await this.init(); if (this.audioCtx.state === 'suspended') await this.audioCtx.resume(); const osc = this.audioCtx.createOscillator(); const envelope = this.audioCtx.createGain(); const accentCheck = document.getElementById('metro-accent'); const isAccent = accentCheck && accentCheck.checked && this.currentBeat === 0; osc.type = 'triangle'; osc.frequency.value = isAccent ? 1200 : 800; const volInput = document.getElementById('metro-vol'); envelope.gain.value = volInput ? volInput.value : 0.5; envelope.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.1); osc.connect(envelope); envelope.connect(this.audioCtx.destination); osc.start(this.audioCtx.currentTime); osc.stop(this.audioCtx.currentTime + 0.1); this.currentBeat = (this.currentBeat + 1) % 4; }
-  scheduler() { if (!this.audioCtx) return; while (this.nextTickTime < this.audioCtx.currentTime + 0.1) { this.playClick(); const bpmInput = document.getElementById('metro-bpm'); const bpm = bpmInput ? parseFloat(bpmInput.value) : 175; this.nextTickTime += 60.0 / bpm; } this.timerID = setTimeout(() => this.scheduler(), 25); }
-  async toggle() { await this.init(); if (this.isPlaying) { clearTimeout(this.timerID); this.isPlaying = false; if (this.audioCtx) this.audioCtx.suspend(); } else { await this.audioCtx.resume(); this.currentBeat = 0; this.nextTickTime = this.audioCtx.currentTime; this.scheduler(); this.isPlaying = true; } ui.updateQuickMetroBtn(); const lang = storage.getLang(); if(ui.btnMetroToggle) ui.btnMetroToggle.textContent = this.isPlaying ? translations[lang].stop : translations[lang].start; }
-  updateDisplay() { const bpmInput = document.getElementById('metro-bpm'); const bpm = bpmInput ? bpmInput.value : 175; if(ui.dom.metroBpmVal) ui.dom.metroBpmVal.textContent = bpm; if(this.isPlaying && ui.menuBpmDisplay) ui.menuBpmDisplay.textContent = bpm; }
+constructor() { this.audioCtx = null; this.nextTickTime = 0; this.timerID = null; this.isPlaying = false; this.currentBeat = 0; }
+init() { if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+async playClick() { if (!this.audioCtx) await this.init(); if (this.audioCtx.state === 'suspended') await this.audioCtx.resume(); const osc = this.audioCtx.createOscillator(); const envelope = this.audioCtx.createGain(); const accentCheck = document.getElementById('metro-accent'); const isAccent = accentCheck && accentCheck.checked && this.currentBeat === 0; osc.type = 'triangle'; osc.frequency.value = isAccent ? 1200 : 800; const volInput = document.getElementById('metro-vol'); envelope.gain.value = volInput ? volInput.value : 0.5; envelope.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.1); osc.connect(envelope); envelope.connect(this.audioCtx.destination); osc.start(this.audioCtx.currentTime); osc.stop(this.audioCtx.currentTime + 0.1); this.currentBeat = (this.currentBeat + 1) % 4; }
+scheduler() { if (!this.audioCtx) return; while (this.nextTickTime < this.audioCtx.currentTime + 0.1) { this.playClick(); const bpmInput = document.getElementById('metro-bpm'); const bpm = bpmInput ? parseFloat(bpmInput.value) : 175; this.nextTickTime += 60.0 / bpm; } this.timerID = setTimeout(() => this.scheduler(), 25); }
+async toggle() { await this.init(); if (this.isPlaying) { clearTimeout(this.timerID); this.isPlaying = false; if (this.audioCtx) this.audioCtx.suspend(); } else { await this.audioCtx.resume(); this.currentBeat = 0; this.nextTickTime = this.audioCtx.currentTime; this.scheduler(); this.isPlaying = true; } ui.updateQuickMetroBtn(); const lang = storage.getLang(); if(ui.btnMetroToggle) ui.btnMetroToggle.textContent = this.isPlaying ? translations[lang].stop : translations[lang].start; }
+updateDisplay() { const bpmInput = document.getElementById('metro-bpm'); const bpm = bpmInput ? bpmInput.value : 175; if(ui.dom.metroBpmVal) ui.dom.metroBpmVal.textContent = bpm; if(this.isPlaying && ui.menuBpmDisplay) ui.menuBpmDisplay.textContent = bpm; }
 }
 
-// ========== MotionManager 클래스 ==========
+// ========== MotionManager ==========
 class MotionManager {
-  constructor(onStepCallback) { this.onStep = onStepCallback; this.lastStepTime = 0; this.isFeetOnGround = false; this.gctAccumulator = 0; this.gctCount = 0; }
-  reset() { this.lastStepTime = 0; this.isFeetOnGround = false; this.gctAccumulator = 0; this.gctCount = 0; }
-  handleMotion(e) { let acc = e.accelerationIncludingGravity; if (!acc || acc.z === null) return; let force = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z); let now = Date.now(); if (force > 12.5 && (now - this.lastStepTime) > 230) { let cycleTime = now - this.lastStepTime; this.lastStepTime = now; let result = { cycleTime, gct: 0, flight: 0 }; if (this.isFeetOnGround) { let currentGCT = Math.round(cycleTime * 0.35); this.gctAccumulator += currentGCT; this.gctCount++; result.gct = Math.round(this.gctAccumulator / this.gctCount); result.flight = Math.round(((cycleTime - result.gct) / cycleTime) * 100); } this.isFeetOnGround = true; this.onStep(result); } }
+constructor(onStepCallback) { this.onStep = onStepCallback; this.lastStepTime = 0; this.isFeetOnGround = false; this.gctAccumulator = 0; this.gctCount = 0; }
+reset() { this.lastStepTime = 0; this.isFeetOnGround = false; this.gctAccumulator = 0; this.gctCount = 0; }
+handleMotion(e) { let acc = e.accelerationIncludingGravity; if (!acc || acc.z === null) return; let force = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z); let now = Date.now(); if (force > 12.5 && (now - this.lastStepTime) > 230) { let cycleTime = now - this.lastStepTime; this.lastStepTime = now; let result = { cycleTime, gct: 0, flight: 0 }; if (this.isFeetOnGround) { let currentGCT = Math.round(cycleTime * 0.35); this.gctAccumulator += currentGCT; this.gctCount++; result.gct = Math.round(this.gctAccumulator / this.gctCount); result.flight = Math.round(((cycleTime - result.gct) / cycleTime) * 100); } this.isFeetOnGround = true; this.onStep(result); } }
 }
 
-// ========== OppaRunApp 클래스 (배터리 최적화 및 세션 복구 포함) ==========
+// ========== OppaRunApp (WakeLock 안정화, 배터리 최적화 적용) ==========
 class OppaRunApp {
-  constructor() {
-    this.state = {
-      isRunning: false, isPaused: false, isAutoPaused: false,
-      seconds: 0, steps: 0, totalDist: 0, lastPos: null, pathCoords: [],
-      currentAlt: 0, lowSpeedStartTime: null, wakeLock: null,
-      maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
-      splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
-      lastPosTimestamp: Date.now()
-    };
-    this.map = null; this.marker = null; this.polyline = null; this.timer = null;
-    this.motion = new MotionManager((data) => this.updateMetrics(data));
-    this.wakeLockInterval = null;
-    this.silentAudio = null;
-  }
-  async requestWakeLock() {
-    if ('wakeLock' in navigator) {
-      try {
-        if (this.state.wakeLock && this.state.wakeLock.released === false) return;
-        this.state.wakeLock = await navigator.wakeLock.request('screen');
-        this.state.wakeLock.addEventListener('release', () => {
-          if (document.visibilityState === 'visible') this.requestWakeLock();
-        });
-      } catch (err) { console.log('WakeLock 실패:', err); }
-    }
-  }
-  releaseWakeLock() {
-    if (this.state.wakeLock) { this.state.wakeLock.release().catch(console.log); this.state.wakeLock = null; }
-  }
-  startSilentKeepAlive() {
-    if (this.silentAudio) this.stopSilentKeepAlive();
-    try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      this.silentAudio = new AudioCtx();
-      const gain = this.silentAudio.createGain();
-      gain.gain.value = 0;
-      gain.connect(this.silentAudio.destination);
-      const schedule = () => {
-        if (this.silentAudio && this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
-          const now = this.silentAudio.currentTime;
-          const osc = this.silentAudio.createOscillator();
-          osc.connect(gain);
-          osc.frequency.value = 20;
-          osc.start(now);
-          osc.stop(now + 0.05);
-        }
-        setTimeout(schedule, 2000);
-      };
-      schedule();
-      this.silentAudio.resume().catch(e=>console.log);
-    } catch(e) { console.log('Silent audio failed', e); }
-  }
-  stopSilentKeepAlive() {
-    if (this.silentAudio) { this.silentAudio.close().catch(()=>{}); this.silentAudio = null; }
-  }
-  initMap() {
-    setTimeout(() => {
-      const mapDiv = document.getElementById('map');
-      if(!mapDiv) return;
-      this.map = L.map('map', {zoomControl: false, attributionControl: false}).setView([37.5665, 126.9780], 16);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        crossOrigin: true
-      }).addTo(this.map);
-      this.marker = L.marker([37.5665, 126.9780], {icon: L.divIcon({className:'loc', html:'<div style="background:#007bff; border:2px solid #fff; border-radius:50%; width:14px; height:14px;"></div>'})}).addTo(this.map);
-      this.polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(this.map);
-      ui.applyMapTheme(storage.getMapTheme());
-      setTimeout(() => { if(this.map) this.map.invalidateSize(); }, 200);
-      setTimeout(() => { if(this.map) this.map.invalidateSize(); }, 800);
-    }, 300);
-  }
-  updatePosition(p) {
-    if(!this.map) return;
-    const pos = [p.coords.latitude, p.coords.longitude];
-    const accuracy = Math.round(p.coords.accuracy);
-    const speedKmh = (p.coords.speed || 0) * 3.6;
-    this.state.currentAlt = p.coords.altitude ? Math.round(p.coords.altitude) : 0;
-    if(ui.dom.status) ui.dom.status.textContent = 'GPS: ±' + accuracy + 'm | ALT: ' + this.state.currentAlt + 'm';
-    if (this.marker) { this.marker.setLatLng(pos); this.map.panTo(pos); }
-    if (this.state.isRunning && !this.state.isPaused) {
-      if (speedKmh < 1.2) {
-        if (!this.state.lowSpeedStartTime) this.state.lowSpeedStartTime = Date.now();
-        else if ((Date.now() - this.state.lowSpeedStartTime) > 3500 && !this.state.isAutoPaused) {
-          this.state.isAutoPaused = true;
-          if(ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'block';
-        }
-      } else {
-        if (this.state.isAutoPaused) {
-          this.state.isAutoPaused = false;
-          if(ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'none';
-        }
-        this.state.lowSpeedStartTime = null;
-      }
-      if (!this.state.isAutoPaused && accuracy < 40) {
-        if (this.state.lastPos) {
-          let d = this.map.distance(this.state.lastPos, pos) / 1000;
-          let timeDelta = (Date.now() - (this.state.lastPosTimestamp || Date.now())) / 1000;
-          let maxJump = (speedKmh > 25) ? 0.2 : 0.12;
-          if (d > 0.002 && d < maxJump) {
-            this.state.totalDist += d;
-            this.state.pathCoords.push(pos);
-            if(this.polyline) this.polyline.setLatLngs(this.state.pathCoords);
-            ui.updateRunningDisplay({dist: this.state.totalDist.toFixed(2)});
-            this.state.lastPos = pos;
-            this.state.lastPosTimestamp = Date.now();
-            let currentTargetKm = this.state.lastKmCheckpoint + 1;
-            if (this.state.totalDist >= currentTargetKm) {
-              let splitDuration = this.state.seconds - this.state.lastKmSeconds;
-              let min = Math.floor(splitDuration / 60);
-              let sec = splitDuration % 60;
-              let paceStr = min + "'" + String(sec).padStart(2,'0') + '"';
-              this.state.splits.push({ km: currentTargetKm, pace: paceStr, altFrom: this.state.lastKmAlt, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastKmAlt, coord: pos });
-              this.state.lastKmCheckpoint = currentTargetKm;
-              this.state.lastKmSeconds = this.state.seconds;
-              this.state.lastKmAlt = this.state.currentAlt;
-            }
-          } else if (timeDelta > 4 && d < 0.5) {
-            let corrected = Math.min(d, 0.08);
-            this.state.totalDist += corrected;
-            this.state.pathCoords.push(pos);
-            if(this.polyline) this.polyline.setLatLngs(this.state.pathCoords);
-            this.state.lastPos = pos;
-            this.state.lastPosTimestamp = Date.now();
-          }
-        } else {
-          this.state.lastPos = pos;
-          this.state.lastPosTimestamp = Date.now();
-          this.state.lastKmAlt = this.state.currentAlt;
-        }
-        const currentPaceStr = this.formatPace(speedKmh);
-        const avgKmh = this.state.seconds > 0 ? (this.state.totalDist / (this.state.seconds / 3600)) : 0;
-        ui.updateRunningDisplay({ pace: currentPaceStr, avgPace: this.formatPace(avgKmh) });
-      }
-      storage.saveTempSession(this.state);
-    }
-  }
-  updateMetrics(data) {
-    this.state.steps++;
-    this.state.stepCount++;
-    this.state.totalGct += data.gct || 0;
-    this.state.totalFlight += data.flight || 0;
-    let cadVal = Math.round((this.state.steps / (this.state.seconds || 1)) * 60);
-    ui.updateRunningDisplay({cadence: cadVal, gct: data.gct || 0, flight: data.flight || 0});
-  }
-  formatPace(kmh) { if (!kmh || kmh < 0.5) return "--'--"; let s = 3600 / kmh; return Math.floor(s/60) + "'" + String(Math.floor(s%60)).padStart(2,'0') + '"'; }
-  onStart() {
-    if(this.timer) clearInterval(this.timer);
-    this.state.isRunning = true;
-    this.state.isPaused = false;
-    this.state.isAutoPaused = false;
-    this.state.totalDist = 0;
-    this.state.seconds = 0;
-    this.state.steps = 0;
-    this.state.pathCoords = [];
-    this.state.totalGct = 0;
-    this.state.totalFlight = 0;
-    this.state.stepCount = 0;
-    this.state.splits = [];
-    this.state.lastKmCheckpoint = 0;
-    this.state.lastKmSeconds = 0;
-    this.state.lastKmAlt = this.state.currentAlt;
-    this.state.lowSpeedStartTime = null;
-    this.state.lastPosTimestamp = Date.now();
-    if(this.motion) this.motion.reset();
-    if(ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'none';
-    if(ui.dom.btnStart) ui.dom.btnStart.style.display = 'none';
-    if(ui.dom.btnStop) ui.dom.btnStop.style.display = 'block';
-    if(ui.dom.afterStop) ui.dom.afterStop.style.display = 'none';
-    this.requestWakeLock();
-    this.startSilentKeepAlive();
-    if(metro) metro.init();
-    this.timer = setInterval(() => {
-      if(this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
-        this.state.seconds++;
-        let m = Math.floor(this.state.seconds / 60);
-        let s = this.state.seconds % 60;
-        ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')});
-      }
-    }, 1000);
-    if (this.wakeLockInterval) clearInterval(this.wakeLockInterval);
-    this.wakeLockInterval = setInterval(() => {
-      if (this.state.isRunning && !this.state.isPaused) this.requestWakeLock();
-    }, 60000);
-  }
-  onStop() {
-    this.state.isPaused = true;
-    this.state.isAutoPaused = false;
-    if(ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'none';
-    if(ui.dom.btnStop) ui.dom.btnStop.style.display = 'none';
-    if(ui.dom.afterStop) ui.dom.afterStop.style.display = 'flex';
-  }
-  onResume() {
-    this.state.isPaused = false;
-    this.state.isAutoPaused = false;
-    if(ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'none';
-    if(ui.dom.afterStop) ui.dom.afterStop.style.display = 'none';
-    if(ui.dom.btnStop) ui.dom.btnStop.style.display = 'block';
-  }
-  onFinish() {
-    if(this.timer) clearInterval(this.timer);
-    if(this.wakeLockInterval) clearInterval(this.wakeLockInterval);
-    this.releaseWakeLock();
-    this.stopSilentKeepAlive();
-    const p = storage.loadProfile();
-    const weightKg = p.wu === 'lb' ? p.w * 0.453592 : p.w;
-    let totalAltGain = 0;
-    if (this.state.splits && this.state.splits.length > 0) {
-      totalAltGain = this.state.splits.reduce((sum, split) => sum + Math.max(0, split.altDiff || 0), 0);
-    }
-    const avgPaceSec = ui.parsePaceToSeconds(ui.dom.avgPace.textContent);
-    const calculatedKcal = ui.calculateCalories(weightKg, this.state.totalDist, avgPaceSec, totalAltGain, ui.currentGender);
-    const avgCadence = this.state.seconds > 0 ? Math.round((this.state.steps / this.state.seconds) * 60) : 0;
-    const avgGct = this.state.stepCount > 0 ? Math.round(this.state.totalGct / this.state.stepCount) : 0;
-    const avgFlight = this.state.stepCount > 0 ? Math.round(this.state.totalFlight / this.state.stepCount) : 0;
-    if (this.state.totalDist > this.state.lastKmCheckpoint + 0.01 && this.state.seconds > this.state.lastKmSeconds) {
-      let splitDuration = this.state.seconds - this.state.lastKmSeconds;
-      let min = Math.floor(splitDuration / 60);
-      let sec = splitDuration % 60;
-      let paceStr = min + "'" + String(sec).padStart(2,'0') + '"';
-      this.state.splits.push({ km: parseFloat(this.state.totalDist).toFixed(2), pace: paceStr, altFrom: this.state.lastKmAlt, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastKmAlt, coord: this.state.pathCoords[this.state.pathCoords.length - 1] || null });
-    }
-    const record = {
-      id: Date.now(),
-      date: new Date().toLocaleString(),
-      dist: this.state.totalDist.toFixed(2),
-      time: ui.dom.time ? ui.dom.time.textContent : "00:00",
-      avgPace: ui.dom.avgPace ? ui.dom.avgPace.textContent : "--'--",
-      cadence: avgCadence,
-      gct: avgGct,
-      flight: avgFlight,
-      kcal: calculatedKcal,
-      alt: this.state.currentAlt,
-      path: this.state.pathCoords,
-      splits: this.state.splits
-    };
-    storage.saveRecord(record);
-    this.timer = null;
-    location.reload();
-  }
-  checkResume() {
-    try {
-      const saved = storage.loadTempSession();
-      if (saved && saved.isRunning) {
-        if (confirm("Resume last session?")) {
-          Object.assign(this.state, saved);
-          if(ui.dom.btnStart) ui.dom.btnStart.style.display = 'none';
-          if(ui.dom.btnStop) ui.dom.btnStop.style.display = 'block';
-          if(this.state.isAutoPaused && ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'block';
-          ui.updateRunningDisplay({dist: this.state.totalDist.toFixed(2)});
-          if(this.timer) clearInterval(this.timer);
-          this.timer = setInterval(() => {
-            if(this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
-              this.state.seconds++;
-              let m = Math.floor(this.state.seconds / 60);
-              let s = this.state.seconds % 60;
-              ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')});
-            }
-          }, 1000);
-        } else { storage.clearTempSession(); }
-      }
-    } catch (e) {
-      console.warn("Session recovery failed, resetting.", e);
-      storage.clearTempSession();
-      this.state = {
-        isRunning: false, isPaused: false, isAutoPaused: false,
-        seconds: 0, steps: 0, totalDist: 0, lastPos: null, pathCoords: [],
-        currentAlt: 0, lowSpeedStartTime: null, wakeLock: null,
-        maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
-        splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
-        lastPosTimestamp: Date.now()
-      };
-      location.reload();
-    }
-  }
-  async init() {
-    try {
-      window.addEventListener('devicemotion', (e) => {
-        if (this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
-          this.motion.handleMotion(e);
-        }
-      });
-      this.initMap();
-      this.checkResume();
-      if ("geolocation" in navigator) {
-        navigator.geolocation.watchPosition(
-          (p) => this.updatePosition(p),
-          (err) => console.warn("GPS Error", err),
-          { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
-        );
-      }
-    } catch(e) { console.error("App init error", e); }
-  }
+constructor() {
+this.state = {
+isRunning: false, isPaused: false, isAutoPaused: false,
+seconds: 0, steps: 0, totalDist: 0, lastPos: null, pathCoords: [],
+currentAlt: 0, lowSpeedStartTime: null, wakeLock: null,
+maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
+splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
+lastPosTimestamp: Date.now()
+};
+this.map = null; this.marker = null; this.polyline = null; this.timer = null;
+this.motion = new MotionManager((data) => this.updateMetrics(data));
+this.wakeLockInterval = null;
+this.silentAudio = null;
+}
+async requestWakeLock() {
+if ('wakeLock' in navigator) {
+try {
+if (this.state.wakeLock && this.state.wakeLock.released === false) return;
+this.state.wakeLock = await navigator.wakeLock.request('screen');
+this.state.wakeLock.addEventListener('release', () => {
+if (document.visibilityState === 'visible') this.requestWakeLock();
+});
+} catch (err) { console.log('WakeLock 실패:', err); }
+}
+}
+releaseWakeLock() {
+if (this.state.wakeLock) { this.state.wakeLock.release().catch(console.log); this.state.wakeLock = null; }
+}
+startSilentKeepAlive() {
+if (this.silentAudio) this.stopSilentKeepAlive();
+try {
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+this.silentAudio = new AudioCtx();
+const gain = this.silentAudio.createGain();
+gain.gain.value = 0;
+gain.connect(this.silentAudio.destination);
+const schedule = () => {
+if (this.silentAudio && this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
+const now = this.silentAudio.currentTime;
+const osc = this.silentAudio.createOscillator();
+osc.connect(gain);
+osc.frequency.value = 20;
+osc.start(now);
+osc.stop(now + 0.05);
+}
+setTimeout(schedule, 2000);
+};
+schedule();
+this.silentAudio.resume().catch(e=>console.log);
+} catch(e) { console.log('Silent audio failed', e); }
+}
+stopSilentKeepAlive() {
+if (this.silentAudio) { this.silentAudio.close().catch(()=>{}); this.silentAudio = null; }
+}
+initMap() {
+setTimeout(() => {
+const mapDiv = document.getElementById('map');
+if(!mapDiv) return;
+this.map = L.map('map', {zoomControl: false, attributionControl: false}).setView([37.5665, 126.9780], 16);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+maxZoom: 19,
+crossOrigin: true
+}).addTo(this.map);
+this.marker = L.marker([37.5665, 126.9780], {icon: L.divIcon({className:'loc', html:'<div style="background:#007bff; border:2px solid #fff; border-radius:50%; width:14px; height:14px;"></div>'})}).addTo(this.map);
+this.polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(this.map);
+ui.applyMapTheme(storage.getMapTheme());
+setTimeout(() => { if(this.map) this.map.invalidateSize(); }, 200);
+setTimeout(() => { if(this.map) this.map.invalidateSize(); }, 800);
+}, 300);
+}
+updatePosition(p) {
+if(!this.map) return;
+const pos = [p.coords.latitude, p.coords.longitude];
+const accuracy = Math.round(p.coords.accuracy);
+const speedKmh = (p.coords.speed || 0) * 3.6;
+this.state.currentAlt = p.coords.altitude ? Math.round(p.coords.altitude) : 0;
+if(ui.dom.status) ui.dom.status.textContent = 'GPS: ±' + accuracy + 'm | ALT: ' + this.state.currentAlt + 'm';
+if (this.marker) { this.marker.setLatLng(pos); this.map.panTo(pos); }
+if (this.state.isRunning && !this.state.isPaused) {
+if (speedKmh < 1.2) {
+if (!this.state.lowSpeedStartTime) this.state.lowSpeedStartTime = Date.now();
+else if ((Date.now() - this.state.lowSpeedStartTime) > 3500 && !this.state.isAutoPaused) {
+this.state.isAutoPaused = true;
+if(ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'block';
+}
+} else {
+if (this.state.isAutoPaused) {
+this.state.isAutoPaused = false;
+if(ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'none';
+}
+this.state.lowSpeedStartTime = null;
+}
+if (!this.state.isAutoPaused && accuracy < 40) {
+if (this.state.lastPos) {
+let d = this.map.distance(this.state.lastPos, pos) / 1000;
+let timeDelta = (Date.now() - (this.state.lastPosTimestamp || Date.now())) / 1000;
+let maxJump = (speedKmh > 25) ? 0.2 : 0.12;
+if (d > 0.002 && d < maxJump) {
+this.state.totalDist += d;
+this.state.pathCoords.push(pos);
+if(this.polyline) this.polyline.setLatLngs(this.state.pathCoords);
+ui.updateRunningDisplay({dist: this.state.totalDist.toFixed(2)});
+this.state.lastPos = pos;
+this.state.lastPosTimestamp = Date.now();
+let currentTargetKm = this.state.lastKmCheckpoint + 1;
+if (this.state.totalDist >= currentTargetKm) {
+let splitDuration = this.state.seconds - this.state.lastKmSeconds;
+let min = Math.floor(splitDuration / 60);
+let sec = splitDuration % 60;
+let paceStr = min + "'" + String(sec).padStart(2,'0') + '"';
+this.state.splits.push({ km: currentTargetKm, pace: paceStr, altFrom: this.state.lastKmAlt, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastKmAlt, coord: pos });
+this.state.lastKmCheckpoint = currentTargetKm;
+this.state.lastKmSeconds = this.state.seconds;
+this.state.lastKmAlt = this.state.currentAlt;
+}
+} else if (timeDelta > 4 && d < 0.5) {
+let corrected = Math.min(d, 0.08);
+this.state.totalDist += corrected;
+this.state.pathCoords.push(pos);
+if(this.polyline) this.polyline.setLatLngs(this.state.pathCoords);
+this.state.lastPos = pos;
+this.state.lastPosTimestamp = Date.now();
+}
+} else {
+this.state.lastPos = pos;
+this.state.lastPosTimestamp = Date.now();
+this.state.lastKmAlt = this.state.currentAlt;
+}
+const currentPaceStr = this.formatPace(speedKmh);
+const avgKmh = this.state.seconds > 0 ? (this.state.totalDist / (this.state.seconds / 3600)) : 0;
+ui.updateRunningDisplay({ pace: currentPaceStr, avgPace: this.formatPace(avgKmh) });
+}
+storage.saveTempSession(this.state);
+}
+}
+updateMetrics(data) {
+this.state.steps++;
+this.state.stepCount++;
+this.state.totalGct += data.gct || 0;
+this.state.totalFlight += data.flight || 0;
+let cadVal = Math.round((this.state.steps / (this.state.seconds || 1)) * 60);
+ui.updateRunningDisplay({cadence: cadVal, gct: data.gct || 0, flight: data.flight || 0});
+}
+formatPace(kmh) { if (!kmh || kmh < 0.5) return "--'--""; let s = 3600 / kmh; return Math.floor(s/60) + "'" + String(Math.floor(s%60)).padStart(2,'0') + '"'; }
+onStart() {
+if(this.timer) clearInterval(this.timer);
+this.state.isRunning = true;
+this.state.isPaused = false;
+this.state.isAutoPaused = false;
+this.state.totalDist = 0;
+this.state.seconds = 0;
+this.state.steps = 0;
+this.state.pathCoords = [];
+this.state.totalGct = 0;
+this.state.totalFlight = 0;
+this.state.stepCount = 0;
+this.state.splits = [];
+this.state.lastKmCheckpoint = 0;
+this.state.lastKmSeconds = 0;
+this.state.lastKmAlt = this.state.currentAlt;
+this.state.lowSpeedStartTime = null;
+this.state.lastPosTimestamp = Date.now();
+if(this.motion) this.motion.reset();
+if(ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'none';
+if(ui.dom.btnStart) ui.dom.btnStart.style.display = 'none';
+if(ui.dom.btnStop) ui.dom.btnStop.style.display = 'block';
+if(ui.dom.afterStop) ui.dom.afterStop.style.display = 'none';
+this.requestWakeLock();
+this.startSilentKeepAlive();
+if(metro) metro.init();
+this.timer = setInterval(() => {
+if(this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
+this.state.seconds++;
+let m = Math.floor(this.state.seconds / 60);
+let s = this.state.seconds % 60;
+ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')});
+}
+}, 1000);
+if (this.wakeLockInterval) clearInterval(this.wakeLockInterval);
+// 배터리 최적화: wakeLock 재요청 간격을 20초 → 60초로 변경
+this.wakeLockInterval = setInterval(() => {
+if (this.state.isRunning && !this.state.isPaused) this.requestWakeLock();
+}, 60000);
+}
+onStop() {
+this.state.isPaused = true;
+this.state.isAutoPaused = false;
+if(ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'none';
+if(ui.dom.btnStop) ui.dom.btnStop.style.display = 'none';
+if(ui.dom.afterStop) ui.dom.afterStop.style.display = 'flex';
+}
+onResume() {
+this.state.isPaused = false;
+this.state.isAutoPaused = false;
+if(ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'none';
+if(ui.dom.afterStop) ui.dom.afterStop.style.display = 'none';
+if(ui.dom.btnStop) ui.dom.btnStop.style.display = 'block';
+}
+onFinish() {
+if(this.timer) clearInterval(this.timer);
+if(this.wakeLockInterval) clearInterval(this.wakeLockInterval);
+this.releaseWakeLock();
+this.stopSilentKeepAlive();
+const p = storage.loadProfile();
+const weightKg = p.wu === 'lb' ? p.w * 0.453592 : p.w;
+let totalAltGain = 0;
+if (this.state.splits && this.state.splits.length > 0) {
+totalAltGain = this.state.splits.reduce((sum, split) => sum + Math.max(0, split.altDiff || 0), 0);
+}
+const avgPaceSec = ui.parsePaceToSeconds(ui.dom.avgPace.textContent);
+const calculatedKcal = ui.calculateCalories(weightKg, this.state.totalDist, avgPaceSec, totalAltGain, ui.currentGender);
+const avgCadence = this.state.seconds > 0 ? Math.round((this.state.steps / this.state.seconds) * 60) : 0;
+const avgGct = this.state.stepCount > 0 ? Math.round(this.state.totalGct / this.state.stepCount) : 0;
+const avgFlight = this.state.stepCount > 0 ? Math.round(this.state.totalFlight / this.state.stepCount) : 0;
+if (this.state.totalDist > this.state.lastKmCheckpoint + 0.01 && this.state.seconds > this.state.lastKmSeconds) {
+let splitDuration = this.state.seconds - this.state.lastKmSeconds;
+let min = Math.floor(splitDuration / 60);
+let sec = splitDuration % 60;
+let paceStr = min + "'" + String(sec).padStart(2,'0') + '"';
+this.state.splits.push({ km: parseFloat(this.state.totalDist).toFixed(2), pace: paceStr, altFrom: this.state.lastKmAlt, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastKmAlt, coord: this.state.pathCoords[this.state.pathCoords.length - 1] || null });
+}
+const record = {
+id: Date.now(),
+date: new Date().toLocaleString(),
+dist: this.state.totalDist.toFixed(2),
+time: ui.dom.time ? ui.dom.time.textContent : "00:00",
+avgPace: ui.dom.avgPace ? ui.dom.avgPace.textContent : "--'--"",
+cadence: avgCadence,
+gct: avgGct,
+flight: avgFlight,
+kcal: calculatedKcal,
+alt: this.state.currentAlt,
+path: this.state.pathCoords,
+splits: this.state.splits
+};
+storage.saveRecord(record);
+this.timer = null;
+location.reload();
+}
+checkResume() {
+try {
+const saved = storage.loadTempSession();
+if (saved && saved.isRunning) {
+if (confirm("Resume last session?")) {
+Object.assign(this.state, saved);
+if(ui.dom.btnStart) ui.dom.btnStart.style.display = 'none';
+if(ui.dom.btnStop) ui.dom.btnStop.style.display = 'block';
+if(this.state.isAutoPaused && ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'block';
+ui.updateRunningDisplay({dist: this.state.totalDist.toFixed(2)});
+if(this.timer) clearInterval(this.timer);
+this.timer = setInterval(() => {
+if(this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
+this.state.seconds++;
+let m = Math.floor(this.state.seconds / 60);
+let s = this.state.seconds % 60;
+ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')});
+}
+}, 1000);
+} else { storage.clearTempSession(); }
+}
+} catch (e) {
+console.warn("Session recovery failed, resetting.", e);
+storage.clearTempSession();
+this.state = {
+isRunning: false, isPaused: false, isAutoPaused: false,
+seconds: 0, steps: 0, totalDist: 0, lastPos: null, pathCoords: [],
+currentAlt: 0, lowSpeedStartTime: null, wakeLock: null,
+maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
+splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
+lastPosTimestamp: Date.now()
+};
+location.reload();
+}
+}
+async init() {
+try {
+window.addEventListener('devicemotion', (e) => {
+if (this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
+this.motion.handleMotion(e);
+}
+});
+this.initMap();
+this.checkResume();
+// 배터리 최적화: watchPosition 옵션 수정 (maximumAge, timeout 증가)
+if ("geolocation" in navigator) {
+navigator.geolocation.watchPosition(
+(p) => this.updatePosition(p),
+(err) => console.warn("GPS Error", err),
+{ enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+);
+}
+} catch(e) { console.error("App init error", e); }
+}
 }
 
-// ========== 전역 인스턴스 및 실행 ==========
+// ========== 전역 인스턴스 ==========
 const storage = new RunningStorage();
 const ui = new UIManager();
 const metro = new MetroEngine();
 const app = new OppaRunApp();
 
 window.onload = () => {
-  app.init();
-  ui.changeLanguage(storage.getLang());
-  ui.setUnit(storage.getUnit());
-  ui.setGender(storage.getGender());
-  app.requestWakeLock();
+app.init();
+ui.changeLanguage(storage.getLang());
+ui.setUnit(storage.getUnit());
+ui.setGender(storage.getGender());
+app.requestWakeLock();
 
-  // 개선된 서비스 워커 등록 (캐시 전략 포함)
-  if ('serviceWorker' in navigator) {
-    const swCode = `
+// 개선된 서비스 워커 등록 (캐시 전략 포함)
+if ('serviceWorker' in navigator) {
+const swCode = `
 const CACHE_NAME = 'jennyrun-v1';
 const urlsToCache = ['/', '/index.html'];
 self.addEventListener('install', event => {
@@ -1596,32 +1762,31 @@ self.addEventListener('activate', event => {
   self.clients.claim();
 });
 `;
-    const blob = new Blob([swCode], {type: 'application/javascript'});
-    const swUrl = URL.createObjectURL(blob);
-    navigator.serviceWorker.register(swUrl, { scope: './' }).catch(() => {
-      navigator.serviceWorker.register(swUrl).catch(()=>{});
-    });
-  }
+const blob = new Blob([swCode], {type: 'application/javascript'});
+const swUrl = URL.createObjectURL(blob);
+navigator.serviceWorker.register(swUrl, {scope: '/'}).catch(() => {
+navigator.serviceWorker.register(swUrl).catch(()=>{});
+});
+}
 };
-
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
-    app.requestWakeLock();
-    if (app && app.state && app.state.isRunning && !app.timer && !app.state.isPaused && !app.state.isAutoPaused) {
-      app.timer = setInterval(() => {
-        if (app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
-          app.state.seconds++;
-          let m = Math.floor(app.state.seconds / 60);
-          let s = app.state.seconds % 60;
-          ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')});
-        }
-      }, 1000);
-    }
-    if (ui && ui.dimActive) {
-      const overlay = document.getElementById('dimmer-overlay');
-      if (overlay) overlay.style.display = 'flex';
-    }
-  }
+if (document.visibilityState === 'visible') {
+app.requestWakeLock();
+if (app && app.state && app.state.isRunning && !app.timer && !app.state.isPaused && !app.state.isAutoPaused) {
+app.timer = setInterval(() => {
+if (app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
+app.state.seconds++;
+let m = Math.floor(app.state.seconds / 60);
+let s = app.state.seconds % 60;
+ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')});
+}
+}, 1000);
+}
+if (ui && ui.dimActive) {
+const overlay = document.getElementById('dimmer-overlay');
+if (overlay) overlay.style.display = 'flex';
+}
+}
 });
 </script>
 </body>
