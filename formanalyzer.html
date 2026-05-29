@@ -1748,8 +1748,11 @@ vTarget.pause();
 
 vM.ontimeupdate = () => timeUpdateSync(vM);
 vA.ontimeupdate = () => timeUpdateSync(vA);
-
+let _seekedByUser = false;
 const targetSeekEnd = () => {
+if (!_seekedByUser) return;
+_seekedByUser = false;
+vM.pause(); vA.pause();
 if(this.currentRoom === 'manual') {
 CoreAI.runStableAI(true);
 } else if(this.currentRoom === 'auto' && !this.isAutoMode) {
@@ -1758,6 +1761,7 @@ CoreAI.runStableAI(true);
 };
 vM.onseeked = targetSeekEnd;
 vA.onseeked = targetSeekEnd;
+AppControl._markUserSeek = () => { _seekedByUser = true; };
 },
 
 switchRoom(roomName) {
@@ -2445,18 +2449,11 @@ if(!vActive || !vActive.src) {
 AppStorage.triggerCustomConfirm('alertNoVideo');
 return;
 }
-const wasPlaying = !vActive.paused;
-if (wasPlaying) vActive.pause();
-
 const newTime = Math.max(0, Math.min(vActive.duration, vActive.currentTime + amount));
-vActive.currentTime = newTime;
-
-// [AUTO-PLAY FIX] seek 후에도 반드시 pause 상태 유지
 vActive.pause();
-
-// 양쪽 슬라이더 동기화
-document.getElementById('timelineLeftManual').value = newTime;
-document.getElementById('timelineLeftAuto').value = newTime;
+AppControl._markUserSeek();
+vActive.currentTime = newTime;
+setTimeout(() => { vActive.pause(); vM.pause(); vA.pause(); }, 80);
 
 // timeOverlay 즉시 업데이트
 const tStr = newTime.toFixed(2) + "s";
@@ -2469,8 +2466,9 @@ document.getElementById('timeOverlayAuto').innerText = tStr;
 resetAll() {
 vM.pause(); vA.pause();
 this._cancelCurrentLoop();
-
+AppControl._markUserSeek();
 vM.currentTime = 0; vA.currentTime = 0;
+setTimeout(() => { vM.pause(); vA.pause(); }, 80);
 const sLM = document.getElementById('timelineLeftManual');
 const sRM = document.getElementById('timelineRightManual');
 const sLA = document.getElementById('timelineLeftAuto');
@@ -2547,15 +2545,13 @@ I18n.updateUIStrings();
 },
 
 resetToMark() {
-if(!vActive || !vActive.src) return;
 vActive.pause();
 
 const targetTime = (this.contactTime !== null) ? this.contactTime : 0;
 const endTime = (this.takeoffTime !== null) ? this.takeoffTime : (vActive.duration || 0);
+AppControl._markUserSeek();
 vActive.currentTime = targetTime;
-
-// [AUTO-PLAY FIX] 구간 리셋 후 강제 일시정지
-vActive.pause();
+setTimeout(() => { vActive.pause(); }, 80);
 
 document.getElementById('timelineLeftManual').value = targetTime;
 document.getElementById('timelineLeftAuto').value = targetTime;
@@ -2642,4 +2638,4 @@ if(sel) sel.value = _savedLang;
 I18n.updateUIStrings();
 </script>
 </body>
-                                                                                                                         </html>
+  </html>
