@@ -92,7 +92,7 @@ cursor: pointer; border: 2px solid #ffffff; box-shadow: 0 0 8px rgba(0,0,0,0.6);
 .control-panel {
 background: var(--panel-bg); padding: 10px 12px; border-radius: 24px; width: 100%; box-sizing: border-box;
 display: flex; flex-direction: column; flex: 1; justify-content: space-between; min-height: 0;
-max-height: 60%; /* 화면 잘림 방지 */
+max-height: 60%;
 }
 .grid-row { display: grid; gap: 6px; margin-bottom: 4px; width: 100%; }
 .precision-row { grid-template-columns: repeat(4, 1fr); }
@@ -306,7 +306,7 @@ background:rgba(10,10,12,0.99); flex-direction:column; align-items:center; paddi
 <div id="reportModal" class="gallery-panel-modal" style="background: rgba(15,15,17,0.99); overflow-y:auto; justify-content:flex-start; padding-top:10px;">
 <div class="gallery-header"><span class="gallery-title" id="txtReportTitle">RUNNING REPORT</span><span class="gallery-close-text" id="txtReportClose" onclick="AppControl.closeReportModal()">닫기</span></div>
 <div style="width:100%; max-width:460px; margin:0 auto;">
-<table class="report-table"><thead><tr><th id="thMetric">분석 항목</th><th id="thGuide">권장 표준 수치</th><th id="thValue">내 측정 데이터</th></tr></thead>
+<table class="report-table"><thead><tr><th id="thMetric">분석 항목</th><th id="thGuide">권장 표준 수치</th><th id="thValue">내 측정 데이터</th></thead>
 <tbody>
 <tr><td id="tdRepKnee">Knee Angle (무릎 익스텐션)</td><td>160° - 170°</td><td id="repValKnee">--°</td></tr>
 <tr><td id="tdRepElbow">Elbow Angle (팔꿈치 각도)</td><td>80° - 90°</td><td id="repValElbow">--°</td></tr>
@@ -425,6 +425,9 @@ computedStride = (stridePx * cmPerPixel) / 100 * (1.5 + (userHeight-170)*0.003);
 if(computedStride>0.3 && computedStride<2.8) {
 document.getElementById('valStrideA').innerText = computedStride.toFixed(2)+"m";
 this._stride = computedStride;
+// FIXED: 보폭 게이지 업데이트 추가
+let sBar = document.getElementById('gStrideA');
+if (sBar) sBar.style.width = Math.min(100, (computedStride / 2.0) * 100) + '%';
 }
 }
 // 각도 게이지
@@ -499,10 +502,11 @@ descTorso.innerText = (lang==='ko'?`상체 너무 숙여짐 (${torso.toFixed(1)}
 
 calcAngle(p1,p2,p3) {
 const v1={x:p1.x-p2.x,y:p1.y-p2.y}, v2={x:p3.x-p2.x,y:p3.y-p2.y};
-const dot=v1.xv2.x+v1.yv2.y, m1=Math.hypot(v1.x,v1.y), m2=Math.hypot(v2.x,v2.y);
+const dot=v1.x*v2.x+v1.y*v2.y, m1=Math.hypot(v1.x,v1.y), m2=Math.hypot(v2.x,v2.y);
 if(m1===0||m2===0) return 0;
 return Math.acos(Math.max(-1,Math.min(1,dot/(m1*m2))))*180/Math.PI;
-},_movingAvg(buf,val,size) { buf.push(val); if(buf.length>size) buf.shift(); return buf.reduce((a,b)=>a+b,0)/buf.length; },
+},
+_movingAvg(buf,val,size) { buf.push(val); if(buf.length>size) buf.shift(); return buf.reduce((a,b)=>a+b,0)/buf.length; },
 
 analyzeRunningGCT() {
 const h = this.footDataHistory;
@@ -642,6 +646,9 @@ CoreAI.lastDetectedContact=null; CoreAI.lastDetectedTakeoff=null;
 CoreAI._leftYBuf=[]; CoreAI._rightYBuf=[];
 CoreAI.autoKneeList=[]; CoreAI.autoElbowList=[]; CoreAI.autoTorsoList=[];
 CoreAI.lastFrameTime=-1;
+// FIXED: 자동 분석 시작 시 Contact/Takeoff 시간 초기화
+CoreAI._autoContactTime = null;
+CoreAI._autoTakeoffTime = null;
 if(vActive.paused) CoreAI.runStableAI(true); else this.syncPlayAI();
 } else {
 btn.style.background="transparent";
@@ -662,7 +669,7 @@ this._playLoopVideo=null;
 }
 },
 togglePlay() { if(!vActive||!vActive.src) AppStorage.triggerCustomConfirm('alertNoVideo'); else if(vActive.paused) vActive.play(); else vActive.pause(); },
-stepTime(amount, e) { if(e) e.stopPropagation(); if(!vActive||!vActive.src) { AppStorage.triggerCustomConfirm('alertNoVideo'); return; } const newTime = Math.max(0, Math.min(vActive.duration, vActive.currentTime+amount)); vActive.pause(); this._markUserSeek(); vActive.currentTime = newTime; setTimeout(()=>vActive.pause(),80); document.getElementById('timeOverlayAuto').innerText = newTime.toFixed(2)+"s"; },
+stepTime(amount, e) { if(e) e.stopPropagation(); if(!vActive||!vActive.src) { AppStorage.triggerCustomConfirm('alertNoVideo'); return; } const newTime = Math.max(0, Math.min(vActive.duration, vActive.currentTime+amount)); vActive.pause(); this._markUserSeek(); vActive.currentTime = newTime; setTimeout(()=>vActive.pause(),80); document.getElementById('timeOverlayAuto').innerText = newTime.toFixed(2)+"s"; // FIXED: 수동 스텝 후 스켈레톤 갱신 강제 호출 setTimeout(() => CoreAI.runStableAI(true), 50); },
 markBall(side) {
 if(!vActive || !vActive.src) { AppStorage.triggerCustomConfirm('alertNoVideo'); return; }
 if(!vActive.paused) vActive.pause();
@@ -677,6 +684,22 @@ this.takeoffTime = now;
 }
 if(this.contactTime !== null && this.takeoffTime !== null) this.calculateMetrics();
 },
+// FIXED: 수동 마크 데이터 계산 함수 추가
+calculateMetrics() {
+if (this.contactTime === null || this.takeoffTime === null) return;
+const gct = Math.round((this.takeoffTime - this.contactTime) * 1000);
+const flight = gct; // 단순화, 필요시 더 정교하게 가능
+document.getElementById('valGCTA').innerText = gct + "ms";
+document.getElementById('valFlightA').innerText = flight + "ms";
+let gBar = document.getElementById('gGCTA');
+if (gBar) gBar.style.width = Math.min(100, (gct / 300) * 100) + '%';
+let fBar = document.getElementById('gFlightA');
+if (fBar) fBar.style.width = Math.min(100, (flight / 200) * 100) + '%';
+CoreAI.autoGctList.push(gct);
+CoreAI.autoFlightList.push(flight);
+CoreAI._avgGct = Math.round(CoreAI.autoGctList.reduce((a,b)=>a+b,0)/CoreAI.autoGctList.length);
+CoreAI._avgFlight = Math.round(CoreAI.autoFlightList.reduce((a,b)=>a+b,0)/CoreAI.autoFlightList.length);
+},
 onDualSliderInput(side) {
 if(!vActive||!vActive.src) return;
 if(!vActive.paused) vActive.pause();
@@ -686,7 +709,6 @@ if(valL>valR-0.01) { if(side==='left') valL=Math.max(0,valR-0.01); else valR=Mat
 this.updateTrack();
 const t = (side==='left')?valL:valR;
 vActive.currentTime = t;
-// 구간 설정 업데이트
 this.contactTime = valL;
 this.takeoffTime = valR;
 document.getElementById('inputStartPointAuto').value = valL.toFixed(2);
@@ -713,183 +735,70 @@ const sL=document.getElementById('timelineLeftAuto'), sR=document.getElementById
 if(sL&&sR&&sT) {
 const max=parseFloat(sL.max)||1;
 const pL=(parseFloat(sL.value)/max)*100, pR=(parseFloat(sR.value)/max)*100;
-sT.style.background = `linear-gradient(to right, #333 ${pL}%, var(--blue) ${pL}%, var(--blue) ${pR}%, #333 ${pR}%, #333 100%)`;
+sT.style.background = `linear-gradient(to right, #333 ${pL}%, var(--blue) ${pL}%, var(--blue) ${pR}%, #333 ${pR}%)`;
 }
 },
-calculateMetrics() {
-if(this.contactTime!==null && this.takeoffTime!==null) {
-const diffMs = Math.round((this.takeoffTime-this.contactTime)*1000);
-if(diffMs>=0) {
-document.getElementById('valGCTM').innerText = diffMs+"ms";
-document.getElementById('valFlightM').innerText = Math.round(diffMs*0.38)+"ms";
-let gBar=document.getElementById('gGCTM'); if(gBar) gBar.style.width = Math.min(100,(diffMs/300)*100)+'%';
-let fBar=document.getElementById('gFlightM'); if(fBar) fBar.style.width = Math.min(100,(diffMs*0.38/200)*100)+'%';
-}
-}
+loadVideo(event) {
+const file = event.target.files[0];
+if(!file) return;
+const url = URL.createObjectURL(file);
+vActive.src = url;
+vActive.load();
+this.resetAll();
 },
-loadVideo(e) {
-const file=e.target.files[0]; if(!file) return;
-this._cancelCurrentLoop(); vA.pause(); vA.src='';
-const url=URL.createObjectURL(file); vA.src=url;
-let metaDone=false;
-const onMeta=()=>{
-if(metaDone) return; if(!vA.duration||!isFinite(vA.duration)) return;
-metaDone=true;
-const sL=document.getElementById('timelineLeftAuto'), sR=document.getElementById('timelineRightAuto');
-sL.max=sR.max=vA.duration; sL.value=0; sR.value=vA.duration;
-this.updateTrack();
-cA.width=vA.videoWidth; cA.height=vA.videoHeight;
-vA.currentTime=0; document.getElementById('timeOverlayAuto').innerText="0.00s";
-ctxA.clearRect(0,0,cA.width,cA.height);
-this.contactTime=null; this.takeoffTime=null;
-document.getElementById('inputStartPointAuto').value="0.00";
-document.getElementById('inputEndPointAuto').value=vA.duration.toFixed(2);
-document.getElementById('valKneeA').innerText="--°"; document.getElementById('valElbowA').innerText="--°"; document.getElementById('valBodyA').innerText="--°";
-document.getElementById('valGCTA').innerText="0ms"; document.getElementById('valFlightA').innerText="0ms"; document.getElementById('valStrideA').innerText="0.00m";
-document.getElementById('valGCTM').innerText="0ms"; document.getElementById('valFlightM').innerText="0ms";
-CoreAI.footDataHistory=[]; CoreAI.autoGctList=[]; CoreAI.autoFlightList=[]; CoreAI.autoStrideList=[];
-CoreAI.autoKneeList=[]; CoreAI.autoElbowList=[]; CoreAI.autoTorsoList=[];
-CoreAI._leftYBuf=[]; CoreAI._rightYBuf=[];
-CoreAI.lastDetectedContact=null; CoreAI.lastDetectedTakeoff=null;
-CoreAI._autoContactTime=null; CoreAI._autoTakeoffTime=null;
-CoreAI._avgGct=0; CoreAI._avgFlight=0;
-const p=I18n[I18n.currentLang];
-document.getElementById('solTagKnee').innerText=p.solTagWait; document.getElementById('solTagDynamic').innerText=p.solTagWait; document.getElementById('solTagTorso').innerText=p.solTagWait;
-setTimeout(()=>CoreAI.runStableAI(true),150);
-};
-vA.onloadedmetadata=onMeta;
+openSettingModal() { document.getElementById('settingModal').style.display='flex'; },
+closeSettingModal() { this.saveSettings(); document.getElementById('settingModal').style.display='none'; },
+saveSettings() {
+userHeight = parseFloat(document.getElementById('inputHeight').value) || 175;
+userWeight = parseFloat(document.getElementById('inputWeight').value) || 70;
+userAge = parseInt(document.getElementById('inputAge').value) || 30;
+userGender = document.getElementById('selectGender').value;
+localStorage.setItem('proAnalysisUser', JSON.stringify({height:userHeight,weight:userWeight,age:userAge,gender:userGender}));
 },
-openSettingModal() { document.getElementById('settingModal').style.display="flex"; },
-closeSettingModal() { this.saveSettings(); document.getElementById('settingModal').style.display="none"; setTimeout(()=>CoreAI.runStableAI(true),50); },
-saveSettings() { userHeight=parseFloat(document.getElementById('inputHeight').value)||175; userWeight=parseFloat(document.getElementById('inputWeight').value)||70; userAge=parseInt(document.getElementById('inputAge').value)||30; userGender=document.getElementById('selectGender').value; },
 openReportModal() {
-if(!vActive || !vActive.src) { this.openSavedList(); return; }
-let finalKnee = 0, finalElbow = 0, finalTorso = 0;
-let finalGct = 0, finalFlight = 0, finalStride = 0;
-if(CoreAI.autoKneeList.length > 0) {
-const sumKnee = CoreAI.autoKneeList.reduce((a,b)=>a+b,0);
-const sumElbow = CoreAI.autoElbowList.reduce((a,b)=>a+b,0);
-const sumTorso = CoreAI.autoTorsoList.reduce((a,b)=>a+b,0);
-finalKnee = sumKnee / CoreAI.autoKneeList.length;
-finalElbow = sumElbow / CoreAI.autoElbowList.length;
-finalTorso = sumTorso / CoreAI.autoTorsoList.length;
-document.getElementById('repValKnee').innerText = finalKnee.toFixed(1)+"°";
-document.getElementById('repValElbow').innerText = finalElbow.toFixed(1)+"°";
-document.getElementById('repValBody').innerText = finalTorso.toFixed(1)+"°";
-} else {
-finalKnee = parseFloat(CoreAI.curKnee) || 0;
-finalElbow = parseFloat(CoreAI.curElbow) || 0;
-finalTorso = parseFloat(CoreAI.curBody) || 0;
-document.getElementById('repValKnee').innerText = CoreAI.curKnee;
-document.getElementById('repValElbow').innerText = CoreAI.curElbow;
-document.getElementById('repValBody').innerText = CoreAI.curBody;
-}
-if(CoreAI.autoGctList.length > 0) {
-const sumGct = CoreAI.autoGctList.reduce((a,b)=>a+b,0);
-finalGct = Math.round(sumGct / CoreAI.autoGctList.length);
-document.getElementById('repValGCT').innerText = finalGct+"ms";
-document.getElementById('repValSteps').innerText = CoreAI.autoGctList.length;
-if(CoreAI.autoFlightList.length > 0) {
-const sumFlight = CoreAI.autoFlightList.reduce((a,b)=>a+b,0);
-finalFlight = Math.round(sumFlight / CoreAI.autoFlightList.length);
-document.getElementById('repValFlight').innerText = finalFlight+"ms";
-}
-} else {
-finalGct = parseInt(document.getElementById('valGCTM').innerText) || 0;
-finalFlight = parseInt(document.getElementById('valFlightM').innerText) || 0;
-document.getElementById('repValGCT').innerText = document.getElementById('valGCTM').innerText;
-document.getElementById('repValFlight').innerText = document.getElementById('valFlightM').innerText;
-document.getElementById('repValSteps').innerText = (this.contactTime !== null && this.takeoffTime !== null) ? "1 (Manual)" : "0";
-}
-if(CoreAI.autoStrideList.length > 0) {
-const sumStride = CoreAI.autoStrideList.reduce((a,b)=>a+b,0);
-finalStride = sumStride / CoreAI.autoStrideList.length;
-document.getElementById('repValStride').innerText = finalStride.toFixed(2)+"m";
-} else {
-finalStride = parseFloat(document.getElementById('valStrideA').innerText) || 0;
+const lang=I18n.currentLang;
+document.getElementById('repValKnee').innerText = document.getElementById('valKneeA').innerText;
+document.getElementById('repValElbow').innerText = document.getElementById('valElbowA').innerText;
+document.getElementById('repValBody').innerText = document.getElementById('valBodyA').innerText;
+document.getElementById('repValGCT').innerText = document.getElementById('valGCTA').innerText;
+document.getElementById('repValFlight').innerText = document.getElementById('valFlightA').innerText;
 document.getElementById('repValStride').innerText = document.getElementById('valStrideA').innerText;
-}
-const applyStatusColor = (elementId, val, min, max, warnOffset = 5) => {
-const el = document.getElementById(elementId);
-if (!el) return;
-el.classList.remove('status-green','status-yellow','status-red');
-if (!val || val === 0) return;
-if (val >= min && val <= max) el.classList.add('status-green');
-else if (val >= (min - warnOffset) && val <= (max + warnOffset)) el.classList.add('status-yellow');
-else el.classList.add('status-red');
-};
-applyStatusColor('repValKnee', finalKnee, 160, 170, 10);
-applyStatusColor('repValElbow', finalElbow, 80, 90, 15);
-applyStatusColor('repValBody', finalTorso, 5, 10, 3);
-applyStatusColor('repValGCT', finalGct, 180, 220, 20);
-applyStatusColor('repValFlight', finalFlight, 70, 100, 15);
-applyStatusColor('repValStride', finalStride, 1.0, 1.4, 0.2);
-I18n.updateUIStrings();
-document.getElementById('reportModal').style.display = "flex";
+let steps = Math.max(CoreAI.autoGctList.length, CoreAI.autoFlightList.length);
+document.getElementById('repValSteps').innerText = steps;
+document.getElementById('reportModal').style.display='flex';
 },
-closeReportModal() { document.getElementById('reportModal').style.display="none"; },
+closeReportModal() { document.getElementById('reportModal').style.display='none'; },
 saveReportData() {
-const now=new Date();
-const entry={
-id:now.getTime(),
-date:now.toLocaleDateString(I18n.currentLang==='ko'?'ko-KR':'en-US',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}),
-knee:document.getElementById('repValKnee').innerText,
-elbow:document.getElementById('repValElbow').innerText,
-body:document.getElementById('repValBody').innerText,
-gct:document.getElementById('repValGCT').innerText,
-flight:document.getElementById('repValFlight').innerText,
-stride:document.getElementById('repValStride').innerText,
-steps:document.getElementById('repValSteps').innerText,
-kneeClass:document.getElementById('repValKnee').className,
-elbowClass:document.getElementById('repValElbow').className,
-bodyClass:document.getElementById('repValBody').className,
-gctClass:document.getElementById('repValGCT').className,
-flightClass:document.getElementById('repValFlight').className,
-strideClass:document.getElementById('repValStride').className
+const report = {
+id: Date.now(),
+date: new Date().toLocaleString(),
+knee: document.getElementById('repValKnee').innerText,
+elbow: document.getElementById('repValElbow').innerText,
+body: document.getElementById('repValBody').innerText,
+gct: document.getElementById('repValGCT').innerText,
+flight: document.getElementById('repValFlight').innerText,
+stride: document.getElementById('repValStride').innerText,
+steps: document.getElementById('repValSteps').innerText
 };
-const saved=JSON.parse(localStorage.getItem('proAnalysisReports')||'[]');
-saved.unshift(entry); if(saved.length>50) saved.pop();
-localStorage.setItem('proAnalysisReports',JSON.stringify(saved));
-this.closeReportModal(); this.openSavedList();
+let saved = JSON.parse(localStorage.getItem('proAnalysisReports') || '[]');
+saved.unshift(report);
+localStorage.setItem('proAnalysisReports', JSON.stringify(saved));
+const lang=I18n.currentLang;
+alert(lang==='ko'?'레포트가 저장되었습니다!':'Report saved!');
 },
-openSavedList() { document.getElementById('savedListModal').style.display="flex"; this.renderSavedList(); },
-closeSavedList() { document.getElementById('savedListModal').style.display="none"; this.switchRoom('auto'); },
-renderSavedList() {
-const scroll=document.getElementById('savedListScroll');
-const empty=document.getElementById('savedListEmpty');
-const saved=JSON.parse(localStorage.getItem('proAnalysisReports')||'[]');
-Array.from(scroll.querySelectorAll('.saved-card')).forEach(el=>el.remove());
-if(saved.length===0) { empty.style.display='block'; return; }
-empty.style.display='none';
-saved.forEach(entry=>{
-const card=document.createElement('div');
-card.className='saved-card';
-card.innerHTML=`<button class="saved-card-del" onclick="AppControl.deleteSavedEntry(${entry.id})">✕</button>
-<div class="saved-card-date">📅 ${entry.date}</div>
-<div class="saved-card-row">
-<div class="saved-card-item">${I18n[I18n.currentLang].cardKnee}: <span class="${entry.kneeClass}">${entry.knee}</span></div>
-<div class="saved-card-item">${I18n[I18n.currentLang].cardElbow}: <span class="${entry.elbowClass}">${entry.elbow}</span></div>
-<div class="saved-card-item">${I18n[I18n.currentLang].cardTorso}: <span class="${entry.bodyClass}">${entry.body}</span></div>
-</div>
-<div class="saved-card-row">
-<div class="saved-card-item blue">${I18n[I18n.currentLang].gctAuto}: <span class="${entry.gctClass}">${entry.gct}</span></div>
-<div class="saved-card-item blue">${I18n[I18n.currentLang].flightAuto}: <span class="${entry.flightClass}">${entry.flight}</span></div>
-<div class="saved-card-item">${I18n[I18n.currentLang].cardStride}: <span class="${entry.strideClass}">${entry.stride}</span></div>
-</div>
-<div class="saved-card-row"><div class="saved-card-item">${I18n[I18n.currentLang].repSteps}: <span>${entry.steps}</span></div></div>`;
-scroll.appendChild(card);
-});
-},
-deleteSavedEntry(id) { let saved=JSON.parse(localStorage.getItem('proAnalysisReports')||'[]'); saved=saved.filter(e=>e.id!==id); localStorage.setItem('proAnalysisReports',JSON.stringify(saved)); this.renderSavedList(); },
 deleteReportData() {
 if(confirm(I18n[I18n.currentLang].deleteConfirm)) {
 document.getElementById('repValKnee').innerText="--°"; document.getElementById('repValElbow').innerText="--°"; document.getElementById('repValBody').innerText="--°";
 document.getElementById('repValGCT').innerText="0ms"; document.getElementById('repValFlight').innerText="0ms"; document.getElementById('repValStride').innerText="0.00m"; document.getElementById('repValSteps').innerText="0";
-['repValKnee','repValElbow','repValBody','repValGCT','repValFlight','repValStride'].forEach(id=>{ const el=document.getElementById(id); if(el) el.classList.remove('status-green','status-yellow','status-red'); });
 CoreAI.autoKneeList=[]; CoreAI.autoElbowList=[]; CoreAI.autoTorsoList=[]; CoreAI.autoGctList=[]; CoreAI.autoFlightList=[]; CoreAI.autoStrideList=[];
 this.closeReportModal();
 }
 },
+openSavedList() {
+document.getElementById('savedListModal').style.display='flex';
+AppStorage.renderSavedList();
+},
+closeSavedList() { document.getElementById('savedListModal').style.display='none'; },
 resetAll() {
 if(!vActive || !vActive.src) return;
 vActive.pause();
@@ -915,16 +824,12 @@ document.getElementById('valBodyA').innerText = "--°";
 document.getElementById('valGCTA').innerText = "0ms";
 document.getElementById('valFlightA').innerText = "0ms";
 document.getElementById('valStrideA').innerText = "0.00m";
-document.getElementById('valGCTM').innerText = "0ms";
-document.getElementById('valFlightM').innerText = "0ms";
 document.getElementById('gKneeA').style.width = '0%';
 document.getElementById('gElbowA').style.width = '0%';
 document.getElementById('gTorsoA').style.width = '0%';
 document.getElementById('gGCTA').style.width = '0%';
 document.getElementById('gFlightA').style.width = '0%';
 document.getElementById('gStrideA').style.width = '0%';
-document.getElementById('gGCTM').style.width = '0%';
-document.getElementById('gFlightM').style.width = '0%';
 CoreAI.footDataHistory = [];
 CoreAI.autoGctList = [];
 CoreAI.autoFlightList = [];
@@ -1001,7 +906,44 @@ box.appendChild(img); gal.insertBefore(box,gal.firstChild);
 openGalleryPanel() { document.getElementById('galleryModal').style.display='flex'; },
 closeGalleryPanel() { document.getElementById('galleryModal').style.display='none'; },
 openModal(src,thumb) { this.targetThumbBox=thumb; document.getElementById('imgModal').style.display='flex'; document.getElementById('modalImg').src=src; },
-closeModal() { document.getElementById('imgModal').style.display='none'; this.targetThumbBox=null; }
+closeModal() { document.getElementById('imgModal').style.display='none'; this.targetThumbBox=null; },
+renderSavedList() {
+const scroll = document.getElementById('savedListScroll');
+const emptyDiv = document.getElementById('savedListEmpty');
+const saved = JSON.parse(localStorage.getItem('proAnalysisReports') || '[]');
+scroll.innerHTML = '';
+if(saved.length === 0) {
+scroll.appendChild(emptyDiv);
+return;
+}
+emptyDiv.remove();
+saved.forEach(entry => {
+const card = document.createElement('div');
+card.className = 'saved-card';
+card.innerHTML = `
+<div class="saved-card-date">📅 ${entry.date}</div>
+<div class="saved-card-row">
+<div class="saved-card-item">${I18n[I18n.currentLang].cardKnee}: <span>${entry.knee}</span></div>
+<div class="saved-card-item">${I18n[I18n.currentLang].cardElbow}: <span>${entry.elbow}</span></div>
+<div class="saved-card-item">${I18n[I18n.currentLang].cardTorso}: <span>${entry.body}</span></div>
+</div>
+<div class="saved-card-row">
+<div class="saved-card-item blue">GCT: <span>${entry.gct}</span></div>
+<div class="saved-card-item blue">Flight: <span>${entry.flight}</span></div>
+<div class="saved-card-item">Stride: <span>${entry.stride}</span></div>
+<div class="saved-card-item">Steps: <span>${entry.steps}</span></div>
+</div>
+<button class="saved-card-del" onclick="AppStorage.deleteSavedEntry(${entry.id})">🗑️</button>
+`;
+scroll.appendChild(card);
+});
+},
+deleteSavedEntry(id) {
+let saved = JSON.parse(localStorage.getItem('proAnalysisReports') || '[]');
+saved = saved.filter(e => e.id !== id);
+localStorage.setItem('proAnalysisReports', JSON.stringify(saved));
+this.renderSavedList();
+}
 };
 
 // ======================== I18n ========================
@@ -1059,7 +1001,7 @@ document.getElementById('lblSetGender').innerText=p.setGender;
 document.getElementById('lblSetLang').innerText=p.setLang;
 document.getElementById('btnReportSave').innerText=p.btnSave;
 document.getElementById('btnReportDelete').innerText=p.btnDelete;
-document.getElementById('btnReportAuto').innerText = p.btnReport; // Report 버튼 한글 적용
+document.getElementById('btnReportAuto').innerText = p.btnReport;
 const svTitle=document.getElementById('savedListTitle'); if(svTitle) svTitle.innerText=p.savedListTitle;
 const svBack=document.getElementById('savedListBack'); if(svBack) svBack.innerText=p.savedListBack;
 const svView=document.getElementById('btnSavedListView'); if(svView) svView.innerText=p.savedListView;
@@ -1085,4 +1027,4 @@ I18n.updateUIStrings();
 window.onerror = function(msg, url, line) { console.error(msg, url, line); };
 </script>
 </body>
-  </html>
+</html>
