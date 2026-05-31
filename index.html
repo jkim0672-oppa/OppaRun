@@ -343,7 +343,7 @@ pointer-events: none;
 <div id="sub-page-info" class="sub-page" style="padding: 20px 12px 120px 12px; gap: 10px;">
 <div class="info-tab-nav">
 <button id="info-sub-tab-theory" class="info-sub-btn active" onclick="ui.toggleInfoSubTab('theory')"><span id="info-tab-theory-label">이론 가이드</span></button>
-<button id="info-sub-tab-precision" class="info-sub-btn" onclick="ui.toggleInfoSubTab('precision')"><span id="info-tab-precision-label">폼 정밀 분석실</span></button>
+<button id="info-sub-tab-precision" class="info-sub-btn" onclick="ui.toggleInfoSubTab('precision'); setTimeout(function(){if(window._avatarStart)window._avatarStart();},100);"><span id="info-tab-precision-label">폼 정밀 분석실</span></button>
 </div>
 <div id="info-theory-area" style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
 <div class="diag-card"><div id="info-cadence-title" style="color:var(--primary); font-weight:900; margin-bottom:5px;">CADENCE</div><div id="info-cadence-desc" style="font-size:12px; color:#ccc;">Recommended 170~185 BPM.</div></div>
@@ -1861,29 +1861,43 @@ navigator.serviceWorker.register(swUrl).catch(()=>{});
     }
   };
 
-  // ── 탭 전환 후킹 (precision 탭 열리면 시작) ──
-  window.addEventListener('load',function(){
+  // ── 외부 노출 ────────────────────────────────
+  window._avatarStart = start;
+  window._avatarStop  = stop;
+
+  // precision 탭 버튼 직접 후킹 (load 타이밍 무관)
+  function hookBtn(){
+    const btn = document.getElementById('info-sub-tab-precision');
+    if(btn){
+      // 이미 onclick에 있으므로 추가 불필요, _avatarStart로 충분
+    }
+    // precision 영역이 이미 보이면 바로 시작
+    const pa = document.getElementById('info-precision-analysis-area');
+    if(pa && (pa.style.display === 'flex' || pa.style.display === '')) start();
+  }
+
+  // 탭 전환 후킹 (ui 객체 생성 후 덮어씌움)
+  window.addEventListener('load', function(){
     setTimeout(function(){
-      if(window.ui&&ui.toggleInfoSubTab){
-        const orig=ui.toggleInfoSubTab.bind(ui);
-        ui.toggleInfoSubTab=function(target){
+      hookBtn();
+      if(window.ui && ui.toggleInfoSubTab){
+        const orig = ui.toggleInfoSubTab.bind(ui);
+        ui.toggleInfoSubTab = function(target){
           orig(target);
-          if(target==='precision') start();
+          if(target === 'precision') start();
         };
       }
-      if(window.ui&&ui.loadPrecisionDashboard){
-        const origL=ui.loadPrecisionDashboard.bind(ui);
-        ui.loadPrecisionDashboard=function(recordId){
+      if(window.ui && ui.loadPrecisionDashboard){
+        const origL = ui.loadPrecisionDashboard.bind(ui);
+        ui.loadPrecisionDashboard = function(recordId){
           origL(recordId);
-          const h=storage.loadHistory();
-          const rec=h.find(r=>r.id==recordId);
+          const h = storage.loadHistory();
+          const rec = h.find(r => r.id == recordId);
           if(rec) window.avatarSyncRecord(rec);
+          start();
         };
       }
-      // 이미 precision 탭이 열려있으면 바로 시작
-      const pa=document.getElementById('info-precision-analysis-area');
-      if(pa&&pa.style.display==='flex') start();
-    },500);
+    }, 800);
   });
 })();
 // ═══════════════════════════════════════════════
@@ -1909,4 +1923,4 @@ if (overlay) overlay.style.display = 'flex';
 });
 </script>
 </body>
-    </html>
+</html>
