@@ -171,7 +171,21 @@ background: #111111; border: 1.5px solid #2a2a2a; border-radius: 14px;
 padding: 8px; position: relative; width: calc(100% - 35px); height: auto;
 display: flex; flex-direction: column; align-items: center; overflow: visible; margin-bottom: 10px;
 }
-/* avatar speed btn / skeleton indicator — 제거됨 */
+.avatar-speed-btn {
+width: 34px; height: 34px; border-radius: 50%;
+background: #2a2a2a; border: 1.5px solid #444;
+color: var(--primary); font-size: 20px; font-weight: 900;
+line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center;
+-webkit-tap-highlight-color: transparent;
+}
+.avatar-speed-btn:active { background: #333; transform: scale(0.92); }
+.skeleton-indicator-box {
+position: absolute; background: rgba(30, 30, 30, 0.85); border: 1px solid var(--good);
+border-radius: 6px; padding: 5px 8px; min-width: 95px; font-family: sans-serif;
+}
+.skeleton-ind-title { font-size: 8px; color: var(--good); font-weight: 900; text-transform: uppercase; margin-bottom: 1px; letter-spacing: 0.3px; }
+.skeleton-ind-val { font-size: 13px; color: #fff; font-weight: 900; line-height: 1.2; }
+.skeleton-ind-ref { font-size: 8px; color: var(--warning); font-weight: 700; opacity: 0.9; }
 .btn-launch-full-diagnosis {
 width: 100%; height: 46px; border-radius: 12px; border: 1.5px solid var(--good);
 background: rgba(0, 255, 136, 0.04); color: var(--good); font-size: 14px;
@@ -367,23 +381,31 @@ pointer-events: none;
 </div>
 </div>
 <div class="skeleton-graphic-container" id="avatar-wrap">
-<!-- 캔버스: 아바타 그려짐 -->
-<div style="position:relative; width:100%;">
-<canvas id="avatar-canvas" width="360" height="300"
-style="width:100%; height:300px; display:block; border-radius:10px;"></canvas>
-</div>
-<!-- PLAY / STOP 버튼 -->
-<div style="width:100%; padding:8px 4px 4px 4px; display:flex; gap:10px; justify-content:center;">
-<button id="btn-avatar-play" onclick="window._avatarStart && window._avatarStart()" style="
-flex:1; height:44px; border-radius:22px; border:none;
-background:var(--primary); color:#000; font-size:15px; font-weight:900;
-cursor:pointer; letter-spacing:1px; transition:all 0.2s;
-box-shadow:0 0 14px rgba(0,255,136,0.35);">▶ PLAY</button>
-<button id="btn-avatar-stop" onclick="window._avatarStop && window._avatarStop()" style="
-flex:1; height:44px; border-radius:22px; border:1.5px solid #444;
-background:#1a1a1a; color:#aaa; font-size:15px; font-weight:900;
-cursor:pointer; letter-spacing:1px; transition:all 0.2s;">■ STOP</button>
-</div>
+  <!-- 캔버스: 아바타 그려짐 -->
+  <div style="position:relative; width:100%;">
+    <canvas id="avatar-canvas" width="340" height="230"
+      style="width:100%; height:230px; display:block; border-radius:10px;"></canvas>
+    <!-- 각도 라벨 레이어 (JS가 실시간으로 채움) -->
+    <div id="avatar-labels" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;"></div>
+  </div>
+  <!-- 속도 조절 -->
+  <div style="width:100%; padding:8px 4px 4px 4px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+      <span style="font-size:9px;color:var(--primary);font-weight:900;letter-spacing:1px;">AVATAR SPEED</span>
+      <span id="avatar-spd-lbl" style="font-size:12px;color:#fff;font-weight:900;">6.0 km/h</span>
+    </div>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <button class="avatar-speed-btn" onclick="avatarSpeedAdj(-0.5)">−</button>
+      <input id="avatar-spd-slider" type="range" min="4" max="20" step="0.5" value="6"
+        oninput="avatarSpeedAdj(0,+this.value)"
+        style="flex:1;accent-color:var(--primary);height:4px;">
+      <button class="avatar-speed-btn" onclick="avatarSpeedAdj(+0.5)">+</button>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:3px;">
+      <span style="font-size:8px;color:#333;font-weight:900;">4 km/h</span>
+      <span style="font-size:8px;color:#333;font-weight:900;">20 km/h</span>
+    </div>
+  </div>
 </div>
 <button class="btn-launch-full-diagnosis" onclick="alert(storage.getLang() === 'ko' ? '외장 인공지능 모션 진단 모듈을 동기화합니다.' : 'Launching external full form diagnosis module...')">LAUNCH FULL DIAGNOSIS APP</button>
 </div>
@@ -410,7 +432,7 @@ cursor:pointer; letter-spacing:1px; transition:all 0.2s;">■ STOP</button>
 
 <script>
 // ========== 전역 상수 (문자열 오류 방지) ==========
-const INVALID_PACE = "--'--"";
+const INVALID_PACE = "--'--\"";
 
 // ========== 번역 객체 (원본 유지) ==========
 const translations = {
@@ -730,7 +752,217 @@ return;
 dropdownOptions.innerHTML = h.map((r) => {
 let shortDate = r.date.split(' (')[0].replace(', ', ' ');
 let escapedDate = shortDate.replace(/'/g, "'");
-return <div class="dropdown-option precision-option" onclick="ui.selectPrecisionRecord(${r.id}, '${escapedDate}')"&gt;${shortDate}</div>; }).join(''); const defaultDateText = h[0].date.split(' (')[0].replace(', ', ' '); currentSelectText.textContent = defaultDateText; this.loadPrecisionDashboard(h[0].id); } selectPrecisionRecord(recordId, dateText) { const currentText = document.getElementById('current-precision-record-text'); if(currentText) currentText.textContent = dateText; this.loadPrecisionDashboard(recordId); const dropdown = document.getElementById('precision-record-dropdown-options'); if(dropdown) dropdown.style.display = 'none'; } loadPrecisionDashboard(recordId) { const isKo = (storage.getLang() === 'ko'); if (!recordId) { const setText = (id, val) =&gt; { const el = document.getElementById(id); if(el) el.textContent = val; }; setText('precision-cadence', '-- SPM'); setText('precision-cadence-bal', '-- %'); setText('precision-gct', '-- ms'); setText('precision-gct-bal', '-- %'); setText('precision-flight', '-- %'); setText('precision-vert-ratio', '-- %'); setText('precision-alt', '-- m'); setText('precision-stride', '-- m'); const fb = document.getElementById('precision-feedback-text'); if(fb) fb.textContent = isKo ? "기록이 존재하지 않습니다." : "No records found."; return; } const h = storage.loadHistory(); const record = h.find(r =&gt; r.id == recordId); if (record) { const cadence = record.cadence || 170; const gct = record.gct && record.gct !== '--' ? parseInt(record.gct) : 250; const flight = record.flight && record.flight !== '--' ? parseInt(record.flight) : 25; const alt = record.alt || 0; let speedKmh = 12; if (record.avgPace && record.avgPace.includes("'")) { const parts = record.avgPace.replace('"', '').split("'"); const min = parseInt(parts[0]) || 5; const sec = parseInt(parts[1]) || 0; if(min &gt; 0) speedKmh = 60 / (min + (sec / 60)); } const strideCalculated = ((speedKmh / 3.6) / (cadence / 60)).toFixed(2); const vertRatioCalculated = (7.5 - (cadence - 160) * 0.05).toFixed(1); const setVal = (id, val) =&gt; { const el = document.getElementById(id); if(el) el.textContent = val; }; setVal('precision-cadence', cadence + ' SPM'); const cadEl = document.getElementById('precision-cadence'); if(cadEl) cadEl.style.color = this.getCadenceColor(cadence); setVal('precision-cadence-bal', (record.cadenceBal ? record.cadenceBal : '50:50') + ' %'); setVal('precision-gct', gct + ' ms'); const gctEl = document.getElementById('precision-gct'); if(gctEl) gctEl.style.color = this.getGctColor(gct); setVal('precision-gct-bal', (record.gctBal ? record.gctBal : '50:50') + ' %'); setVal('precision-flight', flight + ' %'); const flightEl = document.getElementById('precision-flight'); if(flightEl) flightEl.style.color = this.getFlightColor(flight); setVal('precision-vert-ratio', (record.vertRatio ? record.vertRatio : vertRatioCalculated) + ' %'); setVal('precision-alt', alt + ' m'); setVal('precision-stride', (record.stride ? record.stride : strideCalculated) + ' m'); let feedback = ""; if (gct &gt; 240 || cadence &lt; 170) { feedback = isKo ? "지면 접촉(GCT)이 늘어지고 피치가 낮아 충격 부하가 발생할 수 있습니다. 메트로놈 비트에 리듬을 동기화하세요!" : "Prolonged GCT and low cadence increase impact loading. Sync with metronome rhythm!"; } else { feedback = isKo ? "훌륭한 다이내믹스 밸런스입니다! 지면 반발력을 수평 추진력으로 전환하고 있습니다." : "Outstanding running dynamics symmetry! Efficient ground reaction force conversion."; } const fb = document.getElementById('precision-feedback-text'); if(fb) fb.innerHTML = feedback; } } changeLanguage(lang) { storage.setLang(lang); const t = translations[lang] || translations['en']; ['pace','dist','time','avg','cadence','gct','flight'].forEach(id =&gt; { const el = document.getElementById('label-'+id); if(el) el.textContent = t[id]; });if(this.dom.btnStart) this.dom.btnStart.textContent = t.start; if(this.dom.btnStop) this.dom.btnStop.textContent = t.stop; const resumeBtn = document.getElementById('btn-resume'); const finishBtn = document.getElementById('btn-finish'); if(resumeBtn) resumeBtn.textContent = t.resume; if(finishBtn) finishBtn.textContent = t.finish; const tabRun = document.getElementById('tab-run'); const tabHistory = document.getElementById('tab-history'); if(tabRun) tabRun.textContent = t.run; if(tabHistory) tabHistory.textContent = t.history; const subList = document.getElementById('sub-tab-list'); const subTotal = document.getElementById('sub-tab-total'); const subInfo = document.getElementById('sub-tab-info'); const subSettings = document.getElementById('sub-tab-settings'); if(subList) subList.textContent = t.list; if(subTotal) subTotal.textContent = t.total; if(subInfo) subInfo.textContent = t.info; if(subSettings) subSettings.textContent = t.settings; const langLabel = document.getElementById('label-select-lang'); if(langLabel) langLabel.textContent = t.selLang; const unitLabel = document.getElementById('label-unit'); if(unitLabel) unitLabel.textContent = t.unitLabel; const genderLabel = document.getElementById('label-gender'); if(genderLabel) genderLabel.textContent = t.genderLabel; const metroLabel = document.getElementById('label-metronome'); if(metroLabel) metroLabel.textContent = t.metro; const clearBtn = document.getElementById('btn-clear-history'); if(clearBtn) clearBtn.textContent = t.clear; const heightLabel = document.getElementById('label-height'); if(heightLabel) heightLabel.textContent = t.height; const weightLabel = document.getElementById('label-weight'); if(weightLabel) weightLabel.textContent = t.weight; const metroMenu = document.getElementById('label-metro-menu'); if(metroMenu) metroMenu.textContent = t.metroTitle; const infoC = document.getElementById('info-cadence-title'); if(infoC) infoC.textContent = t.infC; const infoCD = document.getElementById('info-cadence-desc'); if(infoCD) infoCD.textContent = t.infCD; const infoP = document.getElementById('info-power-title'); if(infoP) infoP.textContent = t.infP; const infoPD = document.getElementById('info-power-desc'); if(infoPD) infoPD.textContent = t.infPD; const infoS = document.getElementById('info-strike-title'); if(infoS) infoS.textContent = t.infS; const infoSD = document.getElementById('info-strike-desc'); if(infoSD) infoSD.textContent = t.infSD; const infoO = document.getElementById('info-oscillation-title'); if(infoO) infoO.textContent = t.infO; const infoOD = document.getElementById('info-oscillation-desc'); if(infoOD) infoOD.textContent = t.infOD; const infoR = document.getElementById('info-rolling-title'); if(infoR) infoR.textContent = t.infR; const infoRD = document.getElementById('info-rolling-desc'); if(infoRD) infoRD.textContent = t.infRD; const infoPost = document.getElementById('info-posture-title'); if(infoPost) infoPost.textContent = t.infPost; const infoPostD = document.getElementById('info-posture-desc'); if(infoPostD) infoPostD.textContent = t.infPostD; const metroTitle = document.getElementById('metro-title'); if(metroTitle) metroTitle.textContent = t.metroTitle; const metroDesc = document.getElementById('metro-desc'); if(metroDesc) metroDesc.textContent = t.metroDesc; const metroAccent = document.getElementById('metro-accent-label'); if(metroAccent) metroAccent.textContent = t.metroAccent; const diagTitle = document.getElementById('diag-view-title'); if(diagTitle) diagTitle.textContent = t.diagTitle; if(this.btnMetroToggle) this.btnMetroToggle.textContent = metro.isPlaying ? t.stop : t.start; if(this.dom.dimmerOverlay) this.dom.dimmerOverlay.querySelector('.dim-message').textContent = (lang === 'ko' ? '어두운 모드 활성화' : 'Dark mode active'); if(this.dom.pauseStatus) this.dom.pauseStatus.textContent = t.autoPaused; const statWeekly = document.getElementById('stat-filter-weekly'); const statMonthly = document.getElementById('stat-filter-monthly'); const statYearly = document.getElementById('stat-filter-yearly'); if(statWeekly) statWeekly.textContent = t.statWeekly; if(statMonthly) statMonthly.textContent = t.statMonthly; if(statYearly) statYearly.textContent = t.statYearly; const isKo = (lang === 'ko'); const pLabels = ['p-label-cadence', 'p-label-cadence-bal', 'p-label-gct', 'p-label-gct-bal', 'p-label-flight', 'p-label-vert', 'p-label-alt', 'p-label-stride']; const pKo = ["케이던스 (CAD)", "케이던스 밸런스", "지면 접촉 (GCT)", "GCT 밸런스", "체공 시간 (FLIGHT)", "수직진폭 비율", "주행 고도 (ALT)", "스트라이드 보폭"]; const pEn = ["CADENCE", "CADENCE BAL", "GCT TIME", "GCT BAL", "FLIGHT TIME", "VERT RATIO", "ALTITUDE", "STRIDE LENGTH"]; pLabels.forEach((id, idx) =&gt; { const el = document.getElementById(id); if(el) el.textContent = isKo ? pKo[idx] : pEn[idx]; }); const langMap = { en: "English (US)", ko: "한국어 (KR)" }; const currentLang = document.getElementById('current-lang-text'); if(currentLang) currentLang.textContent = langMap[lang]; const theoryLabel = document.getElementById('info-tab-theory-label'); const precisionLabel = document.getElementById('info-tab-precision-label'); if(theoryLabel) theoryLabel.textContent = t.infoTabTheory; if(precisionLabel) precisionLabel.textContent = t.infoTabPrecision; this.updateHistoryList(); this.updateTotalStats(); this.updateQuickMetroBtn(); const precisionArea = document.getElementById('info-precision-analysis-area'); if(precisionArea && precisionArea.style.display === 'flex') { this.buildPrecisionSelector(); } } toggleDim() { this.dimActive = !this.dimActive; const overlay = this.dom.dimmerOverlay; if (!overlay) return; if (this.dimActive) { overlay.style.display = 'flex'; if (app && app.state && app.state.isRunning) app.requestWakeLock(); } else { overlay.style.display = 'none'; } } dismissDim() { if (!this.dimActive) return; this.dimActive = false; const overlay = this.dom.dimmerOverlay; if (overlay) overlay.style.display = 'none'; } toggleDropdown(id) { const opt = document.getElementById(id); const isOpen = opt && opt.style.display === 'block'; document.querySelectorAll('.dropdown-options, .precision-dropdown-options').forEach(d =&gt; d.style.display = 'none'); if(opt) opt.style.display = isOpen ? 'none' : 'block'; } selectLang(lang) { this.changeLanguage(lang); this.toggleDropdown('dropdown-options'); } initProfileDropdowns() { const p = storage.loadProfile(); const heightEl = document.getElementById('current-height'); const weightEl = document.getElementById('current-weight'); if(heightEl) heightEl.textContent = p.h + ' ' + p.hu; if(weightEl) weightEl.textContent = p.w + ' ' + p.wu; this.renderProfileOptions('height', p.hu); this.renderProfileOptions('weight', p.wu); } renderProfileOptions(type, unit) { const container = document.getElementById(type + '-options'); if(!container) return; let html = ''; if (type === 'height') { html +=<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit('height', '${unit === 'cm' ? 'inch' : 'cm'}')"&gt;SWITCH TO ${unit === 'cm' ? 'INCH' : 'CM'}</div>; const min = unit === 'cm' ? 140 : 55, max = unit === 'cm' ? 210 : 83; for (let i = min; i &lt;= max; i++) html +=<div class="dropdown-option" onclick="ui.setProfile('height', ${i}, '${unit}')">${i} ${unit}</div>; } else { html +=<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit('weight', '${unit === 'kg' ? 'lb' : 'kg'}')"&gt;SWITCH TO ${unit === 'kg' ? 'LB' : 'KG'}</div>; const min = unit === 'kg' ? 40 : 130, max = unit === 'kg' ? 130 : 286; for (let i = min; i &lt;= max; i++) html +=<div class="dropdown-option" onclick="ui.setProfile('weight', ${i}, '${unit}')">${i} ${unit}&lt;/div>;
+return `<div class="dropdown-option precision-option" onclick="ui.selectPrecisionRecord(${r.id}, '${escapedDate}')">${shortDate}</div>`;
+}).join('');
+const defaultDateText = h[0].date.split(' (')[0].replace(', ', ' ');
+currentSelectText.textContent = defaultDateText;
+this.loadPrecisionDashboard(h[0].id);
+}
+selectPrecisionRecord(recordId, dateText) {
+const currentText = document.getElementById('current-precision-record-text');
+if(currentText) currentText.textContent = dateText;
+this.loadPrecisionDashboard(recordId);
+const dropdown = document.getElementById('precision-record-dropdown-options');
+if(dropdown) dropdown.style.display = 'none';
+}
+loadPrecisionDashboard(recordId) {
+const isKo = (storage.getLang() === 'ko');
+if (!recordId) {
+const setText = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
+setText('precision-cadence', '-- SPM');
+setText('precision-cadence-bal', '-- %');
+setText('precision-gct', '-- ms');
+setText('precision-gct-bal', '-- %');
+setText('precision-flight', '-- %');
+setText('precision-vert-ratio', '-- %');
+setText('precision-alt', '-- m');
+setText('precision-stride', '-- m');
+const fb = document.getElementById('precision-feedback-text');
+if(fb) fb.textContent = isKo ? "기록이 존재하지 않습니다." : "No records found.";
+return;
+}
+const h = storage.loadHistory();
+const record = h.find(r => r.id == recordId);
+if (record) {
+const cadence = record.cadence || 170;
+const gct = record.gct && record.gct !== '--' ? parseInt(record.gct) : 250;
+const flight = record.flight && record.flight !== '--' ? parseInt(record.flight) : 25;
+const alt = record.alt || 0;
+let speedKmh = 12;
+if (record.avgPace && record.avgPace.includes("'")) {
+const parts = record.avgPace.replace('"', '').split("'");
+const min = parseInt(parts[0]) || 5;
+const sec = parseInt(parts[1]) || 0;
+if(min > 0) speedKmh = 60 / (min + (sec / 60));
+}
+const strideCalculated = ((speedKmh / 3.6) / (cadence / 60)).toFixed(2);
+const vertRatioCalculated = (7.5 - (cadence - 160) * 0.05).toFixed(1);
+const setVal = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
+setVal('precision-cadence', cadence + ' SPM');
+const cadEl = document.getElementById('precision-cadence');
+if(cadEl) cadEl.style.color = this.getCadenceColor(cadence);
+setVal('precision-cadence-bal', (record.cadenceBal ? record.cadenceBal : '50:50') + ' %');
+setVal('precision-gct', gct + ' ms');
+const gctEl = document.getElementById('precision-gct');
+if(gctEl) gctEl.style.color = this.getGctColor(gct);
+setVal('precision-gct-bal', (record.gctBal ? record.gctBal : '50:50') + ' %');
+setVal('precision-flight', flight + ' %');
+const flightEl = document.getElementById('precision-flight');
+if(flightEl) flightEl.style.color = this.getFlightColor(flight);
+setVal('precision-vert-ratio', (record.vertRatio ? record.vertRatio : vertRatioCalculated) + ' %');
+setVal('precision-alt', alt + ' m');
+setVal('precision-stride', (record.stride ? record.stride : strideCalculated) + ' m');
+let feedback = "";
+if (gct > 240 || cadence < 170) {
+feedback = isKo ? "지면 접촉(GCT)이 늘어지고 피치가 낮아 충격 부하가 발생할 수 있습니다. 메트로놈 비트에 리듬을 동기화하세요!" : "Prolonged GCT and low cadence increase impact loading. Sync with metronome rhythm!";
+} else {
+feedback = isKo ? "훌륭한 다이내믹스 밸런스입니다! 지면 반발력을 수평 추진력으로 전환하고 있습니다." : "Outstanding running dynamics symmetry! Efficient ground reaction force conversion.";
+}
+const fb = document.getElementById('precision-feedback-text');
+if(fb) fb.innerHTML = feedback;
+}
+}
+changeLanguage(lang) {
+storage.setLang(lang);
+const t = translations[lang] || translations['en'];
+['pace','dist','time','avg','cadence','gct','flight'].forEach(id => {
+const el = document.getElementById('label-'+id); if(el) el.textContent = t[id];
+});if(this.dom.btnStart) this.dom.btnStart.textContent = t.start;
+if(this.dom.btnStop) this.dom.btnStop.textContent = t.stop;
+const resumeBtn = document.getElementById('btn-resume');
+const finishBtn = document.getElementById('btn-finish');
+if(resumeBtn) resumeBtn.textContent = t.resume;
+if(finishBtn) finishBtn.textContent = t.finish;
+const tabRun = document.getElementById('tab-run');
+const tabHistory = document.getElementById('tab-history');
+if(tabRun) tabRun.textContent = t.run;
+if(tabHistory) tabHistory.textContent = t.history;
+const subList = document.getElementById('sub-tab-list');
+const subTotal = document.getElementById('sub-tab-total');
+const subInfo = document.getElementById('sub-tab-info');
+const subSettings = document.getElementById('sub-tab-settings');
+if(subList) subList.textContent = t.list;
+if(subTotal) subTotal.textContent = t.total;
+if(subInfo) subInfo.textContent = t.info;
+if(subSettings) subSettings.textContent = t.settings;
+const langLabel = document.getElementById('label-select-lang');
+if(langLabel) langLabel.textContent = t.selLang;
+const unitLabel = document.getElementById('label-unit');
+if(unitLabel) unitLabel.textContent = t.unitLabel;
+const genderLabel = document.getElementById('label-gender');
+if(genderLabel) genderLabel.textContent = t.genderLabel;
+const metroLabel = document.getElementById('label-metronome');
+if(metroLabel) metroLabel.textContent = t.metro;
+const clearBtn = document.getElementById('btn-clear-history');
+if(clearBtn) clearBtn.textContent = t.clear;
+const heightLabel = document.getElementById('label-height');
+if(heightLabel) heightLabel.textContent = t.height;
+const weightLabel = document.getElementById('label-weight');
+if(weightLabel) weightLabel.textContent = t.weight;
+const metroMenu = document.getElementById('label-metro-menu');
+if(metroMenu) metroMenu.textContent = t.metroTitle;
+const infoC = document.getElementById('info-cadence-title');
+if(infoC) infoC.textContent = t.infC;
+const infoCD = document.getElementById('info-cadence-desc');
+if(infoCD) infoCD.textContent = t.infCD;
+const infoP = document.getElementById('info-power-title');
+if(infoP) infoP.textContent = t.infP;
+const infoPD = document.getElementById('info-power-desc');
+if(infoPD) infoPD.textContent = t.infPD;
+const infoS = document.getElementById('info-strike-title');
+if(infoS) infoS.textContent = t.infS;
+const infoSD = document.getElementById('info-strike-desc');
+if(infoSD) infoSD.textContent = t.infSD;
+const infoO = document.getElementById('info-oscillation-title');
+if(infoO) infoO.textContent = t.infO;
+const infoOD = document.getElementById('info-oscillation-desc');
+if(infoOD) infoOD.textContent = t.infOD;
+const infoR = document.getElementById('info-rolling-title');
+if(infoR) infoR.textContent = t.infR;
+const infoRD = document.getElementById('info-rolling-desc');
+if(infoRD) infoRD.textContent = t.infRD;
+const infoPost = document.getElementById('info-posture-title');
+if(infoPost) infoPost.textContent = t.infPost;
+const infoPostD = document.getElementById('info-posture-desc');
+if(infoPostD) infoPostD.textContent = t.infPostD;
+const metroTitle = document.getElementById('metro-title');
+if(metroTitle) metroTitle.textContent = t.metroTitle;
+const metroDesc = document.getElementById('metro-desc');
+if(metroDesc) metroDesc.textContent = t.metroDesc;
+const metroAccent = document.getElementById('metro-accent-label');
+if(metroAccent) metroAccent.textContent = t.metroAccent;
+const diagTitle = document.getElementById('diag-view-title');
+if(diagTitle) diagTitle.textContent = t.diagTitle;
+if(this.btnMetroToggle) this.btnMetroToggle.textContent = metro.isPlaying ? t.stop : t.start;
+if(this.dom.dimmerOverlay) this.dom.dimmerOverlay.querySelector('.dim-message').textContent = (lang === 'ko' ? '어두운 모드 활성화' : 'Dark mode active');
+if(this.dom.pauseStatus) this.dom.pauseStatus.textContent = t.autoPaused;
+const statWeekly = document.getElementById('stat-filter-weekly');
+const statMonthly = document.getElementById('stat-filter-monthly');
+const statYearly = document.getElementById('stat-filter-yearly');
+if(statWeekly) statWeekly.textContent = t.statWeekly;
+if(statMonthly) statMonthly.textContent = t.statMonthly;
+if(statYearly) statYearly.textContent = t.statYearly;
+const isKo = (lang === 'ko');
+const pLabels = ['p-label-cadence', 'p-label-cadence-bal', 'p-label-gct', 'p-label-gct-bal', 'p-label-flight', 'p-label-vert', 'p-label-alt', 'p-label-stride'];
+const pKo = ["케이던스 (CAD)", "케이던스 밸런스", "지면 접촉 (GCT)", "GCT 밸런스", "체공 시간 (FLIGHT)", "수직진폭 비율", "주행 고도 (ALT)", "스트라이드 보폭"];
+const pEn = ["CADENCE", "CADENCE BAL", "GCT TIME", "GCT BAL", "FLIGHT TIME", "VERT RATIO", "ALTITUDE", "STRIDE LENGTH"];
+pLabels.forEach((id, idx) => { const el = document.getElementById(id); if(el) el.textContent = isKo ? pKo[idx] : pEn[idx]; });
+const langMap = { en: "English (US)", ko: "한국어 (KR)" };
+const currentLang = document.getElementById('current-lang-text');
+if(currentLang) currentLang.textContent = langMap[lang];
+const theoryLabel = document.getElementById('info-tab-theory-label');
+const precisionLabel = document.getElementById('info-tab-precision-label');
+if(theoryLabel) theoryLabel.textContent = t.infoTabTheory;
+if(precisionLabel) precisionLabel.textContent = t.infoTabPrecision;
+this.updateHistoryList(); this.updateTotalStats(); this.updateQuickMetroBtn();
+const precisionArea = document.getElementById('info-precision-analysis-area');
+if(precisionArea && precisionArea.style.display === 'flex') {
+this.buildPrecisionSelector();
+}
+}
+toggleDim() {
+this.dimActive = !this.dimActive;
+const overlay = this.dom.dimmerOverlay;
+if (!overlay) return;
+if (this.dimActive) {
+overlay.style.display = 'flex';
+if (app && app.state && app.state.isRunning) app.requestWakeLock();
+} else {
+overlay.style.display = 'none';
+}
+}
+dismissDim() {
+if (!this.dimActive) return;
+this.dimActive = false;
+const overlay = this.dom.dimmerOverlay;
+if (overlay) overlay.style.display = 'none';
+}
+toggleDropdown(id) {
+const opt = document.getElementById(id); const isOpen = opt && opt.style.display === 'block';
+document.querySelectorAll('.dropdown-options, .precision-dropdown-options').forEach(d => d.style.display = 'none');
+if(opt) opt.style.display = isOpen ? 'none' : 'block';
+}
+selectLang(lang) { this.changeLanguage(lang); this.toggleDropdown('dropdown-options'); }
+initProfileDropdowns() {
+const p = storage.loadProfile();
+const heightEl = document.getElementById('current-height');
+const weightEl = document.getElementById('current-weight');
+if(heightEl) heightEl.textContent = p.h + ' ' + p.hu;
+if(weightEl) weightEl.textContent = p.w + ' ' + p.wu;
+this.renderProfileOptions('height', p.hu); this.renderProfileOptions('weight', p.wu);
+}
+renderProfileOptions(type, unit) {
+const container = document.getElementById(type + '-options');
+if(!container) return;
+let html = '';
+if (type === 'height') {
+html += `<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit('height', '${unit === 'cm' ? 'inch' : 'cm'}')">SWITCH TO ${unit === 'cm' ? 'INCH' : 'CM'}</div>`;
+const min = unit === 'cm' ? 140 : 55, max = unit === 'cm' ? 210 : 83;
+for (let i = min; i <= max; i++) html += `<div class="dropdown-option" onclick="ui.setProfile('height', ${i}, '${unit}')">${i} ${unit}</div>`;
+} else {
+html += `<div class="dropdown-option" style="color:var(--primary)" onclick="ui.changeUnit('weight', '${unit === 'kg' ? 'lb' : 'kg'}')">SWITCH TO ${unit === 'kg' ? 'LB' : 'KG'}</div>`;
+const min = unit === 'kg' ? 40 : 130, max = unit === 'kg' ? 130 : 286;
+for (let i = min; i <= max; i++) html += `<div class="dropdown-option" onclick="ui.setProfile('weight', ${i}, '${unit}')">${i} ${unit}</div>`;
 }
 container.innerHTML = html;
 }
@@ -781,7 +1013,8 @@ this.updateHistoryList();
 this.updateTotalStats();
 }
 this.pendingDeleteId = null;
-}openSaveConfirmModal(id) {
+}
+openSaveConfirmModal(id) {
 this.pendingSaveId = id;
 const lang = storage.getLang();
 const t = translations[lang] || translations['en'];
@@ -1398,7 +1631,7 @@ app.requestWakeLock();
 
 // 서비스 워커 (간단한 offline fallback)
 if ('serviceWorker' in navigator) {
-const swCode = const CACHE_NAME = 'jennyrun-v2'; const urlsToCache = ['/', '/index.html']; self.addEventListener('install', event =&gt; { self.skipWaiting(); event.waitUntil(caches.open(CACHE_NAME).then(cache =&gt; cache.addAll(urlsToCache))); }); self.addEventListener('fetch', event =&gt; { event.respondWith( fetch(event.request).catch(() =&gt; { if (event.request.mode === 'navigate') { return caches.match('/') || new Response('오프라인 상태입니다.', { status: 200 }); } return new Response('', { status: 200 }); }) ); }); self.addEventListener('activate', event =&gt; { event.waitUntil(caches.keys().then(keys =&gt; Promise.all( keys.map(key =&gt; key !== CACHE_NAME && caches.delete(key)) ))); self.clients.claim(); });
+const swCode = `const CACHE_NAME = 'jennyrun-v1'; const urlsToCache = ['/', '/index.html']; self.addEventListener('install', event => { self.skipWaiting(); event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache))); }); self.addEventListener('fetch', event => { event.respondWith( fetch(event.request).catch(() => { if (event.request.mode === 'navigate') { return caches.match('/') || new Response('오프라인 상태입니다.', { status: 200 }); } return new Response('', { status: 200 }); }) ); }); self.addEventListener('activate', event => { event.waitUntil(caches.keys().then(keys => Promise.all( keys.map(key => key !== CACHE_NAME && caches.delete(key)) ))); self.clients.claim(); });`
 const blob = new Blob([swCode], {type: 'application/javascript'});
 const swUrl = URL.createObjectURL(blob);
 navigator.serviceWorker.register(swUrl, {scope: '/'}).catch(() => {
@@ -1407,438 +1640,359 @@ navigator.serviceWorker.register(swUrl).catch(()=>{});
 }
 };
 // ═══════════════════════════════════════════════
-// 🏃 LIVE AVATAR ENGINE v5 — 네온 실루엣 여성 러너
+// 🏃 LIVE AVATAR ENGINE v4 — 측면 달리기
 // ═══════════════════════════════════════════════
 (function(){
-const PI = Math.PI;
-let _speed=6, _cadence=170, _phase=0, _lastTs=null, _raf=null, _running=false;
+  const PI = Math.PI;
+  let _speed=6, _cadence=170, _phase=0, _lastTs=null, _raf=null;
 
-// ── 달리기 포즈 (자연스러운 큰 스윙) ──
-function getPose(ph) {
-const a = ph * PI * 2;
+  // 측면 달리기 키프레임
+  // 모든 각도: 라디안, 수직아래=0, 앞(오른쪽)=+, 뒤=-
+  // phase 0: 오른발 착지 직후 / 왼발 스윙 앞
+  // phase 0.5: 왼발 착지 직후 / 오른발 스윙 앞
+  function getPose(ph) {
+    // 사인파 기반으로 자연스러운 교차 운동
+    const a = ph * PI * 2; // 0~2π
 
-// 다리 — 허벅지 스윙 크게, 무릎 굽힘 확실히
-const lThigh = -0.72 * Math.cos(a);
-const lKnee  =  0.30 + 0.88 * Math.max(0, Math.cos(a + PI * 0.55));
-const lAnkle =  0.30 - 0.50 * Math.cos(a);
+    // ── 다리 (측면, 오른쪽을 향해 달림) ──
+    // 앞다리(L): 앞으로 스윙 → 뒤로
+    const lThigh = -0.45 * Math.cos(a);          // -25°~+25°
+    const lKnee  =  0.55 + 0.45 * Math.cos(a);   // 무릎굽힘: 앞에서 펴짐, 뒤에서 굽힘
+    // 발목: 앞(착지)=배굴(위로,음수), 뒤(이지오프)=저굴(아래,양수)
+    const lAnkle = -0.25 * Math.cos(a);
 
-const rThigh = -0.72 * Math.cos(a + PI);
-const rKnee  =  0.30 + 0.88 * Math.max(0, Math.cos(a + PI + PI * 0.55));
-const rAnkle =  0.30 - 0.50 * Math.cos(a + PI);
+    // 뒷다리(R): 반대 위상
+    const rThigh = -0.45 * Math.cos(a + PI);
+    const rKnee  =  0.55 + 0.45 * Math.cos(a + PI);
+    const rAnkle = -0.25 * Math.cos(a + PI);
 
-// 팔 — 다리와 반대 위상, 스윙 크게
-const rShoulder = -0.75 * Math.cos(a + PI);
-const rElbow    =  1.55 + 0.55 * Math.sin(a);
-const lShoulder = -0.75 * Math.cos(a);
-const lElbow    =  1.55 + 0.55 * Math.sin(a + PI);
+    // ── 팔 (다리와 반대 위상) ──
+    // 앞팔(R): 다리 L과 반대 = a+PI
+    const rShoulder = -0.42 * Math.cos(a + PI);
+    const rElbow    =  1.45 + 0.25 * Math.sin(a); // 85°~100° 사이
 
-return { lThigh, lKnee, lAnkle, rThigh, rKnee, rAnkle,
-         rShoulder, rElbow, lShoulder, lElbow };
-}
+    // 뒷팔(L): a와 동위상
+    const lShoulder = -0.42 * Math.cos(a);
+    const lElbow    =  1.45 + 0.25 * Math.sin(a + PI);
 
-// ── 정지 대기 포즈 (직립 측면, 미세 호흡) ──
-function getIdlePose(t) {
-const breath = Math.sin(t * 1.2) * 0.03;
-return {
-  lThigh: 0.08 + breath, lKnee: 0.06, lAnkle: 0.08,
-  rThigh: -0.08 + breath, rKnee: 0.06, rAnkle: 0.08,
-  rShoulder: 0.15 + breath * 0.5, rElbow: 1.55,
-  lShoulder: -0.15 + breath * 0.5, lElbow: 1.55
-};
-}
+    return { lThigh, lKnee, lAnkle, rThigh, rKnee, rAnkle,
+             rShoulder, rElbow, lShoulder, lElbow };
+  }
 
-// ── 두 점으로부터 끝점 계산 ──
-function endpoint(x, y, angle, len) {
-return [x + Math.sin(angle)*len, y + Math.cos(angle)*len];
-}
+  // ── 두 점으로부터 끝점 계산 ──
+  // angle: 수직 아래=PI/2 기준 (canvas Y축)
+  // 오른쪽=+, 왼쪽=- (달리는 방향이 오른쪽)
+  function endpoint(x, y, angle, len) {
+    // angle=0 → 수직 아래, angle=+→앞(오른쪽), angle=-→뒤
+    return [x + Math.sin(angle)*len, y + Math.cos(angle)*len];
+  }
 
-// ── 실루엣 채워진 다리 그리기 ──
-function drawFilledLimb(ctx, x1,y1, x2,y2, x3,y3, w1,w2, col, alpha) {
-ctx.save();
-ctx.globalAlpha = alpha;
-const dx1=y2-y1, dy1=-(x2-x1);
-const len1=Math.sqrt(dx1*dx1+dy1*dy1)||1;
-const nx1=dx1/len1*w1, ny1=dy1/len1*w1;
-const dx2=y3-y2, dy2=-(x3-x2);
-const len2=Math.sqrt(dx2*dx2+dy2*dy2)||1;
-const nx2=dx2/len2*w2, ny2=dy2/len2*w2;
-ctx.beginPath();
-ctx.moveTo(x1+nx1,y1+ny1);
-ctx.quadraticCurveTo(x2+nx1,y2+ny1,x2+nx2,y2+ny2);
-ctx.lineTo(x3+nx2,y3+ny2);
-ctx.quadraticCurveTo(x3-nx2,y3-ny2,x2-nx2,y2-ny2);
-ctx.quadraticCurveTo(x2-nx1,y2-ny1,x1-nx1,y1-ny1);
-ctx.closePath();
-ctx.fillStyle=col;
-ctx.fill();
-ctx.restore();
-}
+  // ── 그리기 ──
+  function drawAvatar(canvas, pose, bounce) {
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0,0,W,H);
 
-// ── 그리기 ──
-function drawAvatar(canvas, pose, bounce, idleT) {
-const ctx = canvas.getContext('2d');
-const W = canvas.width, H = canvas.height;
-ctx.clearRect(0,0,W,H);
+    // 배경
+    ctx.fillStyle = '#0c0c0c';
+    ctx.fillRect(0,0,W,H);
 
-// ── 배경 ──
-const bgGrad = ctx.createLinearGradient(0,0,0,H);
-bgGrad.addColorStop(0,'#080c0a');
-bgGrad.addColorStop(1,'#0a0f0c');
-ctx.fillStyle=bgGrad;
-ctx.fillRect(0,0,W,H);
+    const floorY = H * 0.87;
 
-const floorY = H * 0.84;
+    // 바닥선
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0,255,136,0.18)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(0,floorY); ctx.lineTo(W,floorY); ctx.stroke();
+    ctx.strokeStyle = 'rgba(0,255,136,0.05)'; ctx.lineWidth=0.5;
+    for(let x=0;x<W;x+=20){
+      ctx.beginPath(); ctx.moveTo(x,floorY); ctx.lineTo(x,H); ctx.stroke();
+    }
+    ctx.restore();
 
-// ── 바닥 그리드 ──
-ctx.save();
-// 수평선
-for(let i=0;i<5;i++){
-const fy = floorY + i*10;
-const alpha = 0.18 - i*0.03;
-ctx.strokeStyle=`rgba(0,255,136,${alpha})`;
-ctx.lineWidth=i===0?1:0.5;
-ctx.beginPath(); ctx.moveTo(0,fy); ctx.lineTo(W,fy); ctx.stroke();
-}
-// 수직 격자선
-for(let x=0;x<W;x+=22){
-ctx.strokeStyle='rgba(0,255,136,0.05)';
-ctx.lineWidth=0.5;
-ctx.beginPath(); ctx.moveTo(x,floorY); ctx.lineTo(x,H); ctx.stroke();
-}
-ctx.restore();
+    // ── 신체 치수 (px) ──
+    const THIGH = 44, SHIN = 40, FOOT = 16;
+    const TORSO = 52, UARM = 28, LARM = 24;
+    const HEAD_R = 14;
 
-// ── 신체 치수 ──
-const THIGH=46, SHIN=42, FOOT=17;
-const TORSO=54, UARM=29, LARM=25;
-const HEAD_R=13;
-const LEAN = _running ? 0.10 : 0.03;
+    // ── 골반 위치 ──
+    // 서있을 때: hipY = floorY - SHIN - THIGH
+    // 달릴 때 약간 올라감 (bounce)
+    const hipX = W * 0.48;
+    const hipY = floorY - THIGH*0.95 - SHIN*0.6 + bounce;
 
-// ── 골반 위치 ──
-const hipX = W * 0.50;
-const hipY = floorY - THIGH*0.90 - SHIN*0.55 + bounce;
+    // 어깨 (몸통 위, 약간 앞으로 기울어짐)
+    const LEAN = 0.08; // 전방 기울기 라디안
+    const shoX = hipX - Math.sin(LEAN)*TORSO;
+    const shoY = hipY - Math.cos(LEAN)*TORSO;
 
-// ── 어깨 ──
-const shoX = hipX - Math.sin(LEAN)*TORSO;
-const shoY = hipY - Math.cos(LEAN)*TORSO;
+    // 머리
+    const headX = shoX - Math.sin(LEAN)*HEAD_R*1.2;
+    const headY = shoY - HEAD_R*1.4;
 
-// ── 머리 ──
-const headX = shoX - Math.sin(LEAN)*HEAD_R*1.1;
-const headY = shoY - HEAD_R*1.5;
+    const G    = '#00ff88';
+    const GOLD = '#ffcc00';
+    const DIM  = 'rgba(0,120,70,0.38)';
+    const BODY = '#b8ccff';
 
-// ── 색상 ──
-const G    = '#00ff88';
-const GLOW = 'rgba(0,255,136,0.9)';
-const DIM  = 'rgba(0,160,80,0.30)';
-const BODY = 'rgba(160,200,255,0.75)';
-const SKIN = '#b8f0d0';
+    // 그림자
+    const gsh = ctx.createRadialGradient(hipX,floorY,1,hipX,floorY,34);
+    gsh.addColorStop(0,'rgba(0,255,136,0.2)');
+    gsh.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle = gsh;
+    ctx.beginPath(); ctx.ellipse(hipX,floorY,30,5,0,0,2*PI); ctx.fill();
 
-// ── 발바닥 그림자 ──
-const gsh = ctx.createRadialGradient(hipX,floorY,1,hipX,floorY,36);
-gsh.addColorStop(0,'rgba(0,255,136,0.22)');
-gsh.addColorStop(1,'rgba(0,0,0,0)');
-ctx.fillStyle=gsh;
-ctx.beginPath(); ctx.ellipse(hipX,floorY,32,6,0,0,2*PI); ctx.fill();
+    // 헬퍼
+    function seg(x1,y1,x2,y2,col,w,al) {
+      ctx.save(); ctx.globalAlpha=al??1;
+      ctx.strokeStyle=col; ctx.lineWidth=w; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+      ctx.restore();
+    }
+    function dot(x,y,r,col,al) {
+      ctx.save(); ctx.globalAlpha=al??1; ctx.fillStyle=col;
+      ctx.beginPath(); ctx.arc(x,y,r,0,2*PI); ctx.fill();
+      ctx.restore();
+    }
 
-// ── helper: 선분 ──
-function seg(x1,y1,x2,y2,col,w,al,blur){
-ctx.save();
-ctx.globalAlpha=al??1;
-if(blur){ctx.shadowBlur=blur; ctx.shadowColor=col;}
-ctx.strokeStyle=col; ctx.lineWidth=w; ctx.lineCap='round';
-ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
-ctx.restore();
-}
-function glowDot(x,y,r,col){
-ctx.save();
-ctx.shadowBlur=14; ctx.shadowColor=col;
-ctx.fillStyle=col;
-ctx.beginPath(); ctx.arc(x,y,r,0,2*PI); ctx.fill();
-ctx.restore();
-}
+    // ── 뒷다리 R (어두운 색, 원근) ──
+    const [kRx,kRy] = endpoint(hipX, hipY, pose.rThigh, THIGH);
+    const [aRx,aRy] = endpoint(kRx, kRy, pose.rThigh + pose.rKnee, SHIN);
+    // 발: 발목각도로 발끝 방향 결정
+    const footRangle = pose.rThigh + pose.rKnee + pose.rAnkle - 0.3;
+    const [fRx,fRy] = endpoint(aRx, aRy, footRangle, FOOT);
 
-// ══════════════════════════════
-// ── 뒷다리 R (원근, 어둡게) ──
-// ══════════════════════════════
-const [kRx,kRy]=endpoint(hipX,hipY,pose.rThigh,THIGH);
-const [aRx,aRy]=endpoint(kRx,kRy,pose.rThigh+pose.rKnee,SHIN);
-const footRa=pose.rThigh+pose.rKnee+pose.rAnkle-0.2;
-const [fRx,fRy]=endpoint(aRx,aRy,footRa,FOOT);
+    seg(hipX,hipY, kRx,kRy, DIM, 7, 0.65);
+    seg(kRx,kRy, aRx,aRy, DIM, 6, 0.6);
+    seg(aRx,aRy, fRx,fRy, DIM, 4.5, 0.5);
+    dot(kRx,kRy, 5, DIM, 0.6);
+    dot(aRx,aRy, 4, DIM, 0.5);
 
-// 허벅지 실루엣
-drawFilledLimb(ctx,hipX,hipY,kRx,kRy,aRx,aRy,8,5,DIM,0.55);
-// 종아리 실루엣
-drawFilledLimb(ctx,kRx,kRy,aRx,aRy,fRx,fRy,5,3.5,DIM,0.45);
-seg(aRx,aRy,fRx,fRy,DIM,3,0.38);
+    // 뒷다리 실루엣 (허벅지 볼륨)
+    ctx.save(); ctx.globalAlpha=0.15;
+    const [kRx2,kRy2] = endpoint(hipX,hipY, pose.rThigh-0.12, THIGH*0.95);
+    ctx.beginPath();
+    ctx.moveTo(hipX-6,hipY-2);
+    ctx.quadraticCurveTo(kRx2-8,kRy2, kRx-4,kRy);
+    ctx.quadraticCurveTo(kRx2+4,kRy2, hipX+6,hipY-2);
+    ctx.closePath(); ctx.fillStyle=DIM; ctx.fill();
+    ctx.restore();
 
-// ── 뒷팔 L (어둡게) ──
-const [eLx,eLy]=endpoint(shoX,shoY,pose.lShoulder,UARM);
-const [hLx,hLy]=endpoint(eLx,eLy,pose.lShoulder+pose.lElbow,LARM);
-drawFilledLimb(ctx,shoX,shoY,eLx,eLy,hLx,hLy,5,3.5,DIM,0.48);
+    // ── 뒷팔 L (어두운) ──
+    const [eLx,eLy] = endpoint(shoX, shoY, pose.lShoulder, UARM);
+    const [hLx,hLy] = endpoint(eLx, eLy, pose.lShoulder + pose.lElbow, LARM);
+    seg(shoX,shoY, eLx,eLy, DIM, 5, 0.55);
+    seg(eLx,eLy, hLx,hLy, DIM, 4, 0.5);
+    dot(eLx,eLy, 3.5, DIM, 0.5);
 
-// ══════════════════════════════
-// ── 몸통 실루엣 (여성 라인) ──
-// ══════════════════════════════
-const shW=17, waistW=10, hipW=16;
-const waistX=shoX+(hipX-shoX)*0.55;
-const waistY=shoY+(hipY-shoY)*0.55;
+    // ── 몸통 실루엣 (여성 라인) ──
+    ctx.save();
+    const shW=18, waistW=11, hipW=17;
+    const waistX = shoX + (hipX-shoX)*0.55;
+    const waistY = shoY + (hipY-shoY)*0.55;
 
-// 몸통 채우기
-ctx.save();
-ctx.beginPath();
-ctx.moveTo(shoX-Math.cos(LEAN)*shW, shoY+Math.sin(LEAN)*shW);
-ctx.bezierCurveTo(
-  waistX-Math.cos(LEAN)*(waistW+2), waistY+Math.sin(LEAN)*(waistW+2),
-  hipX-Math.cos(LEAN)*(waistW+3), hipY-TORSO*0.12,
-  hipX-Math.cos(LEAN)*hipW, hipY
-);
-ctx.quadraticCurveTo(hipX, hipY+8, hipX+Math.cos(LEAN)*hipW, hipY);
-ctx.bezierCurveTo(
-  hipX+Math.cos(LEAN)*(waistW+3), hipY-TORSO*0.12,
-  waistX+Math.cos(LEAN)*(waistW+2), waistY-Math.sin(LEAN)*(waistW+2),
-  shoX+Math.cos(LEAN)*shW, shoY-Math.sin(LEAN)*shW
-);
-ctx.closePath();
-const torsoGrad=ctx.createLinearGradient(shoX-shW,shoY,shoX+shW,shoY);
-torsoGrad.addColorStop(0,'rgba(0,200,100,0.06)');
-torsoGrad.addColorStop(0.5,'rgba(0,255,136,0.13)');
-torsoGrad.addColorStop(1,'rgba(0,200,100,0.06)');
-ctx.fillStyle=torsoGrad; ctx.fill();
-ctx.strokeStyle=BODY; ctx.lineWidth=1.8; ctx.globalAlpha=0.65;
-ctx.shadowBlur=6; ctx.shadowColor='rgba(0,255,136,0.4)';
-ctx.stroke();
-ctx.restore();
+    ctx.beginPath();
+    // 왼쪽
+    ctx.moveTo(shoX - Math.cos(LEAN)*shW, shoY + Math.sin(LEAN)*shW);
+    ctx.bezierCurveTo(
+      waistX - Math.cos(LEAN)*(waistW+2), waistY + Math.sin(LEAN)*(waistW+2),
+      hipX - Math.cos(LEAN)*(waistW+3),   hipY - TORSO*0.15,
+      hipX - Math.cos(LEAN)*hipW,          hipY
+    );
+    // 골반 하단 곡선
+    ctx.quadraticCurveTo(hipX, hipY+7, hipX + Math.cos(LEAN)*hipW, hipY);
+    // 오른쪽
+    ctx.bezierCurveTo(
+      hipX + Math.cos(LEAN)*(waistW+3),   hipY - TORSO*0.15,
+      waistX + Math.cos(LEAN)*(waistW+2), waistY - Math.sin(LEAN)*(waistW+2),
+      shoX + Math.cos(LEAN)*shW,           shoY - Math.sin(LEAN)*shW
+    );
+    ctx.closePath();
 
-// 척추
-seg(shoX,shoY,hipX,hipY,BODY,1.5,0.3);
+    const bg2 = ctx.createLinearGradient(shoX-shW,shoY,shoX+shW,shoY);
+    bg2.addColorStop(0,'rgba(80,120,220,0.1)');
+    bg2.addColorStop(0.5,'rgba(120,160,255,0.2)');
+    bg2.addColorStop(1,'rgba(80,120,220,0.1)');
+    ctx.fillStyle=bg2; ctx.fill();
+    ctx.strokeStyle=BODY; ctx.lineWidth=1.8; ctx.globalAlpha=0.6; ctx.stroke();
+    ctx.restore();
 
-// 브라라인 (여성 실루엣)
-const braY=shoY+(hipY-shoY)*0.28;
-const braX=shoX+(hipX-shoX)*0.28;
-ctx.save();
-ctx.strokeStyle=BODY; ctx.lineWidth=1.2; ctx.globalAlpha=0.35;
-ctx.beginPath();
-ctx.moveTo(braX-Math.cos(LEAN)*13, braY+Math.sin(LEAN)*13);
-ctx.lineTo(braX+Math.cos(LEAN)*13, braY-Math.sin(LEAN)*13);
-ctx.stroke();
-ctx.restore();
+    // 척추
+    seg(shoX,shoY, hipX,hipY, BODY, 2, 0.35);
 
-// ══════════════════════════════
-// ── 앞다리 L (네온 글로우) ──
-// ══════════════════════════════
-const [kLx,kLy]=endpoint(hipX,hipY,pose.lThigh,THIGH);
-const [aLx,aLy]=endpoint(kLx,kLy,pose.lThigh+pose.lKnee,SHIN);
-const footLa=pose.lThigh+pose.lKnee+pose.lAnkle-0.2;
-const [fLx,fLy]=endpoint(aLx,aLy,footLa,FOOT);
+    // ── 앞다리 L (초록 글로우) ──
+    const [kLx,kLy] = endpoint(hipX, hipY, pose.lThigh, THIGH);
+    const [aLx,aLy] = endpoint(kLx, kLy, pose.lThigh + pose.lKnee, SHIN);
+    const footLangle = pose.lThigh + pose.lKnee + pose.lAnkle - 0.3;
+    const [fLx,fLy] = endpoint(aLx, aLy, footLangle, FOOT);
 
-// 허벅지 볼륨 (채움)
-ctx.save();
-ctx.globalAlpha=0.22;
-ctx.shadowBlur=18; ctx.shadowColor=G;
-const [kLx2,kLy2]=endpoint(hipX,hipY,pose.lThigh-0.10,THIGH*0.92);
-ctx.beginPath();
-ctx.moveTo(hipX-7,hipY+1);
-ctx.quadraticCurveTo(kLx2-9,kLy2,kLx-5,kLy);
-ctx.quadraticCurveTo(kLx2+6,kLy2,hipX+8,hipY+1);
-ctx.closePath();
-ctx.fillStyle=G; ctx.fill();
-ctx.restore();
+    // 앞다리 허벅지 실루엣
+    ctx.save(); ctx.globalAlpha=0.18;
+    const [kLx2,kLy2] = endpoint(hipX,hipY, pose.lThigh-0.12, THIGH*0.95);
+    ctx.beginPath();
+    ctx.moveTo(hipX-6,hipY);
+    ctx.quadraticCurveTo(kLx2-8,kLy2, kLx-4,kLy);
+    ctx.quadraticCurveTo(kLx2+5,kLy2, hipX+7,hipY);
+    ctx.closePath(); ctx.fillStyle=G; ctx.fill();
+    ctx.restore();
 
-// 허벅지 선
-ctx.save();
-ctx.shadowBlur=16; ctx.shadowColor=G;
-ctx.strokeStyle=G; ctx.lineCap='round'; ctx.lineWidth=6;
-ctx.beginPath(); ctx.moveTo(hipX,hipY); ctx.lineTo(kLx,kLy); ctx.stroke();
-ctx.restore();
+    ctx.save();
+    ctx.shadowBlur=12; ctx.shadowColor=G;
+    ctx.strokeStyle=G; ctx.lineCap='round';
+    ctx.lineWidth=5.5;
+    ctx.beginPath(); ctx.moveTo(hipX,hipY); ctx.lineTo(kLx,kLy); ctx.stroke();
+    ctx.lineWidth=5;
+    ctx.beginPath(); ctx.moveTo(kLx,kLy); ctx.lineTo(aLx,aLy); ctx.stroke();
+    ctx.lineWidth=3.5;
+    ctx.beginPath(); ctx.moveTo(aLx,aLy); ctx.lineTo(fLx,fLy); ctx.stroke();
+    ctx.restore();
 
-// 종아리 볼륨 (채움)
-ctx.save();
-ctx.globalAlpha=0.18;
-ctx.shadowBlur=12; ctx.shadowColor=G;
-const calfMx=kLx+(aLx-kLx)*0.45+4;
-const calfMy=kLy+(aLy-kLy)*0.45;
-ctx.beginPath();
-ctx.moveTo(kLx-4,kLy+3);
-ctx.quadraticCurveTo(calfMx-7,calfMy,aLx-3,aLy);
-ctx.quadraticCurveTo(calfMx+5,calfMy,kLx+5,kLy+3);
-ctx.closePath();
-ctx.fillStyle=G; ctx.fill();
-ctx.restore();
+    // 관절 글로우
+    [[hipX,hipY,7],[kLx,kLy,6],[aLx,aLy,5]].forEach(([x,y,r])=>{
+      ctx.save(); ctx.shadowBlur=10; ctx.shadowColor=G;
+      ctx.fillStyle=G; ctx.beginPath(); ctx.arc(x,y,r,0,2*PI); ctx.fill();
+      ctx.restore();
+    });
 
-// 종아리 선
-ctx.save();
-ctx.shadowBlur=14; ctx.shadowColor=G;
-ctx.strokeStyle=G; ctx.lineCap='round'; ctx.lineWidth=5;
-ctx.beginPath(); ctx.moveTo(kLx,kLy); ctx.lineTo(aLx,aLy); ctx.stroke();
-ctx.restore();
+    // ── 앞팔 R (골드 글로우) ──
+    const [eRx2,eRy2] = endpoint(shoX, shoY, pose.rShoulder, UARM);
+    const [hRx2,hRy2] = endpoint(eRx2, eRy2, pose.rShoulder + pose.rElbow, LARM);
 
-// 발
-ctx.save();
-ctx.shadowBlur=12; ctx.shadowColor=G;
-ctx.strokeStyle=G; ctx.lineCap='round'; ctx.lineWidth=4;
-ctx.beginPath(); ctx.moveTo(aLx,aLy); ctx.lineTo(fLx,fLy); ctx.stroke();
-// 발끝 돔
-ctx.beginPath(); ctx.arc(fLx,fLy,3.5,0,2*PI);
-ctx.fillStyle=G; ctx.fill();
-ctx.restore();
+    ctx.save();
+    ctx.shadowBlur=10; ctx.shadowColor=GOLD;
+    ctx.strokeStyle=GOLD; ctx.lineCap='round';
+    ctx.lineWidth=4.5;
+    ctx.beginPath(); ctx.moveTo(shoX,shoY); ctx.lineTo(eRx2,eRy2); ctx.stroke();
+    ctx.lineWidth=4;
+    ctx.beginPath(); ctx.moveTo(eRx2,eRy2); ctx.lineTo(hRx2,hRy2); ctx.stroke();
+    ctx.fillStyle=GOLD;
+    ctx.beginPath(); ctx.arc(eRx2,eRy2,5.5,0,2*PI); ctx.fill();
+    ctx.beginPath(); ctx.arc(shoX,shoY,6,0,2*PI); ctx.fill();
+    ctx.restore();
 
-// 관절 글로우
-[[hipX,hipY,7.5],[kLx,kLy,6.5],[aLx,aLy,5]].forEach(([x,y,r])=>glowDot(x,y,r,G));
+    // ── 머리 ──
+    ctx.save();
+    ctx.shadowBlur=8; ctx.shadowColor=G;
+    ctx.beginPath();
+    ctx.ellipse(headX, headY, HEAD_R*0.82, HEAD_R, -LEAN, 0, 2*PI);
+    ctx.fillStyle='#141418'; ctx.fill();
+    ctx.strokeStyle=G; ctx.lineWidth=2; ctx.stroke();
+    ctx.restore();
 
-// ══════════════════════════════
-// ── 앞팔 R (네온 골드 글로우) ──
-// ══════════════════════════════
-const GOLD='#ffd060';
-const [eRx2,eRy2]=endpoint(shoX,shoY,pose.rShoulder,UARM);
-const [hRx2,hRy2]=endpoint(eRx2,eRy2,pose.rShoulder+pose.rElbow,LARM);
+    // 목
+    seg(headX, headY+HEAD_R*0.7, shoX, shoY-3, BODY, 4, 0.5);
 
-// 위팔 볼륨
-drawFilledLimb(ctx,shoX,shoY,eRx2,eRy2,hRx2,hRy2,5.5,3.5,GOLD,0.18);
+    // 포니테일 (달리면서 흔들림)
+    const tailSwing = Math.sin(_phase*PI*2)*0.15;
+    ctx.save();
+    ctx.strokeStyle=BODY; ctx.lineWidth=3; ctx.lineCap='round'; ctx.globalAlpha=0.5;
+    ctx.beginPath();
+    ctx.moveTo(headX - HEAD_R*0.5, headY - HEAD_R*0.4);
+    ctx.quadraticCurveTo(
+      headX - HEAD_R*2.2 + tailSwing*20,
+      headY + HEAD_R*0.4,
+      headX - HEAD_R*1.6 + tailSwing*30,
+      headY + HEAD_R*1.1
+    );
+    ctx.stroke();
+    ctx.lineWidth=2; ctx.globalAlpha=0.3;
+    ctx.beginPath();
+    ctx.moveTo(headX-HEAD_R*1.6+tailSwing*30, headY+HEAD_R*1.1);
+    ctx.quadraticCurveTo(
+      headX-HEAD_R*2.1+tailSwing*35, headY+HEAD_R*1.6,
+      headX-HEAD_R*1.5+tailSwing*25, headY+HEAD_R*1.9
+    );
+    ctx.stroke();
+    ctx.restore();
 
-ctx.save();
-ctx.shadowBlur=12; ctx.shadowColor=GOLD;
-ctx.strokeStyle=GOLD; ctx.lineCap='round';
-ctx.lineWidth=5;
-ctx.beginPath(); ctx.moveTo(shoX,shoY); ctx.lineTo(eRx2,eRy2); ctx.stroke();
-ctx.lineWidth=4;
-ctx.beginPath(); ctx.moveTo(eRx2,eRy2); ctx.lineTo(hRx2,hRy2); ctx.stroke();
-ctx.restore();
-// 주먹
-ctx.save();
-ctx.shadowBlur=10; ctx.shadowColor=GOLD;
-ctx.fillStyle=GOLD;
-ctx.beginPath(); ctx.arc(hRx2,hRy2,4.5,0,2*PI); ctx.fill();
-ctx.beginPath(); ctx.arc(eRx2,eRy2,5,0,2*PI); ctx.fill();
-ctx.beginPath(); ctx.arc(shoX,shoY,6,0,2*PI); ctx.fill();
-ctx.restore();
+    // 각도 계산
+    const hipAng   = Math.round(Math.abs(pose.lThigh - pose.rThigh) * 180/PI);
+    const kneeAng  = Math.round((PI - pose.lKnee) * 180/PI);
+    const ankleAng = Math.round(108 + pose.lAnkle*30);
+    const elbowAng = Math.round((PI - pose.lElbow + 1.45) * 100);
 
-// ══════════════════════════════
-// ── 머리 ──
-// ══════════════════════════════
-ctx.save();
-ctx.shadowBlur=10; ctx.shadowColor=G;
-ctx.beginPath();
-ctx.ellipse(headX, headY, HEAD_R*0.80, HEAD_R, -LEAN, 0, 2*PI);
-ctx.fillStyle='#101418'; ctx.fill();
-ctx.strokeStyle=G; ctx.lineWidth=2.2; ctx.stroke();
-ctx.restore();
+    return { hipAng, kneeAng, ankleAng, elbowAng,
+             kL:[kLx,kLy], aL:[aLx,aLy], eL:[eRx2,eRy2], sho:[shoX,shoY] };
+  }
 
-// 얼굴 윤곽 (측면)
-ctx.save();
-ctx.globalAlpha=0.25;
-ctx.strokeStyle=SKIN; ctx.lineWidth=1.2;
-ctx.beginPath();
-ctx.arc(headX+HEAD_R*0.15, headY, HEAD_R*0.62, -PI*0.3, PI*0.55);
-ctx.stroke();
-ctx.restore();
+  // ── 각도 라벨 ──
+  function updateLabels(info) {
+    const box = document.getElementById('avatar-labels');
+    if(!box) return;
+    function isOk(t,v){
+      return (t==='KNEE'&&v>=155&&v<=178)||(t==='ANKLE'&&v>=95&&v<=116)||
+             (t==='ELBOW'&&v>=75&&v<=100)||(t==='HIP'&&v>=35&&v<=80);
+    }
+    function lbl(title,val,ref,right,top){
+      const col=isOk(title,val)?'var(--good)':'var(--warning)';
+      const side=right?'right:4px':'left:4px';
+      return `<div class="skeleton-indicator-box" style="position:absolute;${side};top:${top}px;border-color:${col};min-width:74px;padding:3px 5px;">
+        <div class="skeleton-ind-title" style="color:${col};font-size:8px;">${title}</div>
+        <div class="skeleton-ind-val" style="font-size:13px;">∠ ${val}°</div>
+        <div class="skeleton-ind-ref" style="font-size:7px;">${ref}</div>
+      </div>`;
+    }
+    box.innerHTML =
+      lbl('HIP',   info.hipAng,   'REF: 35-80°',  false,  6) +
+      lbl('KNEE',  info.kneeAng,  'REF: 155-178°', false, 88) +
+      lbl('ELBOW', info.elbowAng, 'REF: 75-100°',  true,   6) +
+      lbl('ANKLE', info.ankleAng, 'REF: 95-116°',  true,  88);
+  }
 
-// 목
-seg(headX, headY+HEAD_R*0.75, shoX, shoY-3, BODY, 4, 0.55);
+  // ── 루프 ──
+  function tick(ts){
+    if(!_lastTs) _lastTs=ts;
+    const dt=Math.min((ts-_lastTs)/1000,0.05); _lastTs=ts;
+    _phase=(_phase+(_cadence/60)*dt)%1;
+    const bounce=-Math.abs(Math.sin(_phase*PI*2))*4;
+    const canvas=document.getElementById('avatar-canvas');
+    if(canvas){
+      const info=drawAvatar(canvas,getPose(_phase),bounce);
+      updateLabels(info);
+    }
+    _raf=requestAnimationFrame(tick);
+  }
 
-// ── 포니테일 ──
-const tailSwing = _running ? Math.sin(_phase*PI*2)*0.18 : Math.sin((idleT||0)*1.2)*0.04;
-ctx.save();
-ctx.strokeStyle=BODY; ctx.lineWidth=3.5; ctx.lineCap='round'; ctx.globalAlpha=0.55;
-ctx.beginPath();
-ctx.moveTo(headX-HEAD_R*0.45, headY-HEAD_R*0.35);
-ctx.quadraticCurveTo(
-  headX-HEAD_R*2.3+tailSwing*22, headY+HEAD_R*0.35,
-  headX-HEAD_R*1.7+tailSwing*32, headY+HEAD_R*1.0
-);
-ctx.stroke();
-ctx.lineWidth=2.5; ctx.globalAlpha=0.32;
-ctx.beginPath();
-ctx.moveTo(headX-HEAD_R*1.7+tailSwing*32, headY+HEAD_R*1.0);
-ctx.quadraticCurveTo(
-  headX-HEAD_R*2.2+tailSwing*38, headY+HEAD_R*1.55,
-  headX-HEAD_R*1.6+tailSwing*28, headY+HEAD_R*1.85
-);
-ctx.stroke();
-ctx.restore();
+  function start(){ if(!_raf){ _lastTs=null; _raf=requestAnimationFrame(tick); } }
+  function stop() { if(_raf){ cancelAnimationFrame(_raf); _raf=null; } }
+  function setSpeed(v){
+    _speed=Math.min(20,Math.max(4,parseFloat(v)));
+    _cadence=Math.round(155+(_speed-4)*2.3);
+    const lb=document.getElementById('avatar-spd-lbl');
+    if(lb) lb.textContent=_speed.toFixed(1)+' km/h';
+    const sl=document.getElementById('avatar-spd-slider');
+    if(sl) sl.value=_speed;
+  }
 
-// ── 달리기 중 모션 블러 흔적 ──
-if(_running){
-const trailAlpha = 0.06;
-ctx.save();
-ctx.globalAlpha=trailAlpha;
-ctx.shadowBlur=6; ctx.shadowColor=G;
-ctx.strokeStyle=G; ctx.lineWidth=3; ctx.lineCap='round';
-ctx.beginPath(); ctx.moveTo(hipX-8,hipY); ctx.lineTo(kLx-8,kLy); ctx.stroke();
-ctx.beginPath(); ctx.moveTo(kLx-8,kLy); ctx.lineTo(aLx-8,aLy); ctx.stroke();
-ctx.restore();
-}
-}
+  window.avatarSpeedAdj=function(d,abs){ setSpeed(abs!=null?abs:_speed+d); };
+  window.avatarSyncRecord=function(rec){
+    if(!rec) return;
+    if(rec.cadence) _cadence=parseInt(rec.cadence)||170;
+    if(rec.avgPace&&rec.avgPace.includes("'")){
+      const p=rec.avgPace.replace('"','').split("'");
+      let s=60/(parseInt(p[0]||5)+(parseInt(p[1]||0)/60));
+      setSpeed(Math.min(20,Math.max(4,Math.round(s*2)/2)));
+    }
+  };
+  window._avatarStart=start;
+  window._avatarStop=stop;
 
-// ── 루프 ──
-let _idleTime = 0;
-function tick(ts){
-if(!_lastTs) _lastTs=ts;
-const dt=Math.min((ts-_lastTs)/1000,0.05); _lastTs=ts;
-if(_running){
-  _phase=(_phase+(_cadence/60)*dt)%1;
-  const bounce=-Math.abs(Math.sin(_phase*PI*2))*9;
-  const canvas=document.getElementById('avatar-canvas');
-  if(canvas) drawAvatar(canvas,getPose(_phase),bounce,0);
-} else {
-  _idleTime += dt;
-  const canvas=document.getElementById('avatar-canvas');
-  if(canvas) drawAvatar(canvas,getIdlePose(_idleTime),0,_idleTime);
-}
-_raf=requestAnimationFrame(tick);
-}
-
-function start(){
-_running=true;
-if(!_raf){ _lastTs=null; _raf=requestAnimationFrame(tick); }
-const pb=document.getElementById('btn-avatar-play');
-const sb=document.getElementById('btn-avatar-stop');
-if(pb){pb.style.background='rgba(0,255,136,0.3)'; pb.style.color='var(--primary)'; pb.style.border='1.5px solid var(--primary)';}
-if(sb){sb.style.background='#1a1a1a'; sb.style.color='#aaa';}
-}
-function stop(){
-_running=false;
-if(!_raf){ _lastTs=null; _raf=requestAnimationFrame(tick); }
-const pb=document.getElementById('btn-avatar-play');
-const sb=document.getElementById('btn-avatar-stop');
-if(pb){pb.style.background='var(--primary)'; pb.style.color='#000'; pb.style.border='none';}
-if(sb){sb.style.background='rgba(255,80,80,0.15)'; sb.style.color='var(--danger)'; sb.style.border='1.5px solid var(--danger)';}
-}
-function setSpeed(v){
-_speed=Math.min(20,Math.max(4,parseFloat(v)));
-_cadence=Math.round(155+(_speed-4)*2.3);
-}
-
-window.avatarSpeedAdj=function(d,abs){ setSpeed(abs!=null?abs:_speed+d); };
-window.avatarSyncRecord=function(rec){
-if(!rec) return;
-if(rec.cadence) _cadence=parseInt(rec.cadence)||170;
-if(rec.avgPace&&rec.avgPace.includes("'")){
-const p=rec.avgPace.replace('"','').split("'");
-let s=60/(parseInt(p[0]||5)+(parseInt(p[1]||0)/60));
-setSpeed(Math.min(20,Math.max(4,Math.round(s*2)/2)));
-}
-};
-window._avatarStart=start;
-window._avatarStop=stop;
-
-window.addEventListener('load',function(){
-setTimeout(function(){
-// 처음엔 정지 상태로 대기 자세 루프 시작
-_running=false;
-if(!_raf){ _lastTs=null; _raf=requestAnimationFrame(tick); }
-if(window.ui&&ui.toggleInfoSubTab){
-const orig=ui.toggleInfoSubTab.bind(ui);
-ui.toggleInfoSubTab=function(t){ orig(t); if(t==='precision'){ _running=false; if(!_raf){_lastTs=null;_raf=requestAnimationFrame(tick);} } };
-}
-if(window.ui&&ui.loadPrecisionDashboard){
-const origL=ui.loadPrecisionDashboard.bind(ui);
-ui.loadPrecisionDashboard=function(id){
-origL(id);
-const rec=(storage.loadHistory()||[]).find(r=>r.id==id);
-if(rec) window.avatarSyncRecord(rec);
-};
-}
-},600);
-});
+  window.addEventListener('load',function(){
+    setTimeout(function(){
+      if(window.ui&&ui.toggleInfoSubTab){
+        const orig=ui.toggleInfoSubTab.bind(ui);
+        ui.toggleInfoSubTab=function(t){ orig(t); if(t==='precision') start(); };
+      }
+      if(window.ui&&ui.loadPrecisionDashboard){
+        const origL=ui.loadPrecisionDashboard.bind(ui);
+        ui.loadPrecisionDashboard=function(id){
+          origL(id);
+          const rec=(storage.loadHistory()||[]).find(r=>r.id==id);
+          if(rec) window.avatarSyncRecord(rec);
+          start();
+        };
+      }
+    },600);
+  });
 })();
 // ═══════════════════════════════════════════════
 
