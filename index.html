@@ -1640,300 +1640,287 @@ navigator.serviceWorker.register(swUrl).catch(()=>{});
 }
 };
 // ═══════════════════════════════════════════════
-// 🏃 LIVE AVATAR ENGINE v3 — 여성 실루엣 러닝
+// 🏃 LIVE AVATAR ENGINE v4 — 측면 달리기
 // ═══════════════════════════════════════════════
 (function(){
   const PI = Math.PI;
   let _speed=6, _cadence=170, _phase=0, _lastTs=null, _raf=null;
 
-  // ── 러닝 사이클 키프레임 ──────────────────────
-  // t: 0~1 사이클 위상
-  // 각 값: 관절 회전각(도). 수직 아래=0, 앞=+, 뒤=-
-  // lThigh/rThigh: 대퇴부 수직 기준 전후 스윙
-  // lKnee/rKnee: 무릎 굽힘 (0=펴짐, 90=직각)
-  // lArm/rArm: 어깨 전후 스윙
-  // lElbow/rElbow: 팔꿈치 굽힘
-  const KF = [
-    // 오른발 착지 / 왼발 앞으로
-    { t:0.00, lTh: 35, lK:15, rTh:-15, rK:75, lAr:-30, lEl:75, rAr:28, rEl:90 },
-    { t:0.12, lTh: 20, lK: 5, rTh: -5, rK:40, lAr:-15, lEl:80, rAr:14, rEl:82 },
-    // 오른발 지지 / 왼발 착지
-    { t:0.25, lTh:-15, lK:70, rTh: 35, rK:15, lAr: 28, lEl:90, rAr:-30, rEl:75 },
-    { t:0.38, lTh: -5, lK:38, rTh: 20, rK: 5, lAr: 14, lEl:82, rAr:-15, rEl:80 },
-    // 공중 / 양발 띠는 순간
-    { t:0.50, lTh: 35, lK:15, rTh:-15, rK:75, lAr:-30, lEl:75, rAr:28, rEl:90 },
-    { t:0.75, lTh:-15, lK:70, rTh: 35, rK:15, lAr: 28, lEl:90, rAr:-30, rEl:75 },
-    { t:1.00, lTh: 35, lK:15, rTh:-15, rK:75, lAr:-30, lEl:75, rAr:28, rEl:90 },
-  ];
+  // 측면 달리기 키프레임
+  // 모든 각도: 라디안, 수직아래=0, 앞(오른쪽)=+, 뒤=-
+  // phase 0: 오른발 착지 직후 / 왼발 스윙 앞
+  // phase 0.5: 왼발 착지 직후 / 오른발 스윙 앞
+  function getPose(ph) {
+    // 사인파 기반으로 자연스러운 교차 운동
+    const a = ph * PI * 2; // 0~2π
 
-  function lerp(a,b,t){ return a+(b-a)*t; }
-  function getPose(p){
-    let i=0;
-    for(let j=0;j<KF.length-1;j++){
-      if(p>=KF[j].t && p<KF[j+1].t){ i=j; break; }
-    }
-    const k0=KF[i], k1=KF[i+1];
-    const t=(p-k0.t)/Math.max(k1.t-k0.t,0.001);
-    const r={};
-    for(const k in k0) if(k!=='t') r[k]=lerp(k0[k],k1[k],t);
-    return r;
+    // ── 다리 (측면, 오른쪽을 향해 달림) ──
+    // 앞다리(L): 앞으로 스윙 → 뒤로
+    const lThigh = -0.45 * Math.cos(a);          // -25°~+25°
+    const lKnee  =  0.55 + 0.45 * Math.cos(a);   // 무릎굽힘: 앞에서 펴짐, 뒤에서 굽힘
+    // 발목: 앞(착지)=배굴(위로,음수), 뒤(이지오프)=저굴(아래,양수)
+    const lAnkle = -0.25 * Math.cos(a);
+
+    // 뒷다리(R): 반대 위상
+    const rThigh = -0.45 * Math.cos(a + PI);
+    const rKnee  =  0.55 + 0.45 * Math.cos(a + PI);
+    const rAnkle = -0.25 * Math.cos(a + PI);
+
+    // ── 팔 (다리와 반대 위상) ──
+    // 앞팔(R): 다리 L과 반대 = a+PI
+    const rShoulder = -0.42 * Math.cos(a + PI);
+    const rElbow    =  1.45 + 0.25 * Math.sin(a); // 85°~100° 사이
+
+    // 뒷팔(L): a와 동위상
+    const lShoulder = -0.42 * Math.cos(a);
+    const lElbow    =  1.45 + 0.25 * Math.sin(a + PI);
+
+    return { lThigh, lKnee, lAnkle, rThigh, rKnee, rAnkle,
+             rShoulder, rElbow, lShoulder, lElbow };
   }
 
-  // 각도로 끝점 계산: 수직 아래가 0도, 앞(오른쪽)이 +
-  function tip(ox,oy,deg,len){
-    const rad=(deg-90)*PI/180; // -90: canvas에서 위가 -Y
-    return [ox + Math.cos(rad)*len, oy + Math.sin(rad)*len];
+  // ── 두 점으로부터 끝점 계산 ──
+  // angle: 수직 아래=PI/2 기준 (canvas Y축)
+  // 오른쪽=+, 왼쪽=- (달리는 방향이 오른쪽)
+  function endpoint(x, y, angle, len) {
+    // angle=0 → 수직 아래, angle=+→앞(오른쪽), angle=-→뒤
+    return [x + Math.sin(angle)*len, y + Math.cos(angle)*len];
   }
 
-  // ── 여성 실루엣 러닝 아바타 ──────────────────
-  function drawAvatar(canvas, pose, bounce){
+  // ── 그리기 ──
+  function drawAvatar(canvas, pose, bounce) {
     const ctx = canvas.getContext('2d');
-    const W=canvas.width, H=canvas.height;
+    const W = canvas.width, H = canvas.height;
     ctx.clearRect(0,0,W,H);
 
     // 배경
-    ctx.fillStyle='#0c0c0c'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle = '#0c0c0c';
+    ctx.fillRect(0,0,W,H);
 
-    const floorY = H*0.88;
+    const floorY = H * 0.87;
 
-    // 바닥선 + 그리드
+    // 바닥선
     ctx.save();
-    ctx.strokeStyle='rgba(0,255,136,0.18)'; ctx.lineWidth=1;
+    ctx.strokeStyle = 'rgba(0,255,136,0.18)'; ctx.lineWidth=1;
     ctx.beginPath(); ctx.moveTo(0,floorY); ctx.lineTo(W,floorY); ctx.stroke();
-    ctx.strokeStyle='rgba(0,255,136,0.05)'; ctx.lineWidth=0.5;
+    ctx.strokeStyle = 'rgba(0,255,136,0.05)'; ctx.lineWidth=0.5;
     for(let x=0;x<W;x+=20){
       ctx.beginPath(); ctx.moveTo(x,floorY); ctx.lineTo(x,H); ctx.stroke();
     }
     ctx.restore();
 
-    // ── 신체 치수 ──
+    // ── 신체 치수 (px) ──
+    const THIGH = 44, SHIN = 40, FOOT = 16;
+    const TORSO = 52, UARM = 28, LARM = 24;
     const HEAD_R = 14;
-    const NECK   = 8;
-    const TORSO  = 54;
-    const THIGH  = 44;
-    const SHIN   = 40;
-    const FOOT_L = 20;
-    const UARM   = 28;
-    const LARM   = 24;
 
-    // 루트: 골반 위치 (화면 중앙, 바닥에서 다리 높이만큼)
-    const cx = W * 0.52;
-    const hipY = floorY - THIGH - SHIN*0.5 + bounce;
-    const hipX = cx;
+    // ── 골반 위치 ──
+    // 서있을 때: hipY = floorY - SHIN - THIGH
+    // 달릴 때 약간 올라감 (bounce)
+    const hipX = W * 0.48;
+    const hipY = floorY - THIGH*0.95 - SHIN*0.6 + bounce;
 
-    // 어깨 (몸통 위)
-    const shoX = hipX - 4; // 약간 앞으로 기운 느낌
-    const shoY = hipY - TORSO;
+    // 어깨 (몸통 위, 약간 앞으로 기울어짐)
+    const LEAN = 0.08; // 전방 기울기 라디안
+    const shoX = hipX - Math.sin(LEAN)*TORSO;
+    const shoY = hipY - Math.cos(LEAN)*TORSO;
 
-    // 목, 머리
-    const neckX = shoX;
-    const neckY = shoY - NECK;
-    const headX = neckX + 2;
-    const headY = neckY - HEAD_R;
+    // 머리
+    const headX = shoX - Math.sin(LEAN)*HEAD_R*1.2;
+    const headY = shoY - HEAD_R*1.4;
 
     const G    = '#00ff88';
     const GOLD = '#ffcc00';
-    const DIM  = 'rgba(0,150,80,0.35)';
-    const BODY = '#c8d8ff';
+    const DIM  = 'rgba(0,120,70,0.38)';
+    const BODY = '#b8ccff';
 
     // 그림자
-    const gsh = ctx.createRadialGradient(cx,floorY,1,cx,floorY,38);
-    gsh.addColorStop(0,'rgba(0,255,136,0.22)');
+    const gsh = ctx.createRadialGradient(hipX,floorY,1,hipX,floorY,34);
+    gsh.addColorStop(0,'rgba(0,255,136,0.2)');
     gsh.addColorStop(1,'rgba(0,0,0,0)');
-    ctx.fillStyle=gsh;
-    ctx.beginPath(); ctx.ellipse(cx,floorY,36,6,0,0,2*PI); ctx.fill();
+    ctx.fillStyle = gsh;
+    ctx.beginPath(); ctx.ellipse(hipX,floorY,30,5,0,0,2*PI); ctx.fill();
 
-    // ── 뒷다리 R ──
-    // 대퇴: 골반에서 rThigh 각도로
-    const [kRx,kRy] = tip(hipX,hipY, 90+pose.rTh, THIGH);
-    // 하퇴: 무릎굽힘은 대퇴 방향 + 굽힘각
-    const [aRx,aRy] = tip(kRx,kRy, 90+pose.rTh+pose.rK, SHIN);
-    // 발
-    const [fRx,fRy] = tip(aRx,aRy, 90+pose.rTh+pose.rK+10, FOOT_L);
+    // 헬퍼
+    function seg(x1,y1,x2,y2,col,w,al) {
+      ctx.save(); ctx.globalAlpha=al??1;
+      ctx.strokeStyle=col; ctx.lineWidth=w; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+      ctx.restore();
+    }
+    function dot(x,y,r,col,al) {
+      ctx.save(); ctx.globalAlpha=al??1; ctx.fillStyle=col;
+      ctx.beginPath(); ctx.arc(x,y,r,0,2*PI); ctx.fill();
+      ctx.restore();
+    }
 
-    ctx.save();
-    ctx.strokeStyle=DIM; ctx.lineWidth=5; ctx.lineCap='round'; ctx.globalAlpha=0.6;
-    // 허벅지
-    ctx.beginPath(); ctx.moveTo(hipX,hipY); ctx.lineTo(kRx,kRy); ctx.stroke();
-    // 정강이
-    ctx.beginPath(); ctx.moveTo(kRx,kRy); ctx.lineTo(aRx,aRy); ctx.stroke();
-    ctx.lineWidth=3;
-    // 발
-    ctx.beginPath(); ctx.moveTo(aRx,aRy); ctx.lineTo(fRx,fRy); ctx.stroke();
-    ctx.restore();
+    // ── 뒷다리 R (어두운 색, 원근) ──
+    const [kRx,kRy] = endpoint(hipX, hipY, pose.rThigh, THIGH);
+    const [aRx,aRy] = endpoint(kRx, kRy, pose.rThigh + pose.rKnee, SHIN);
+    // 발: 발목각도로 발끝 방향 결정
+    const footRangle = pose.rThigh + pose.rKnee + pose.rAnkle - 0.3;
+    const [fRx,fRy] = endpoint(aRx, aRy, footRangle, FOOT);
 
-    // 뒷다리 여성 실루엣 (살짝 두껍게)
-    ctx.save(); ctx.globalAlpha=0.25;
-    // 허벅지 실루엣
+    seg(hipX,hipY, kRx,kRy, DIM, 7, 0.65);
+    seg(kRx,kRy, aRx,aRy, DIM, 6, 0.6);
+    seg(aRx,aRy, fRx,fRy, DIM, 4.5, 0.5);
+    dot(kRx,kRy, 5, DIM, 0.6);
+    dot(aRx,aRy, 4, DIM, 0.5);
+
+    // 뒷다리 실루엣 (허벅지 볼륨)
+    ctx.save(); ctx.globalAlpha=0.15;
+    const [kRx2,kRy2] = endpoint(hipX,hipY, pose.rThigh-0.12, THIGH*0.95);
     ctx.beginPath();
-    const thW=10;
-    ctx.moveTo(hipX-thW/2,hipY);
-    ctx.quadraticCurveTo(hipX-thW,hipY+(kRy-hipY)*0.5, kRx-4,kRy);
-    ctx.quadraticCurveTo(hipX+thW,hipY+(kRy-hipY)*0.5, hipX+thW/2,hipY);
-    ctx.fillStyle=DIM; ctx.fill();
+    ctx.moveTo(hipX-6,hipY-2);
+    ctx.quadraticCurveTo(kRx2-8,kRy2, kRx-4,kRy);
+    ctx.quadraticCurveTo(kRx2+4,kRy2, hipX+6,hipY-2);
+    ctx.closePath(); ctx.fillStyle=DIM; ctx.fill();
     ctx.restore();
 
-    // ── 뒷팔 R ──
-    const [eRx,eRy] = tip(shoX,shoY, 90+pose.rAr, UARM);
-    const [hRx,hRy] = tip(eRx,eRy, 90+pose.rAr+pose.rEl, LARM);
-    ctx.save();
-    ctx.strokeStyle=DIM; ctx.lineWidth=4; ctx.lineCap='round'; ctx.globalAlpha=0.5;
-    ctx.beginPath(); ctx.moveTo(shoX,shoY); ctx.lineTo(eRx,eRy); ctx.stroke();
-    ctx.lineWidth=3;
-    ctx.beginPath(); ctx.moveTo(eRx,eRy); ctx.lineTo(hRx,hRy); ctx.stroke();
-    ctx.restore();
+    // ── 뒷팔 L (어두운) ──
+    const [eLx,eLy] = endpoint(shoX, shoY, pose.lShoulder, UARM);
+    const [hLx,hLy] = endpoint(eLx, eLy, pose.lShoulder + pose.lElbow, LARM);
+    seg(shoX,shoY, eLx,eLy, DIM, 5, 0.55);
+    seg(eLx,eLy, hLx,hLy, DIM, 4, 0.5);
+    dot(eLx,eLy, 3.5, DIM, 0.5);
 
-    // ── 몸통 + 여성 실루엣 ──
+    // ── 몸통 실루엣 (여성 라인) ──
     ctx.save();
-    ctx.shadowBlur=6; ctx.shadowColor='rgba(180,200,255,0.25)';
-
-    // 몸통 실루엣 (여성 라인: 어깨-허리-골반)
-    const shoulderW = 20;
-    const waistW    = 11;
-    const hipW      = 18;
-    const waistY    = shoY + TORSO*0.6;
+    const shW=18, waistW=11, hipW=17;
+    const waistX = shoX + (hipX-shoX)*0.55;
+    const waistY = shoY + (hipY-shoY)*0.55;
 
     ctx.beginPath();
-    // 왼쪽 라인
-    ctx.moveTo(shoX - shoulderW, shoY);
+    // 왼쪽
+    ctx.moveTo(shoX - Math.cos(LEAN)*shW, shoY + Math.sin(LEAN)*shW);
     ctx.bezierCurveTo(
-      shoX - shoulderW - 2, shoY + TORSO*0.3,
-      shoX - waistW,        waistY,
-      hipX - hipW,          hipY
+      waistX - Math.cos(LEAN)*(waistW+2), waistY + Math.sin(LEAN)*(waistW+2),
+      hipX - Math.cos(LEAN)*(waistW+3),   hipY - TORSO*0.15,
+      hipX - Math.cos(LEAN)*hipW,          hipY
     );
-    // 골반 아래 (치마/팬츠 약간)
-    ctx.quadraticCurveTo(hipX - hipW*0.5, hipY+8, hipX, hipY+6);
-    ctx.quadraticCurveTo(hipX + hipW*0.5, hipY+8, hipX + hipW, hipY);
-    // 오른쪽 라인
+    // 골반 하단 곡선
+    ctx.quadraticCurveTo(hipX, hipY+7, hipX + Math.cos(LEAN)*hipW, hipY);
+    // 오른쪽
     ctx.bezierCurveTo(
-      shoX + waistW,        waistY,
-      shoX + shoulderW + 2, shoY + TORSO*0.3,
-      shoX + shoulderW,     shoY
+      hipX + Math.cos(LEAN)*(waistW+3),   hipY - TORSO*0.15,
+      waistX + Math.cos(LEAN)*(waistW+2), waistY - Math.sin(LEAN)*(waistW+2),
+      shoX + Math.cos(LEAN)*shW,           shoY - Math.sin(LEAN)*shW
     );
     ctx.closePath();
 
-    // 실루엣 그라디언트
-    const bodyGrad = ctx.createLinearGradient(shoX-shoulderW, shoY, shoX+shoulderW, shoY);
-    bodyGrad.addColorStop(0,'rgba(100,140,255,0.12)');
-    bodyGrad.addColorStop(0.5,'rgba(140,180,255,0.22)');
-    bodyGrad.addColorStop(1,'rgba(100,140,255,0.12)');
-    ctx.fillStyle = bodyGrad;
-    ctx.fill();
-
-    // 몸통 외곽선 (글로우)
-    ctx.strokeStyle = BODY; ctx.lineWidth=2; ctx.globalAlpha=0.7;
-    ctx.stroke();
+    const bg2 = ctx.createLinearGradient(shoX-shW,shoY,shoX+shW,shoY);
+    bg2.addColorStop(0,'rgba(80,120,220,0.1)');
+    bg2.addColorStop(0.5,'rgba(120,160,255,0.2)');
+    bg2.addColorStop(1,'rgba(80,120,220,0.1)');
+    ctx.fillStyle=bg2; ctx.fill();
+    ctx.strokeStyle=BODY; ctx.lineWidth=1.8; ctx.globalAlpha=0.6; ctx.stroke();
     ctx.restore();
 
-    // 척추선
-    ctx.save();
-    ctx.strokeStyle=BODY; ctx.lineWidth=2; ctx.lineCap='round'; ctx.globalAlpha=0.4;
-    ctx.beginPath(); ctx.moveTo(shoX,shoY); ctx.lineTo(hipX,hipY); ctx.stroke();
-    ctx.restore();
+    // 척추
+    seg(shoX,shoY, hipX,hipY, BODY, 2, 0.35);
 
     // ── 앞다리 L (초록 글로우) ──
-    const [kLx,kLy] = tip(hipX,hipY, 90+pose.lTh, THIGH);
-    const [aLx,aLy] = tip(kLx,kLy, 90+pose.lTh+pose.lK, SHIN);
-    const [fLx,fLy] = tip(aLx,aLy, 90+pose.lTh+pose.lK+10, FOOT_L);
+    const [kLx,kLy] = endpoint(hipX, hipY, pose.lThigh, THIGH);
+    const [aLx,aLy] = endpoint(kLx, kLy, pose.lThigh + pose.lKnee, SHIN);
+    const footLangle = pose.lThigh + pose.lKnee + pose.lAnkle - 0.3;
+    const [fLx,fLy] = endpoint(aLx, aLy, footLangle, FOOT);
 
-    // 앞다리 실루엣
+    // 앞다리 허벅지 실루엣
     ctx.save(); ctx.globalAlpha=0.18;
+    const [kLx2,kLy2] = endpoint(hipX,hipY, pose.lThigh-0.12, THIGH*0.95);
     ctx.beginPath();
-    ctx.moveTo(hipX-8,hipY);
-    ctx.quadraticCurveTo(hipX-12,hipY+(kLy-hipY)*0.5, kLx-5,kLy);
-    ctx.quadraticCurveTo(hipX+8, hipY+(kLy-hipY)*0.5, hipX+8,hipY);
-    ctx.fillStyle=G; ctx.fill();
+    ctx.moveTo(hipX-6,hipY);
+    ctx.quadraticCurveTo(kLx2-8,kLy2, kLx-4,kLy);
+    ctx.quadraticCurveTo(kLx2+5,kLy2, hipX+7,hipY);
+    ctx.closePath(); ctx.fillStyle=G; ctx.fill();
     ctx.restore();
 
     ctx.save();
     ctx.shadowBlur=12; ctx.shadowColor=G;
-    ctx.strokeStyle=G; ctx.lineWidth=5; ctx.lineCap='round';
-    // 허벅지
+    ctx.strokeStyle=G; ctx.lineCap='round';
+    ctx.lineWidth=5.5;
     ctx.beginPath(); ctx.moveTo(hipX,hipY); ctx.lineTo(kLx,kLy); ctx.stroke();
-    // 정강이
+    ctx.lineWidth=5;
     ctx.beginPath(); ctx.moveTo(kLx,kLy); ctx.lineTo(aLx,aLy); ctx.stroke();
     ctx.lineWidth=3.5;
-    // 발
     ctx.beginPath(); ctx.moveTo(aLx,aLy); ctx.lineTo(fLx,fLy); ctx.stroke();
-
-    // 관절 점
-    ctx.fillStyle=G;
-    [[ hipX,hipY,7],[kLx,kLy,6],[aLx,aLy,5]].forEach(([x,y,r])=>{
-      ctx.beginPath(); ctx.arc(x,y,r,0,2*PI); ctx.fill();
-    });
     ctx.restore();
 
-    // ── 앞팔 L (골드 글로우) ──
-    const [eLx,eLy] = tip(shoX,shoY, 90+pose.lAr, UARM);
-    const [hLx,hLy] = tip(eLx,eLy, 90+pose.lAr+pose.lEl, LARM);
+    // 관절 글로우
+    [[hipX,hipY,7],[kLx,kLy,6],[aLx,aLy,5]].forEach(([x,y,r])=>{
+      ctx.save(); ctx.shadowBlur=10; ctx.shadowColor=G;
+      ctx.fillStyle=G; ctx.beginPath(); ctx.arc(x,y,r,0,2*PI); ctx.fill();
+      ctx.restore();
+    });
+
+    // ── 앞팔 R (골드 글로우) ──
+    const [eRx2,eRy2] = endpoint(shoX, shoY, pose.rShoulder, UARM);
+    const [hRx2,hRy2] = endpoint(eRx2, eRy2, pose.rShoulder + pose.rElbow, LARM);
 
     ctx.save();
     ctx.shadowBlur=10; ctx.shadowColor=GOLD;
-    ctx.strokeStyle=GOLD; ctx.lineWidth=4; ctx.lineCap='round';
-    ctx.beginPath(); ctx.moveTo(shoX,shoY); ctx.lineTo(eLx,eLy); ctx.stroke();
-    ctx.lineWidth=3.5;
-    ctx.beginPath(); ctx.moveTo(eLx,eLy); ctx.lineTo(hLx,hLy); ctx.stroke();
+    ctx.strokeStyle=GOLD; ctx.lineCap='round';
+    ctx.lineWidth=4.5;
+    ctx.beginPath(); ctx.moveTo(shoX,shoY); ctx.lineTo(eRx2,eRy2); ctx.stroke();
+    ctx.lineWidth=4;
+    ctx.beginPath(); ctx.moveTo(eRx2,eRy2); ctx.lineTo(hRx2,hRy2); ctx.stroke();
     ctx.fillStyle=GOLD;
-    ctx.beginPath(); ctx.arc(eLx,eLy,5,0,2*PI); ctx.fill();
+    ctx.beginPath(); ctx.arc(eRx2,eRy2,5.5,0,2*PI); ctx.fill();
     ctx.beginPath(); ctx.arc(shoX,shoY,6,0,2*PI); ctx.fill();
     ctx.restore();
 
-    // ── 머리 + 여성 실루엣 ──
+    // ── 머리 ──
     ctx.save();
     ctx.shadowBlur=8; ctx.shadowColor=G;
-
-    // 머리 실루엣 (타원형 얼굴)
     ctx.beginPath();
-    ctx.ellipse(headX, headY, HEAD_R*0.85, HEAD_R, 0.1, 0, 2*PI);
-    ctx.fillStyle='#181820'; ctx.fill();
+    ctx.ellipse(headX, headY, HEAD_R*0.82, HEAD_R, -LEAN, 0, 2*PI);
+    ctx.fillStyle='#141418'; ctx.fill();
     ctx.strokeStyle=G; ctx.lineWidth=2; ctx.stroke();
+    ctx.restore();
 
     // 목
-    ctx.beginPath();
-    ctx.moveTo(headX-4, headY+HEAD_R-2);
-    ctx.lineTo(neckX-4, neckY+2);
-    ctx.lineTo(neckX+4, neckY+2);
-    ctx.lineTo(headX+4, headY+HEAD_R-2);
-    ctx.fillStyle='#181820'; ctx.fill();
-    ctx.strokeStyle=BODY; ctx.lineWidth=1.5; ctx.globalAlpha=0.6; ctx.stroke();
+    seg(headX, headY+HEAD_R*0.7, shoX, shoY-3, BODY, 4, 0.5);
 
-    ctx.restore();
-
-    // 포니테일
+    // 포니테일 (달리면서 흔들림)
+    const tailSwing = Math.sin(_phase*PI*2)*0.15;
     ctx.save();
-    ctx.strokeStyle=BODY; ctx.lineWidth=3; ctx.lineCap='round'; ctx.globalAlpha=0.55;
+    ctx.strokeStyle=BODY; ctx.lineWidth=3; ctx.lineCap='round'; ctx.globalAlpha=0.5;
     ctx.beginPath();
-    ctx.moveTo(headX-HEAD_R*0.6, headY-HEAD_R*0.3);
-    ctx.quadraticCurveTo(headX-HEAD_R*2.5, headY+HEAD_R*0.5, headX-HEAD_R*1.8, headY+HEAD_R*1.2);
+    ctx.moveTo(headX - HEAD_R*0.5, headY - HEAD_R*0.4);
+    ctx.quadraticCurveTo(
+      headX - HEAD_R*2.2 + tailSwing*20,
+      headY + HEAD_R*0.4,
+      headX - HEAD_R*1.6 + tailSwing*30,
+      headY + HEAD_R*1.1
+    );
     ctx.stroke();
-    // 포니테일 끝 살짝 컬
-    ctx.lineWidth=2; ctx.globalAlpha=0.35;
+    ctx.lineWidth=2; ctx.globalAlpha=0.3;
     ctx.beginPath();
-    ctx.moveTo(headX-HEAD_R*1.8, headY+HEAD_R*1.2);
-    ctx.quadraticCurveTo(headX-HEAD_R*2.2, headY+HEAD_R*1.6, headX-HEAD_R*1.4, headY+HEAD_R*1.7);
+    ctx.moveTo(headX-HEAD_R*1.6+tailSwing*30, headY+HEAD_R*1.1);
+    ctx.quadraticCurveTo(
+      headX-HEAD_R*2.1+tailSwing*35, headY+HEAD_R*1.6,
+      headX-HEAD_R*1.5+tailSwing*25, headY+HEAD_R*1.9
+    );
     ctx.stroke();
     ctx.restore();
 
-    // 각도 계산 (표시용)
-    const hipAng   = Math.round(Math.abs(pose.lTh - pose.rTh));
-    const kneeAng  = Math.round(180 - pose.lK);
-    const ankleAng = 108;
-    const elbowAng = Math.round(180 - pose.lEl);
+    // 각도 계산
+    const hipAng   = Math.round(Math.abs(pose.lThigh - pose.rThigh) * 180/PI);
+    const kneeAng  = Math.round((PI - pose.lKnee) * 180/PI);
+    const ankleAng = Math.round(108 + pose.lAnkle*30);
+    const elbowAng = Math.round((PI - pose.lElbow + 1.45) * 100);
 
     return { hipAng, kneeAng, ankleAng, elbowAng,
-      kL:[kLx,kLy], aL:[aLx,aLy], eL:[eLx,eLy], sho:[shoX,shoY] };
+             kL:[kLx,kLy], aL:[aLx,aLy], eL:[eRx2,eRy2], sho:[shoX,shoY] };
   }
 
-  // ── 각도 라벨 (4구석 고정, 겹침 없음) ─────────
-  function updateLabels(info){
-    const box=document.getElementById('avatar-labels');
+  // ── 각도 라벨 ──
+  function updateLabels(info) {
+    const box = document.getElementById('avatar-labels');
     if(!box) return;
     function isOk(t,v){
-      if(t==='KNEE') return v>=155&&v<=178;
-      if(t==='ANKLE') return v>=95&&v<=116;
-      if(t==='ELBOW') return v>=75&&v<=100;
-      if(t==='HIP') return v>=35&&v<=80;
-      return false;
+      return (t==='KNEE'&&v>=155&&v<=178)||(t==='ANKLE'&&v>=95&&v<=116)||
+             (t==='ELBOW'&&v>=75&&v<=100)||(t==='HIP'&&v>=35&&v<=80);
     }
     function lbl(title,val,ref,right,top){
       const col=isOk(title,val)?'var(--good)':'var(--warning)';
@@ -1945,19 +1932,17 @@ navigator.serviceWorker.register(swUrl).catch(()=>{});
       </div>`;
     }
     box.innerHTML =
-      lbl('HIP',   info.hipAng,   'REF: 35-80°',   false,  6) +
-      lbl('KNEE',  info.kneeAng,  'REF: 155-178°',  false, 88) +
-      lbl('ELBOW', info.elbowAng, 'REF: 75-100°',   true,   6) +
-      lbl('ANKLE', info.ankleAng, 'REF: 95-116°',   true,  88);
+      lbl('HIP',   info.hipAng,   'REF: 35-80°',  false,  6) +
+      lbl('KNEE',  info.kneeAng,  'REF: 155-178°', false, 88) +
+      lbl('ELBOW', info.elbowAng, 'REF: 75-100°',  true,   6) +
+      lbl('ANKLE', info.ankleAng, 'REF: 95-116°',  true,  88);
   }
 
-  // ── 애니메이션 루프 ───────────────────────────
+  // ── 루프 ──
   function tick(ts){
     if(!_lastTs) _lastTs=ts;
-    const dt=Math.min((ts-_lastTs)/1000, 0.05);
-    _lastTs=ts;
-    const sps=_cadence/60;
-    _phase=(_phase+sps*dt)%1;
+    const dt=Math.min((ts-_lastTs)/1000,0.05); _lastTs=ts;
+    _phase=(_phase+(_cadence/60)*dt)%1;
     const bounce=-Math.abs(Math.sin(_phase*PI*2))*4;
     const canvas=document.getElementById('avatar-canvas');
     if(canvas){
@@ -1969,7 +1954,6 @@ navigator.serviceWorker.register(swUrl).catch(()=>{});
 
   function start(){ if(!_raf){ _lastTs=null; _raf=requestAnimationFrame(tick); } }
   function stop() { if(_raf){ cancelAnimationFrame(_raf); _raf=null; } }
-
   function setSpeed(v){
     _speed=Math.min(20,Math.max(4,parseFloat(v)));
     _cadence=Math.round(155+(_speed-4)*2.3);
@@ -1979,15 +1963,14 @@ navigator.serviceWorker.register(swUrl).catch(()=>{});
     if(sl) sl.value=_speed;
   }
 
-  window.avatarSpeedAdj=function(delta,abs){ setSpeed(abs!=null?abs:_speed+delta); };
+  window.avatarSpeedAdj=function(d,abs){ setSpeed(abs!=null?abs:_speed+d); };
   window.avatarSyncRecord=function(rec){
     if(!rec) return;
     if(rec.cadence) _cadence=parseInt(rec.cadence)||170;
     if(rec.avgPace&&rec.avgPace.includes("'")){
       const p=rec.avgPace.replace('"','').split("'");
       let s=60/(parseInt(p[0]||5)+(parseInt(p[1]||0)/60));
-      s=Math.round(s*2)/2;
-      setSpeed(Math.min(20,Math.max(4,s)));
+      setSpeed(Math.min(20,Math.max(4,Math.round(s*2)/2)));
     }
   };
   window._avatarStart=start;
