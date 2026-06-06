@@ -1,1 +1,707 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>ImageStudio</title>
+<style>
+/* 시스템 폰트만 사용 — Google Fonts 제거 (content:// 환경에서 외부 리소스 차단됨) */
+:root{
+--bg:#f5f5f3;--surface:#fff;--s2:#efefed;--border:#e0e0dc;
+--text:#1a1a18;--text2:#6b6b68;--accent:#2563eb;--accent2:#7c3aed;
+--danger:#dc2626;--success:#16a34a;
+--r:14px;--r2:8px;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+
+/* HEADER */
+.hdr{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 18px 12px;position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:8px}
+.hdr-logo{font-size:21px;font-weight:800;letter-spacing:-.5px}
+.hdr-logo em{color:var(--accent);font-style:normal}
+
+/* TABS */
+.tabs{display:flex;background:var(--s2);border-radius:12px;padding:4px;margin:12px 14px 0}
+.tab{flex:1;padding:9px 4px;border:none;background:transparent;border-radius:9px;font-size:14px;font-weight:500;color:var(--text2);cursor:pointer;transition:all .18s}
+.tab.on{background:var(--surface);color:var(--text);font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,.10)}
+
+/* PANELS */
+.panel{display:none;padding:14px}
+.panel.on{display:block}
+
+/* CARD */
+.card{background:var(--surface);border-radius:var(--r);border:1px solid var(--border);overflow:hidden;margin-bottom:13px;box-shadow:0 1px 3px rgba(0,0,0,.07)}
+.card-hd{padding:11px 15px;font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.7px;border-bottom:1px solid var(--border);background:var(--s2)}
+.card-bd{padding:14px 15px}
+
+/* UPLOAD */
+.upzone{border:2px dashed var(--border);border-radius:var(--r);padding:32px 16px;text-align:center;background:var(--s2);margin-bottom:13px;position:relative;cursor:pointer}
+.upzone input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.upzone label{position:absolute;inset:0;cursor:pointer;z-index:2}
+.upzone svg{width:44px;height:44px;color:var(--text2);margin-bottom:10px;display:block;margin-left:auto;margin-right:auto}
+.upzone .upt{font-size:16px;font-weight:700;color:var(--accent);margin-bottom:4px}
+.upzone .ups{font-size:13px;color:var(--text2)}
+
+/* CANVAS WRAP */
+.cvwrap{background:#111;border-radius:var(--r2);display:flex;align-items:center;justify-content:center;min-height:160px;overflow:hidden;position:relative;width:100%}
+canvas{display:block;max-width:100%;max-height:340px;touch-action:none}
+#cropBox{position:absolute;border:2px solid #fff;box-shadow:0 0 0 9999px rgba(0,0,0,.5);pointer-events:none;display:none}
+#cropBox.show{display:block}
+
+/* CONTROLS */
+.row{display:flex;align-items:center;gap:10px;margin-bottom:11px}
+.lbl{font-size:13px;font-weight:600;color:var(--text);min-width:52px;flex-shrink:0}
+.val{font-size:13px;font-family:monospace;color:var(--accent);min-width:32px;text-align:right;flex-shrink:0}
+input[type=range]{flex:1;-webkit-appearance:none;height:5px;background:var(--border);border-radius:3px;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;background:var(--accent);border-radius:50%;box-shadow:0 2px 6px rgba(37,99,235,.4)}
+input[type=number]{width:70px;padding:8px 8px;border:1px solid var(--border);border-radius:var(--r2);font-size:14px;color:var(--text);background:var(--s2);text-align:center;outline:none}
+textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r2);font-size:15px;color:var(--text);background:var(--s2);resize:vertical;min-height:70px;font-family:inherit;outline:none;line-height:1.5}
+textarea:focus,input[type=number]:focus{border-color:var(--accent)}
+select{flex:1;padding:9px 10px;border:1px solid var(--border);border-radius:var(--r2);font-size:14px;color:var(--text);background:var(--s2);outline:none;-webkit-appearance:none}
+select:focus{border-color:var(--accent)}
+
+/* BUTTONS */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:11px 16px;border-radius:var(--r2);font-size:14px;font-weight:700;border:none;cursor:pointer;transition:all .13s;white-space:nowrap;font-family:inherit}
+.btn:active{opacity:.8;transform:scale(.97)}
+.bp{background:var(--accent);color:#fff}
+.bs{background:var(--s2);color:var(--text);border:1px solid var(--border)}
+.bg{background:var(--success);color:#fff}
+.bd{background:var(--danger);color:#fff}
+.bv{background:var(--accent2);color:#fff}
+.sm{padding:8px 12px;font-size:13px}
+.brow{display:flex;gap:7px;flex-wrap:wrap}
+.brow .btn{flex:1;min-width:0}
+
+/* SIZES */
+.srow{display:flex;align-items:center;gap:7px;margin-bottom:11px;flex-wrap:wrap}
+.srow span{color:var(--text2)}
+
+/* COLOR */
+.crow{display:flex;align-items:center;gap:9px;margin-bottom:11px;flex-wrap:wrap}
+input[type=color]{width:40px;height:40px;border:2px solid var(--border);border-radius:8px;padding:2px;cursor:pointer;background:none;flex-shrink:0}
+.cps{display:flex;gap:5px;flex-wrap:wrap;flex:1}
+.dot{width:28px;height:28px;border-radius:50%;border:2px solid transparent;cursor:pointer;transition:transform .13s;flex-shrink:0}
+.dot:active{transform:scale(.85)}
+.dot.on{border-color:var(--accent);transform:scale(1.18)}
+
+/* LAYERS */
+.li{display:flex;align-items:center;gap:7px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r2);margin-bottom:5px;background:var(--s2);cursor:pointer}
+.li.on{border-color:var(--accent);background:#eff6ff}
+.lp{font-size:12px;color:var(--text2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ldel{background:none;border:none;color:var(--danger);font-size:22px;cursor:pointer;padding:0 3px;line-height:1}
+
+/* TOAST */
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(80px);background:#1a1a18;color:#fff;padding:12px 22px;border-radius:100px;font-size:14px;font-weight:600;z-index:999;transition:transform .28s cubic-bezier(.34,1.56,.64,1);white-space:nowrap;pointer-events:none}
+.toast.show{transform:translateX(-50%) translateY(0)}
+
+/* SAVE MODAL */
+.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:500;flex-direction:column;align-items:center;justify-content:flex-start;padding:16px;overflow-y:auto}
+.modal.show{display:flex}
+.modal img{max-width:100%;border-radius:10px;margin-bottom:14px;margin-top:40px}
+.mh1{color:#fff;font-size:16px;font-weight:800;text-align:center;margin-bottom:6px}
+.mh2{color:rgba(255,255,255,.6);font-size:13px;text-align:center;margin-bottom:18px;line-height:1.6}
+.mcl{position:absolute;top:14px;right:14px;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:18px;width:36px;height:36px;border-radius:50%;cursor:pointer}
+
+.hint{font-size:12px;color:var(--text2);margin-top:7px;line-height:1.5}
+.badge{display:inline-block;padding:2px 9px;border-radius:100px;font-size:11px;font-weight:700;background:#eff6ff;color:var(--accent);margin-left:5px}
+.badge.crop{background:#fefce8;color:#b45309}
+.sp{height:36px}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+<div class="hdr-logo">Image<em>Studio</em></div>
+</div>
+
+<div class="tabs">
+<button class="tab on" onclick="switchTab('edit')" id="tab-edit">🖼 이미지 편집</button>
+<button class="tab" onclick="switchTab('text')" id="tab-text">✍️ 텍스트 카드</button>
+</div>
+
+<!-- ══ PANEL: EDIT ══ -->
+<div class="panel on" id="panel-edit">
+
+<div class="upzone" id="upzone">
+<input type="file" id="fileIn" accept="image/*">
+<label for="fileIn"></label>
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+<polyline points="17 8 12 3 7 8"/>
+<line x1="12" y1="3" x2="12" y2="15"/>
+</svg>
+<div class="upt">탭해서 사진 불러오기</div>
+<div class="ups">JPG · PNG · WEBP</div>
+</div>
+
+<div class="card" id="cvCard" style="display:none">
+<div class="card-hd">미리보기 <span class="badge" id="modeBadge">편집</span></div>
+<div class="card-bd" style="padding:10px">
+<div class="cvwrap" id="cvWrap">
+<canvas id="editCv"></canvas>
+<div id="cropBox"></div>
+</div>
+<p class="hint" id="editHint">슬라이더로 밝기·대비를 조정하세요.</p>
+</div>
+</div>
+
+<div class="card" id="adjCard" style="display:none">
+<div class="card-hd">밝기 / 대비 / 채도</div>
+<div class="card-bd">
+<div class="row">
+<span class="lbl">☀️ 밝기</span>
+<input type="range" id="brightness" min="-100" max="100" value="0" oninput="applyF()">
+<span class="val" id="bVal">0</span>
+</div>
+<div class="row">
+<span class="lbl">◑ 대비</span>
+<input type="range" id="contrast" min="-100" max="100" value="0" oninput="applyF()">
+<span class="val" id="cVal">0</span>
+</div>
+<div class="row">
+<span class="lbl">🎨 채도</span>
+<input type="range" id="saturation" min="-100" max="100" value="0" oninput="applyF()">
+<span class="val" id="sVal">0</span>
+</div>
+<button class="btn bs sm" onclick="resetF()">↺ 초기화</button>
+</div>
+</div>
+
+<div class="card" id="cropCard" style="display:none">
+<div class="card-hd">✂️ 자르기</div>
+<div class="card-bd">
+<div class="brow" style="margin-bottom:8px">
+<button class="btn bs sm" id="cropStBtn" onclick="startCrop()">영역 선택 시작</button>
+<button class="btn bp sm" id="cropApBtn" onclick="applyCrop()" style="display:none">✅ 적용</button>
+<button class="btn bs sm" id="cropCxBtn" onclick="cancelCrop()" style="display:none">✖ 취소</button>
+</div>
+<p class="hint">버튼 후 캔버스를 드래그해서 영역 선택</p>
+</div>
+</div>
+
+<div class="card" id="saveCard" style="display:none">
+<div class="card-hd">저장</div>
+<div class="card-bd">
+<div class="srow">
+<span class="lbl">가로</span>
+<input type="number" id="saveW" value="512" min="16" max="4096">
+<span>×</span>
+<input type="number" id="saveH" value="512" min="16" max="4096">
+<span class="lbl" style="min-width:auto">세로</span>
+</div>
+<div class="brow" style="margin-bottom:10px">
+<button class="btn bs sm" onclick="setPS(192,192)">192²</button>
+<button class="btn bs sm" onclick="setPS(512,512)">512²</button>
+<button class="btn bs sm" onclick="setPS(1080,1080)">1080²</button>
+<button class="btn bs sm" onclick="useOrig()">원본</button>
+</div>
+<button class="btn bg" style="width:100%" onclick="saveImg()">💾 저장하기</button>
+</div>
+</div>
+
+</div>
+
+<!-- ══ PANEL: TEXT ══ -->
+<div class="panel" id="panel-text">
+
+<div class="card">
+<div class="card-hd">미리보기 <span class="badge">텍스트 카드</span></div>
+<div class="card-bd" style="padding:10px">
+<div class="cvwrap" id="tcWrap">
+<canvas id="tcCv"></canvas>
+</div>
+<p class="hint">텍스트를 드래그해서 이동 가능</p>
+</div>
+</div>
+
+<div class="card">
+<div class="card-hd">배경</div>
+<div class="card-bd">
+<div class="crow">
+<span class="lbl">배경색</span>
+<input type="color" id="bgColor" value="#ffffff" oninput="renderTC()">
+<div class="cps" id="bgCps"></div>
+</div>
+<div class="srow">
+<span class="lbl">크기</span>
+<input type="number" id="tcW" value="512" min="64" max="4096" onchange="initTC()">
+<span>×</span>
+<input type="number" id="tcH" value="512" min="64" max="4096" onchange="initTC()">
+</div>
+<div class="brow">
+<button class="btn bs sm" onclick="setTC(512,512)">512²</button>
+<button class="btn bs sm" onclick="setTC(1080,1080)">1080²</button>
+<button class="btn bs sm" onclick="setTC(1080,1920)">세로형</button>
+<button class="btn bs sm" onclick="setTC(1920,1080)">가로형</button>
+</div>
+</div>
+</div>
+
+<div class="card">
+<div class="card-hd">텍스트 추가</div>
+<div class="card-bd">
+<textarea id="newTxt" placeholder="텍스트를 입력하세요..." rows="2"></textarea>
+<div class="row" style="margin-top:10px">
+<span class="lbl">폰트</span>
+<select id="ff" onchange="renderTC()">
+<option value="sans-serif">기본</option>
+<option value="serif">명조</option>
+<option value="monospace">고정폭</option>
+<option value="Impact,sans-serif">Impact</option>
+<option value="'Arial Black',sans-serif">Arial Black</option>
+</select>
+</div>
+<div class="row">
+<span class="lbl">굵기</span>
+<select id="fw" onchange="renderTC()">
+<option value="300">Light</option>
+<option value="400">Regular</option>
+<option value="600" selected>SemiBold</option>
+<option value="700">Bold</option>
+<option value="900">Black</option>
+</select>
+</div>
+<div class="row">
+<span class="lbl">크기</span>
+<input type="range" id="fs" min="10" max="300" value="60" oninput="document.getElementById('fsV').textContent=this.value;renderTC()">
+<span class="val" id="fsV">60</span>
+</div>
+<div class="crow">
+<span class="lbl">글자색</span>
+<input type="color" id="fontColor" value="#1a1a18" oninput="renderTC()">
+<div class="cps" id="fcCps"></div>
+</div>
+<div class="row">
+<span class="lbl">정렬</span>
+<div class="brow" style="margin:0;flex:1">
+<button class="btn bs sm" id="aL" onclick="setAlign('left')">◀ 좌</button>
+<button class="btn bp sm" id="aC" onclick="setAlign('center')">가운데</button>
+<button class="btn bs sm" id="aR" onclick="setAlign('right')">우 ▶</button>
+</div>
+</div>
+<button class="btn bv" style="width:100%;margin-top:6px" onclick="addLayer()">＋ 텍스트 추가</button>
+</div>
+</div>
+
+<div class="card" id="layersCard" style="display:none">
+<div class="card-hd">레이어</div>
+<div class="card-bd" id="layersList"></div>
+</div>
+
+<div class="card">
+<div class="card-hd">저장</div>
+<div class="card-bd">
+<button class="btn bg" style="width:100%" onclick="saveTC()">💾 저장하기</button>
+</div>
+</div>
+
+</div>
+
+<div class="sp"></div>
+<div class="toast" id="toast"></div>
+
+<!-- 저장 모달 -->
+<div class="modal" id="saveModal">
+<button class="mcl" onclick="closeModal()">✕</button>
+<div class="mh1">📥 이미지를 길게 눌러서 저장하세요</div>
+<div class="mh2">이미지를 꾹 누른 후<br>"이미지 저장" 또는 "다운로드" 선택</div>
+<img id="savePrev" src="" alt="저장 이미지">
+<button class="btn bs" style="margin-top:12px;background:rgba(255,255,255,.12);color:#fff;border-color:rgba(255,255,255,.2)" onclick="closeModal()">닫기</button>
+</div>
+
+<script>
+/* ────────────────────────
+GLOBALS
+──────────────────────── */
+var origImg=null, origData=null;
+var cropMode=false, cropSt=null, cropEn=null, cropDrag=false;
+var layers=[], selL=-1, tcAlign='center';
+var dragL=-1, dragOx=0, dragOy=0;
+var TCW=512, TCH=512;
+
+var BG=['#ffffff','#1a1a18','#f5f5f3','#eff6ff','#fef2f2','#f0fdf4','#0f172a','#1e3a5f','#2d1b69','#fefce8'];
+var FC=['#1a1a18','#ffffff','#2563eb','#dc2626','#16a34a','#d97706','#7c3aed','#ec4899','#0891b2','#f97316'];
+
+/* ────────────────────────
+UTILS
+──────────────────────── */
+function toast(m){
+var el=document.getElementById('toast');
+el.textContent=m; el.classList.add('show');
+clearTimeout(el._t);
+el._t=setTimeout(function(){el.classList.remove('show');},2400);
+}
+
+function showModal(url){
+document.getElementById('savePrev').src=url;
+document.getElementById('saveModal').classList.add('show');
+}
+function closeModal(){
+document.getElementById('saveModal').classList.remove('show');
+}
+
+function doSave(url, name){
+/* PC: a.click() 시도 /
+try{
+var a=document.createElement('a');
+a.href=url; a.download=name;
+document.body.appendChild(a);
+a.click();
+setTimeout(function(){document.body.removeChild(a);},100);
+}catch(e){}
+/ 안드로이드: 모달로 길게눌러 저장 */
+showModal(url);
+}
+
+/* ────────────────────────
+TAB
+──────────────────────── */
+function switchTab(t){
+document.querySelectorAll('.panel').forEach(function(p){p.classList.remove('on');});
+document.querySelectorAll('.tab').forEach(function(b){b.classList.remove('on');});
+document.getElementById('panel-'+t).classList.add('on');
+document.getElementById('tab-'+t).classList.add('on');
+if(t==='text') setTimeout(initTC,80);
+}
+
+/* ────────────────────────
+IMAGE EDITOR
+──────────────────────── /
+var fileIn=document.getElementById('fileIn');
+fileIn.addEventListener('change',function(){
+var file=this.files&&this.files[0];
+this.value=''; / 재선택 허용 */
+if(!file){toast('파일을 선택하세요');return;}
+var reader=new FileReader();
+reader.onerror=function(){toast('파일 읽기 실패');};
+reader.onload=function(e){
+var url=e.target.result;
+var img=new Image();
+img.onerror=function(){toast('이미지 로드 실패');};
+img.onload=function(){
+origImg=img;
+document.getElementById('upzone').style.display='none';
+['cvCard','adjCard','cropCard','saveCard'].forEach(function(id){
+document.getElementById(id).style.display='block';
+});
+document.getElementById('saveW').value=img.naturalWidth||img.width;
+document.getElementById('saveH').value=img.naturalHeight||img.height;
+setTimeout(function(){resetF();renderCv();toast('📷 이미지 로드 완료!');},60);
+};
+img.src=url;
+};
+reader.readAsDataURL(file);
+});
+
+function renderCv(){
+if(!origImg)return;
+var cv=document.getElementById('editCv');
+var wr=document.getElementById('cvWrap');
+var maxW=Math.max(wr.clientWidth-2,180);
+var maxH=320;
+var iw=origImg.naturalWidth||origImg.width;
+var ih=origImg.naturalHeight||origImg.height;
+if(!iw||!ih){toast('이미지 크기 오류');return;}
+var sc=Math.min(maxW/iw,maxH/ih,1);
+cv.width=Math.round(iwsc);
+cv.height=Math.round(ihsc);
+var ctx=cv.getContext('2d');
+ctx.drawImage(origImg,0,0,cv.width,cv.height);
+origData=ctx.getImageData(0,0,cv.width,cv.height);
+applyF();
+}
+
+function applyF(){
+if(!origImg||!origData)return;
+var cv=document.getElementById('editCv');
+var ctx=cv.getContext('2d');
+var bv=+document.getElementById('brightness').value;
+var cv2=+document.getElementById('contrast').value;
+var sv=+document.getElementById('saturation').value;
+document.getElementById('bVal').textContent=bv;
+document.getElementById('cVal').textContent=cv2;
+document.getElementById('sVal').textContent=sv;
+var raw=new ImageData(new Uint8ClampedArray(origData.data),origData.width,origData.height);
+var d=raw.data;
+var cf=(259*(cv2+255))/(255*(259-cv2));
+for(var i=0;i<d.length;i+=4){
+var r=d[i],g=d[i+1],b=d[i+2];
+r+=bv2.55;g+=bv2.55;b+=bv2.55;
+r=cf(r-128)+128;g=cf*(g-128)+128;b=cf*(b-128)+128;
+var gr=0.2126r+0.7152g+0.0722b;
+var sf=1+sv/100;
+r=gr+sf(r-gr);g=gr+sf*(g-gr);b=gr+sf*(b-gr);
+d[i]=Math.max(0,Math.min(255,r));
+d[i+1]=Math.max(0,Math.min(255,g));
+d[i+2]=Math.max(0,Math.min(255,b));
+}
+ctx.putImageData(raw,0,0);
+}
+
+function resetF(){
+['brightness','contrast','saturation'].forEach(function(id){document.getElementById(id).value=0;});
+if(origData)applyF();
+}
+
+/* CROP */
+function startCrop(){
+cropMode=true;cropSt=cropEn=null;
+document.getElementById('cropStBtn').style.display='none';
+document.getElementById('cropApBtn').style.display='';
+document.getElementById('cropCxBtn').style.display='';
+document.getElementById('modeBadge').textContent='자르기';
+document.getElementById('modeBadge').classList.add('crop');
+document.getElementById('editHint').textContent='캔버스를 드래그해서 영역 선택';
+}
+function cancelCrop(){
+cropMode=false;cropSt=cropEn=null;cropDrag=false;
+document.getElementById('cropBox').classList.remove('show');
+document.getElementById('cropStBtn').style.display='';
+document.getElementById('cropApBtn').style.display='none';
+document.getElementById('cropCxBtn').style.display='none';
+document.getElementById('modeBadge').textContent='편집';
+document.getElementById('modeBadge').classList.remove('crop');
+document.getElementById('editHint').textContent='슬라이더로 밝기·대비를 조정하세요.';
+}
+
+function getPos(e,cv){
+var r=cv.getBoundingClientRect();
+var t=e.touches&&e.touches[0];
+var cx=t?t.clientX:e.clientX;
+var cy=t?t.clientY:e.clientY;
+var sx=cv.width/r.width, sy=cv.height/r.height;
+return{x:Math.max(0,Math.min(cv.width,(cx-r.left)*sx)),
+y:Math.max(0,Math.min(cv.height,(cy-r.top)*sy))};
+}
+
+function updBox(){
+if(!cropSt||!cropEn)return;
+var cv=document.getElementById('editCv');
+var wr=document.getElementById('cvWrap').getBoundingClientRect();
+var cr=cv.getBoundingClientRect();
+var sx=cr.width/cv.width, sy=cr.height/cv.height;
+var bx=document.getElementById('cropBox');
+bx.classList.add('show');
+bx.style.left=(cr.left-wr.left+Math.min(cropSt.x,cropEn.x)*sx)+'px';
+bx.style.top=(cr.top-wr.top+Math.min(cropSt.y,cropEn.y)*sy)+'px';
+bx.style.width=Math.abs(cropEn.x-cropSt.x)*sx+'px';
+bx.style.height=Math.abs(cropEn.y-cropSt.y)*sy+'px';
+}
+
+function applyCrop(){
+if(!cropSt||!cropEn){toast('먼저 영역을 선택하세요');return;}
+var cv=document.getElementById('editCv');
+var x1=Math.round(Math.min(cropSt.x,cropEn.x));
+var y1=Math.round(Math.min(cropSt.y,cropEn.y));
+var cw=Math.round(Math.abs(cropEn.x-cropSt.x));
+var ch=Math.round(Math.abs(cropEn.y-cropSt.y));
+if(cw<4||ch<4){toast('영역이 너무 작아요');return;}
+var tmp=document.createElement('canvas');
+tmp.width=cw;tmp.height=ch;
+tmp.getContext('2d').drawImage(cv,x1,y1,cw,ch,0,0,cw,ch);
+var ni=new Image();
+ni.onload=function(){
+origImg=ni;
+document.getElementById('saveW').value=cw;
+document.getElementById('saveH').value=ch;
+cancelCrop();renderCv();toast('✅ 자르기 완료!');
+};
+ni.src=tmp.toDataURL();
+}
+
+var ec=document.getElementById('editCv');
+ec.addEventListener('mousedown',function(e){if(!cropMode)return;e.preventDefault();cropDrag=true;cropSt=getPos(e,ec);});
+ec.addEventListener('touchstart',function(e){if(!cropMode)return;e.preventDefault();cropDrag=true;cropSt=getPos(e,ec);},{passive:false});
+ec.addEventListener('mousemove',function(e){if(!cropMode||!cropDrag)return;e.preventDefault();cropEn=getPos(e,ec);updBox();});
+ec.addEventListener('touchmove',function(e){if(!cropMode||!cropDrag)return;e.preventDefault();cropEn=getPos(e,ec);updBox();},{passive:false});
+ec.addEventListener('mouseup',function(){cropDrag=false;});
+ec.addEventListener('touchend',function(){cropDrag=false;});
+
+/* SAVE */
+function setPS(w,h){document.getElementById('saveW').value=w;document.getElementById('saveH').value=h;}
+function useOrig(){if(origImg){document.getElementById('saveW').value=origImg.naturalWidth||origImg.width;document.getElementById('saveH').value=origImg.naturalHeight||origImg.height;}}
+function saveImg(){
+if(!origImg){toast('이미지를 먼저 불러오세요');return;}
+var sw=+document.getElementById('saveW').value;
+var sh=+document.getElementById('saveH').value;
+var bv=+document.getElementById('brightness').value;
+var cv=+document.getElementById('contrast').value;
+var sv=+document.getElementById('saturation').value;
+var out=document.createElement('canvas');
+out.width=sw;out.height=sh;
+var ctx=out.getContext('2d');
+ctx.filter='brightness('+(1+bv/100)+') contrast('+(1+cv/100)+') saturate('+(1+sv/100)+')';
+ctx.drawImage(origImg,0,0,sw,sh);
+ctx.filter='none';
+doSave(out.toDataURL('image/png'),'img-'+Date.now()+'.png');
+toast('이미지를 길게 눌러 저장하세요 👆');
+}
+
+/* ────────────────────────
+TEXT CARD
+──────────────────────── /
+function initTC(){
+TCW=+document.getElementById('tcW').value||512;
+TCH=+document.getElementById('tcH').value||512;
+var cv=document.getElementById('tcCv');
+var wr=document.getElementById('tcWrap');
+var maxW=Math.max(wr.clientWidth-2,180);
+var maxH=320;
+var sc=Math.min(maxW/TCW,maxH/TCH,1);
+cv.width=Math.round(TCWsc);
+cv.height=Math.round(TCH*sc);
+cv.dataset.sc=sc;
+renderTC();
+}
+function setTC(w,h){document.getElementById('tcW').value=w;document.getElementById('tcH').value=h;initTC();}
+
+function renderTC(){
+var cv=document.getElementById('tcCv');
+if(!cv.width||!cv.height)return;
+var ctx=cv.getContext('2d');
+var sc=+cv.dataset.sc||1;
+ctx.clearRect(0,0,cv.width,cv.height);
+ctx.fillStyle=document.getElementById('bgColor').value;
+ctx.fillRect(0,0,cv.width,cv.height);
+layers.forEach(function(l,i){
+ctx.save();
+ctx.font=l.weight+' '+Math.round(l.sizesc)+'px '+l.font;
+ctx.fillStyle=l.color;
+ctx.textAlign=l.align;
+ctx.textBaseline='top';
+if(i===selL){ctx.shadowColor='rgba(37,99,235,.5)';ctx.shadowBlur=8;}
+var lines=l.text.split('\n');
+var lh=l.sizesc1.3;
+var ax=l.xsc;
+if(l.align==='center')ax=cv.width/2+(l.x-TCW/2)sc;
+if(l.align==='right')ax=cv.width-(TCW-l.x)sc;
+lines.forEach(function(ln,li){ctx.fillText(ln,ax,l.ysc+lilh);});
+ctx.restore();
+});
+updLayers();
+}
+
+function addLayer(){
+var txt=document.getElementById('newTxt').value.trim();
+if(!txt){toast('텍스트를 입력하세요');return;}
+layers.push({
+text:txt,
+font:document.getElementById('ff').value,
+size:+document.getElementById('fs').value,
+weight:document.getElementById('fw').value,
+color:document.getElementById('fontColor').value,
+align:tcAlign,
+x:TCW/2, y:TCH/2
+});
+selL=layers.length-1;
+document.getElementById('newTxt').value='';
+document.getElementById('layersCard').style.display='block';
+renderTC();
+toast('✅ 텍스트 추가됨!');
+}
+
+function updLayers(){
+var list=document.getElementById('layersList');
+list.innerHTML='';
+layers.forEach(function(l,i){
+var d=document.createElement('div');
+d.className='li'+(i===selL?' on':'');
+d.innerHTML='<div class="lp" style="color:'+l.color+';font-weight:'+l.weight+'">'+
+l.text.replace(/\n/g,'↵').substring(0,18)+'</div>'+
+'<span style="font-size:11px;color:var(--text2)">'+l.size+'px</span>'+
+'<button class="ldel" data-i="'+i+'">×</button>';
+d.querySelector('.ldel').addEventListener('click',function(ev){
+ev.stopPropagation();
+delLayer(+this.dataset.i);
+});
+d.addEventListener('click',function(){selL=i;renderTC();});
+list.appendChild(d);
+});
+}
+
+function delLayer(i){
+layers.splice(i,1);
+if(selL>=layers.length)selL=layers.length-1;
+if(!layers.length)document.getElementById('layersCard').style.display='none';
+renderTC();toast('🗑 삭제됨');
+}
+
+function setAlign(a){
+tcAlign=a;
+['L','C','R'].forEach(function(x){document.getElementById('a'+x).className='btn bs sm';});
+document.getElementById({'left':'aL','center':'aC','right':'aR'}[a]).className='btn bp sm';
+if(selL>=0)layers[selL].align=a;
+renderTC();
+}
+
+/* TEXT DRAG /
+var tc=document.getElementById('tcCv');
+function tcPos(e){
+var r=tc.getBoundingClientRect();
+var t=e.touches&&e.touches[0];
+var cx=t?t.clientX:e.clientX;
+var cy=t?t.clientY:e.clientY;
+return{x:(cx-r.left)/r.widthTCW, y:(cy-r.top)/r.heightTCH};
+}
+function hitL(p){
+for(var i=layers.length-1;i>=0;i--){
+var w=Math.max(layers[i].sizelayers[i].text.length0.55,60);
+var h=layers[i].size1.6;
+if(Math.abs(p.x-layers[i].x)<w&&Math.abs(p.y-layers[i].y)<h)return i;
+}
+return -1;
+}
+tc.addEventListener('mousedown',function(e){e.preventDefault();var p=tcPos(e);var h=hitL(p);if(h>=0){dragL=h;selL=h;dragOx=p.x-layers[h].x;dragOy=p.y-layers[h].y;renderTC();}});
+tc.addEventListener('touchstart',function(e){e.preventDefault();var p=tcPos(e);var h=hitL(p);if(h>=0){dragL=h;selL=h;dragOx=p.x-layers[h].x;dragOy=p.y-layers[h].y;renderTC();}},{passive:false});
+tc.addEventListener('mousemove',function(e){if(dragL<0)return;e.preventDefault();var p=tcPos(e);layers[dragL].x=p.x-dragOx;layers[dragL].y=p.y-dragOy;renderTC();});
+tc.addEventListener('touchmove',function(e){if(dragL<0)return;e.preventDefault();var p=tcPos(e);layers[dragL].x=p.x-dragOx;layers[dragL].y=p.y-dragOy;renderTC();},{passive:false});
+tc.addEventListener('mouseup',function(){dragL=-1;});
+tc.addEventListener('touchend',function(){dragL=-1;});
+
+function saveTC(){
+if(!layers.length){toast('텍스트를 먼저 추가하세요');return;}
+var out=document.createElement('canvas');
+out.width=TCW;out.height=TCH;
+var ctx=out.getContext('2d');
+ctx.fillStyle=document.getElementById('bgColor').value;
+ctx.fillRect(0,0,TCW,TCH);
+layers.forEach(function(l){
+ctx.font=l.weight+' '+l.size+'px '+l.font;
+ctx.fillStyle=l.color;ctx.textAlign=l.align;ctx.textBaseline='top';
+var lines=l.text.split('\n');
+var lh=l.size1.3;
+var ax=l.x;
+if(l.align==='center')ax=out.width/2+(l.x-TCW/2);
+if(l.align==='right')ax=out.width-(TCW-l.x);
+lines.forEach(function(ln,li){ctx.fillText(ln,ax,l.y+lilh);});
+});
+doSave(out.toDataURL('image/png'),'text-card-'+Date.now()+'.png');
+toast('이미지를 길게 눌러 저장하세요 👆');
+}
+
+/* COLOR PRESETS */
+function buildCps(cid,colors,inputId,cb){
+var wrap=document.getElementById(cid);
+colors.forEach(function(c){
+var d=document.createElement('div');
+d.className='dot';
+d.style.background=c;
+if(c==='#ffffff')d.style.border='2px solid #ccc';
+d.addEventListener('click',function(){
+document.getElementById(inputId).value=c;
+wrap.querySelectorAll('.dot').forEach(function(x){x.classList.remove('on');});
+d.classList.add('on');
+cb();
+});
+wrap.appendChild(d);
+});
+}
+buildCps('bgCps',BG,'bgColor',renderTC);
+buildCps('fcCps',FC,'fontColor',renderTC);
+
+/* INIT */
+setTimeout(initTC,150);
+</script>
+</body>
+</html>
 
