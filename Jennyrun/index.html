@@ -14,6 +14,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/nosleep.js@0.12.0/dist/NoSleep.min.js"></script>
 
 <style>
 :root {
@@ -29,8 +30,51 @@ display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: no
 -webkit-font-smoothing: antialiased;
 }
 #map-area { flex-shrink: 0; width: 100%; }
-#map-container { height: 18vh; min-height: 130px; border-bottom: 2px solid #222; position: relative; }
+#map-container { height: 18vh; min-height: 130px; border-bottom: 2px solid #222; position: relative; cursor: pointer; }
 #map { height: 100%; width: 100%; background: #111; }
+#map-expand-hint {
+position: absolute; bottom: 10px; left: 10px; z-index: 1000;
+background: rgba(0,0,0,0.65); border: 1px solid #555; border-radius: 6px;
+color: #aaa; font-size: 9px; font-weight: 900; padding: 4px 8px;
+pointer-events: none; letter-spacing: 0.5px;
+}
+/* 맵 전체화면 오버레이 */
+#map-fullscreen-overlay {
+display: none;
+position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+z-index: 50000; background: #000; flex-direction: column;
+}
+#map-fullscreen-overlay.active { display: flex; }
+#map-fullscreen-inner { flex: 1; width: 100%; position: relative; }
+#map-fullscreen-el { width: 100%; height: 100%; }
+#btn-map-fullscreen-close {
+position: absolute; top: 18px; right: 18px; z-index: 51000;
+background: var(--primary); color: #000; border: none;
+padding: 9px 18px; border-radius: 20px; font-weight: 900; font-size: 13px; cursor: pointer;
+box-shadow: 0 2px 12px rgba(0,255,136,0.4);
+}
+/* 히스토리 디테일 맵 전체화면 */
+#detail-map { cursor: pointer; position: relative; }
+#detail-map-hint {
+position: absolute; bottom: 10px; left: 10px; z-index: 1000;
+background: rgba(0,0,0,0.65); border: 1px solid #555; border-radius: 6px;
+color: #aaa; font-size: 9px; font-weight: 900; padding: 4px 8px;
+pointer-events: none; letter-spacing: 0.5px;
+}
+#detail-map-fullscreen-overlay {
+display: none;
+position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+z-index: 50000; background: #000; flex-direction: column;
+}
+#detail-map-fullscreen-overlay.active { display: flex; }
+#detail-map-fullscreen-inner { flex: 1; width: 100%; position: relative; }
+#detail-map-fullscreen-el { width: 100%; height: 100%; }
+#btn-detail-map-fullscreen-close {
+position: absolute; top: 18px; right: 18px; z-index: 51000;
+background: var(--primary); color: #000; border: none;
+padding: 9px 18px; border-radius: 20px; font-weight: 900; font-size: 13px; cursor: pointer;
+box-shadow: 0 2px 12px rgba(0,255,136,0.4);
+}
 .btn-map-theme {
 position: absolute; bottom: 10px; right: 10px; z-index: 1000;
 width: 36px; height: 36px; border-radius: 50%;
@@ -240,17 +284,36 @@ border: 1px solid rgba(255,255,255,0.2);
 </div>
 
 <div id="map-area">
-<div id="map-container">
+<div id="map-container" onclick="ui.openMainMapFullscreen()">
 <div id="map"></div>
-<button id="map-theme-toggle" class="btn-map-theme" onclick="ui.toggleMapTheme()">🌙</button>
+<button id="map-theme-toggle" class="btn-map-theme" onclick="event.stopPropagation(); ui.toggleMapTheme()">🌙</button>
+<div id="map-expand-hint">⛶ TAP TO EXPAND</div>
+</div>
+
+<!-- 메인 맵 전체화면 오버레이 -->
+<div id="map-fullscreen-overlay">
+<div id="map-fullscreen-inner">
+<div id="map-fullscreen-el"></div>
+<button id="btn-map-fullscreen-close" onclick="ui.closeMainMapFullscreen()">✕ CLOSE</button>
+</div>
 </div>
 <div id="status" class="status-bar">GPS INITIALIZING... | ALT: --m</div>
 </div>
 
 <div id="detail-view">
 <button class="close-detail" onclick="ui.closeDetail()">CLOSE</button>
-<div id="detail-map" style="height: 40%; border-bottom: 1px solid #222;"></div>
+<div id="detail-map" style="height: 40%; border-bottom: 1px solid #222;" onclick="ui.openDetailMapFullscreen()">
+<div id="detail-map-hint">⛶ TAP TO EXPAND</div>
+</div>
 <div id="detail-data" style="padding: 12px 15px; overflow-y: auto;"></div>
+</div>
+
+<!-- 히스토리 맵 전체화면 오버레이 -->
+<div id="detail-map-fullscreen-overlay">
+<div id="detail-map-fullscreen-inner">
+<div id="detail-map-fullscreen-el"></div>
+<button id="btn-detail-map-fullscreen-close" onclick="ui.closeDetailMapFullscreen()">✕ CLOSE</button>
+</div>
 </div>
 
 <div id="diag-view">
@@ -1255,9 +1318,9 @@ const h = storage.loadHistory(); const record = h.find(r => r.id === id); if (!r
 const lang = storage.getLang(); const t = translations[lang] || translations['en'];
 const detailView = document.getElementById('detail-view');
 if(detailView) detailView.style.display = 'flex';
-if (this.detailMap) this.detailMap.remove();
+if (this.detailMap) { this.detailMap.remove(); this.detailMap = null; }
 const detailMapDiv = document.getElementById('detail-map');
-if(detailMapDiv) {
+if(detailMapDiv && typeof L !== 'undefined') {
 this.detailMap = L.map('detail-map', {zoomControl: false, attributionControl: false});
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(this.detailMap);
 if (storage.getMapTheme() === 'dark') detailMapDiv.classList.add('dark-map-layer');
@@ -1395,18 +1458,21 @@ this.silentAudio = null;
 this.motionListenerAttached = false;
 }
 async requestWakeLock() {
-if ('wakeLock' in navigator) {
 try {
-if (this.state.wakeLock && this.state.wakeLock.released === false) return;
-this.state.wakeLock = await navigator.wakeLock.request('screen');
-this.state.wakeLock.addEventListener('release', () => {
-if (document.visibilityState === 'visible') this.requestWakeLock();
-});
-} catch (err) { console.log('WakeLock 실패:', err); }
+if (!this._noSleep) this._noSleep = new NoSleep();
+if (!this._noSleepEnabled) {
+await this._noSleep.enable();
+this._noSleepEnabled = true;
 }
+} catch (err) { console.log('NoSleep 실패:', err); }
 }
 releaseWakeLock() {
-if (this.state.wakeLock) { this.state.wakeLock.release().catch(console.log); this.state.wakeLock = null; }
+try {
+if (this._noSleep && this._noSleepEnabled) {
+this._noSleep.disable();
+this._noSleepEnabled = false;
+}
+} catch(e) {}
 }
 startSilentKeepAlive() {
 if (this.silentAudio) this.stopSilentKeepAlive();
@@ -1417,7 +1483,9 @@ const gain = this.silentAudio.createGain();
 gain.gain.value = 0;
 gain.connect(this.silentAudio.destination);
 const schedule = () => {
-if (this.silentAudio && this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
+if (!this.silentAudio) return;
+// auto-pause 중에도 오디오는 계속 유지 (화면 깨우기 목적)
+if (this.state.isRunning) {
 const now = this.silentAudio.currentTime;
 const osc = this.silentAudio.createOscillator();
 osc.connect(gain);
@@ -1425,19 +1493,26 @@ osc.frequency.value = 20;
 osc.start(now);
 osc.stop(now + 0.05);
 }
-setTimeout(schedule, 2000);
+this._silentKeepAliveTimeout = setTimeout(schedule, 2000);
 };
 schedule();
 this.silentAudio.resume().catch(e=>console.log);
 } catch(e) { console.log('Silent audio failed', e); }
 }
 stopSilentKeepAlive() {
+if (this._silentKeepAliveTimeout) { clearTimeout(this._silentKeepAliveTimeout); this._silentKeepAliveTimeout = null; }
 if (this.silentAudio) { this.silentAudio.close().catch(()=>{}); this.silentAudio = null; }
 }
 initMap() {
-setTimeout(() => {
+const tryInit = () => {
+if (typeof L === 'undefined') {
+setTimeout(tryInit, 100);
+return;
+}
 const mapDiv = document.getElementById('map');
 if(!mapDiv) return;
+if (this.map) return; // 이미 초기화됨
+try {
 this.map = L.map('map', {zoomControl: false, attributionControl: false}).setView([37.5665, 126.9780], 16);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 maxZoom: 19,
@@ -1448,7 +1523,9 @@ this.polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(this.map);
 ui.applyMapTheme(storage.getMapTheme());
 setTimeout(() => { if(this.map) this.map.invalidateSize(); }, 200);
 setTimeout(() => { if(this.map) this.map.invalidateSize(); }, 800);
-}, 300);
+} catch(e) { console.warn('Map init error:', e); }
+};
+setTimeout(tryInit, 300);
 }
 updatePosition(p) {
 if(!this.map) return;
@@ -1593,7 +1670,7 @@ ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padSt
 if (this.wakeLockInterval) clearInterval(this.wakeLockInterval);
 this.wakeLockInterval = setInterval(() => {
 if (this.state.isRunning && !this.state.isPaused) this.requestWakeLock();
-}, 60000);
+}, 30000);
 }
 onStop() {
 this.state.isPaused = true;
@@ -1612,6 +1689,11 @@ this.state.isAutoPaused = false;
 if(ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'none';
 if(ui.dom.afterStop) ui.dom.afterStop.style.display = 'none';
 if(ui.dom.btnStop) ui.dom.btnStop.style.display = 'block';
+this.requestWakeLock();
+// 오디오 컨텍스트 재개
+if (this.silentAudio && this.silentAudio.state === 'suspended') {
+this.silentAudio.resume().catch(()=>{});
+}
 if (!this.timer) {
 this.timer = setInterval(() => {
 if(this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
@@ -1713,7 +1795,13 @@ this.checkResume();
 if ("geolocation" in navigator) {
 navigator.geolocation.watchPosition(
 (p) => this.updatePosition(p),
-(err) => console.warn("GPS Error", err),
+(err) => {
+let msg = 'GPS: ';
+if (err.code === 1) msg += 'Permission denied';
+else if (err.code === 2) msg += 'Position unavailable';
+else if (err.code === 3) msg += 'Timeout';
+if (ui.dom.status) ui.dom.status.textContent = msg + ' | ALT: --m';
+},
 { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
 );
 }
@@ -1733,7 +1821,7 @@ app.init();
 ui.changeLanguage(storage.getLang());
 ui.setUnit(storage.getUnit());
 ui.setGender(storage.getGender());
-app.requestWakeLock();
+// NoSleep은 사용자 제스처(버튼 터치) 후 onStart에서 활성화됨
 
 // 서비스 워커
 if ('serviceWorker' in navigator) {
@@ -1742,7 +1830,15 @@ navigator.serviceWorker.register('pwabuilder-sw.js').catch(()=>{});
 };
 document.addEventListener('visibilitychange', () => {
 if (document.visibilityState === 'visible') {
+// NoSleep 재활성화 (러닝 중일 때만)
+if (app && app.state && app.state.isRunning) {
 app.requestWakeLock();
+}
+// 오디오 컨텍스트가 suspended 상태면 resume
+if (app.silentAudio && app.silentAudio.state === 'suspended') {
+app.silentAudio.resume().catch(()=>{});
+}
+// 타이머가 끊겼으면 재시작
 if (app && app.state && app.state.isRunning && !app.timer && !app.state.isPaused && !app.state.isAutoPaused) {
 app.timer = setInterval(() => {
 if (app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
@@ -1759,6 +1855,72 @@ if (overlay) overlay.style.display = 'flex';
 }
 }
 });
+
+// ========== 맵 전체화면 ==========
+let _mainMapFull = null;
+let _detailMapFull = null;
+
+UIManager.prototype.openMainMapFullscreen = function() {
+const overlay = document.getElementById('map-fullscreen-overlay');
+const container = document.getElementById('map-fullscreen-el');
+if (!overlay || !container || !app.map || typeof L === 'undefined') return;
+overlay.classList.add('active');
+// 전체화면 맵 생성
+if (!_mainMapFull) {
+_mainMapFull = L.map(container, { zoomControl: true, attributionControl: false })
+.setView(app.map.getCenter(), app.map.getZoom());
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(_mainMapFull);
+if (app.state.pathCoords && app.state.pathCoords.length > 0) {
+L.polyline(app.state.pathCoords, { color: '#007bff', weight: 5 }).addTo(_mainMapFull);
+}
+const center = app.map.getCenter();
+L.marker([center.lat, center.lng], { icon: L.divIcon({ className:'loc', html:'<div style="background:#007bff;border:2px solid #fff;border-radius:50%;width:14px;height:14px;"></div>' }) }).addTo(_mainMapFull);
+if (storage.getMapTheme() === 'dark') {
+container.classList.add('dark-map-layer');
+}
+} else {
+_mainMapFull.setView(app.map.getCenter(), app.map.getZoom());
+}
+setTimeout(() => { if (_mainMapFull) _mainMapFull.invalidateSize(); }, 200);
+};
+
+UIManager.prototype.closeMainMapFullscreen = function() {
+const overlay = document.getElementById('map-fullscreen-overlay');
+if (overlay) overlay.classList.remove('active');
+};
+
+UIManager.prototype.openDetailMapFullscreen = function() {
+if (!this.detailMap || typeof L === 'undefined') return;
+const overlay = document.getElementById('detail-map-fullscreen-overlay');
+const container = document.getElementById('detail-map-fullscreen-el');
+if (!overlay || !container) return;
+overlay.classList.add('active');
+if (!_detailMapFull) {
+_detailMapFull = L.map(container, { zoomControl: true, attributionControl: false })
+.setView(this.detailMap.getCenter(), this.detailMap.getZoom());
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(_detailMapFull);
+// 기존 레이어 복사
+this.detailMap.eachLayer(layer => {
+if (layer instanceof L.Polyline || layer instanceof L.Marker) {
+const cloned = layer instanceof L.Polyline
+? L.polyline(layer.getLatLngs(), layer.options)
+: L.marker(layer.getLatLng(), layer.options);
+cloned.addTo(_detailMapFull);
+}
+});
+if (storage.getMapTheme() === 'dark') container.classList.add('dark-map-layer');
+} else {
+_detailMapFull.setView(this.detailMap.getCenter(), this.detailMap.getZoom());
+}
+setTimeout(() => { if (_detailMapFull) _detailMapFull.invalidateSize(); }, 200);
+};
+
+UIManager.prototype.closeDetailMapFullscreen = function() {
+const overlay = document.getElementById('detail-map-fullscreen-overlay');
+if (overlay) overlay.classList.remove('active');
+// 다음번 열 때 갱신 위해 초기화
+if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
+};
 </script>
 </body>
-</html>
+  </html>
