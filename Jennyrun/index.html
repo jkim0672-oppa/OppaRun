@@ -1225,6 +1225,17 @@ return '<div class="history-item">' +
 '<div class="h-det-box"><div class="h-det-label">' + t.cal + '</div><div class="h-det-val">' + (r.kcal || 0) + '</div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.gct + '</div><div class="h-det-val" style="color:' + this.getGctColor(r.gct) + '">' + (r.gct || '--') + ' <span style="font-size:7px">MS</span></div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.flight + '</div><div class="h-det-val" style="color:' + this.getFlightColor(r.flight) + '">' + (r.flight || '--') + ' <span style="font-size:7px">%</span></div></div>' +
+((() => {
+let strideVal = '--';
+if (r.cadence && r.cadence > 0 && r.avgPace && r.avgPace.includes("'")) {
+const parts = r.avgPace.replace('"','').split("'");
+const min = parseInt(parts[0]) || 5;
+const sec = parseInt(parts[1]) || 0;
+const speedKmh = 60 / (min + sec / 60);
+strideVal = ((speedKmh / 3.6) / (r.cadence / 60)).toFixed(2);
+}
+return '<div class="h-det-box"><div class="h-det-label">보폭</div><div class="h-det-val" style="color:#aaa">' + strideVal + ' <span style="font-size:7px">M</span></div></div>';
+})()) +
 '</div>' +
 '<button class="btn-h-delete" onclick="ui.openConfirmModal(' + r.id + ')">' + t.deleteBtn + '</button>' +
 '</div>';
@@ -1427,7 +1438,29 @@ recovComment = (lang === 'ko') ? '다음 고강도 주행 전까지 최소 <b>' 
 }
 const contentArea = document.getElementById('diag-content-area');
 if(contentArea) {
+let paceVal = r.avgPace || r.pace || INVALID_PACE;
+if(this.currentUnit === 'mile' && paceVal !== INVALID_PACE) paceVal = this.convertPaceToUnit(paceVal, 'mile');
+const paceUnit = this.currentUnit === 'km' ? '/km' : '/mi';
+let strideVal = '--';
+if (r.cadence && r.cadence > 0 && r.avgPace && r.avgPace.includes("'")) {
+const parts = r.avgPace.replace('"','').split("'");
+const min = parseInt(parts[0]) || 5;
+const sec = parseInt(parts[1]) || 0;
+const speedKmh = 60 / (min + sec / 60);
+strideVal = ((speedKmh / 3.6) / (r.cadence / 60)).toFixed(2) + ' m';
+}
+let paceComment = '';
+if (r.avgPace && r.avgPace.includes("'")) {
+const parts = r.avgPace.replace('"','').split("'");
+const totalSec = (parseInt(parts[0])||0)*60 + (parseInt(parts[1])||0);
+paceComment = totalSec < 300 ? (lang==='ko'?'빠른 페이스입니다. 지속 가능한지 확인하세요.':'Fast pace. Check sustainability.')
+: totalSec < 420 ? (lang==='ko'?'적절한 유산소 페이스입니다.':'Good aerobic pace.')
+: (lang==='ko'?'여유 있는 페이스입니다. 조금 더 빠르게 도전해보세요.':'Easy pace. Try pushing a bit more.');
+}
+let strideComment = strideVal !== '--' ? (lang==='ko'?'보폭이 클수록 효율적이지만 과도하면 충격이 증가합니다. 1.0~1.5m가 이상적입니다.':'Longer stride improves efficiency, but too long increases impact. 1.0~1.5m is ideal.') : '';
 contentArea.innerHTML =
+'<div class="diag-card"><div class="diag-label">' + (lang==='ko'?'페이스':'PACE') + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + ' <span style="font-size:13px;color:#aaa">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (lang==='ko'?'보폭 (STRIDE)':'STRIDE LENGTH') + '</div><div class="diag-val-group"><div class="diag-main-val">' + strideVal + '</div><div class="diag-ref">Ref: 1.0~1.5m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagDyna || "DYNAMICS") + '</div><div class="diag-val-group"><div class="diag-main-val">GCT: ' + r.gct + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagBalance || "BALANCE") + '</div><div class="diag-val-group"><div class="diag-main-val">CAD: ' + (r.cadence || 0) + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagRecov || "RECOVERY") + '</div>' + recovHighlightHTML + '<div class="diag-tip">' + recovComment + '</div></div>';
@@ -1991,4 +2024,4 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
 };
 </script>
 </body>
-  </html>
+</html>
