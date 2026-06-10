@@ -1328,8 +1328,21 @@ else detailMapDiv.classList.remove('dark-map-layer');
 setTimeout(() => { if(this.detailMap) this.detailMap.invalidateSize(); }, 200);
 }
 if (record.path && record.path.length > 0 && this.detailMap) {
-let poly = L.polyline(record.path, {color: 'var(--primary)', weight: 5}).addTo(this.detailMap);
+let poly = L.polyline(record.path, {color: '#ff3333', weight: 2}).addTo(this.detailMap);
 this.detailMap.fitBounds(poly.getBounds());
+// 방향 화살표 그리기
+const coords = record.path;
+const arrowStep = Math.max(1, Math.floor(coords.length / 8));
+for (let i = arrowStep; i < coords.length; i += arrowStep) {
+const from = coords[i - 1];
+const to = coords[i];
+const angle = Math.atan2(to[1] - from[1], to[0] - from[0]) * 180 / Math.PI;
+const mid = [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2];
+L.marker(mid, {
+icon: L.divIcon({ className: '', html: `<div style="transform:rotate(${angle - 90}deg);color:#ff3333;font-size:12px;line-height:1;opacity:0.9;">▲</div>`, iconSize: [12,12], iconAnchor: [6,6] }),
+interactive: false
+}).addTo(this.detailMap);
+}
 }
 if (record.splits && record.splits.length > 0 && this.detailMap) {
 record.splits.forEach(split => {
@@ -1519,8 +1532,9 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 maxZoom: 19,
 crossOrigin: true
 }).addTo(this.map);
-this.marker = L.marker([37.5665, 126.9780], {icon: L.divIcon({className:'loc', html:'<div style="background:#007bff; border:2px solid #fff; border-radius:50%; width:14px; height:14px;"></div>'})}).addTo(this.map);
-this.polyline = L.polyline([], {color: '#007bff', weight: 5}).addTo(this.map);
+this.marker = L.marker([37.5665, 126.9780], {icon: L.divIcon({className:'loc', html:'<div style="background:#007bff; border:2px solid #fff; border-radius:50%; width:8px; height:8px;"></div>'})}).addTo(this.map);
+this.polyline = L.polyline([], {color: '#ff3333', weight: 2}).addTo(this.map);
+this.arrowLayer = L.layerGroup().addTo(this.map);
 ui.applyMapTheme(storage.getMapTheme());
 setTimeout(() => { if(this.map) this.map.invalidateSize(); }, 200);
 setTimeout(() => { if(this.map) this.map.invalidateSize(); }, 800);
@@ -1560,6 +1574,7 @@ if (d > 0.002 && d < maxJump) {
 this.state.totalDist += d;
 this.state.pathCoords.push(pos);
 if(this.polyline) this.polyline.setLatLngs(this.state.pathCoords);
+this.drawArrows();
 ui.updateRunningDisplay({dist: this.state.totalDist.toFixed(2)});
 this.state.lastPos = pos;
 this.state.lastPosTimestamp = Date.now();
@@ -1579,6 +1594,7 @@ let corrected = Math.min(d, 0.1); // 80m→100m로 소폭 완화
 this.state.totalDist += corrected;
 this.state.pathCoords.push(pos);
 if(this.polyline) this.polyline.setLatLngs(this.state.pathCoords);
+this.drawArrows();
 this.state.lastPos = pos;
 this.state.lastPosTimestamp = Date.now();
 }
@@ -1629,6 +1645,27 @@ this.state.totalGct += data.gct || 0;
 this.state.totalFlight += data.flight || 0;
 let cadVal = Math.round((this.state.steps / (this.state.seconds || 1)) * 60);
 ui.updateRunningDisplay({cadence: cadVal, gct: data.gct || 0, flight: data.flight || 0});
+}
+}
+drawArrows() {
+if (!this.arrowLayer || !this.map) return;
+this.arrowLayer.clearLayers();
+const coords = this.state.pathCoords;
+if (coords.length < 2) return;
+// 매 N포인트마다 화살표 표시 (너무 촘촘하지 않게)
+const step = Math.max(1, Math.floor(coords.length / 8));
+for (let i = step; i < coords.length; i += step) {
+const from = coords[i - 1];
+const to = coords[i];
+const angle = Math.atan2(to[1] - from[1], to[0] - from[0]) * 180 / Math.PI;
+const mid = [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2];
+const icon = L.divIcon({
+className: '',
+html: `<div style="transform:rotate(${angle - 90}deg);color:#ff3333;font-size:12px;line-height:1;opacity:0.9;">▲</div>`,
+iconSize: [12, 12],
+iconAnchor: [6, 6]
+});
+L.marker(mid, { icon, interactive: false }).addTo(this.arrowLayer);
 }
 }
 formatPace(kmh) { if (!kmh || kmh < 0.5) return INVALID_PACE; let s = 3600 / kmh; return Math.floor(s/60) + "'" + String(Math.floor(s%60)).padStart(2,'0') + '"'; }
@@ -1902,10 +1939,10 @@ _mainMapFull = L.map(container, { zoomControl: true, attributionControl: false }
 .setView(app.map.getCenter(), app.map.getZoom());
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(_mainMapFull);
 if (app.state.pathCoords && app.state.pathCoords.length > 0) {
-L.polyline(app.state.pathCoords, { color: '#007bff', weight: 5 }).addTo(_mainMapFull);
+L.polyline(app.state.pathCoords, { color: '#ff3333', weight: 2 }).addTo(_mainMapFull);
 }
 const center = app.map.getCenter();
-L.marker([center.lat, center.lng], { icon: L.divIcon({ className:'loc', html:'<div style="background:#007bff;border:2px solid #fff;border-radius:50%;width:14px;height:14px;"></div>' }) }).addTo(_mainMapFull);
+L.marker([center.lat, center.lng], { icon: L.divIcon({ className:'loc', html:'<div style="background:#007bff;border:2px solid #fff;border-radius:50%;width:8px;height:8px;"></div>' }) }).addTo(_mainMapFull);
 if (storage.getMapTheme() === 'dark') {
 container.classList.add('dark-map-layer');
 }
