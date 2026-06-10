@@ -1449,7 +1449,8 @@ seconds: 0, steps: 0, totalDist: 0, lastPos: null, pathCoords: [],
 currentAlt: 0, lowSpeedStartTime: null, wakeLock: null,
 maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
 splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
-lastPosTimestamp: Date.now()
+lastPosTimestamp: Date.now(),
+speedBuffer: [], lastValidSpeed: 0
 };
 this.map = null; this.marker = null; this.polyline = null; this.timer = null;
 this.motion = new MotionManager((data) => this.updateMetrics(data));
@@ -1554,7 +1555,7 @@ if (!this.state.isAutoPaused && accuracy < 40) {
 if (this.state.lastPos) {
 let d = this.map.distance(this.state.lastPos, pos) / 1000;
 let timeDelta = (Date.now() - (this.state.lastPosTimestamp || Date.now())) / 1000;
-let maxJump = (speedKmh > 25) ? 0.2 : 0.12;
+let maxJump = speedKmh > 25 ? 0.25 : 0.15; // 살짝 여유있게
 if (d > 0.002 && d < maxJump) {
 this.state.totalDist += d;
 this.state.pathCoords.push(pos);
@@ -1574,7 +1575,7 @@ this.state.lastKmSeconds = this.state.seconds;
 this.state.lastKmAlt = this.state.currentAlt;
 }
 } else if (timeDelta > 4 && d < 0.5) {
-let corrected = Math.min(d, 0.08);
+let corrected = Math.min(d, 0.1); // 80m→100m로 소폭 완화
 this.state.totalDist += corrected;
 this.state.pathCoords.push(pos);
 if(this.polyline) this.polyline.setLatLngs(this.state.pathCoords);
@@ -1586,10 +1587,37 @@ this.state.lastPos = pos;
 this.state.lastPosTimestamp = Date.now();
 this.state.lastKmAlt = this.state.currentAlt;
 }
-const currentPaceStr = this.formatPace(speedKmh);
+} // ← if (!isAutoPaused && accuracy < 40)
+
+// ── 페이스 스무딩 ──────────────────────────────────────
+// 1) GPS speed가 유효한 경우에만 버퍼에 추가 (null/0 무시)
+let rawSpeedKmh = p.coords.speed != null ? p.coords.speed * 3.6 : -1;
+if (rawSpeedKmh > 0.5) {
+// 이상치 필터: 버퍼 평균의 2.5배 초과하면 무시
+if (this.state.speedBuffer.length >= 2) {
+const bufAvg = this.state.speedBuffer.reduce((a,b)=>a+b,0) / this.state.speedBuffer.length;
+if (rawSpeedKmh > bufAvg * 2.5) rawSpeedKmh = bufAvg; // 튀는 값 클램핑
+}
+this.state.speedBuffer.push(rawSpeedKmh);
+if (this.state.speedBuffer.length > 5) this.state.speedBuffer.shift(); // 최근 5개 유지
+this.state.lastValidSpeed = rawSpeedKmh;
+}
+// 2) 버퍼가 있으면 평균, 없으면 마지막 유효값 사용
+let smoothedKmh = 0;
+if (this.state.speedBuffer.length > 0) {
+smoothedKmh = this.state.speedBuffer.reduce((a,b)=>a+b,0) / this.state.speedBuffer.length;
+} else if (this.state.lastValidSpeed > 0) {
+smoothedKmh = this.state.lastValidSpeed;
+}
+// 3) 거리 기반 보조 속도 (GPS speed가 없을 때 백업)
+if (smoothedKmh < 0.5 && this.state.lastPos && this.state.seconds > 0) {
+const backupKmh = this.state.totalDist / (this.state.seconds / 3600);
+if (backupKmh > 0.5) smoothedKmh = backupKmh;
+}
+const currentPaceStr = this.formatPace(smoothedKmh);
 const avgKmh = this.state.seconds > 0 ? (this.state.totalDist / (this.state.seconds / 3600)) : 0;
 ui.updateRunningDisplay({ pace: currentPaceStr, avgPace: this.formatPace(avgKmh) });
-}
+// ──────────────────────────────────────────────────────
 storage.saveTempSession(this.state);
 }
 }
@@ -1650,6 +1678,8 @@ this.state.lastKmSeconds = 0;
 this.state.lastKmAlt = this.state.currentAlt;
 this.state.lowSpeedStartTime = null;
 this.state.lastPosTimestamp = Date.now();
+this.state.speedBuffer = [];
+this.state.lastValidSpeed = 0;
 if(this.motion) this.motion.reset();
 if(ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'none';
 if(ui.dom.btnStart) ui.dom.btnStart.style.display = 'none';
@@ -1783,7 +1813,8 @@ seconds: 0, steps: 0, totalDist: 0, lastPos: null, pathCoords: [],
 currentAlt: 0, lowSpeedStartTime: null, wakeLock: null,
 maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
 splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
-lastPosTimestamp: Date.now()
+lastPosTimestamp: Date.now(),
+speedBuffer: [], lastValidSpeed: 0
 };
 window.location.reload();
 }
