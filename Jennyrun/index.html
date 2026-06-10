@@ -1537,14 +1537,35 @@ this.motionListenerAttached = false;
 }
 async requestWakeLock() {
 try {
+/* 1순위: Screen Wake Lock API (안드로이드 크롬 공식 지원) */
+if ('wakeLock' in navigator) {
+if (!this._wakeLockSentinel || this._wakeLockSentinel.released) {
+this._wakeLockSentinel = await navigator.wakeLock.request('screen');
+this._wakeLockSentinel.addEventListener('release', () => {
+/* 화면이 꺼졌다 켜질 때 자동 재획득 */
+if (this.state && this.state.isRunning) {
+setTimeout(() => this.requestWakeLock(), 300);
+}
+});
+}
+}
+} catch(e) {}
+try {
+/* 2순위: NoSleep.js 폴백 */
 if (!this._noSleep) this._noSleep = new NoSleep();
 if (!this._noSleepEnabled) {
 await this._noSleep.enable();
 this._noSleepEnabled = true;
 }
-} catch (err) { console.log('NoSleep 실패:', err); }
+} catch (err) {}
 }
 releaseWakeLock() {
+try {
+if (this._wakeLockSentinel && !this._wakeLockSentinel.released) {
+this._wakeLockSentinel.release();
+this._wakeLockSentinel = null;
+}
+} catch(e) {}
 try {
 if (this._noSleep && this._noSleepEnabled) {
 this._noSleep.disable();
@@ -1801,7 +1822,7 @@ ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padSt
 if (this.wakeLockInterval) clearInterval(this.wakeLockInterval);
 this.wakeLockInterval = setInterval(() => {
 if (this.state.isRunning && !this.state.isPaused) this.requestWakeLock();
-}, 30000);
+}, 15000);
 }
 onStop() {
 this.state.isPaused = true;
@@ -1961,16 +1982,27 @@ navigator.serviceWorker.register('pwabuilder-sw.js').catch(()=>{});
 }
 };
 document.addEventListener('visibilitychange', () => {
-if (document.visibilityState === 'visible') {
-// NoSleep 재활성화 (러닝 중일 때만)
+if (document.visibilityState === 'hidden') {
+/* 화면 꺼지는 순간 timestamp 기록 */
+if (app && app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
+app._hiddenAt = Date.now();
+}
+} else if (document.visibilityState === 'visible') {
+/* 화면 켜질 때 경과 시간 보정 */
+if (app && app._hiddenAt && app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
+const elapsed = Math.floor((Date.now() - app._hiddenAt) / 1000);
+if (elapsed > 0) app.state.seconds += elapsed;
+app._hiddenAt = null;
+}
+/* Wake Lock 재획득 */
 if (app && app.state && app.state.isRunning) {
 app.requestWakeLock();
 }
-// 오디오 컨텍스트가 suspended 상태면 resume
-if (app.silentAudio && app.silentAudio.state === 'suspended') {
+/* 오디오 컨텍스트 resume */
+if (app && app.silentAudio && app.silentAudio.state === 'suspended') {
 app.silentAudio.resume().catch(()=>{});
 }
-// 타이머가 끊겼으면 재시작
+/* 타이머 끊겼으면 재시작 */
 if (app && app.state && app.state.isRunning && !app.timer && !app.state.isPaused && !app.state.isAutoPaused) {
 app.timer = setInterval(() => {
 if (app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
