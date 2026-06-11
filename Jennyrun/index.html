@@ -2195,6 +2195,26 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
   }
   // 취소 버튼
   btnCancel.addEventListener('click', hideExitDialog);
+  // 검은 종료 화면
+  const exitScreen = document.createElement('div');
+  exitScreen.id = 'exit-screen';
+  exitScreen.style.cssText = `
+    display: none;
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: #000;
+    z-index: 9999998;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  `;
+  exitScreen.innerHTML = `
+    <div style="font-size:36px; margin-bottom:20px;">🚪</div>
+    <div style="color:#fff; font-size:20px; font-weight:900; margin-bottom:10px;">App Closed</div>
+    <div style="color:#666; font-size:13px; font-weight:600; text-align:center; line-height:1.8;">
+      Press the Home button<br>to return to your home screen
+    </div>
+  `;
+  document.body.appendChild(exitScreen);
   // 토스트 메시지 함수
   function showToast(msg) {
     let toast = document.getElementById('exit-toast');
@@ -2203,30 +2223,28 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
       toast.id = 'exit-toast';
       toast.style.cssText = `
         position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%);
-        background: rgba(255,255,255,0.15); color: #fff;
+        background: rgba(255,255,255,0.12); color: #fff;
         padding: 12px 24px; border-radius: 24px;
         font-size: 13px; font-weight: 700;
         z-index: 9999999; text-align: center;
         backdrop-filter: blur(8px);
         border: 1px solid rgba(255,255,255,0.2);
         white-space: nowrap;
-        transition: opacity 0.4s;
       `;
       document.body.appendChild(toast);
     }
     toast.textContent = msg;
-    toast.style.opacity = '1';
-    clearTimeout(toast._t);
-    toast._t = setTimeout(() => { toast.style.opacity = '0'; }, 2500);
+    toast.style.display = 'block';
   }
   // 종료 버튼
   btnConfirm.addEventListener('click', function() {
     if (window.AndroidBridge && window.AndroidBridge.exitApp) {
       window.AndroidBridge.exitApp();
     } else {
-      // PWA 환경 → 다이얼로그 닫고 토스트 안내
-      hideExitDialog();
-      showToast('📱 폰 하단의 홈 버튼을 눌러 나가주세요');
+      // PWA 환경 → 검은 화면 + 토스트
+      overlay.classList.remove('active');
+      exitScreen.style.display = 'flex';
+      showToast('📱 Press the Home button to exit');
     }
   });
   // 오버레이 바깥 터치 → 취소
@@ -2235,6 +2253,15 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
   });
   // 뒤로가기 감지
   window.addEventListener('popstate', function(e) {
+    // 검은 종료 화면이 떠있으면 → 앱으로 복귀
+    const es = document.getElementById('exit-screen');
+    if (es && es.style.display === 'flex') {
+      es.style.display = 'none';
+      const toast = document.getElementById('exit-toast');
+      if (toast) toast.style.display = 'none';
+      history.pushState({ exitGuard: true }, '');
+      return;
+    }
     // 전체화면 맵이 열려있으면 닫기만 함
     const mainFull = document.getElementById('map-fullscreen-overlay');
     const detailFull = document.getElementById('detail-map-fullscreen-overlay');
