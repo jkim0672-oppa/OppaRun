@@ -1087,9 +1087,34 @@ const overlay = this.dom.dimmerOverlay;
 if (!overlay) return;
 if (this.dimActive) {
 overlay.style.display = 'flex';
-if (app && app.state && app.state.isRunning) app.requestWakeLock();
+if (app && app.state && app.state.isRunning) {
+app.requestWakeLock();
+/* DIM 중 화면 꺼짐 방지: 20초마다 오버레이 투명도를 아주 살짝 흔들어
+Android 시스템이 "화면 사용 중"으로 인식하게 함 */
+if (this._dimKeepAliveInterval) clearInterval(this._dimKeepAliveInterval);
+this._dimKeepAliveInterval = setInterval(() => {
+if (!this.dimActive || !app.state.isRunning) {
+clearInterval(this._dimKeepAliveInterval);
+this._dimKeepAliveInterval = null;
+return;
+}
+/* 투명도를 0.85 ↔ 0.86 사이로 아주 미세하게 토글 (시각적으로 보이지 않음) */
+const bg = overlay.style.background;
+const isA = overlay.getAttribute('data-dim-tick') === '1';
+overlay.style.background = isA
+? 'rgba(0,0,0,0.85)'
+: 'rgba(0,0,0,0.851)';
+overlay.setAttribute('data-dim-tick', isA ? '0' : '1');
+/* Wake Lock도 주기적으로 재요청 */
+app.requestWakeLock();
+}, 20000);
+}
 } else {
 overlay.style.display = 'none';
+if (this._dimKeepAliveInterval) {
+clearInterval(this._dimKeepAliveInterval);
+this._dimKeepAliveInterval = null;
+}
 }
 }
 dismissDim() {
@@ -1097,6 +1122,10 @@ if (!this.dimActive) return;
 this.dimActive = false;
 const overlay = this.dom.dimmerOverlay;
 if (overlay) overlay.style.display = 'none';
+if (this._dimKeepAliveInterval) {
+clearInterval(this._dimKeepAliveInterval);
+this._dimKeepAliveInterval = null;
+}
 }
 toggleDropdown(id) {
 const opt = document.getElementById(id); const isOpen = opt && opt.style.display === 'block';
@@ -1558,6 +1587,23 @@ await this._noSleep.enable();
 this._noSleepEnabled = true;
 }
 } catch (err) {}
+/* 3순위: 25초마다 Wake Lock 강제 재획득 (DIM 모드 중 Android 절전 우회) */
+if (!this._wakeLockRenewInterval) {
+this._wakeLockRenewInterval = setInterval(async () => {
+if (!this.state || !this.state.isRunning) return;
+try {
+if ('wakeLock' in navigator && (!this._wakeLockSentinel || this._wakeLockSentinel.released)) {
+this._wakeLockSentinel = await navigator.wakeLock.request('screen');
+}
+} catch(e) {}
+try {
+if (this._noSleep && !this._noSleepEnabled) {
+await this._noSleep.enable();
+this._noSleepEnabled = true;
+}
+} catch(e) {}
+}, 25000);
+}
 }
 releaseWakeLock() {
 try {
@@ -1572,6 +1618,10 @@ this._noSleep.disable();
 this._noSleepEnabled = false;
 }
 } catch(e) {}
+if (this._wakeLockRenewInterval) {
+clearInterval(this._wakeLockRenewInterval);
+this._wakeLockRenewInterval = null;
+}
 }
 startSilentKeepAlive() {
 if (this.silentAudio) this.stopSilentKeepAlive();
@@ -1593,7 +1643,7 @@ osc.frequency.value = 40;
 osc.start(now);
 osc.stop(now + 0.1);
 }
-this._silentKeepAliveTimeout = setTimeout(schedule, 500);
+this._silentKeepAliveTimeout = setTimeout(schedule, 200);
 };
 schedule();
 this.silentAudio.resume().catch(e=>console.log);
