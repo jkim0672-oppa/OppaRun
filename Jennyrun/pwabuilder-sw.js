@@ -1,11 +1,9 @@
-// This is the "Offline page" service worker
+// Jenny Run Pro - Service Worker
 
 importScripts('https://storage.googleapis.com/workbox-cdn/releases/5.1.2/workbox-sw.js');
 
-const CACHE = "pwabuilder-page";
-
-// TODO: replace the following with the correct offline fallback page i.e.: const offlineFallbackPage = "offline.html";
-const offlineFallbackPage = "ToDo-replace-this-name.html";
+const CACHE = "jennyrun-v1";
+const offlineFallbackPage = "index.html";
 
 self.addEventListener("message", (event) => {
   if (event.data && event.data.type === "SKIP_WAITING") {
@@ -13,11 +11,24 @@ self.addEventListener("message", (event) => {
   }
 });
 
+// 설치 시 index.html 캐시
 self.addEventListener('install', async (event) => {
   event.waitUntil(
-    caches.open(CACHE)
-      .then((cache) => cache.add(offlineFallbackPage))
+    caches.open(CACHE).then((cache) => cache.add(offlineFallbackPage))
   );
+  self.skipWaiting();
+});
+
+// 새 SW 활성화 시 이전 캐시 삭제
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(
+        keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))
+      )
+    )
+  );
+  self.clients.claim();
 });
 
 if (workbox.navigationPreload.isSupported()) {
@@ -29,15 +40,11 @@ self.addEventListener('fetch', (event) => {
     event.respondWith((async () => {
       try {
         const preloadResp = await event.preloadResponse;
-
-        if (preloadResp) {
-          return preloadResp;
-        }
+        if (preloadResp) return preloadResp;
 
         const networkResp = await fetch(event.request);
         return networkResp;
       } catch (error) {
-
         const cache = await caches.open(CACHE);
         const cachedResp = await cache.match(offlineFallbackPage);
         return cachedResp;
@@ -45,4 +52,3 @@ self.addEventListener('fetch', (event) => {
     })());
   }
 });
-
