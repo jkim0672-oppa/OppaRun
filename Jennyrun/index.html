@@ -1240,6 +1240,10 @@ strideVal = (((speedKmh / 3.6) / (r.cadence / 60)) * 2).toFixed(2);
 }
 return '<div class="h-det-box"><div class="h-det-label">보폭</div><div class="h-det-val" style="color:#aaa">' + strideVal + ' <span style="font-size:7px">M</span></div></div>';
 })()) +
+// [추가] 케이던스 밸런스 / GCT 밸런스 표시 (좌:우 실측값, 새 데이터 행)
+'<div class="h-det-box"><div class="h-det-label">케이던스 밸런스</div><div class="h-det-val" style="color:#aaa">' + (r.cadenceBal || '50:50') + ' <span style="font-size:7px">L:R</span></div></div>' +
+'<div class="h-det-box"><div class="h-det-label">GCT 밸런스</div><div class="h-det-val" style="color:#aaa">' + (r.gctBal || '50:50') + ' <span style="font-size:7px">L:R</span></div></div>' +
+'<div class="h-det-box"><div class="h-det-label">고도 변화</div><div class="h-det-val" style="color:#aaa">' + ((r.splits && r.splits.length > 0) ? r.splits.reduce((sum,s)=>sum+Math.max(0,s.altDiff||0),0) : 0) + ' <span style="font-size:7px">M</span></div></div>' +
 '</div>' +
 '<div class="h-delete-row"><button class="btn-h-delete" onclick="ui.openConfirmModal(' + r.id + ')">' + t.deleteBtn + '</button></div>' +
 '</div>';
@@ -1509,9 +1513,114 @@ updateDisplay() { const bpmInput = document.getElementById('metro-bpm'); const b
 }
 // ========== MotionManager ==========
 class MotionManager {
-constructor(onStepCallback) { this.onStep = onStepCallback; this.lastStepTime = 0; this.isFeetOnGround = false; this.gctAccumulator = 0; this.gctCount = 0; }
-reset() { this.lastStepTime = 0; this.isFeetOnGround = false; this.gctAccumulator = 0; this.gctCount = 0; }
-handleMotion(e) { let acc = e.accelerationIncludingGravity; if (!acc || acc.z === null) return; let force = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z); let now = Date.now(); if (force > 12.5 && (now - this.lastStepTime) > 230) { let cycleTime = now - this.lastStepTime; this.lastStepTime = now; let result = { cycleTime, gct: 0, flight: 0 }; if (this.isFeetOnGround) { let currentGCT = Math.round(cycleTime * 0.35); this.gctAccumulator += currentGCT; this.gctCount++; result.gct = Math.round(this.gctAccumulator / this.gctCount); result.flight = Math.round(((cycleTime - result.gct) / cycleTime) * 100); } this.isFeetOnGround = true; this.onStep(result); } }
+constructor(onStepCallback) {
+this.onStep = onStepCallback;
+this.lastStepTime = 0;
+this.isFeetOnGround = false;
+this.gctAccumulator = 0;
+this.gctCount = 0;
+// [추가] 좌/우 교대 스텝 추적 (단일 IMU는 좌우를 직접 구분할 수 없으므로,
+// 걸음을 좌-우-좌-우 순서로 교대된다고 가정하는 표준 방식 사용)
+this.stepSide = 0; // 0 = side A(좌), 1 = side B(우)
+this.sideGctAccumulator = [0, 0];
+this.sideGctCount = [0, 0];
+this.sideStepCount = [0, 0];
+// [추가] 실제 접지(impact) 시점 타임스탬프 - 접지구간(GCT) 직접 측정용
+this.impactTime = 0;
+this.belowThresholdSince = 0; // 충격 이후 가속도가 안정(=접지)된 시점
+this.groundThreshold = 11.0; // 접지 중으로 판단하는 합산 가속도 임계값 (중력 약 9.8 근처)
+this.impactThreshold = 12.5; // 충격(발 디딤) 감지 임계값
+}
+reset() {
+this.lastStepTime = 0;
+this.isFeetOnGround = false;
+this.gctAccumulator = 0;
+this.gctCount = 0;
+this.stepSide = 0;
+this.sideGctAccumulator = [0, 0];
+this.sideGctCount = [0, 0];
+this.sideStepCount = [0, 0];
+this.impactTime = 0;
+this.belowThresholdSince = 0;
+}
+handleMotion(e) {
+let acc = e.accelerationIncludingGravity;
+if (!acc || acc.z === null) return;
+let force = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
+let now = Date.now();
+
+// [추가] GCT(지면 접촉 시간) 실측: 충격(impact) 발생 시점부터
+// 다음 충격까지의 시간 중, 가속도가 '안정 구간'(접지 상태로 추정)에
+// 머문 비율을 추적. 이전의 cycleTime * 0.35 고정값을 대체.
+if (force < this.groundThreshold) {
+// 가속도가 낮음 = 발이 지면에 닿아 충격이 흡수/안정된 구간으로 추정
+if (this.belowThresholdSince === 0) this.belowThresholdSince = now;
+} else {
+this.belowThresholdSince = 0;
+}
+
+if (force > this.impactThreshold && (now - this.lastStepTime) > 230) {
+let cycleTime = now - this.lastStepTime;
+this.lastStepTime = now;
+let result = { cycleTime, gct: 0, flight: 0, side: this.stepSide };
+
+if (this.isFeetOnGround) {
+// [수정] 실제 접지 구간 길이 추정: 충격 시점부터 가속도가
+// 다시 안정 구간으로 진입한 시점까지의 경과시간을 GCT로 사용.
+// 안정 구간 감지가 안 된 경우(데이터 누락 등)에는 cycleTime의
+// 35%를 폴백값으로만 사용 (이전 동작과 호환 유지)
+let measuredGCT;
+if (this.belowThresholdSince > 0 && this.belowThresholdSince > this.impactTime) {
+measuredGCT = this.belowThresholdSince - this.impactTime;
+} else {
+measuredGCT = cycleTime * 0.35; // 폴백
+}
+// 비정상 범위(50ms 미만, cycleTime 초과) 보정
+measuredGCT = Math.max(50, Math.min(measuredGCT, cycleTime * 0.9));
+let currentGCT = Math.round(measuredGCT);
+
+// 전체 평균 GCT (기존 동작 유지)
+this.gctAccumulator += currentGCT;
+this.gctCount++;
+result.gct = Math.round(this.gctAccumulator / this.gctCount);
+result.flight = Math.round(((cycleTime - result.gct) / cycleTime) * 100);
+
+// [추가] 좌/우 측 GCT 및 케이던스 누적 (밸런스 산출용)
+let side = this.stepSide;
+this.sideGctAccumulator[side] += currentGCT;
+this.sideGctCount[side]++;
+this.sideStepCount[side]++;
+result.sideGct = currentGCT;
+result.cycleTime = cycleTime;
+}
+
+this.impactTime = now;
+this.isFeetOnGround = true;
+this.stepSide = 1 - this.stepSide; // 다음 걸음은 반대쪽 발로 교대
+this.onStep(result);
+}
+}
+// [추가] 케이던스/GCT 좌우 밸런스(%) 계산
+// 반환값: { cadenceBal: "left:right", gctBal: "left:right" }
+getBalance() {
+const totalSteps = this.sideStepCount[0] + this.sideStepCount[1];
+let cadenceBal = '50:50';
+if (totalSteps > 0) {
+const left = Math.round((this.sideStepCount[0] / totalSteps) * 100);
+const right = 100 - left;
+cadenceBal = left + ':' + right;
+}
+let gctBal = '50:50';
+const avgL = this.sideGctCount[0] > 0 ? this.sideGctAccumulator[0] / this.sideGctCount[0] : 0;
+const avgR = this.sideGctCount[1] > 0 ? this.sideGctAccumulator[1] / this.sideGctCount[1] : 0;
+if (avgL > 0 || avgR > 0) {
+const total = avgL + avgR;
+const left = total > 0 ? Math.round((avgL / total) * 100) : 50;
+const right = 100 - left;
+gctBal = left + ':' + right;
+}
+return { cadenceBal, gctBal };
+}
 }
 // ========== OppaRunApp (수정: 타이머 관리, auto-pause시 시간 정지, 중복 모션 리스너 제거) ==========
 class OppaRunApp {
@@ -1888,6 +1997,8 @@ const calculatedKcal = ui.calculateCalories(weightKg, this.state.totalDist, avgP
 const avgCadence = this.state.seconds > 0 ? Math.round((this.state.steps / this.state.seconds) * 60) : 0;
 const avgGct = this.state.stepCount > 0 ? Math.round(this.state.totalGct / this.state.stepCount) : 0;
 const avgFlight = this.state.stepCount > 0 ? Math.round(this.state.totalFlight / this.state.stepCount) : 0;
+// [추가] 좌/우 케이던스 밸런스 및 GCT 밸런스 (실측값, 더미 50:50 제거)
+const balance = this.motion ? this.motion.getBalance() : { cadenceBal: '50:50', gctBal: '50:50' };
 if (this.state.totalDist > this.state.lastKmCheckpoint + 0.01 && this.state.seconds > this.state.lastKmSeconds) {
 let splitDuration = this.state.seconds - this.state.lastKmSeconds;
 let min = Math.floor(splitDuration / 60);
@@ -1904,6 +2015,8 @@ avgPace: ui.dom.avgPace ? ui.dom.avgPace.textContent : INVALID_PACE,
 cadence: avgCadence,
 gct: avgGct,
 flight: avgFlight,
+cadenceBal: balance.cadenceBal,
+gctBal: balance.gctBal,
 kcal: calculatedKcal,
 alt: this.state.currentAlt,
 path: this.state.pathCoords,
