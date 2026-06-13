@@ -1689,18 +1689,179 @@ shareDetailAction(id) {
 const h = storage.loadHistory();
 const record = h.find(r => r.id === id);
 if (!record) return;
+const lang = storage.getLang();
+const isKo = lang === 'ko';
+
+// 단위 변환
 let displayDist = parseFloat(record.dist);
 if(this.currentUnit === 'mile') displayDist = displayDist * 0.621371;
 let displayPace = record.avgPace || record.pace;
 if(displayPace && displayPace !== INVALID_PACE && this.currentUnit === 'mile') displayPace = this.convertPaceToUnit(displayPace, 'mile');
-const unitText = this.currentUnit === 'km' ? 'KM' : 'MI';
-const shareText = 'OppaRun Pro 🏃‍♂️\nDistance: ' + displayDist.toFixed(2) + ' ' + unitText + '\nTime: ' + record.time + '\nPace: ' + displayPace;
-if (navigator.share) {
-navigator.share({ title: 'OppaRun Pro Running Record', text: shareText, url: window.location.href }).catch(err => console.log(err));
-} else {
-navigator.clipboard.writeText(shareText);
-alert(storage.getLang() === 'ko' ? "러닝 데이터 요약 정보가 클립보드에 복사되었습니다!" : "Running dynamics summary copied to clipboard!");
+const unitText = this.currentUnit === 'km' ? 'km' : 'mi';
+
+// VERT RATIO 폴백
+const cadence = record.cadence || 170;
+const vertRatioVal = record.vertRatio ? record.vertRatio : (7.5 - (cadence - 160) * 0.05).toFixed(1);
+
+// 효율점수 계산
+const gct = record.gct || 250;
+const flight = record.flight || 25;
+const cadScore = Math.min(100, Math.max(0, ((cadence - 150) / 35) * 100));
+const gctScore = Math.min(100, Math.max(0, ((400 - gct) / 160) * 100));
+const flightScore = Math.min(100, Math.max(0, ((flight - 20) / 30) * 100));
+const effScore = Math.round(cadScore * 0.4 + gctScore * 0.4 + flightScore * 0.2);
+
+// Canvas 생성
+const W = 750, H = 1000;
+const canvas = document.createElement('canvas');
+canvas.width = W; canvas.height = H;
+const ctx = canvas.getContext('2d');
+
+// 배경: 흰색
+ctx.fillStyle = '#ffffff';
+ctx.fillRect(0, 0, W, H);
+
+// 상단 그린 헤더 띠
+const hdrH = 180;
+ctx.fillStyle = '#00e676';
+ctx.fillRect(0, 0, W, hdrH);
+
+// 헤더 아이콘 + 앱명
+ctx.fillStyle = '#000000';
+ctx.font = 'bold 38px Arial, sans-serif';
+ctx.fillText('🏃 Jenny Run Pro', 40, 68);
+ctx.font = '22px Arial, sans-serif';
+ctx.fillStyle = '#1a1a1a';
+const dateStr = record.date ? record.date.split(' ')[0] : '';
+ctx.fillText((isKo ? '러닝 기록' : 'Running Record') + '  ' + dateStr, 42, 108);
+
+// 주요 3지표 (거리/시간/페이스) - 큰 타일
+const tile = (x, y, w, h, label, val, unit, color) => {
+  ctx.fillStyle = '#f5f5f5';
+  roundRect(ctx, x, y, w, h, 18);
+  ctx.fill();
+  ctx.fillStyle = '#888';
+  ctx.font = '18px Arial, sans-serif';
+  ctx.fillText(label, x + 18, y + 34);
+  ctx.fillStyle = color || '#111';
+  ctx.font = 'bold 48px Arial, sans-serif';
+  ctx.fillText(val, x + 18, y + 88);
+  ctx.fillStyle = '#888';
+  ctx.font = '20px Arial, sans-serif';
+  ctx.fillText(unit, x + 18, y + 118);
+};
+
+const smallTile = (x, y, w, h, label, val, unit, color) => {
+  ctx.fillStyle = '#f0faf4';
+  roundRect(ctx, x, y, w, h, 14);
+  ctx.fill();
+  ctx.fillStyle = '#555';
+  ctx.font = '15px Arial, sans-serif';
+  ctx.fillText(label, x + 14, y + 28);
+  ctx.fillStyle = color || '#111';
+  ctx.font = 'bold 32px Arial, sans-serif';
+  ctx.fillText(val, x + 14, y + 68);
+  ctx.fillStyle = '#888';
+  ctx.font = '15px Arial, sans-serif';
+  ctx.fillText(unit, x + 14, y + 90);
+};
+
+function roundRect(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x+r, y);
+  c.lineTo(x+w-r, y); c.quadraticCurveTo(x+w, y, x+w, y+r);
+  c.lineTo(x+w, y+h-r); c.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  c.lineTo(x+r, y+h); c.quadraticCurveTo(x, y+h, x, y+h-r);
+  c.lineTo(x, y+r); c.quadraticCurveTo(x, y, x+r, y);
+  c.closePath();
 }
+
+const pad = 28, tw = (W - pad*2 - 16) / 3;
+const row1y = hdrH + 24;
+tile(pad,           row1y, tw, 140, isKo?'거리':'DIST', displayDist.toFixed(2), unitText, '#00897b');
+tile(pad+tw+8,      row1y, tw, 140, isKo?'시간':'TIME', record.time || '--', '', '#1565c0');
+tile(pad+tw*2+16,   row1y, tw, 140, isKo?'페이스':'PACE', displayPace || '--', '/'+unitText, '#6a1b9a');
+
+// 구분선
+ctx.strokeStyle = '#e0e0e0';
+ctx.lineWidth = 1;
+ctx.beginPath();
+ctx.moveTo(pad, row1y+155); ctx.lineTo(W-pad, row1y+155);
+ctx.stroke();
+
+// 섹션 타이틀 - 러닝 다이나믹스
+ctx.fillStyle = '#444';
+ctx.font = 'bold 20px Arial, sans-serif';
+ctx.fillText(isKo ? '🔬 러닝 다이나믹스' : '🔬 Running Dynamics', pad, row1y+185);
+
+// 작은 타일 6개: cadence, GCT, effScore, vertRatio, flight, cadenceBal
+const sw = (W - pad*2 - 20) / 3, sh = 110, row2y = row1y + 198;
+const effC = effScore >= 75 ? '#2e7d32' : effScore >= 50 ? '#e65100' : '#c62828';
+smallTile(pad,          row2y,    sw, sh, isKo?'케이던스':'CADENCE',    record.cadence||'--', 'SPM', '#1565c0');
+smallTile(pad+sw+10,    row2y,    sw, sh, 'GCT',                        record.gct||'--',     'ms',  '#00695c');
+smallTile(pad+sw*2+20,  row2y,    sw, sh, isKo?'효율점수':'EFFICIENCY', effScore,              '/ 100', effC);
+
+const row3y = row2y + sh + 14;
+smallTile(pad,          row3y, sw, sh, 'VERT RATIO',                   vertRatioVal,          '%',   '#6a1b9a');
+smallTile(pad+sw+10,    row3y, sw, sh, isKo?'체공시간':'FLIGHT',        record.flight||'--',   '%',   '#0277bd');
+smallTile(pad+sw*2+20,  row3y, sw, sh, isKo?'케이던스 밸':'CAD BAL',    record.cadenceBal||'50:50', '', '#37474f');
+
+// 구분선
+ctx.strokeStyle = '#e0e0e0';
+ctx.lineWidth = 1;
+const divY = row3y + sh + 20;
+ctx.beginPath(); ctx.moveTo(pad, divY); ctx.lineTo(W-pad, divY); ctx.stroke();
+
+// 하단: URL + 효율점수 바
+const barY = divY + 24;
+ctx.fillStyle = '#555';
+ctx.font = 'bold 18px Arial, sans-serif';
+ctx.fillText(isKo ? '효율 점수' : 'Efficiency Score', pad, barY + 18);
+// 바 배경
+ctx.fillStyle = '#e0e0e0';
+roundRect(ctx, pad, barY + 28, W - pad*2 - 160, 24, 12); ctx.fill();
+// 바 채우기
+const barW = Math.round((W - pad*2 - 160) * effScore / 100);
+ctx.fillStyle = effC;
+roundRect(ctx, pad, barY + 28, barW, 24, 12); ctx.fill();
+ctx.fillStyle = '#333';
+ctx.font = 'bold 22px Arial, sans-serif';
+ctx.fillText(effScore + ' pts', W - pad - 148, barY + 47);
+
+// 앱 URL
+const urlY = barY + 72;
+ctx.fillStyle = '#00897b';
+ctx.font = 'bold 19px Arial, sans-serif';
+ctx.fillText('⚡ Jenny Run Pro', pad, urlY);
+ctx.fillStyle = '#888';
+ctx.font = '17px Arial, sans-serif';
+ctx.fillText('AI-powered running dynamics tracker', pad, urlY + 26);
+
+// 하단 초록 띠
+ctx.fillStyle = '#00e676';
+ctx.fillRect(0, H - 50, W, 50);
+ctx.fillStyle = '#000';
+ctx.font = 'bold 20px Arial, sans-serif';
+ctx.fillText('Jenny Run Pro  |  Track smarter, Run better 🏃', pad, H - 16);
+
+// 이미지로 변환 후 공유
+canvas.toBlob(async (blob) => {
+  const file = new File([blob], 'jennyrunpro_record.png', { type: 'image/png' });
+  if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+    navigator.share({
+      title: 'Jenny Run Pro 🏃',
+      text: (isKo ? '내 러닝 기록을 공유합니다!' : 'Check out my run!'),
+      files: [file]
+    }).catch(err => console.log(err));
+  } else {
+    // 파일 공유 불가 시 이미지 다운로드
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'jennyrunpro_record.png';
+    a.click();
+    alert(isKo ? '이미지가 저장되었습니다! SNS에 공유해보세요 🏃' : 'Image saved! Share it on SNS 🏃');
+  }
+}, 'image/png');
 }
 openDiag(id) {
 const h = storage.loadHistory();
