@@ -228,40 +228,11 @@ display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 1
 .btn-launch-full-diagnosis:active {
 transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6px rgba(0, 255, 136, 0.2);
 }
-#dimmer-overlay {
-position: fixed;
-top: 0; left: 0;
-width: 100%; height: 100%;
-background: rgba(0, 0, 0, 0.85);
-pointer-events: auto;
-z-index: 99999;
-display: none;
-justify-content: center;
-align-items: center;
-font-size: 13px;
-font-weight: 600;
-color: #aaa;
-text-align: center;
-backdrop-filter: blur(2px);
-flex-direction: column;
-cursor: default;
-touch-action: none;
-}
-.dim-message {
-background: rgba(255,255,255,0.15);
-padding: 14px 28px;
-border-radius: 30px;
-font-size: 14px;
-pointer-events: auto;
-cursor: pointer;
-border: 1px solid rgba(255,255,255,0.2);
-}
+
 </style>
 </head>
 <body>
-<div id="dimmer-overlay" ontouchstart="event.stopPropagation();" ontouchmove="event.preventDefault(); event.stopPropagation();" onclick="event.stopPropagation();">
-<div class="dim-message" ontouchstart="event.stopPropagation();" onclick="event.stopPropagation(); ui.dismissDim();">🌙 <span id="dim-active-text">어두운 모드 활성화</span><br><span id="dim-dismiss-text" style="font-size:11px;opacity:0.7;">이 글자를 터치하면 해제</span></div>
-</div>
+
 <div id="confirm-modal" class="custom-confirm-overlay">
 <div class="custom-confirm-box">
 <div id="confirm-modal-msg" class="custom-confirm-msg">Are you sure you want to delete this record?</div>
@@ -352,7 +323,7 @@ border: 1px solid rgba(255,255,255,0.2);
 <div class="label" id="label-pace" style="color:var(--primary)">PACE</div>
 <div id="curPace" class="value-large">--'--"</div>
 <button id="quick-metro" class="btn-quick-metro" onclick="metro.toggle()">METRO OFF</button>
-<button id="btn-dim" style="position:absolute; bottom:10px; left:10px; background:#333; border:1px solid #444; color:#999; font-size:9px; padding:5px 20px; border-radius:5px; font-weight:900;">DIM</button>
+
 </div>
 <div class="card"><div class="label" id="label-dist">DIST</div><div class="value"><span id="dist">0.00</span><span id="unit-dist" style="font-size:10px; color:var(--primary)"> KM</span></div></div>
 <div class="card"><div class="label" id="label-time">TIME</div><div id="time" class="value">00:00</div></div>
@@ -837,9 +808,7 @@ this.menuBpmDisplay = document.getElementById('menu-bpm-display');
 this.btnMetroToggle = document.getElementById('btn-metro-toggle');
 this.currentUnit = storage.getUnit();
 this.currentGender = storage.getGender();
-this.dimActive = false;
-const dimBtn = document.getElementById('btn-dim');
-if (dimBtn) dimBtn.onclick = () => this.toggleDim();
+
 }
 calculateCalories(weightKg, distanceKm, paceSeconds, totalAltitudeGain, gender, age) {
 let met = 7.0;
@@ -1220,11 +1189,6 @@ if(metroAccent) metroAccent.textContent = t.metroAccent;
 const diagTitle = document.getElementById('diag-view-title');
 if(diagTitle) diagTitle.textContent = t.diagTitle;
 if(this.btnMetroToggle) this.btnMetroToggle.textContent = metro.isPlaying ? t.stop : t.start;
-// dimmer 메시지 교체 (span id 기반)
-const dimActiveText = document.getElementById('dim-active-text');
-const dimDismissText = document.getElementById('dim-dismiss-text');
-if(dimActiveText) dimActiveText.textContent = t.dimActive;
-if(dimDismissText) dimDismissText.textContent = t.dimDismiss;
 // TAP TO EXPAND 힌트 교체
 const mapExpandHint = document.getElementById('map-expand-hint');
 if(mapExpandHint) mapExpandHint.textContent = '⛶ ' + t.tapToExpand;
@@ -1278,52 +1242,7 @@ if(precisionArea && precisionArea.style.display === 'flex') {
 this.buildPrecisionSelector();
 }
 }
-toggleDim() {
-this.dimActive = !this.dimActive;
-const overlay = this.dom.dimmerOverlay;
-if (!overlay) return;
-if (this.dimActive) {
-overlay.style.display = 'flex';
-if (app && app.state && app.state.isRunning) {
-app.requestWakeLock();
-/* DIM 중 화면 꺼짐 방지: 20초마다 오버레이 투명도를 아주 살짝 흔들어
-Android 시스템이 "화면 사용 중"으로 인식하게 함 */
-if (this._dimKeepAliveInterval) clearInterval(this._dimKeepAliveInterval);
-this._dimKeepAliveInterval = setInterval(() => {
-if (!this.dimActive || !app.state.isRunning) {
-clearInterval(this._dimKeepAliveInterval);
-this._dimKeepAliveInterval = null;
-return;
-}
-/* 투명도를 0.85 ↔ 0.86 사이로 아주 미세하게 토글 (시각적으로 보이지 않음) */
-const bg = overlay.style.background;
-const isA = overlay.getAttribute('data-dim-tick') === '1';
-overlay.style.background = isA
-? 'rgba(0,0,0,0.85)'
-: 'rgba(0,0,0,0.851)';
-overlay.setAttribute('data-dim-tick', isA ? '0' : '1');
-/* Wake Lock도 주기적으로 재요청 */
-app.requestWakeLock();
-}, 20000);
-}
-} else {
-overlay.style.display = 'none';
-if (this._dimKeepAliveInterval) {
-clearInterval(this._dimKeepAliveInterval);
-this._dimKeepAliveInterval = null;
-}
-}
-}
-dismissDim() {
-if (!this.dimActive) return;
-this.dimActive = false;
-const overlay = this.dom.dimmerOverlay;
-if (overlay) overlay.style.display = 'none';
-if (this._dimKeepAliveInterval) {
-clearInterval(this._dimKeepAliveInterval);
-this._dimKeepAliveInterval = null;
-}
-}
+
 toggleDropdown(id) {
 const opt = document.getElementById(id); const isOpen = opt && opt.style.display === 'block';
 document.querySelectorAll('.dropdown-options, .precision-dropdown-options').forEach(d => d.style.display = 'none');
@@ -2121,65 +2040,6 @@ this.wakeLockInterval = null;
 this.silentAudio = null;
 this.motionListenerAttached = false;
 }
-async requestWakeLock() {
-try {
-/* 1순위: Screen Wake Lock API (안드로이드 크롬 공식 지원) */
-if ('wakeLock' in navigator) {
-if (!this._wakeLockSentinel || this._wakeLockSentinel.released) {
-this._wakeLockSentinel = await navigator.wakeLock.request('screen');
-this._wakeLockSentinel.addEventListener('release', () => {
-/* 화면이 꺼졌다 켜질 때 자동 재획득 */
-if (this.state && this.state.isRunning) {
-setTimeout(() => this.requestWakeLock(), 300);
-}
-});
-}
-}
-} catch(e) {}
-try {
-/* 2순위: NoSleep.js 폴백 */
-if (!this._noSleep) this._noSleep = new NoSleep();
-if (!this._noSleepEnabled) {
-await this._noSleep.enable();
-this._noSleepEnabled = true;
-}
-} catch (err) {}
-/* 3순위: 25초마다 Wake Lock 강제 재획득 (DIM 모드 중 Android 절전 우회) */
-if (!this._wakeLockRenewInterval) {
-this._wakeLockRenewInterval = setInterval(async () => {
-if (!this.state || !this.state.isRunning) return;
-try {
-if ('wakeLock' in navigator && (!this._wakeLockSentinel || this._wakeLockSentinel.released)) {
-this._wakeLockSentinel = await navigator.wakeLock.request('screen');
-}
-} catch(e) {}
-try {
-if (this._noSleep && !this._noSleepEnabled) {
-await this._noSleep.enable();
-this._noSleepEnabled = true;
-}
-} catch(e) {}
-}, 25000);
-}
-}
-releaseWakeLock() {
-try {
-if (this._wakeLockSentinel && !this._wakeLockSentinel.released) {
-this._wakeLockSentinel.release();
-this._wakeLockSentinel = null;
-}
-} catch(e) {}
-try {
-if (this._noSleep && this._noSleepEnabled) {
-this._noSleep.disable();
-this._noSleepEnabled = false;
-}
-} catch(e) {}
-if (this._wakeLockRenewInterval) {
-clearInterval(this._wakeLockRenewInterval);
-this._wakeLockRenewInterval = null;
-}
-}
 startSilentKeepAlive() {
 if (this.silentAudio) this.stopSilentKeepAlive();
 try {
@@ -2412,7 +2272,6 @@ if(ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'none';
 if(ui.dom.btnStart) ui.dom.btnStart.style.display = 'none';
 if(ui.dom.btnStop) ui.dom.btnStop.style.display = 'block';
 if(ui.dom.afterStop) ui.dom.afterStop.style.display = 'none';
-this.requestWakeLock();
 this.startSilentKeepAlive();
 if(metro) metro.init();
 this.requestMotionPermission(); // iOS 권한 요청 + 일반기기 리스너 한번만
@@ -2424,10 +2283,6 @@ let s = this.state.seconds % 60;
 ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')});
 }
 }, 1000);
-if (this.wakeLockInterval) clearInterval(this.wakeLockInterval);
-this.wakeLockInterval = setInterval(() => {
-if (this.state.isRunning && !this.state.isPaused) this.requestWakeLock();
-}, 15000);
 }
 onStop() {
 this.state.isPaused = true;
@@ -2446,7 +2301,6 @@ this.state.isAutoPaused = false;
 if(ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'none';
 if(ui.dom.afterStop) ui.dom.afterStop.style.display = 'none';
 if(ui.dom.btnStop) ui.dom.btnStop.style.display = 'block';
-this.requestWakeLock();
 // 오디오 컨텍스트 재개
 if (this.silentAudio && this.silentAudio.state === 'suspended') {
 this.silentAudio.resume().catch(()=>{});
@@ -2464,8 +2318,6 @@ ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padSt
 }
 onFinish() {
 if(this.timer) clearInterval(this.timer);
-if(this.wakeLockInterval) clearInterval(this.wakeLockInterval);
-this.releaseWakeLock();
 this.stopSilentKeepAlive();
 const p = storage.loadProfile();
 const weightKg = p.wu === 'lb' ? p.w * 0.453592 : p.w;
@@ -2608,10 +2460,6 @@ const elapsed = Math.floor((Date.now() - app._hiddenAt) / 1000);
 if (elapsed > 0) app.state.seconds += elapsed;
 app._hiddenAt = null;
 }
-/* Wake Lock 재획득 */
-if (app && app.state && app.state.isRunning) {
-app.requestWakeLock();
-}
 /* 오디오 컨텍스트 resume */
 if (app && app.silentAudio && app.silentAudio.state === 'suspended') {
 app.silentAudio.resume().catch(()=>{});
@@ -2627,10 +2475,7 @@ ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padSt
 }
 }, 1000);
 }
-if (ui && ui.dimActive) {
-const overlay = document.getElementById('dimmer-overlay');
-if (overlay) overlay.style.display = 'flex';
-}
+
 }
 });
 // ========== 맵 전체화면 ==========
