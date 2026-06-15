@@ -280,30 +280,12 @@ _leftYBuf: [], _rightYBuf: [], _bufSize: 4,
 _autoContactTime: null, _autoTakeoffTime: null,
 _avgGct: 0, _avgFlight: 0, _stride: 0,
 manualGct: null, manualFlight: null,
-_displayLandmarks: null, _targetLandmarks: null, _smoothFactor: 0.35, _renderLoopId: null,
 init() {
 if (typeof Pose !== 'undefined') {
 this.instance = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
 this.instance.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5, smoothLandmarks: true, smoothSegmentation: false });
 this.instance.onResults(this.onResults.bind(this));
 }
-},
-_startRenderLoop() {
-if (this._renderLoopId) return;
-const step = () => {
-if (!this._targetLandmarks || !cActive || cActive.width === 0) { this._renderLoopId = null; return; }
-const f = this._smoothFactor;
-for (let i=0; i<this._targetLandmarks.length; i++) {
-const t = this._targetLandmarks[i], d = this._displayLandmarks[i];
-d.x += (t.x - d.x) * f; d.y += (t.y - d.y) * f; d.z += (t.z - d.z) * f; d.visibility = t.visibility;
-}
-ctxActive.clearRect(0, 0, cActive.width, cActive.height);
-const dConnectors = getDrawConnectors();
-if(dConnectors) dConnectors(ctxActive, this._displayLandmarks, POSE_CONNECTIONS, {color: '#deff9a', lineWidth: 3});
-if (this.aiTracking || AppControl.isAutoMode) this._renderLoopId = requestAnimationFrame(step);
-else this._renderLoopId = null;
-};
-this._renderLoopId = requestAnimationFrame(step);
 },
 async runStableAI(forceShow = false) {
 if (!this.instance || !vActive || !vActive.src) return;
@@ -329,9 +311,9 @@ onResults(res) {
 if (!res.poseLandmarks) return;
 if (AppControl.currentRoom === 'solution') return;
 if (!cActive || cActive.width === 0 || cActive.height === 0) return;
-this._targetLandmarks = res.poseLandmarks;
-if (!this._displayLandmarks) this._displayLandmarks = res.poseLandmarks.map(p=>({x:p.x,y:p.y,z:p.z,visibility:p.visibility}));
-this._startRenderLoop();
+ctxActive.clearRect(0, 0, cActive.width, cActive.height);
+const dConnectors = getDrawConnectors();
+if(dConnectors) dConnectors(ctxActive, res.poseLandmarks, POSE_CONNECTIONS, {color: '#deff9a', lineWidth: 3});
 const lm = res.poseLandmarks;
 if (!lm[24]||!lm[26]||!lm[28]||!lm[12]||!lm[14]||!lm[16]||!lm[27]||!lm[29]||!lm[30]||!lm[31]||!lm[32]) return;
 let kneeRaw = this.calcAngle(lm[24], lm[26], lm[28]);
@@ -580,7 +562,6 @@ if(vActive.paused) CoreAI.runStableAI(true); else this.syncPlayAI();
 } else {
 btn.style.background="transparent";
 CoreAI.aiTracking=false;
-CoreAI._targetLandmarks=null; CoreAI._displayLandmarks=null;
 if(ctxActive && cActive) ctxActive.clearRect(0,0,cActive.width,cActive.height);
 }
 I18n.updateUIStrings();
