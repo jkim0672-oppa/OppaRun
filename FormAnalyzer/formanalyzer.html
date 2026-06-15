@@ -281,7 +281,7 @@ _leftYBuf: [], _rightYBuf: [], _bufSize: 4,
 _autoContactTime: null, _autoTakeoffTime: null, _prevTakeoffTime: null,
 _avgGct: 0, _avgFlight: 0, _stride: 0,
 manualGct: null, manualFlight: null,
-_smoothLm: null, _smoothAlpha: 0.5,
+_smoothLm: null, _smoothAlpha: 0.5, _maxJump: 0.05,
 init() {
 if (typeof Pose !== 'undefined') {
 this.instance = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
@@ -315,7 +315,7 @@ if (AppControl.currentRoom === 'solution') return;
 if (!cActive || cActive.width === 0 || cActive.height === 0) return;
 const raw = res.poseLandmarks;
 if (!this._smoothLm) this._smoothLm = raw.map(p=>({x:p.x,y:p.y,z:p.z,visibility:p.visibility}));
-else { const a = this._smoothAlpha; for (let i=0;i<raw.length;i++) { const s=this._smoothLm[i], r=raw[i]; s.x += (r.x-s.x)*a; s.y += (r.y-s.y)*a; s.z += (r.z-s.z)*a; s.visibility=r.visibility; } }
+else { const a = this._smoothAlpha, mj = this._maxJump; for (let i=0;i<raw.length;i++) { const s=this._smoothLm[i], r=raw[i]; let dx=r.x-s.x, dy=r.y-s.y, dz=r.z-s.z; if(dx>mj)dx=mj; else if(dx<-mj)dx=-mj; if(dy>mj)dy=mj; else if(dy<-mj)dy=-mj; if(dz>mj)dz=mj; else if(dz<-mj)dz=-mj; s.x += dx*a; s.y += dy*a; s.z += dz*a; s.visibility=r.visibility; } }
 ctxActive.clearRect(0, 0, cActive.width, cActive.height);
 const dConnectors = getDrawConnectors();
 if(dConnectors) dConnectors(ctxActive, this._smoothLm, POSE_CONNECTIONS, {color: '#deff9a', lineWidth: 3});
@@ -343,10 +343,12 @@ const cmPerPixel = estLegCm / bodyPixelHeight;
 const stridePx = Math.abs((lm[27].x - lm[28].x) * cActive.width);
 computedStride = (stridePx * cmPerPixel) / 100 * (1.5 + (userHeight-170)*0.003);
 if(computedStride>0.3 && computedStride<2.8) {
-document.getElementById('valStrideA').innerText = computedStride.toFixed(2)+"m";
+if (computedStride > this._stride) {
 this._stride = computedStride;
+document.getElementById('valStrideA').innerText = this._stride.toFixed(2)+"m";
 let sBar = document.getElementById('gStrideA');
-if (sBar) sBar.style.width = Math.min(100, (computedStride / 2.0) * 100) + '%';
+if (sBar) sBar.style.width = Math.min(100, (this._stride / 2.0) * 100) + '%';
+}
 }
 }
 if(document.getElementById('gKneeA')) document.getElementById('gKneeA').style.width = Math.min(100, (kneeValNum/180)*100)+'%';
@@ -560,6 +562,7 @@ if(this.isAutoMode) {
 btn.style.background="rgba(16,185,129,0.2)";
 CoreAI.aiTracking=true;
 CoreAI.footDataHistory=[]; CoreAI.autoGctList=[]; CoreAI.autoFlightList=[]; CoreAI.autoStrideList=[];
+CoreAI._stride = 0;
 CoreAI.lastDetectedContact=null; CoreAI.lastDetectedTakeoff=null;
 CoreAI._leftYBuf=[]; CoreAI._rightYBuf=[];
 CoreAI.autoKneeList=[]; CoreAI.autoElbowList=[]; CoreAI.autoTorsoList=[];
@@ -775,6 +778,7 @@ CoreAI._leftYBuf = [];
 CoreAI._rightYBuf = [];
 CoreAI._avgGct = 0;
 CoreAI._avgFlight = 0;
+CoreAI._stride = 0;
 setTimeout(() => { CoreAI.runStableAI(true); }, 80);
 },
 // FIXED: 구간 리셋 함수 - 시작점에서 반드시 멈춤
