@@ -178,7 +178,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer
 
 .setting-select { background:#252428; border:1px solid #2c2c2e; color:var(--neon); padding:8px 12px; border-radius:8px; width:126px; text-align:center; font-weight:bold; font-size:14px; }
 
-#reportModal { overflow-y:auto !important; padding-bottom:40px !important; justify-content:flex-start !important; padding-top:10px !important; }
+#reportModal { overflow-y:auto !important; padding-bottom:40px !important; justify-content:flex-start !important; padding-top:10px !important; overscroll-behavior:contain; touch-action:pan-y; }
 
 .report-table { width:100%; max-width:460px; border-collapse:collapse; margin-top:5px; background:#1c1b1f; border-radius:12px; overflow:hidden; }
 
@@ -208,6 +208,9 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer
 
 .text-btn.danger { color:#ff453a; border-color:rgba(255,69,58,0.4); }
 
+.toast-popup { display:none; position:fixed; z-index:500; left:50%; transform:translateX(-50%); bottom:100px; background:#1c1c1e; border:1.5px solid var(--neon); border-radius:14px; padding:14px 22px; min-width:220px; max-width:85%; text-align:center; box-shadow:0 4px 24px rgba(0,0,0,0.5); }
+.toast-icon { font-size:28px; margin-bottom:6px; }
+.toast-msg { color:#fff; font-size:14px; font-weight:600; }
 .custom-confirm-overlay { display:none; position:fixed; z-index:300; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.85); align-items:center; justify-content:center; }
 
 .custom-confirm-box { background:var(--panel-bg); border:2px solid var(--neon); border-radius:16px; width:85%; max-width:320px; padding:20px; text-align:center; }
@@ -222,7 +225,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer
 
 .confirm-btn.no { background:#3a3a3c; color:#e5e5ea; }
 
-.savedlist-modal { display:none; position:fixed; z-index:250; left:0; top:0; width:100%; height:100%; background:rgba(10,10,12,0.99); flex-direction:column; align-items:center; padding:16px 14px 24px; box-sizing:border-box; overflow:hidden; }
+.savedlist-modal { display:none; position:fixed; z-index:250; left:0; top:0; width:100%; height:100%; background:rgba(10,10,12,0.99); flex-direction:column; align-items:center; padding:16px 14px 24px; box-sizing:border-box; overflow:hidden; overscroll-behavior:contain; }
 
 .savedlist-header { width:100%; max-width:500px; display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid #2c2c2e; padding-bottom:10px; flex-shrink:0; }
 
@@ -924,6 +927,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer
 
 <div id="imgModal" class="modal"><div class="modal-controls"><button class="text-btn danger" id="btnModalDelete" onclick="AppStorage.triggerCustomConfirm('deleteSnapshot')">삭제</button><button class="text-btn" id="btnModalClose" onclick="AppStorage.closeModal()">닫기</button></div><img id="modalImg" src=""></div>
 
+<div id="toastPopup" class="toast-popup"><div class="toast-icon" id="toastIcon">💾</div><div class="toast-msg" id="toastMsg"></div></div>
 <div id="customConfirm" class="custom-confirm-overlay"><div class="custom-confirm-box"><p class="confirm-msg" id="txtConfirmMsg">이 스냅샷을 창고 방에서<br>영구 삭제할까요?</p><div class="confirm-buttons" id="confirmBtnContainer"><button class="confirm-btn yes" id="btnConfirmYes" onclick="AppStorage.executeDelete()">삭제</button><button class="confirm-btn no" id="btnConfirmNo" onclick="AppStorage.cancelDelete()">취소</button></div></div></div>
 
 <script>
@@ -1833,6 +1837,14 @@ document.getElementById('reportModal').style.display = 'flex';
 },
 
 closeReportModal() { document.getElementById('reportModal').style.display='none'; },
+showToast(icon, msg, duration=2200) {
+const el=document.getElementById('toastPopup');
+document.getElementById('toastIcon').innerText=icon;
+document.getElementById('toastMsg').innerText=msg;
+el.style.display='block';
+clearTimeout(this._toastTimer);
+this._toastTimer=setTimeout(()=>el.style.display='none', duration);
+},
 
 saveReportData() {
 
@@ -1872,7 +1884,7 @@ saved.unshift(report);
 
 localStorage.setItem('proAnalysisReports', JSON.stringify(saved));
 
-alert(I18n[I18n.currentLang].saveSuccess);
+AppControl.showToast('💾', I18n[I18n.currentLang].saveSuccess);
 
 },
 
@@ -1906,7 +1918,7 @@ closeSolutionRoom() { AppControl.switchRoom('auto'); },
 
 async _captureAndShare(sourceIds,title){
 const W=720,CARD_PAD=36,LINE_H=28,TAG_H=26,CARD_R=14,TITLE_SIZE=22,SUB_SIZE=15,DESC_SIZE=13,TAG_SIZE=12;
-const BG='#0a0a0c',CARD_BG='#1c1c1e',NEON='#a3e635',BLUE='#60a5fa',GRAY='#6b7280',WHITE='#e5e5ea',BORDER='#7c3aed';
+const BG='#0a0a0c',CARD_BG='#1c1c1e',NEON='#a3e635',BLUE='#60a5fa',GRAY='#c0c0c8',WHITE='#ffffff',BORDER='#7c3aed';
 // 데이터 수집
 const keys=['Knee','Dynamic','Torso'];
 const items=keys.map(k=>{
@@ -1981,7 +1993,7 @@ y+=cardH+10;
 });
 // 하단 브랜딩
 ctx.strokeStyle='#2c2c2e';ctx.beginPath();ctx.moveTo(CARD_PAD,y);ctx.lineTo(W-CARD_PAD,y);ctx.stroke();y+=12;
-ctx.fillStyle=GRAY;ctx.font=`12px -apple-system,sans-serif`;ctx.fillText('PRO ANALYSIS · AI-powered Running Coach',CARD_PAD,y+14);
+ctx.fillStyle='#9a9aaa';ctx.font=`12px -apple-system,sans-serif`;ctx.fillText('PRO ANALYSIS · AI-powered Running Coach',CARD_PAD,y+14);
 ctx.fillStyle=NEON;ctx.textAlign='right';ctx.fillText('🏃 Check out my run!',W-CARD_PAD,y+14);ctx.textAlign='left';
 // 공유
 canvas.toBlob(async blob=>{
@@ -2366,21 +2378,17 @@ renderSavedList() {
 
 const scroll = document.getElementById('savedListScroll');
 
-const emptyDiv = document.getElementById('savedListEmpty');
-
 const saved = JSON.parse(localStorage.getItem('proAnalysisReports') || '[]');
 
 scroll.innerHTML = '';
 
 if(saved.length === 0) {
 
-scroll.appendChild(emptyDiv);
+scroll.innerHTML = '<div class="savedlist-empty">저장된 레포트가 없습니다.<br>분석 후 저장 버튼을 눌러보세요.</div>';
 
 return;
 
 }
-
-emptyDiv.remove();
 
 saved.forEach(entry => {
 
@@ -2780,4 +2788,4 @@ window.addEventListener('DOMContentLoaded', () => {
 
 </body>
 
-  </html>
+</html>
