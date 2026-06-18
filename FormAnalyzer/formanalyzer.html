@@ -18,8 +18,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
 
-<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
@@ -918,7 +916,7 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer
 
 <div id="savedListModal" class="savedlist-modal">
 
-<div class="savedlist-header"><span class="savedlist-title" id="savedListTitle">저장된 레포트</span><button class="savedlist-back" id="savedListBack" onclick="AppControl.closeSavedList()">← 메인으로</button></div>
+<div class="savedlist-header"><span class="savedlist-title" id="savedListTitle">저장된 레포트</span><button class="savedlist-back" id="savedListBack" onclick="AppControl.closeSavedList()">메인으로</button></div>
 
 <div class="savedlist-scroll" id="savedListScroll"><div class="savedlist-empty" id="savedListEmpty">저장된 레포트가 없습니다.<br>분석 후 저장 버튼을 눌러보세요.</div></div>
 
@@ -1906,29 +1904,99 @@ closeSavedList() { document.getElementById('savedListModal').style.display='none
 
 closeSolutionRoom() { AppControl.switchRoom('auto'); },
 
-shareSolution() {
-
-const p=I18n[I18n.currentLang];
-
-const knee=document.getElementById('solDescKnee').innerText;
-
-const dynamic=document.getElementById('solDescDynamic').innerText;
-
-const torso=document.getElementById('solDescTorso').innerText;
-
-const text=`[${p.solutionTitle}]\n\n[Knee]\n${knee}\n\n[GCT/Flight]\n${dynamic}\n\n[Torso]\n${torso}`;
-
-if(navigator.clipboard) {
-
-navigator.clipboard.writeText(text).then(()=>{
-
-if(navigator.share) navigator.share({title:p.solutionTitle, text});
-
-}).catch(()=>{ if(navigator.share) navigator.share({title:p.solutionTitle, text}); });
-
-} else if(navigator.share) { navigator.share({title:p.solutionTitle, text}); }
-
+async _captureAndShare(sourceIds,title){
+const W=720,CARD_PAD=36,LINE_H=28,TAG_H=26,CARD_R=14,TITLE_SIZE=22,SUB_SIZE=15,DESC_SIZE=13,TAG_SIZE=12;
+const BG='#0a0a0c',CARD_BG='#1c1c1e',NEON='#a3e635',BLUE='#60a5fa',GRAY='#6b7280',WHITE='#e5e5ea',BORDER='#7c3aed';
+// 데이터 수집
+const keys=['Knee','Dynamic','Torso'];
+const items=keys.map(k=>{
+const tagEl=document.getElementById(sourceIds['tag'+k]);
+const descEl=document.getElementById(sourceIds['desc'+k]);
+return {
+tag: tagEl?tagEl.innerText:'--',
+tagColor: tagEl?tagEl.style.background||'#3a3a3c':'#3a3a3c',
+tagText: tagEl?tagEl.style.color||'#fff':'#fff',
+desc: descEl?descEl.innerText:'',
+title: k==='Knee'?'하체 익스텐션 & 롤링 (Knee Extension)':k==='Dynamic'?'지면 반발력 & 효율성 (GCT / Flight)':'상체 밸런스 & 각도 (Torso Lean)'
+};
+});
+const dateEl=sourceIds['date']?document.getElementById(sourceIds['date']):null;
+const dateStr=dateEl?dateEl.innerText:'';
+// 캔버스 높이 계산
+const canvas=document.createElement('canvas');
+const ctx=canvas.getContext('2d');
+const wrapText=(text,maxW,size)=>{
+ctx.font=`${size}px -apple-system,sans-serif`;
+const words=text.split(' ');let lines=[],cur='';
+words.forEach(w=>{const t=cur?cur+' '+w:w;if(ctx.measureText(t).width>maxW&&cur){lines.push(cur);cur=w;}else cur=t;});
+if(cur)lines.push(cur);
+return lines;
+};
+const innerW=W-CARD_PAD*2;
+let H=CARD_PAD; // 상단 패딩
+H+=40; // 타이틀
+if(dateStr)H+=24;
+H+=16; // 구분선
+items.forEach(item=>{
+H+=CARD_PAD; // 카드 상단
+H+=TAG_H+8; // 제목+태그
+const descLines=wrapText(item.desc,innerW-CARD_PAD*2-4,DESC_SIZE);
+H+=descLines.length*LINE_H+CARD_PAD; // 설명+하단 패딩
+H+=10; // 카드 간격
+});
+H+=40+CARD_PAD; // 하단 브랜딩
+canvas.width=W; canvas.height=H;
+// 배경
+ctx.fillStyle=BG; ctx.fillRect(0,0,W,H);
+let y=CARD_PAD;
+// 타이틀
+ctx.fillStyle=NEON; ctx.font=`900 ${TITLE_SIZE}px -apple-system,sans-serif`;
+ctx.fillText('BIOMECHANICS REALTIME SOLUTION ⚡',CARD_PAD,y+TITLE_SIZE); y+=TITLE_SIZE+6;
+if(dateStr){ctx.fillStyle=GRAY;ctx.font=`${SUB_SIZE}px -apple-system,sans-serif`;ctx.fillText(dateStr,CARD_PAD,y+SUB_SIZE);y+=SUB_SIZE+6;}
+// 구분선
+ctx.strokeStyle='#2c2c2e';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(CARD_PAD,y);ctx.lineTo(W-CARD_PAD,y);ctx.stroke();y+=14;
+// 카드들
+items.forEach(item=>{
+const descLines=wrapText(item.desc,innerW-CARD_PAD*2-4,DESC_SIZE);
+const cardH=CARD_PAD+TAG_H+8+descLines.length*LINE_H+CARD_PAD;
+// 카드 배경
+ctx.fillStyle=CARD_BG;
+ctx.beginPath();ctx.roundRect(CARD_PAD,y,innerW,cardH,CARD_R);ctx.fill();
+// 왼쪽 보더
+ctx.fillStyle=BORDER;ctx.beginPath();ctx.roundRect(CARD_PAD,y,4,cardH,[CARD_R,0,0,CARD_R]);ctx.fill();
+// 제목
+ctx.fillStyle=NEON;ctx.font=`700 ${SUB_SIZE}px -apple-system,sans-serif`;
+ctx.fillText(item.title,CARD_PAD+16,y+CARD_PAD+SUB_SIZE-4);
+// 태그 배경
+const tagW=ctx.measureText(item.tag).width+20;
+const tagX=W-CARD_PAD-tagW-8;
+ctx.fillStyle=item.tagColor;
+ctx.beginPath();ctx.roundRect(tagX,y+CARD_PAD-2,tagW,TAG_H,6);ctx.fill();
+ctx.fillStyle=item.tagText;ctx.font=`700 ${TAG_SIZE}px -apple-system,sans-serif`;
+ctx.textAlign='center';ctx.fillText(item.tag,tagX+tagW/2,y+CARD_PAD+TAG_H/2+4);ctx.textAlign='left';
+// 설명
+ctx.fillStyle=GRAY;ctx.font=`${DESC_SIZE}px -apple-system,sans-serif`;
+descLines.forEach((line,i)=>{ctx.fillText(line,CARD_PAD+16,y+CARD_PAD+TAG_H+14+(i+1)*LINE_H);});
+y+=cardH+10;
+});
+// 하단 브랜딩
+ctx.strokeStyle='#2c2c2e';ctx.beginPath();ctx.moveTo(CARD_PAD,y);ctx.lineTo(W-CARD_PAD,y);ctx.stroke();y+=12;
+ctx.fillStyle=GRAY;ctx.font=`12px -apple-system,sans-serif`;ctx.fillText('PRO ANALYSIS · AI-powered Running Coach',CARD_PAD,y+14);
+ctx.fillStyle=NEON;ctx.textAlign='right';ctx.fillText('🏃 Check out my run!',W-CARD_PAD,y+14);ctx.textAlign='left';
+// 공유
+canvas.toBlob(async blob=>{
+if(!blob)return;
+const file=new File([blob],'solution.png',{type:'image/png'});
+try{
+if(navigator.share&&navigator.canShare&&navigator.canShare({files:[file]})){
+await navigator.share({title,files:[file]});return;
+}
+}catch(e2){}
+if(navigator.share){await navigator.share({title,text:title});return;}
+const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='solution.png';a.click();URL.revokeObjectURL(url);
+},'image/png');
 },
+shareSolution(){this._captureAndShare({tagKnee:'solTagKnee',descKnee:'solDescKnee',tagDynamic:'solTagDynamic',descDynamic:'solDescDynamic',tagTorso:'solTagTorso',descTorso:'solDescTorso'},'BIOMECHANICS REALTIME SOLUTION');},
 
 openSolutionModal() {
 
@@ -1960,11 +2028,7 @@ modal.style.display='flex';
 
 closeSolutionModal() { document.getElementById('solutionModal').style.display='none'; },
 
-shareSolutionModal() {
-
-this._captureAndShare({tagKnee:'solModalTagKnee',descKnee:'solModalDescKnee',tagDynamic:'solModalTagDynamic',descDynamic:'solModalDescDynamic',tagTorso:'solModalTagTorso',descTorso:'solModalDescTorso'},'BIOMECHANICS REALTIME SOLUTION');
-
-},
+shareSolutionModal(){this._captureAndShare({tagKnee:'solModalTagKnee',descKnee:'solModalDescKnee',tagDynamic:'solModalTagDynamic',descDynamic:'solModalDescDynamic',tagTorso:'solModalTagTorso',descTorso:'solModalDescTorso'},'BIOMECHANICS REALTIME SOLUTION');},
 
 openSolutionModalFromEntry(entry) {
 
@@ -2032,11 +2096,7 @@ if(shareBtn) shareBtn.onclick=()=>AppControl.shareEntryDetail(entry);
 
 closeEntryDetailModal() { document.getElementById('entryDetailModal').style.display='none'; },
 
-shareEntryDetail(entry) {
-
-this._captureAndShare({tagKnee:'entryDetailSolTagKnee',descKnee:'entryDetailSolDescKnee',tagDynamic:'entryDetailSolTagDynamic',descDynamic:'entryDetailSolDescDynamic',tagTorso:'entryDetailSolTagTorso',descTorso:'entryDetailSolDescTorso',date:'entryDetailDate'},'Running Report');
-
-},
+shareEntryDetail(entry){this._captureAndShare({tagKnee:'entryDetailSolTagKnee',descKnee:'entryDetailSolDescKnee',tagDynamic:'entryDetailSolTagDynamic',descDynamic:'entryDetailSolDescDynamic',tagTorso:'entryDetailSolTagTorso',descTorso:'entryDetailSolDescTorso',date:'entryDetailDate'},'Running Report');},
 
 resetAll() {
 
@@ -2717,45 +2777,6 @@ window.addEventListener('DOMContentLoaded', () => {
 </script>
 
 </div><!-- /pageMain -->
-
-
-<div id="shareCardTemplate" style="display:none; position:fixed; left:-9999px; top:0; z-index:-1;">
-<div id="shareCardInner" style="width:360px; background:#0a0a0c; padding:20px; font-family:'Segoe UI',sans-serif; border-radius:16px; box-sizing:border-box;">
-<div style="display:flex; align-items:center; gap:8px; margin-bottom:14px; border-bottom:1px solid #2c2c2e; padding-bottom:10px;">
-<span style="font-size:20px;">⚡</span>
-<div>
-<div style="color:#a3e635; font-size:13px; font-weight:900; letter-spacing:0.5px;">BIOMECHANICS REALTIME SOLUTION</div>
-<div style="color:#6b7280; font-size:10px; margin-top:1px;">PRO ANALYSIS v5.6</div>
-</div>
-</div>
-<div id="shareCardKnee" style="background:#1c1c1e; border-radius:10px; padding:10px 12px; margin-bottom:8px; border-left:3px solid #7c3aed;">
-<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:5px;">
-<span style="color:#a3e635; font-size:11px; font-weight:700;">하체 익스텐션 & 롤링 (Knee Extension)</span>
-<span id="shareTagKnee" style="font-size:9px; font-weight:700; padding:3px 7px; border-radius:6px; white-space:nowrap; background:#3a3a3c; color:#fff;">진단 대기</span>
-</div>
-<p id="shareDescKnee" style="color:#9ca3af; font-size:10px; margin:0; line-height:1.5;"></p>
-</div>
-<div id="shareCardDynamic" style="background:#1c1c1e; border-radius:10px; padding:10px 12px; margin-bottom:8px; border-left:3px solid #7c3aed;">
-<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:5px;">
-<span style="color:#a3e635; font-size:11px; font-weight:700;">지면 반발력 & 효율성 (GCT / Flight)</span>
-<span id="shareTagDynamic" style="font-size:9px; font-weight:700; padding:3px 7px; border-radius:6px; white-space:nowrap; background:#3a3a3c; color:#fff;">진단 대기</span>
-</div>
-<p id="shareDescDynamic" style="color:#9ca3af; font-size:10px; margin:0; line-height:1.5;"></p>
-</div>
-<div id="shareCardTorso" style="background:#1c1c1e; border-radius:10px; padding:10px 12px; margin-bottom:14px; border-left:3px solid #7c3aed;">
-<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:5px;">
-<span style="color:#a3e635; font-size:11px; font-weight:700;">상체 밸런스 & 각도 (Torso Lean)</span>
-<span id="shareTagTorso" style="font-size:9px; font-weight:700; padding:3px 7px; border-radius:6px; white-space:nowrap; background:#3a3a3c; color:#fff;">진단 대기</span>
-</div>
-<p id="shareDescTorso" style="color:#9ca3af; font-size:10px; margin:0; line-height:1.5;"></p>
-</div>
-<div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid #2c2c2e; padding-top:10px;">
-<span style="color:#4b5563; font-size:9px;">PRO ANALYSIS · AI-powered Running Coach</span>
-<span style="color:#a3e635; font-size:9px; font-weight:700;">🏃 Check out my run!</span>
-</div>
-</div>
-</div>
-
 
 </body>
 
