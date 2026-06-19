@@ -531,10 +531,32 @@ if (AppControl.currentRoom === 'solution') return;
 if (!cActive || cActive.width === 0 || cActive.height === 0) return;
 const raw = res.poseLandmarks;
 if (!this._smoothLm) this._smoothLm = raw.map(p=>({x:p.x,y:p.y,z:p.z,visibility:p.visibility}));
-else { const a = this._smoothAlpha, mj = this._maxJump; for (let i=0;i<raw.length;i++) { const s=this._smoothLm[i], r=raw[i]; if((r.visibility||0) < 0.55) continue; let dx=r.x-s.x, dy=r.y-s.y, dz=r.z-s.z; if(dx>mj)dx=mj; else if(dx<-mj)dx=-mj; if(dy>mj)dy=mj; else if(dy<-mj)dy=-mj; if(dz>mj)dz=mj; else if(dz<-mj)dz=-mj; s.x += dx*a; s.y += dy*a; s.z += dz*a; s.visibility=r.visibility; } }
+else {
+const sPrev = this._smoothLm; const a = this._smoothAlpha, mj = this._maxJump;
+let pcx=0, pcy=0, pcn=0, pScale=0.15;
+[11,12,23,24].forEach(i => { if(sPrev[i]) { pcx+=sPrev[i].x; pcy+=sPrev[i].y; pcn++; } });
+if(pcn>0) { pcx/=pcn; pcy/=pcn; if(sPrev[11]&&sPrev[12]) { const dx0=sPrev[11].x-sPrev[12].x, dy0=sPrev[11].y-sPrev[12].y; pScale = Math.max(0.05, Math.sqrt(dx0*dx0+dy0*dy0)); } }
+const pMaxDist = pScale * 4.5;
+for (let i=0;i<raw.length;i++) {
+const s=sPrev[i], r=raw[i];
+if((r.visibility||0) < 0.55) continue;
+if (pcn>0 && i>=11) { const ddx=r.x-pcx, ddy=r.y-pcy; if(Math.sqrt(ddx*ddx+ddy*ddy) > pMaxDist) continue; }
+let dx=r.x-s.x, dy=r.y-s.y, dz=r.z-s.z; if(dx>mj)dx=mj; else if(dx<-mj)dx=-mj; if(dy>mj)dy=mj; else if(dy<-mj)dy=-mj; if(dz>mj)dz=mj; else if(dz<-mj)dz=-mj; s.x += dx*a; s.y += dy*a; s.z += dz*a; s.visibility=r.visibility;
+}
+}
 ctxActive.clearRect(0, 0, cActive.width, cActive.height);
 const visThresh = 0.55;
-const visibleLm = this._smoothLm.map((p,i) => (i >= 11 && (p.visibility||0) >= visThresh) ? p : null);
+const sl = this._smoothLm;
+let cx=0, cy=0, cn=0, refScale=0.15;
+[11,12,23,24].forEach(i => { if(sl[i]) { cx+=sl[i].x; cy+=sl[i].y; cn++; } });
+if(cn>0) { cx/=cn; cy/=cn; if(sl[11]&&sl[12]) { const dx=sl[11].x-sl[12].x, dy=sl[11].y-sl[12].y; refScale = Math.max(0.05, Math.sqrt(dx*dx+dy*dy)); } }
+const maxDist = refScale * 4.5;
+const visibleLm = sl.map((p,i) => {
+if (i < 11) return null;
+if ((p.visibility||0) < visThresh) return null;
+if (cn>0) { const dx=p.x-cx, dy=p.y-cy; if(Math.sqrt(dx*dx+dy*dy) > maxDist) return null; }
+return p;
+});
 const filteredConnections = POSE_CONNECTIONS.filter(([a,b]) => a >= 11 && b >= 11 && visibleLm[a] && visibleLm[b]);
 const dConnectors = getDrawConnectors();
 if(dConnectors) dConnectors(ctxActive, this._smoothLm, filteredConnections, {color: '#deff9a', lineWidth: 3});
