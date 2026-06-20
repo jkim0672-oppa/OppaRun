@@ -408,6 +408,12 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer
 <tr><td id="tdRepSteps" class="neon-txt">Total Tracked Steps (분석된 총 발걸음 수)</td><td class="neon-txt">-</td><td id="repValSteps" class="neon-txt">0</td></tr>
 </tbody>
 </table>
+<div style="margin-top:8px;"><button class="ctrl-btn" id="btnToggleStepLog" style="width:100%; background:#2c2c2e; color:var(--neon); border:1px solid var(--neon);" onclick="AppControl.toggleStepLog()">👟 걸음별 데이터 보기</button></div>
+<div id="stepLogContainer" style="display:none; margin-top:8px; max-height:260px; overflow-y:auto; border:1px solid #333; border-radius:10px;">
+<table class="report-table" style="width:100%;"><thead><tr><th id="thStepNum">Step</th><th id="thStepTime">Time</th><th class="blue-txt" id="thStepGct">GCT</th><th class="blue-txt" id="thStepFlight">Flight</th></tr></thead>
+<tbody id="stepLogBody"></tbody>
+</table>
+</div>
 <div style="margin-top:8px;"><button class="ctrl-btn btn-setting-mix" id="tabSolution" style="width:100%;" onclick="AppControl.openSolutionModal()">Solution AI</button></div>
 <div style="margin-top:8px; display:grid; grid-template-columns:1fr 1fr; gap:8px;"><button class="ctrl-btn btn-play-mix" id="btnReportSave" onclick="AppControl.saveReportData()">💾 저장하기</button><button class="ctrl-btn" style="background:var(--btn-red);" id="btnReportDelete" onclick="AppControl.deleteReportData()">🗑️ 삭제</button></div>
 <div style="margin-top:8px;"><button class="ctrl-btn" id="btnSavedListView" style="width:100%; background:#2c2c2e; color:var(--neon); border:1px solid var(--neon);" onclick="AppControl.openSavedList()">📋 저장목록 보기</button></div>
@@ -489,7 +495,7 @@ curKnee: "--°", curElbow: "--°", curBody: "--°",
 lastJoints: { knee: null, elbow: null, hip: null },
 instance: null,
 footDataHistory: [],
-autoGctList: [], autoFlightList: [], autoStrideList: [],
+autoGctList: [], autoFlightList: [], autoStrideList: [], autoStepLog: [],
 autoKneeList: [], autoElbowList: [], autoTorsoList: [],
 lastDetectedContact: null, lastDetectedTakeoff: null,
 lastFrameTime: -1,
@@ -691,8 +697,10 @@ if (elapsed > 0.06 && elapsed < 0.45) { liftoff = true; this._autoTakeoffTime = 
 if (liftoff && this._autoTakeoffTime !== null) {
 const gct = Math.round((this._autoTakeoffTime - this._autoContactTime)*1000);
 const flight = (this._prevTakeoffTime !== null) ? Math.round((this._autoContactTime - this._prevTakeoffTime)*1000) : null;
+const stepContactTime = this._autoContactTime;
 if (gct > 80 && gct < 350) this.autoGctList.push(gct);
 if (flight !== null && flight > 40 && flight < 220) this.autoFlightList.push(flight);
+this.autoStepLog.push({t: stepContactTime, gct: (gct > 80 && gct < 350) ? gct : null, flight: (flight !== null && flight > 40 && flight < 220) ? flight : null});
 this._prevTakeoffTime = this._autoTakeoffTime;
 if(this.autoGctList.length) {
 this._avgGct = Math.round(this.autoGctList.reduce((a,b)=>a+b,0)/this.autoGctList.length);
@@ -785,7 +793,7 @@ if(this.isAutoMode) {
 btn.style.background="var(--btn-ai-active)";
 btn.style.boxShadow="0 0 12px rgba(220,38,38,0.5)";
 CoreAI.aiTracking=true;
-CoreAI.footDataHistory=[]; CoreAI.autoGctList=[]; CoreAI.autoFlightList=[]; CoreAI.autoStrideList=[];
+CoreAI.footDataHistory=[]; CoreAI.autoGctList=[]; CoreAI.autoFlightList=[]; CoreAI.autoStrideList=[]; CoreAI.autoStepLog=[];
 CoreAI._stride = 0; CoreAI._strideBuf=[];
 CoreAI.lastDetectedContact=null; CoreAI.lastDetectedTakeoff=null;
 CoreAI._leftYBuf=[]; CoreAI._rightYBuf=[];
@@ -917,7 +925,38 @@ document.getElementById('repValFlight').innerText = avgFlight + "ms";
 document.getElementById('repValStride').innerText = document.getElementById('valStrideA').innerText;
 let steps = CoreAI.autoGctList.length;
 document.getElementById('repValSteps').innerText = steps;
+document.getElementById('stepLogContainer').style.display = 'none';
+const stepBtn0 = document.getElementById('btnToggleStepLog');
+if(stepBtn0) stepBtn0.innerText = I18n[I18n.currentLang].btnStepLogShow;
+this.renderStepLog();
 document.getElementById('reportModal').style.display = 'flex';
+},
+toggleStepLog() {
+const el = document.getElementById('stepLogContainer');
+const btn = document.getElementById('btnToggleStepLog');
+const p = I18n[I18n.currentLang];
+const willOpen = (el.style.display === 'none');
+el.style.display = willOpen ? 'block' : 'none';
+if(btn) btn.innerText = willOpen ? p.btnStepLogHide : p.btnStepLogShow;
+},
+renderStepLog() {
+const body = document.getElementById('stepLogBody');
+if (!body) return;
+const p = I18n[I18n.currentLang];
+body.innerHTML = '';
+const log = CoreAI.autoStepLog || [];
+if (log.length === 0) {
+body.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#888;">'+p.stepLogEmpty+'</td></tr>';
+return;
+}
+log.forEach((s, i) => {
+const tr = document.createElement('tr');
+const tT = (typeof s.t === 'number') ? s.t.toFixed(2)+'s' : '-';
+const tG = (s.gct !== null && s.gct !== undefined) ? s.gct+'ms' : '-';
+const tF = (s.flight !== null && s.flight !== undefined) ? s.flight+'ms' : '-';
+tr.innerHTML = '<td>'+(i+1)+'</td><td>'+tT+'</td><td class="blue-txt">'+tG+'</td><td class="blue-txt">'+tF+'</td>';
+body.appendChild(tr);
+});
 },
 closeReportModal() { document.getElementById('reportModal').style.display='none'; },
 showToast(icon, msg, duration=2200) {
@@ -962,7 +1001,8 @@ executeDeleteReport() {
 document.getElementById('deleteReportConfirm').style.display='none';
 document.getElementById('repValKnee').innerText='--°'; document.getElementById('repValElbow').innerText='--°'; document.getElementById('repValBody').innerText='--°';
 document.getElementById('repValGCT').innerText='0ms'; document.getElementById('repValFlight').innerText='0ms'; document.getElementById('repValStride').innerText='0.00m'; document.getElementById('repValSteps').innerText='0';
-CoreAI.autoKneeList=[]; CoreAI.autoElbowList=[]; CoreAI.autoTorsoList=[]; CoreAI.autoGctList=[]; CoreAI.autoFlightList=[]; CoreAI.autoStrideList=[];
+CoreAI.autoKneeList=[]; CoreAI.autoElbowList=[]; CoreAI.autoTorsoList=[]; CoreAI.autoGctList=[]; CoreAI.autoFlightList=[]; CoreAI.autoStrideList=[]; CoreAI.autoStepLog=[];
+this.renderStepLog();
 this.closeReportModal();
 },
 openSavedList() {
@@ -1152,6 +1192,7 @@ document.getElementById('gStrideA').style.width = '0%';
 CoreAI.footDataHistory = [];
 CoreAI.autoGctList = [];
 CoreAI.autoFlightList = [];
+CoreAI.autoStepLog = [];
 CoreAI.autoStrideList = [];
 CoreAI.autoKneeList = [];
 CoreAI.autoElbowList = [];
@@ -1179,7 +1220,7 @@ if(isNaN(endVal) || endVal <= startVal) endVal = vActive.duration;
 vActive.pause();
 this._markUserSeek();
 // 데이터 초기화
-CoreAI.footDataHistory=[]; CoreAI.autoGctList=[]; CoreAI.autoFlightList=[]; CoreAI.autoStrideList=[];
+CoreAI.footDataHistory=[]; CoreAI.autoGctList=[]; CoreAI.autoFlightList=[]; CoreAI.autoStrideList=[]; CoreAI.autoStepLog=[];
 CoreAI.autoKneeList=[]; CoreAI.autoElbowList=[]; CoreAI.autoTorsoList=[];
 CoreAI.lastDetectedContact=null; CoreAI.lastDetectedTakeoff=null;
 CoreAI._autoContactTime=null; CoreAI._autoTakeoffTime=null; CoreAI._prevTakeoffTime=null;
@@ -1291,7 +1332,8 @@ this.renderSavedList();
 const I18n = {
 currentLang:'en',
 ko: {
-mainTitle:"PRO ANALYSIS v5.6", openFile:"📁 비디오 열기", btnPlay:"▶ 재생", btnPause:"⏸ 일시정지", btnReport:"레포트", btnReset:"전체 리셋", btnReturn:"구간 리셋", btnSetting:"설정", cardKnee:"무릎 각도", cardElbow:"팔꿈치 각도", cardTorso:"상체 기울기", cardStride:"보폭 거리", gctManual:"GCT", gctAuto:"평균 GCT", flightManual:"Flight", flightAuto:"평균 Flight", galleryTitle:"내 스냅샷 창고 📁", galleryClose:"닫기", confirmMsg:"이 스냅샷을 창고 방에서\n영구 삭제할까요?", confirmYes:"삭제", confirmNo:"취소", reportTitle:"러닝 분석 종합 레포트", thMetric:"분석 항목", thGuide:"권장 표준 수치", thValue:"내 측정 데이터", repKnee:"Knee Angle (평균 무릎 익스텐션)", repElbow:"Elbow Angle (평균 팔꿈치각도)", repTorso:"Torso Angle (평균 상체기울기)", repGct:"Avg GCT (평균 지면접촉시간)", repFlight:"Avg Flight (평균 공중체류시간)", repStride:"Avg Stride (평균 보폭 거리)", repSteps:"Total Steps (분석된 총 발걸음 수)", settingTitle:"러닝 피지컬 환경 설정 ⚙️", settingClose:"저장 및 닫기", setHeight:"신장 (cm)", setWeight:"체중 (kg)", setAge:"나이", setGender:"성별", setLang:"언어 설정", alertNoVideo:"먼저 분석할 영상을 불러와 주세요!", alertInvalidRange:"시작 지점은 끝 지점보다 작아야 하며, 영상의 길이를 초과할 수 없습니다.", lblStart:"시작", lblEnd:"종료", btnSave:"💾 저장하기", btnDelete:"🗑️ 삭제", saveSuccess:"레포트가 저장되었습니다!", deleteConfirm:"현재 측정된 레포트 데이터를 초기화할까요?", savedListTitle:"저장된 레포트", savedListBack:"← 메인으로", savedListEmpty:"저장된 레포트가 없습니다.\n분석 후 저장 버튼을 눌러보세요.", savedListView:"📋 저장목록 보기", aiStart:"AI 실시간 추적 시작", aiStop:"AI 분석 중단하기", solutionTitle:"BIOMECHANICS REALTIME SOLUTION ⚡", solKneeTitle:"하체 익스텐션 & 롤링 (Knee Extension)", solKneeDesc:"영상을 재생하거나 AI 추적 데이터를 가동하면 무릎 관절 가동 범위와 뒤꿈치 롤링 메커니즘을 분석하여 맞춤형 생체역학 솔루션을 출력합니다.", solDynamicTitle:"지면 반발력 & 효율성 (GCT / Flight)", solDynamicDesc:"발이 땅에 닿는 지면접촉시간(GCT)과 공중 체류시간(Flight Time) 비율을 조합 추적하여 탄성 에너지 활용도를 극대화할 수 있는 자세를 코칭합니다.", solTorsoTitle:"상체 밸런스 & 각도 (Torso Lean)", solTorsoDesc:"체중 이동을 위한 상체 기울기 각도를 정밀 모니터링하여 요추 부하를 줄이고 중력을 추진력으로 바꿀 수 있는 포인트를 분석합니다.", solTagWait:"진단 대기", contact:"Contact", takeoff:"Takeoff",
+mainTitle:"PRO ANALYSIS v5.6", openFile:"📁 비디오 열기", btnPlay:"▶ 재생", btnPause:"⏸ 일시정지", btnReport:"레포트", btnReset:"전체 리셋", btnReturn:"구간 리셋", btnSetting:"설정", cardKnee:"무릎 각도", cardElbow:"팔꿈치 각도", cardTorso:"상체 기울기", cardStride:"보폭 거리", gctManual:"GCT", gctAuto:"평균 GCT", flightManual:"Flight", flightAuto:"평균 Flight", galleryTitle:"내 스냅샷 창고 📁", galleryClose:"닫기", confirmMsg:"이 스냅샷을 창고 방에서\n영구 삭제할까요?", confirmYes:"삭제", confirmNo:"취소", reportTitle:"러닝 분석 종합 레포트", thMetric:"분석 항목", thGuide:"권장 표준 수치", thValue:"내 측정 데이터", repKnee:"무릎 각도 (평균 익스텐션)", repElbow:"팔꿈치 각도 (평균)", repTorso:"상체 기울기 (평균)", repGct:"평균 GCT (지면접촉시간)", repFlight:"평균 Flight (공중체류시간)", repStride:"평균 보폭 거리", repSteps:"총 분석 발걸음 수", settingTitle:"러닝 피지컬 환경 설정 ⚙️", settingClose:"저장 및 닫기", setHeight:"신장 (cm)", setWeight:"체중 (kg)", setAge:"나이", setGender:"성별", setLang:"언어 설정", alertNoVideo:"먼저 분석할 영상을 불러와 주세요!", alertInvalidRange:"시작 지점은 끝 지점보다 작아야 하며, 영상의 길이를 초과할 수 없습니다.", lblStart:"시작", lblEnd:"종료", btnSave:"💾 저장하기", btnDelete:"🗑️ 삭제", saveSuccess:"레포트가 저장되었습니다!", deleteConfirm:"현재 측정된 레포트 데이터를 초기화할까요?", savedListTitle:"저장된 레포트", savedListBack:"← 메인으로", savedListEmpty:"저장된 레포트가 없습니다.\n분석 후 저장 버튼을 눌러보세요.", savedListView:"📋 저장목록 보기", aiStart:"AI 실시간 추적 시작", aiStop:"AI 분석 중단하기", solutionTitle:"BIOMECHANICS REALTIME SOLUTION ⚡", solKneeTitle:"하체 익스텐션 & 롤링 (Knee Extension)", solKneeDesc:"영상을 재생하거나 AI 추적 데이터를 가동하면 무릎 관절 가동 범위와 뒤꿈치 롤링 메커니즘을 분석하여 맞춤형 생체역학 솔루션을 출력합니다.", solDynamicTitle:"지면 반발력 & 효율성 (GCT / Flight)", solDynamicDesc:"발이 땅에 닿는 지면접촉시간(GCT)과 공중 체류시간(Flight Time) 비율을 조합 추적하여 탄성 에너지 활용도를 극대화할 수 있는 자세를 코칭합니다.", solTorsoTitle:"상체 밸런스 & 각도 (Torso Lean)", solTorsoDesc:"체중 이동을 위한 상체 기울기 각도를 정밀 모니터링하여 요추 부하를 줄이고 중력을 추진력으로 바꿀 수 있는 포인트를 분석합니다.", solTagWait:"진단 대기", contact:"Contact", takeoff:"Takeoff",
+btnStepLogShow:"👟 걸음별 데이터 보기", btnStepLogHide:"👟 걸음별 데이터 닫기", thStepNum:"걸음", thStepTime:"시간", thStepGct:"GCT", thStepFlight:"Flight", stepLogEmpty:"아직 측정된 걸음 데이터가 없습니다",
 closeBtn:"닫기", shareBtn:"공유", deleteReportTitle:"데이터 초기화", deleteReportMsg:"현재 측정된 레포트 데이터를 초기화할까요?", deleteCancel:"취소", deleteConfirmBtn:"삭제", langSetupLabel:"Language / 언어", savedReportLabel:"저장된 레포트",
 splashTagline:"데이터로 승부하라.<br>폼을 마스터하라.",
 splashInfo:"가이드", splashSettings:"설정", splashLap:"랩",
@@ -1308,6 +1350,7 @@ guideCard7Title:"가로 모드 60fps 권장", guideCard7Desc:"빠른 동작 분�
 },
 en: {
 mainTitle:"PRO ANALYSIS v5.6", openFile:"Open Video", btnPlay:"▶ Play", btnPause:"Pause", btnReport:"Report", btnReset:"Reset All", btnReturn:"Reset Loop", btnSetting:"Settings", cardKnee:"Knee", cardElbow:"Elbow", cardTorso:"Torso", cardStride:"Stride", gctManual:"GCT", gctAuto:"Avg GCT", flightManual:"Flight", flightAuto:"Avg Flight", galleryTitle:"MY SNAPSHOTS", galleryClose:"Close", confirmMsg:"Delete this snapshot permanently?", confirmYes:"Delete", confirmNo:"Cancel", reportTitle:"RUNNING ANALYSIS REPORT", thMetric:"Metrics", thGuide:"Recommended Range", thValue:"My Data", repKnee:"Knee Angle (Avg Extension)", repElbow:"Elbow Angle (Avg)", repTorso:"Torso Angle (Avg Lean)", repGct:"Avg GCT (Ground Contact)", repFlight:"Avg Flight Time", repStride:"Avg Stride Distance", repSteps:"Total Tracked Steps", settingTitle:"ANALYTICS SETTINGS", settingClose:"Save & Close", setHeight:"Height (cm)", setWeight:"Weight (kg)", setAge:"Age", setGender:"Gender", setLang:"Language", alertNoVideo:"Please load a video first!", alertInvalidRange:"Start point must be less than end point and within video duration.", lblStart:"START", lblEnd:"END", btnSave:"Save", btnDelete:"🗑️ Delete", saveSuccess:"Report saved!", deleteConfirm:"Clear current report data?", savedListTitle:"Saved Reports", savedListBack:"Back to Main", savedListEmpty:"No saved reports yet.\nSave after analysis.", savedListView:"View Saved", aiStart:"Start AI Live Tracking", aiStop:"Stop AI Tracking", solutionTitle:"BIOMECHANICS REALTIME SOLUTION", solKneeTitle:"Lower Body Extension & Rolling (Knee Extension)", solKneeDesc:"Play the video or start AI tracking to analyze your knee joint range of motion and heel rolling mechanism, providing customized biomechanical solutions.", solDynamicTitle:"Ground Reaction Force & Efficiency (GCT / Flight)", solDynamicDesc:"Track ground contact time (GCT) and flight time ratio to maximize elastic energy utilization and optimize running posture.", solTorsoTitle:"Upper Body Balance & Angle (Torso Lean)", solTorsoDesc:"Precisely monitor torso lean angle to reduce lumbar load and convert gravity into forward propulsion.", solTagWait:"Awaiting Diagnosis", contact:"Contact", takeoff:"Takeoff",
+btnStepLogShow:"👟 Show Step-by-Step Data", btnStepLogHide:"👟 Hide Step-by-Step Data", thStepNum:"Step", thStepTime:"Time", thStepGct:"GCT", thStepFlight:"Flight", stepLogEmpty:"No step data yet",
 closeBtn:"Close", shareBtn:"Share", deleteReportTitle:"Clear Data", deleteReportMsg:"Clear current report data?", deleteCancel:"Cancel", deleteConfirmBtn:"Delete", langSetupLabel:"Language / 언어", savedReportLabel:"Saved Report",
 splashTagline:"Empower Your Data.<br>Master Your Forms.",
 splashInfo:"Info", splashSettings:"Settings", splashLap:"Lap",
@@ -1359,6 +1402,16 @@ document.getElementById('tdRepGct').innerText=p.repGct;
 document.getElementById('tdRepFlight').innerText=p.repFlight;
 document.getElementById('tdRepStride').innerText=p.repStride;
 document.getElementById('tdRepSteps').innerText=p.repSteps;
+document.getElementById('thStepNum').innerText=p.thStepNum;
+document.getElementById('thStepTime').innerText=p.thStepTime;
+document.getElementById('thStepGct').innerText=p.thStepGct;
+document.getElementById('thStepFlight').innerText=p.thStepFlight;
+const stepBtn = document.getElementById('btnToggleStepLog');
+if(stepBtn) {
+const isOpen = document.getElementById('stepLogContainer').style.display !== 'none';
+stepBtn.innerText = isOpen ? p.btnStepLogHide : p.btnStepLogShow;
+}
+AppControl.renderStepLog();
 document.getElementById('txtSettingTitle').innerText=p.settingTitle;
 document.getElementById('txtSettingClose').innerText=p.settingClose;
 document.getElementById('lblSetHeight').innerText=p.setHeight;
