@@ -14,6 +14,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/nosleep.js@0.12.0/dist/NoSleep.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
 :root {
 --primary: #00ff88; --bg: #000000;
@@ -457,9 +458,12 @@ alt="runner"/>
 </div>
 </div>
 </div>
-<div class="tab-bar">
+<div id="community-view" class="main-content" style="display:none;">
+<div id="community-feed" style="flex:1; overflow-y:auto; padding: 8px 8px calc(var(--tabbar-h) + 20px) 8px;"></div>
+</div>
 <button id="tab-run" class="tab-btn active" onclick="ui.showTab('run')">RUN</button>
 <button id="tab-history" class="tab-btn" onclick="ui.showTab('history')">HISTORY</button>
+<button id="tab-community" class="tab-btn" onclick="ui.showTab('community')">COMMUNITY</button>
 </div>
 <script>
 // ========== 전역 상수 (문자열 오류 방지) ==========
@@ -665,6 +669,138 @@ setUnit(unit) { localStorage.setItem(this.UNIT_KEY, unit); }
 getGender() { return localStorage.getItem(this.GENDER_KEY) || 'male'; }
 setGender(gender) { localStorage.setItem(this.GENDER_KEY, gender); }
 }
+// ========== CommunityManager (Supabase 커뮤니티 연동) ==========
+class CommunityManager {
+constructor() {
+this.SUPABASE_URL = 'https://ujodspxsisoycniswwl.supabase.co';
+this.SUPABASE_KEY = 'sb_publishable_oQLFSPdQ48wOfoqOR4KdeQ_n5VHS5WC';
+this.client = null;
+this.userId = null;
+this.ready = this._init();
+}
+async _init() {
+try {
+this.client = window.supabase.createClient(this.SUPABASE_URL, this.SUPABASE_KEY);
+let { data } = await this.client.auth.getSession();
+if (!data || !data.session) {
+const signIn = await this.client.auth.signInAnonymously();
+if (signIn.error) { console.error('anon sign-in error', signIn.error); return false; }
+this.userId = signIn.data.session.user.id;
+} else {
+this.userId = data.session.user.id;
+}
+return true;
+} catch (e) {
+console.error('Community init error', e);
+return false;
+}
+}
+// 러닝 종료 시 자동 업로드 (실패해도 앱 흐름을 막지 않음)
+async uploadRecord(record) {
+try {
+const ok = await this.ready;
+if (!ok || !this.client) return;
+const row = {
+user_id: this.userId,
+local_id: record.id,
+dist: parseFloat(record.dist) || 0,
+time: record.time || null,
+avg_pace: record.avgPace || null,
+cadence: record.cadence || null,
+kcal: record.kcal || null,
+alt: record.alt || null
+};
+const { error } = await this.client.from('records').insert(row);
+if (error) console.error('upload error', error);
+} catch (e) { console.error('uploadRecord failed', e); }
+}
+async loadFeed() {
+const feedEl = ui.dom.communityFeed;
+if (!feedEl) return;
+feedEl.innerHTML = '<div style="text-align:center; color:#666; padding:30px; font-size:13px;">불러오는 중...</div>';
+try {
+const ok = await this.ready;
+if (!ok || !this.client) { feedEl.innerHTML = '<div style="text-align:center; color:#666; padding:30px; font-size:13px;">커뮤니티 연결 실패</div>'; return; }
+const { data, error } = await this.client.from('records').select('*').order('created_at', { ascending: false }).limit(50);
+if (error) { console.error('loadFeed error', error); feedEl.innerHTML = '<div style="text-align:center; color:#666; padding:30px; font-size:13px;">불러오기 실패</div>'; return; }
+this.renderFeed(data || []);
+} catch (e) {
+console.error('loadFeed failed', e);
+feedEl.innerHTML = '<div style="text-align:center; color:#666; padding:30px; font-size:13px;">불러오기 실패</div>';
+}
+}
+renderFeed(rows) {
+const feedEl = ui.dom.communityFeed;
+if (!feedEl) return;
+if (rows.length === 0) { feedEl.innerHTML = '<div style="text-align:center; color:#666; padding:30px; font-size:13px;">아직 기록이 없습니다.</div>'; return; }
+feedEl.innerHTML = rows.map(r => this._cardHtml(r)).join('');
+}
+_cardHtml(r) {
+const isMine = r.user_id === this.userId;
+const dateStr = r.created_at ? new Date(r.created_at).toLocaleString() : '';
+return `
+<div class="history-item" data-id="${r.id}">
+<div class="h-date">${dateStr}</div>
+<div class="h-main-stats">
+<div><span class="h-val-big">${r.dist != null ? r.dist : '--'}</span><span class="h-val-unit">KM</span></div>
+<div><span class="h-val-big">${r.time || '--'}</span></div>
+<div><span class="h-val-big">${r.avg_pace || '--'}</span><span class="h-val-unit">/KM</span></div>
+</div>
+<div class="h-details-grid">
+<div class="h-det-box"><div class="h-det-label">CADENCE</div><div class="h-det-val">${r.cadence != null ? r.cadence : '--'}</div></div>
+<div class="h-det-box"><div class="h-det-label">KCAL</div><div class="h-det-val">${r.kcal != null ? r.kcal : '--'}</div></div>
+<div class="h-det-box"><div class="h-det-label">ALT</div><div class="h-det-val">${r.alt != null ? r.alt : '--'}</div></div>
+</div>
+<div class="h-delete-row" style="justify-content:space-between; align-items:center;">
+<div class="h-actions">
+<button class="btn-h-sub" onclick="community.toggleLike('${r.id}', this)">👍 <span class="like-count">${r.likes || 0}</span></button>
+<button class="btn-h-sub" onclick="community.shareRecord('${r.id}')">공유</button>
+</div>
+${isMine ? `<button class="btn-h-delete" onclick="community.deleteRecord('${r.id}')">삭제</button>` : ''}
+</div>
+</div>`;
+}
+async toggleLike(id, btnEl) {
+try {
+const ok = await this.ready;
+if (!ok || !this.client) return;
+const { data, error } = await this.client.from('records').select('likes').eq('id', id).single();
+if (error) { console.error('like fetch error', error); return; }
+const newLikes = (data.likes || 0) + 1;
+const { error: upErr } = await this.client.from('records').update({ likes: newLikes }).eq('id', id);
+if (upErr) { console.error('like update error', upErr); return; }
+if (btnEl) { const span = btnEl.querySelector('.like-count'); if (span) span.textContent = newLikes; }
+} catch (e) { console.error('toggleLike failed', e); }
+}
+async deleteRecord(id) {
+const lang = storage.getLang();
+const isKo = (lang === 'ko');
+if (!confirm(isKo ? '이 기록을 커뮤니티에서 삭제할까요?' : 'Delete this record from the community?')) return;
+try {
+const ok = await this.ready;
+if (!ok || !this.client) return;
+// RLS 정책상 본인 기록만 삭제 가능 (user_id = auth.uid())
+const { error } = await this.client.from('records').delete().eq('id', id);
+if (error) { console.error('delete error', error); alert(isKo ? '삭제에 실패했습니다.' : 'Failed to delete.'); return; }
+this.loadFeed();
+} catch (e) { console.error('deleteRecord failed', e); }
+}
+async shareRecord(id) {
+try {
+const ok = await this.ready;
+if (!ok || !this.client) return;
+const { data, error } = await this.client.from('records').select('*').eq('id', id).single();
+if (error || !data) return;
+const text = `🏃 러닝 기록 - ${data.dist}KM / ${data.time} / 페이스 ${data.avg_pace || '--'}\nJenny Run Pro`;
+if (navigator.share) {
+await navigator.share({ title: 'Jenny Run Pro', text });
+} else {
+await navigator.clipboard.writeText(text);
+alert('기록 내용이 클립보드에 복사되었습니다.');
+}
+} catch (e) { console.error('shareRecord failed', e); }
+}
+}
 // ========== UIManager ==========
 class UIManager {
 constructor() {
@@ -686,6 +822,8 @@ runView: document.getElementById('run-view'),
 mapArea: document.getElementById('map-area'),
 historyView: document.getElementById('history-view'),
 historyList: document.getElementById('history-list'),
+communityView: document.getElementById('community-view'),
+communityFeed: document.getElementById('community-feed'),
 totalStatsContainer: document.getElementById('total-stats-container'),
 dimmerOverlay: document.getElementById('dimmer-overlay'),
 metroBpmVal: document.getElementById('metro-bpm-val'),
@@ -835,10 +973,12 @@ this.closeDetail(); this.closeDiag(); this.closeMetronome();
 this.dom.runView.style.display = (tab === 'run' ? 'flex' : 'none');
 this.dom.mapArea.style.display = (tab === 'run' ? 'block' : 'none');
 this.dom.historyView.style.display = (tab === 'history' ? 'flex' : 'none');
+this.dom.communityView.style.display = (tab === 'community' ? 'flex' : 'none');
 document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 const tabBtn = document.getElementById('tab-' + tab);
 if(tabBtn) tabBtn.classList.add('active');
 if(tab === 'history') this.updateHistoryList();
+if(tab === 'community') community.loadFeed();
 if(tab === 'run' && app.map) setTimeout(() => app.map.invalidateSize(), 100);
 }
 showSubTab(sub) {
@@ -2259,6 +2399,8 @@ path: this.state.pathCoords,
 splits: this.state.splits
 };
 storage.saveRecord(record);
+// 커뮤니티에 자동 업로드 (실패해도 앱 진행에는 영향 없음)
+community.uploadRecord(record).catch(e => console.error('community upload failed', e));
 // 리로드 대신 상태 초기화 및 세션 정리
 storage.clearTempSession();
 this.state.isRunning = false;
@@ -2330,6 +2472,7 @@ if (ui.dom.status) ui.dom.status.textContent = msg + ' | ALT: --m';
 const storage = new RunningStorage();
 const ui = new UIManager();
 const metro = new MetroEngine();
+const community = new CommunityManager();
 const app = new OppaRunApp();
 window.onload = () => {
 app.init();
