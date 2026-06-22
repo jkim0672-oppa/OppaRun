@@ -1387,16 +1387,24 @@ if(placeholder) placeholder.style.display = 'none';
 reader.readAsDataURL(file);
 }
 closeShareCrewModal(isConfirmed) {
+if (this._sharing) return;
 const modal = document.getElementById('share-crew-modal');
 if(modal) modal.style.display = 'none';
 const record = this.pendingShareRecord;
 if (isConfirmed && record) {
+this._sharing = true;
+const shareBtn = document.getElementById('btn-share-crew-share');
+if(shareBtn) { shareBtn.disabled = true; shareBtn.textContent = '...'; }
 const checkbox = document.getElementById('share-crew-route-checkbox');
 const includeRoute = checkbox ? checkbox.checked : true;
 const photoFile = this.pendingSharePhotoFile;
-community.uploadRecord(record, photoFile, includeRoute).then(() => {
+const msgInput = document.getElementById('share-crew-message-input');
+const message = msgInput ? msgInput.value.trim() : '';
+community.uploadRecord(record, photoFile, includeRoute, message).then(() => {
+this._sharing = false;
 window.location.reload();
 }).catch(() => {
+this._sharing = false;
 window.location.reload();
 });
 } else {
@@ -2549,7 +2557,7 @@ async compressPhoto(file) {
     } catch(e) { alert('사진 업로드 예외: ' + e.message); return null; }
   }
 
-  async uploadRecord(record, photoFile, includeRoute) {
+  async uploadRecord(record, photoFile, includeRoute, message) {
     try {
       const uid = await this.ensureUserId();
       const nickname = this.getNickname() || 'Runner';
@@ -2594,7 +2602,8 @@ async compressPhoto(file) {
         alt: record.alt || 0,
         path: shareRoute ? (record.path || null) : null,
         splits: record.splits || null,
-        photo_url: photoUrl
+        photo_url: photoUrl,
+        message: message || null
       };
       const { error } = await _sb.from('records').insert(payload);
       if (error) {
@@ -2612,7 +2621,7 @@ async compressPhoto(file) {
     try {
       const { data, error } = await _sb
         .from('records')
-        .select('id, nickname, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, photo_url')
+        .select('id, nickname, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, photo_url, message')
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) throw error;
@@ -2634,6 +2643,29 @@ async compressPhoto(file) {
     } catch(e) { return []; }
   }
 
+  async shareRecord(recordId) {
+    const records = await this.loadFeed();
+    const r = records.find(x => x.id === recordId);
+    if (!r) return;
+    const text = `${r.nickname}'s Run: ${parseFloat(r.distance_km||0).toFixed(2)}km in ${this.formatDuration(r.duration_sec)} @ ${this.formatPaceSec(r.pace_sec_per_km)}/km${r.message ? '\n' + r.message : ''}`;
+    if (navigator.share) {
+      const shareData = { title: r.title || "Jenny Run", text };
+      if (r.photo_url) {
+        try {
+          const res = await fetch(r.photo_url);
+          const blob = await res.blob();
+          const file = new File([blob], 'run.jpg', { type: 'image/jpeg' });
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            shareData.files = [file];
+          }
+        } catch(e) {}
+      }
+      navigator.share(shareData).catch(() => {});
+    } else {
+      navigator.clipboard && navigator.clipboard.writeText(text);
+      alert('Copied to clipboard!');
+    }
+  }
   async toggleLike(recordId) {
     const uid = await this.ensureUserId();
     const { data } = await _sb.from('likes').select('id').eq('record_id', recordId).eq('user_id', uid);
@@ -2804,9 +2836,11 @@ async compressPhoto(file) {
         </div>
 
         <!-- 러닝 제목 -->
-        <div style="font-size:16px; font-weight:900; color:#111; margin-bottom:12px;">${r.title || runLabel}</div>
+        <div style="font-size:16px; font-weight:900; color:#111; margin-bottom:${r.message ? '4px' : '12px'};">${r.title || runLabel}</div>
+        ${r.message ? `<div style="font-size:13px; color:#555; margin-bottom:12px;">${r.message}</div>` : ''}
 
-        ${r.photo_url ? `<div style="margin-bottom:12px; border-radius:10px; overflow:hidden;"><img src="${r.photo_url}" loading="lazy" style="width:100%; max-height:280px; object-fit:cover; display:block;"></div>` : ''}
+        ${r.photo_url ? `<div style="margin-bottom:12px; border-radius:10px; overflow:hidden;"><img src="${r.photo_url}" loading="lazy" style="width:100%; max-height:280px; object-fit:cover; display:block;"></div>` : ""}
+        ${(r.path && r.path.length > 1) ? `<div style="margin-bottom:12px; border-radius:10px; overflow:hidden;"><img src="${this.pathToStaticMap(r.path)}" style="width:100%; display:block;" loading="lazy"></div>` : ""}
         ${(!r.photo_url && r.path && r.path.length > 1) ? `<div style="margin-bottom:12px; border-radius:10px; overflow:hidden;"><img src="${this.pathToStaticMap(r.path)}" style="width:100%; display:block;" loading="lazy"></div>` : ""}
 
         <!-- 스탯 -->
@@ -2843,6 +2877,9 @@ async compressPhoto(file) {
           </button>
           <button onclick="community.toggleComments('${r.id}')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:none; border:none; border-left:1px solid #f0f0f0; color:#666; font-size:13px; font-weight:800; padding:6px 0; cursor:pointer;">
             &#9825; ${commentCount > 0 ? commentCount + ' ' : ''}${t.crewComment}
+          </button>
+          <button onclick="community.shareRecord('${r.id}')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:none; border:none; border-left:1px solid #f0f0f0; color:#666; font-size:13px; font-weight:800; padding:6px 0; cursor:pointer;">
+            &#8679; Share
           </button>
         </div>
 
@@ -3148,7 +3185,8 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
 </script>
 <div id="share-crew-modal" class="custom-confirm-overlay">
 <div class="custom-confirm-box" style="max-width:340px;">
-<div id="share-crew-modal-msg" class="custom-confirm-msg" style="margin-bottom:16px;">Share this run with the crew?</div>
+<div id="share-crew-modal-msg" class="custom-confirm-msg" style="margin-bottom:12px;">Share this run with the crew?</div>
+<input id="share-crew-message-input" type="text" maxlength="100" placeholder="Add a message (optional)" style="width:100%; background:#2a2a2a; border:1.5px solid #444; border-radius:10px; color:#fff; padding:10px 14px; font-size:13px; margin-bottom:12px; box-sizing:border-box; outline:none;">
 <label id="share-crew-photo-label" for="share-crew-photo-input" style="display:flex; align-items:center; justify-content:center; width:100%; height:140px; background:#222; border:1.5px dashed #444; border-radius:12px; margin-bottom:14px; overflow:hidden; cursor:pointer; position:relative;">
 <span id="share-crew-photo-placeholder" style="font-size:12px; color:#888; font-weight:700;">Add a photo (optional)</span>
 <img id="share-crew-photo-preview" style="display:none; width:100%; height:100%; object-fit:cover;">
