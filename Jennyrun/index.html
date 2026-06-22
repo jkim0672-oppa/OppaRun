@@ -2531,11 +2531,32 @@ class CommunityManager {
     return uid;
   }
 
+async compressPhoto(file) {
+    return new Promise(resolve => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        const MAX = 1280;
+        let w = img.width, h = img.height;
+        if (w > MAX || h > MAX) {
+          if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+          else { w = Math.round(w * MAX / h); h = MAX; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+        canvas.toBlob(blob => resolve(blob || file), 'image/jpeg', 0.8);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+      img.src = url;
+    });
+  }
   async uploadPhoto(uid, recordId, photoFile) {
     try {
-      const ext = (photoFile.name && photoFile.name.split('.').pop()) || 'jpg';
-      const path = uid + '/' + recordId + '.' + ext;
-      const { error: upErr } = await _sb.storage.from('run-photos').upload(path, photoFile, { upsert: true, contentType: photoFile.type || 'image/jpeg' });
+      const compressed = await this.compressPhoto(photoFile);
+      const path = uid + '/' + recordId + '.jpg';
+      const { error: upErr } = await _sb.storage.from('run-photos').upload(path, compressed, { upsert: true, contentType: 'image/jpeg' });
       if (upErr) { console.warn('Photo upload error:', upErr.message); return null; }
       const { data } = _sb.storage.from('run-photos').getPublicUrl(path);
       return (data && data.publicUrl) || null;
