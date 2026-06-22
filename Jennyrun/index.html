@@ -2446,13 +2446,10 @@ class CommunityManager {
         path: record.path || null,
         splits: record.splits || null
       };
-      alert('업로드 시도중... uid=' + uid.slice(0,8));
       const { error } = await _sb.from('records').insert(payload);
       if (error) {
-        alert('업로드 실패: ' + error.message);
         console.warn('Upload error:', error.message);
       } else {
-        alert('업로드 성공!');
         console.log('Record uploaded to community!');
       }
     } catch(e) {
@@ -2471,6 +2468,58 @@ class CommunityManager {
       if (error) throw error;
       return data || [];
     } catch(e) { console.warn('Feed load failed', e); return []; }
+  }
+
+  async loadLikes(recordIds) {
+    try {
+      const { data } = await _sb.from('likes').select('record_id, user_id').in('record_id', recordIds);
+      return data || [];
+    } catch(e) { return []; }
+  }
+
+  async loadComments(recordIds) {
+    try {
+      const { data } = await _sb.from('comments').select('id, record_id, user_id, nickname, message, created_at').in('record_id', recordIds).order('created_at', { ascending: true });
+      return data || [];
+    } catch(e) { return []; }
+  }
+
+  async toggleLike(recordId) {
+    const uid = await this.ensureUserId();
+    const { data } = await _sb.from('likes').select('id').eq('record_id', recordId).eq('user_id', uid);
+    if (data && data.length > 0) {
+      await _sb.from('likes').delete().eq('record_id', recordId).eq('user_id', uid);
+    } else {
+      await _sb.from('likes').insert({ record_id: recordId, user_id: uid });
+    }
+    await this.renderFeed();
+  }
+
+  async submitComment(recordId) {
+    const input = document.getElementById('comment-input-' + recordId);
+    if (!input || !input.value.trim()) return;
+    const uid = await this.ensureUserId();
+    const nickname = this.getNickname() || 'Runner';
+    await _sb.from('comments').insert({
+      record_id: recordId,
+      user_id: uid,
+      nickname: nickname,
+      message: input.value.trim()
+    });
+    input.value = '';
+    await this.renderFeed();
+  }
+
+  async deleteComment(commentId) {
+    const uid = await this.ensureUserId();
+    await _sb.from('comments').delete().eq('id', commentId).eq('user_id', uid);
+    await this.renderFeed();
+  }
+
+  toggleComments(recordId) {
+    const box = document.getElementById('comments-box-' + recordId);
+    if (!box) return;
+    box.style.display = box.style.display === 'none' ? 'block' : 'none';
   }
 
   async deleteRecord(recordId) {
@@ -2510,15 +2559,37 @@ class CommunityManager {
     if (loading) loading.style.display = 'block';
     const uid = await this.ensureUserId();
     const records = await this.loadFeed();
-    if (loading) loading.style.display = 'none';
-    if (!container) return;
     if (records.length === 0) {
+      if (loading) loading.style.display = 'none';
+      if (!container) return;
       container.innerHTML = '<div style="text-align:center; padding:60px 20px; color:#555; font-size:14px; font-weight:700;">아직 기록이 없어요<br><span style="font-size:11px; color:#444;">첫 번째 러너가 되어보세요!</span></div>';
       return;
     }
+    const ids = records.map(r => r.id);
+    const [allLikes, allComments] = await Promise.all([this.loadLikes(ids), this.loadComments(ids)]);
+    if (loading) loading.style.display = 'none';
+    if (!container) return;
+
     container.innerHTML = records.map(r => {
       const isMine = r.user_id === uid;
       const effColor = r.eff_score >= 75 ? 'var(--good)' : r.eff_score >= 50 ? 'var(--warning)' : 'var(--danger)';
+      const recordLikes = allLikes.filter(l => l.record_id === r.id);
+      const likeCount = recordLikes.length;
+      const iLiked = recordLikes.some(l => l.user_id === uid);
+      const recordComments = allComments.filter(c => c.record_id === r.id);
+      const commentCount = recordComments.length;
+
+      const commentsHTML = recordComments.map(c => `
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; padding:7px 0; border-bottom:1px solid #2a2a2a;">
+          <div>
+            <span style="font-size:11px; font-weight:900; color:${c.user_id === uid ? 'var(--primary)' : '#aaa'};">${c.user_id === uid ? '⚡ ' : ''}${c.nickname}</span>
+            <span style="font-size:10px; color:#555; margin-left:6px;">${this.timeAgo(c.created_at)}</span>
+            <div style="font-size:12px; color:#ddd; margin-top:3px;">${c.message}</div>
+          </div>
+          ${c.user_id === uid ? `<button onclick="community.deleteComment('${c.id}')" style="background:none; border:none; color:#555; font-size:14px; cursor:pointer; padding:0 4px; flex-shrink:0;">✕</button>` : ''}
+        </div>
+      `).join('');
+
       return `
       <div style="background:#1e1e1e; border-radius:14px; padding:14px; margin-bottom:10px; border:1px solid ${isMine ? 'var(--primary)' : '#333'};">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
@@ -2544,11 +2615,30 @@ class CommunityManager {
             <div style="font-size:9px; color:var(--primary);">/KM</div>
           </div>
         </div>
-        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;">
           ${r.cadence ? `<span style="background:#222; border-radius:6px; padding:3px 7px; font-size:10px; color:#aaa; font-weight:700;">CAD ${r.cadence}</span>` : ''}
           ${r.gct_ms ? `<span style="background:#222; border-radius:6px; padding:3px 7px; font-size:10px; color:#aaa; font-weight:700;">GCT ${r.gct_ms}ms</span>` : ''}
           ${r.eff_score != null ? `<span style="background:#222; border-radius:6px; padding:3px 7px; font-size:10px; color:${effColor}; font-weight:900;">효율 ${r.eff_score}/100</span>` : ''}
           ${r.alt ? `<span style="background:#222; border-radius:6px; padding:3px 7px; font-size:10px; color:#aaa; font-weight:700;">ALT ${r.alt}m</span>` : ''}
+        </div>
+        <!-- 좋아요 / 댓글 버튼 -->
+        <div style="display:flex; gap:8px; border-top:1px solid #2a2a2a; padding-top:10px;">
+          <button onclick="community.toggleLike('${r.id}')" style="flex:1; background:${iLiked ? 'rgba(255,68,68,0.15)' : '#2a2a2a'}; border:1px solid ${iLiked ? '#ff4444' : '#444'}; color:${iLiked ? '#ff4444' : '#888'}; border-radius:8px; padding:8px 0; font-size:13px; font-weight:900; cursor:pointer;">
+            ❤️ ${likeCount > 0 ? likeCount : ''} 좋아요
+          </button>
+          <button onclick="community.toggleComments('${r.id}')" style="flex:1; background:#2a2a2a; border:1px solid #444; color:#888; border-radius:8px; padding:8px 0; font-size:13px; font-weight:900; cursor:pointer;">
+            💬 ${commentCount > 0 ? commentCount : ''} 댓글
+          </button>
+        </div>
+        <!-- 댓글 영역 -->
+        <div id="comments-box-${r.id}" style="display:none; margin-top:10px;">
+          <div style="margin-bottom:8px;">
+            ${commentsHTML || '<div style="font-size:11px; color:#555; padding:8px 0;">아직 댓글이 없어요</div>'}
+          </div>
+          <div style="display:flex; gap:6px; margin-top:6px;">
+            <input id="comment-input-${r.id}" type="text" maxlength="100" placeholder="댓글 남기기..." style="flex:1; background:#111; border:1px solid #333; color:#fff; border-radius:8px; padding:8px 10px; font-size:12px; outline:none;" onkeydown="if(event.key==='Enter') community.submitComment('${r.id}')">
+            <button onclick="community.submitComment('${r.id}')" style="background:var(--primary); color:#000; border:none; border-radius:8px; padding:8px 14px; font-size:12px; font-weight:900; cursor:pointer;">전송</button>
+          </div>
         </div>
       </div>`;
     }).join('');
