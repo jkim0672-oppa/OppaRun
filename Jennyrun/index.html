@@ -14,6 +14,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/nosleep.js@0.12.0/dist/NoSleep.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root {
 --primary: #00ff88; --bg: #000000;
@@ -427,6 +428,15 @@ alt="runner"/>
 </div>
 <div id="sub-page-settings" class="sub-page">
 <div class="settings-container">
+<div class="settings-group">
+  <div class="settings-label">CREW NICKNAME</div>
+  <div style="display:flex; gap:10px; align-items:center;">
+    <input id="nickname-input" type="text" maxlength="16" placeholder="닉네임 입력 (최대 16자)"
+      style="flex:1; background:#2a2a2a; color:#fff; border:1.5px solid #444; padding:16px; border-radius:12px; font-size:15px; font-weight:800; outline:none;"
+      oninput="community.saveNickname(this.value)">
+  </div>
+  <div style="font-size:10px; color:#666; margin-top:6px; font-weight:700;">커뮤니티에 기록이 이 이름으로 공개됩니다</div>
+</div>
 <div class="settings-group"><div id="label-select-lang" class="settings-label">SELECT LANGUAGE</div><div class="dropdown"><div class="dropdown-select" onclick="ui.toggleDropdown('dropdown-options')"><span id="current-lang-text">English (US)</span><span style="font-size:10px; color:var(--primary);">▼</span></div><div id="dropdown-options" class="dropdown-options"><div class="dropdown-option" onclick="ui.selectLang('en')">English (US)</div><div class="dropdown-option" onclick="ui.selectLang('ko')">한국어 (KR)</div></div></div></div>
 <div class="settings-group"><div id="label-unit" class="settings-label">DISTANCE UNIT</div><div class="unit-toggle-row"><div id="unit-km" class="unit-btn active" onclick="ui.setUnit('km')">KM</div><div id="unit-mile" class="unit-btn" onclick="ui.setUnit('mile')">MILE</div></div></div>
 <div class="settings-group"><div id="label-gender" class="settings-label">GENDER</div><div class="gender-toggle-row"><div id="gender-male" class="gender-btn active" onclick="ui.setGender('male')"> MALE</div><div id="gender-female" class="gender-btn" onclick="ui.setGender('female')"> FEMALE</div></div></div>
@@ -457,9 +467,20 @@ alt="runner"/>
 </div>
 </div>
 </div>
+<!-- 커뮤니티 뷰 -->
+<div id="community-view" class="main-content" style="display:none;">
+  <div style="padding: 10px 12px 6px 12px; background:#000; border-bottom:1px solid #222; flex-shrink:0;">
+    <div style="font-size:18px; font-weight:900; color:var(--primary);">🏃 JENNY RUN CREW</div>
+    <div style="font-size:11px; color:#666; margin-top:2px;">러너들의 오늘 기록</div>
+  </div>
+  <div id="community-list" style="flex:1; overflow-y:auto; padding: 8px 8px calc(var(--tabbar-h) + 20px) 8px;">
+    <div id="community-loading" style="text-align:center; padding:40px; color:#666; font-size:13px;">불러오는 중...</div>
+  </div>
+</div>
 <div class="tab-bar">
 <button id="tab-run" class="tab-btn active" onclick="ui.showTab('run')">RUN</button>
 <button id="tab-history" class="tab-btn" onclick="ui.showTab('history')">HISTORY</button>
+<button id="tab-community" class="tab-btn" onclick="ui.showTab('community')">CREW</button>
 </div>
 <script>
 // ========== 전역 상수 (문자열 오류 방지) ==========
@@ -835,11 +856,14 @@ this.closeDetail(); this.closeDiag(); this.closeMetronome();
 this.dom.runView.style.display = (tab === 'run' ? 'flex' : 'none');
 this.dom.mapArea.style.display = (tab === 'run' ? 'block' : 'none');
 this.dom.historyView.style.display = (tab === 'history' ? 'flex' : 'none');
+const communityView = document.getElementById('community-view');
+if (communityView) communityView.style.display = (tab === 'community' ? 'flex' : 'none');
 document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 const tabBtn = document.getElementById('tab-' + tab);
 if(tabBtn) tabBtn.classList.add('active');
 if(tab === 'history') this.updateHistoryList();
 if(tab === 'run' && app.map) setTimeout(() => app.map.invalidateSize(), 100);
+if(tab === 'community') community.renderFeed();
 }
 showSubTab(sub) {
 document.querySelectorAll('.sub-btn').forEach(b => b.classList.remove('active'));
@@ -851,7 +875,11 @@ if(subPage) subPage.style.display = 'flex';
 if(sub === 'list') this.updateHistoryList();
 if(sub === 'total') this.updateTotalStats();
 if(sub === 'info') this.toggleInfoSubTab('theory');
-if(sub === 'settings') this.initProfileDropdowns();
+if(sub === 'settings') {
+  this.initProfileDropdowns();
+  const ni = document.getElementById('nickname-input');
+  if (ni) ni.value = community.getNickname();
+}
 }
 toggleInfoSubTab(target) {
 const theoryBtn = document.getElementById('info-sub-tab-theory');
@@ -2259,6 +2287,7 @@ path: this.state.pathCoords,
 splits: this.state.splits
 };
 storage.saveRecord(record);
+community.uploadRecord(record); // 커뮤니티 자동 업로드
 // 리로드 대신 상태 초기화 및 세션 정리
 storage.clearTempSession();
 this.state.isRunning = false;
@@ -2326,16 +2355,211 @@ if (ui.dom.status) ui.dom.status.textContent = msg + ' | ALT: --m';
 } catch(e) { console.error("App init error", e); }
 }
 }
+// ========== Supabase + Community ==========
+const SUPABASE_URL = 'https://ujodpspxsisoycniswwl.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_oQLFSPdQ48w0foqOR4KdeQ_n5VHS5WC';
+const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+class CommunityManager {
+  constructor() {
+    this.NICKNAME_KEY = 'jennyRunNickname';
+    this.USER_ID_KEY = 'jennyRunUserId';
+    this.userId = null;
+  }
+
+  getNickname() {
+    return localStorage.getItem(this.NICKNAME_KEY) || '';
+  }
+
+  saveNickname(val) {
+    localStorage.setItem(this.NICKNAME_KEY, val.trim());
+  }
+
+  async ensureUserId() {
+    if (this.userId) return this.userId;
+    let uid = localStorage.getItem(this.USER_ID_KEY);
+    if (uid) { this.userId = uid; return uid; }
+    // 익명 로그인
+    try {
+      const { data, error } = await _sb.auth.signInAnonymously();
+      if (data && data.user) {
+        uid = data.user.id;
+        localStorage.setItem(this.USER_ID_KEY, uid);
+        this.userId = uid;
+        return uid;
+      }
+    } catch(e) { console.warn('Supabase anon login failed', e); }
+    // 폴백: 로컬 UUID
+    uid = 'local-' + Math.random().toString(36).slice(2);
+    localStorage.setItem(this.USER_ID_KEY, uid);
+    this.userId = uid;
+    return uid;
+  }
+
+  async uploadRecord(record) {
+    try {
+      const uid = await this.ensureUserId();
+      const nickname = this.getNickname() || 'Runner';
+      // avgPace → seconds 변환
+      let paceSec = 360;
+      if (record.avgPace && record.avgPace.includes("'")) {
+        const parts = record.avgPace.replace('"','').split("'");
+        paceSec = (parseInt(parts[0])||0)*60 + (parseInt(parts[1])||0);
+      }
+      // time → seconds 변환
+      let durationSec = 0;
+      if (record.time) {
+        const tp = record.time.split(':');
+        if (tp.length === 2) durationSec = parseInt(tp[0])*60 + parseInt(tp[1]);
+        else if (tp.length === 3) durationSec = parseInt(tp[0])*3600 + parseInt(tp[1])*60 + parseInt(tp[2]);
+      }
+      // 효율점수 계산
+      let effScore = null;
+      if (record.cadence && record.gct && record.flight && record.flight !== '--' && record.gct !== '--') {
+        const cadScore = Math.min(100, Math.max(0, ((record.cadence-150)/35)*100));
+        const gctScore = Math.min(100, Math.max(0, ((400-record.gct)/160)*100));
+        const flightScore = Math.min(100, Math.max(0, ((parseInt(record.flight)-20)/30)*100));
+        effScore = Math.round(cadScore*0.4 + gctScore*0.4 + flightScore*0.2);
+      }
+      const payload = {
+        user_id: uid,
+        nickname: nickname,
+        title: nickname + "'s Run",
+        distance_km: parseFloat(record.dist) || 0,
+        duration_sec: durationSec,
+        pace_sec_per_km: paceSec,
+        cadence: record.cadence || null,
+        gct_ms: record.gct || null,
+        flight_pct: record.flight ? parseInt(record.flight) : null,
+        stride_m: null,
+        eff_score: effScore,
+        alt: record.alt || 0,
+        path: record.path || null,
+        splits: record.splits || null
+      };
+      const { error } = await _sb.from('records').insert(payload);
+      if (error) console.warn('Upload error:', error.message);
+      else console.log('Record uploaded to community!');
+    } catch(e) { console.warn('Upload failed', e); }
+  }
+
+  async loadFeed() {
+    try {
+      const { data, error } = await _sb
+        .from('records')
+        .select('id, nickname, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id')
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      return data || [];
+    } catch(e) { console.warn('Feed load failed', e); return []; }
+  }
+
+  async deleteRecord(recordId) {
+    try {
+      const uid = await this.ensureUserId();
+      const { error } = await _sb.from('records').delete().eq('id', recordId).eq('user_id', uid);
+      if (error) console.warn('Delete error:', error.message);
+    } catch(e) { console.warn('Delete failed', e); }
+  }
+
+  formatPaceSec(sec) {
+    if (!sec || sec <= 0) return "--'--\"";
+    const m = Math.floor(sec/60);
+    const s = sec % 60;
+    return m + "'" + String(s).padStart(2,'0') + '"';
+  }
+
+  formatDuration(sec) {
+    if (!sec) return '--:--';
+    const m = Math.floor(sec/60);
+    const s = sec % 60;
+    if (m >= 60) return Math.floor(m/60) + ':' + String(m%60).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+    return String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+  }
+
+  timeAgo(dateStr) {
+    const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
+    if (diff < 60) return '방금';
+    if (diff < 3600) return Math.floor(diff/60) + '분 전';
+    if (diff < 86400) return Math.floor(diff/3600) + '시간 전';
+    return Math.floor(diff/86400) + '일 전';
+  }
+
+  async renderFeed() {
+    const container = document.getElementById('community-list');
+    const loading = document.getElementById('community-loading');
+    if (loading) loading.style.display = 'block';
+    const uid = await this.ensureUserId();
+    const records = await this.loadFeed();
+    if (loading) loading.style.display = 'none';
+    if (!container) return;
+    if (records.length === 0) {
+      container.innerHTML = '<div style="text-align:center; padding:60px 20px; color:#555; font-size:14px; font-weight:700;">아직 기록이 없어요<br><span style="font-size:11px; color:#444;">첫 번째 러너가 되어보세요!</span></div>';
+      return;
+    }
+    container.innerHTML = records.map(r => {
+      const isMine = r.user_id === uid;
+      const effColor = r.eff_score >= 75 ? 'var(--good)' : r.eff_score >= 50 ? 'var(--warning)' : 'var(--danger)';
+      return `
+      <div style="background:#1e1e1e; border-radius:14px; padding:14px; margin-bottom:10px; border:1px solid ${isMine ? 'var(--primary)' : '#333'};">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+          <div>
+            <div style="font-size:13px; font-weight:900; color:${isMine ? 'var(--primary)' : '#fff'};">${isMine ? '⚡ ' : ''}${r.nickname || 'Runner'}</div>
+            <div style="font-size:10px; color:#555; margin-top:2px;">${this.timeAgo(r.created_at)}</div>
+          </div>
+          ${isMine ? `<button onclick="community.confirmDelete('${r.id}')" style="background:transparent; border:1px solid #555; color:var(--danger); font-size:10px; padding:4px 8px; border-radius:6px; font-weight:900; cursor:pointer;">삭제</button>` : ''}
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:8px;">
+          <div style="background:#111; border-radius:8px; padding:8px; text-align:center;">
+            <div style="font-size:9px; color:#666; font-weight:900; margin-bottom:3px;">거리</div>
+            <div style="font-size:16px; font-weight:900; color:#fff;">${parseFloat(r.distance_km||0).toFixed(2)}</div>
+            <div style="font-size:9px; color:var(--primary);">KM</div>
+          </div>
+          <div style="background:#111; border-radius:8px; padding:8px; text-align:center;">
+            <div style="font-size:9px; color:#666; font-weight:900; margin-bottom:3px;">시간</div>
+            <div style="font-size:16px; font-weight:900; color:#fff;">${this.formatDuration(r.duration_sec)}</div>
+          </div>
+          <div style="background:#111; border-radius:8px; padding:8px; text-align:center;">
+            <div style="font-size:9px; color:#666; font-weight:900; margin-bottom:3px;">페이스</div>
+            <div style="font-size:16px; font-weight:900; color:#fff;">${this.formatPaceSec(r.pace_sec_per_km)}</div>
+            <div style="font-size:9px; color:var(--primary);">/KM</div>
+          </div>
+        </div>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          ${r.cadence ? `<span style="background:#222; border-radius:6px; padding:3px 7px; font-size:10px; color:#aaa; font-weight:700;">CAD ${r.cadence}</span>` : ''}
+          ${r.gct_ms ? `<span style="background:#222; border-radius:6px; padding:3px 7px; font-size:10px; color:#aaa; font-weight:700;">GCT ${r.gct_ms}ms</span>` : ''}
+          ${r.eff_score != null ? `<span style="background:#222; border-radius:6px; padding:3px 7px; font-size:10px; color:${effColor}; font-weight:900;">효율 ${r.eff_score}/100</span>` : ''}
+          ${r.alt ? `<span style="background:#222; border-radius:6px; padding:3px 7px; font-size:10px; color:#aaa; font-weight:700;">ALT ${r.alt}m</span>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  async confirmDelete(recordId) {
+    const isKo = storage.getLang() === 'ko';
+    if (!confirm(isKo ? '이 커뮤니티 기록을 삭제할까요?' : 'Delete this record from community?')) return;
+    await this.deleteRecord(recordId);
+    await this.renderFeed();
+  }
+}
+
 // ========== 전역 인스턴스 ==========
 const storage = new RunningStorage();
 const ui = new UIManager();
 const metro = new MetroEngine();
 const app = new OppaRunApp();
+const community = new CommunityManager();
 window.onload = () => {
 app.init();
 ui.changeLanguage(storage.getLang());
 ui.setUnit(storage.getUnit());
 ui.setGender(storage.getGender());
+// 닉네임 불러오기
+const nicknameInput = document.getElementById('nickname-input');
+if (nicknameInput) nicknameInput.value = community.getNickname();
+// 익명 로그인 미리 실행
+community.ensureUserId();
 // NoSleep은 사용자 제스처(버튼 터치) 후 onStart에서 활성화됨
 // 서비스 워커
 if ('serviceWorker' in navigator) {
