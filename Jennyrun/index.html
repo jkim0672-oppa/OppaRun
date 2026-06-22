@@ -536,7 +536,7 @@ crewLike: "Like", crewComment: "Comment", crewDelete: "Delete",
 crewCommentPlaceholder: "Leave a comment...", crewSend: "Send",
 crewNoComments: "No comments yet", crewConfirmDelete: "Delete this record from community?",
 crewMorning: "Morning Run", crewAfternoon: "Afternoon Run", crewEvening: "Evening Run", crewNight: "Night Run",
-crewDist: "Distance", crewTime: "Time", crewPace: "Pace", crewEff: "Efficiency", crewMe: "Me"
+crewDist: "Distance", crewTime: "Time", crewPace: "Pace", crewEff: "Efficiency", crewMe: "Me", editTitle: "EDIT TITLE"
 },
 ko: {
 pace: "페이스", dist: "거리", time: "시간", avg: "평균", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", cal: "칼로리", start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료", run: "러닝", history: "기록", list: "목록", total: "통계", info: "정보", settings: "설정", selLang: "언어 설정", unitLabel: "거리 단위", genderLabel: "성별", metro: "리듬 어시스턴트", clear: "전체 기록 삭제", confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.", route: "경로", diag: "진단", close: "닫기", alt: "고도",
@@ -587,7 +587,7 @@ crewLike: "좋아요", crewComment: "댓글", crewDelete: "삭제",
 crewCommentPlaceholder: "댓글 남기기...", crewSend: "전송",
 crewNoComments: "아직 댓글이 없어요", crewConfirmDelete: "이 커뮤니티 기록을 삭제할까요?",
 crewMorning: "아침 러닝", crewAfternoon: "오후 러닝", crewEvening: "저녁 러닝", crewNight: "야간 러닝",
-crewDist: "거리", crewTime: "시간", crewPace: "페이스", crewEff: "효율", crewMe: "나"
+crewDist: "거리", crewTime: "시간", crewPace: "페이스", crewEff: "효율", crewMe: "나", editTitle: "제목 수정"
 }
 };
 // ========== RunningStorage ==========
@@ -1272,6 +1272,17 @@ btn.textContent = t.metroOff; btn.style.background = "#333"; btn.style.color = "
 if(this.menuBpmDisplay) this.menuBpmDisplay.textContent = "OFF";
 }
 }
+openEditTitle(id) {
+  const t = translations[storage.getLang()] || translations['en'];
+  const history = storage.loadHistory();
+  const record = history.find(r => r.id === id);
+  if (!record) return;
+  const newTitle = prompt(t.editTitle + ':', record.title || '');
+  if (newTitle === null) return;
+  const updated = history.map(r => r.id === id ? {...r, title: newTitle.trim() || r.title} : r);
+  localStorage.setItem(storage.HISTORY_KEY, JSON.stringify(updated));
+  this.renderHistory();
+}
 openConfirmModal(id) {
 this.pendingDeleteId = id;
 const lang = storage.getLang();
@@ -1333,7 +1344,10 @@ displayPace = this.convertPaceToUnit(displayPace, 'mile');
 }
 return '<div class="history-item">' +
 '<div class="h-top-row">' +
-'<div class="h-date">' + r.date + '</div>' +
+'<div style="display:flex;flex-direction:column;gap:2px">' +
+'<div style="font-size:15px;font-weight:900;color:#fff;">' + (r.title || (t.crewMorning)) + '</div>' +
+'<div class="h-date" style="margin-bottom:0">' + r.date + '</div>' +
+'</div>' +
 '<div class="h-actions">' +
 '<button class="btn-h-sub" onclick="ui.openDetail(' + r.id + ')">' + t.route + '</button>' +
 '<button class="btn-h-sub" onclick="ui.openDiag(' + r.id + ')">' + t.diag + '</button>' +
@@ -1366,7 +1380,10 @@ return '<div class="h-det-box"><div class="h-det-label">' + t.stride + '</div><d
 '<div class="h-det-box"><div class="h-det-label">' + t.gctBal + '</div><div class="h-det-val" style="color:#aaa">' + (r.gctBal || '50:50') + ' <span style="font-size:7px">L:R</span></div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.altChange + '</div><div class="h-det-val" style="color:#aaa">' + ((r.splits && r.splits.length > 0) ? r.splits.reduce((sum,s)=>sum+Math.max(0,s.altDiff||0),0) : 0) + ' <span style="font-size:7px">M</span></div></div>' +
 '</div>' +
-'<div class="h-delete-row"><button class="btn-h-delete" onclick="ui.openConfirmModal(' + r.id + ')">' + t.deleteBtn + '</button></div>' +
+'<div class="h-delete-row" style="display:flex;justify-content:space-between;align-items:center;">' +
+'<button style="background:#222;border:1px solid #444;color:var(--primary);font-size:9px;padding:3px 7px;border-radius:5px;font-weight:900;cursor:pointer;" onclick="ui.openEditTitle(' + r.id + ')">' + (t.editTitle || 'EDIT TITLE') + '</button>' +
+'<button class="btn-h-delete" onclick="ui.openConfirmModal(' + r.id + ')">' + t.deleteBtn + '</button>' +
+'</div>' +
 '</div>';
 }).join('');
 }
@@ -2283,8 +2300,15 @@ let sec = splitDuration % 60;
 let paceStr = min + "'" + String(sec).padStart(2,'0') + '"';
 this.state.splits.push({ km: parseFloat(this.state.totalDist).toFixed(2), pace: paceStr, altFrom: this.state.lastKmAlt, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastKmAlt, coord: this.state.pathCoords[this.state.pathCoords.length - 1] || null });
 }
+const _now = new Date();
+const _h = _now.getHours();
+const _isKo = storage.getLang() === 'ko';
+const _autoTitle = _isKo
+  ? (_h>=5&&_h<11?'아침 러닝':_h>=11&&_h<17?'오후 러닝':_h>=17&&_h<21?'저녁 러닝':'야간 러닝')
+  : (_h>=5&&_h<11?'Morning Run':_h>=11&&_h<17?'Afternoon Run':_h>=17&&_h<21?'Evening Run':'Night Run');
 const record = {
 id: Date.now(),
+title: _autoTitle,
 date: new Date().toLocaleString(),
 dist: this.state.totalDist.toFixed(2),
 time: ui.dom.time ? ui.dom.time.textContent : "00:00",
@@ -2447,7 +2471,7 @@ class CommunityManager {
       const payload = {
         user_id: uid,
         nickname: nickname,
-        title: nickname + "'s Run",
+        title: record.title || (nickname + "'s Run"),
         distance_km: parseFloat(record.dist) || 0,
         duration_sec: durationSec,
         pace_sec_per_km: paceSec,
@@ -2632,11 +2656,15 @@ class CommunityManager {
             <div style="width:40px; height:40px; border-radius:50%; background:${isMine ? 'linear-gradient(135deg,#00c853,#00ff88)' : 'linear-gradient(135deg,#555,#777)'}; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:900; color:#fff; flex-shrink:0;">${initial}</div>
             <div>
               <div style="font-size:14px; font-weight:900; color:${isMine ? '#00aa55' : '#111'};">${r.nickname || 'Runner'}${isMine ? ' <span style="font-size:10px; color:#00aa55; font-weight:700;">' + t.crewMe + '</span>' : ''}</div>
-              <div style="font-size:11px; color:#aaa; margin-top:1px;">${this.timeAgo(r.created_at)} · ${runLabel}</div>
+              <div style="font-size:11px; color:#aaa; margin-top:1px;">${this.timeAgo(r.created_at)}</div>
             </div>
           </div>
           ${isMine ? `<button onclick="community.confirmDelete('${r.id}')" style="background:none; border:1px solid #e0e0e0; color:#bbb; font-size:10px; padding:4px 10px; border-radius:6px; font-weight:700; cursor:pointer;">${t.crewDelete}</button>` : ''}
         </div>
+
+        <!-- 러닝 제목 -->
+        <div style="font-size:16px; font-weight:900; color:#111; margin-bottom:2px;">${r.title || runLabel}</div>
+        <div style="font-size:11px; color:#aaa; margin-bottom:12px;">${runLabel}</div>
 
         <!-- 스탯 -->
         <div style="display:flex; border-top:1px solid #f5f5f5; border-bottom:1px solid #f5f5f5; padding:12px 0; margin-bottom:12px;">
