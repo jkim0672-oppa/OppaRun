@@ -431,7 +431,7 @@ alt="runner"/>
 <div class="settings-group">
   <div class="settings-label">CREW NICKNAME</div>
   <div style="display:flex; gap:10px; align-items:center;">
-    <input id="nickname-input" type="text" maxlength="16" placeholder="닉네임 입력 (최대 16자)"
+    <input id="nickname-input" type="text" maxlength="4" placeholder="닉네임 (최대 4자)"
       style="flex:1; background:#2a2a2a; color:#fff; border:1.5px solid #444; padding:16px; border-radius:12px; font-size:15px; font-weight:800; outline:none;"
       oninput="community.saveNickname(this.value)">
   </div>
@@ -2375,11 +2375,20 @@ class CommunityManager {
     localStorage.setItem(this.NICKNAME_KEY, val.trim());
   }
 
+  generateUUID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
   async ensureUserId() {
     if (this.userId) return this.userId;
     let uid = localStorage.getItem(this.USER_ID_KEY);
-    if (uid) { this.userId = uid; return uid; }
-    // 익명 로그인
+    // 기존 저장값이 uuid 형식인지 확인
+    if (uid && uid.match(/^[0-9a-f-]{36}$/)) { this.userId = uid; return uid; }
+    // 익명 로그인 시도
     try {
       const { data, error } = await _sb.auth.signInAnonymously();
       if (data && data.user) {
@@ -2389,8 +2398,8 @@ class CommunityManager {
         return uid;
       }
     } catch(e) { console.warn('Supabase anon login failed', e); }
-    // 폴백: 로컬 UUID
-    uid = 'local-' + Math.random().toString(36).slice(2);
+    // 폴백: 올바른 UUID 형식 생성
+    uid = this.generateUUID();
     localStorage.setItem(this.USER_ID_KEY, uid);
     this.userId = uid;
     return uid;
