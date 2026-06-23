@@ -2859,7 +2859,7 @@ async compressPhoto(file) {
 
         <!-- 이미지/지도 -->
         ${r.photo_url ? `<div style="margin-bottom:12px; border-radius:10px; overflow:hidden;"><img src="${r.photo_url}" loading="lazy" style="width:100%; max-height:280px; object-fit:cover; display:block;"></div>` : ''}
-        ${(r.path && r.path.length > 1) ? `<div style="margin-bottom:12px; border-radius:10px; overflow:hidden;"><img src="${this.pathToStaticMap(r.path)}" style="width:100%; display:block;" loading="lazy"></div>` : ''}
+        ${(r.path && r.path.length > 1) ? `<div id="feed-map-${r.id}" style="margin-bottom:12px; border-radius:10px; overflow:hidden; height:160px; background:#eee;"></div>` : ''}
 
         <!-- 액션 버튼 -->
         <div style="display:flex; border-top:1px solid #f0f0f0; padding-top:12px;">
@@ -2886,6 +2886,36 @@ async compressPhoto(file) {
         </div>
       </div>`;
     }).join('');
+
+    // 경로가 있는 카드마다 실제 Leaflet 미니맵 생성 (정적 외부 API 대신 자체 렌더링)
+    records.forEach(r => {
+      if (!(r.path && r.path.length > 1)) return;
+      const mapEl = document.getElementById('feed-map-' + r.id);
+      if (!mapEl) return;
+      try {
+        const latlngs = r.path.map(p => {
+          if (Array.isArray(p)) return [p[0], p[1]];
+          return [p.lat, p.lng];
+        }).filter(p => p[0] != null && p[1] != null);
+        if (latlngs.length < 2) return;
+        const feedMap = L.map(mapEl, {
+          zoomControl: false,
+          attributionControl: false,
+          dragging: false,
+          scrollWheelZoom: false,
+          doubleClickZoom: false,
+          touchZoom: false,
+          boxZoom: false,
+          keyboard: false,
+          tap: false
+        });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(feedMap);
+        const line = L.polyline(latlngs, { color: '#ff3333', weight: 3 }).addTo(feedMap);
+        feedMap.fitBounds(line.getBounds(), { padding: [14, 14] });
+      } catch (e) {
+        console.warn('feed map render failed', e);
+      }
+    });
   }
 
   async confirmDelete(recordId) {
