@@ -99,7 +99,7 @@ filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
 }
 .status-bar { text-align: center; color: var(--warning); font-size: 11px; padding: 6px; background: #0a0a0a; font-weight: 900; border-bottom: 1px solid #222; letter-spacing: 0.5px; }
 .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
-.dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 6px; margin-top: var(--dashboard-top-gap); flex-shrink: 0; }
+.dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 6px; margin-top: var(--dashboard-top-gap); flex-shrink: 0; }
 .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #333; height: 78px; padding: 0; transition: border-color 0.3s ease; }
 .card-main { grid-column: span 3; border: 2.5px solid var(--primary); height: 82px; position: relative; margin-bottom: 4px; }
 .label { font-size: 9px; color: var(--text-dim); font-weight: 900; margin-bottom: 4px; text-transform: uppercase; }
@@ -243,6 +243,12 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 </style>
 </head>
 <body>
+<div id="app-alert-overlay" style="display:none; position:fixed; inset:0; z-index:99999; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
+  <div style="background:#111; border:1px solid #333; border-radius:16px; padding:24px 22px; width:80%; max-width:320px; box-shadow:0 8px 30px rgba(0,0,0,0.6);">
+    <div id="app-alert-msg" style="color:#fff; font-size:15px; font-weight:600; line-height:1.5; margin-bottom:20px; white-space:pre-line;"></div>
+    <button id="app-alert-ok" style="width:100%; background:var(--primary); color:#000; border:none; padding:12px; border-radius:10px; font-weight:900; font-size:14px;">OK</button>
+  </div>
+</div>
 
 <div id="confirm-modal" class="custom-confirm-overlay">
 <div class="custom-confirm-box">
@@ -488,6 +494,109 @@ alt="runner"/>
 <button id="tab-community" class="tab-btn" onclick="ui.showTab('community')">CREW</button>
 </div>
 <script>
+function generateRunCardBlob(data, isKo) {
+  return new Promise((resolve) => {
+    const W = 750, H = 1000;
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+    const hdrH = 180;
+    ctx.fillStyle = '#00e676'; ctx.fillRect(0, 0, W, hdrH);
+    ctx.fillStyle = '#000000'; ctx.font = 'bold 38px Arial, sans-serif';
+    ctx.fillText(data.nickname ? (isKo ? data.nickname + '님의 러닝' : data.nickname + "'s Run") : 'Jenny Run Pro', 40, 68);
+    ctx.font = '22px Arial, sans-serif'; ctx.fillStyle = '#1a1a1a';
+    ctx.fillText((isKo ? '러닝 기록' : 'Running Record') + (data.dateStr ? '  ' + data.dateStr : ''), 42, 108);
+    const tile = (x, y, w, h, label, val, unit, color) => {
+      ctx.fillStyle = '#f5f5f5'; roundRect(ctx, x, y, w, h, 18); ctx.fill();
+      ctx.fillStyle = '#888'; ctx.font = '18px Arial, sans-serif'; ctx.fillText(label, x + 18, y + 34);
+      ctx.fillStyle = color || '#111'; ctx.font = 'bold 48px Arial, sans-serif'; ctx.fillText(val, x + 18, y + 88);
+      ctx.fillStyle = '#888'; ctx.font = '20px Arial, sans-serif'; ctx.fillText(unit, x + 18, y + 118);
+    };
+    const smallTile = (x, y, w, h, label, val, unit, color) => {
+      ctx.fillStyle = '#f0faf4'; roundRect(ctx, x, y, w, h, 14); ctx.fill();
+      ctx.fillStyle = '#555'; ctx.font = '15px Arial, sans-serif'; ctx.fillText(label, x + 14, y + 28);
+      ctx.fillStyle = color || '#111'; ctx.font = 'bold 32px Arial, sans-serif'; ctx.fillText(val, x + 14, y + 68);
+      ctx.fillStyle = '#888'; ctx.font = '15px Arial, sans-serif'; ctx.fillText(unit, x + 14, y + 90);
+    };
+    function roundRect(c, x, y, w, h, r) {
+      c.beginPath();
+      c.moveTo(x+r, y); c.lineTo(x+w-r, y); c.quadraticCurveTo(x+w, y, x+w, y+r);
+      c.lineTo(x+w, y+h-r); c.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+      c.lineTo(x+r, y+h); c.quadraticCurveTo(x, y+h, x, y+h-r);
+      c.lineTo(x, y+r); c.quadraticCurveTo(x, y, x+r, y); c.closePath();
+    }
+    const pad = 28, tw = (W - pad*2 - 16) / 3, row1y = hdrH + 24;
+    tile(pad,           row1y, tw, 140, isKo?'거리':'DIST', data.dist, data.distUnit, '#00897b');
+    tile(pad+tw+8,      row1y, tw, 140, isKo?'시간':'TIME', data.time || '--', '', '#1565c0');
+    tile(pad+tw*2+16,   row1y, tw, 140, isKo?'페이스':'PACE', data.pace || '--', '/'+(data.distUnit||'km'), '#6a1b9a');
+    ctx.strokeStyle = '#e0e0e0'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(pad, row1y+155); ctx.lineTo(W-pad, row1y+155); ctx.stroke();
+    ctx.fillStyle = '#444'; ctx.font = 'bold 20px Arial, sans-serif';
+    ctx.fillText(isKo ? '🔬 러닝 다이나믹스' : '🔬 Running Dynamics', pad, row1y+185);
+    const sw = (W - pad*2 - 20) / 3, sh = 110, row2y = row1y + 198;
+    const effScore = data.effScore != null ? data.effScore : 0;
+    const effC = effScore >= 75 ? '#2e7d32' : effScore >= 50 ? '#e65100' : '#c62828';
+    smallTile(pad,          row2y,    sw, sh, isKo?'케이던스':'CADENCE',    data.cadence||'--', 'SPM', '#1565c0');
+    smallTile(pad+sw+10,    row2y,    sw, sh, 'GCT',                        data.gct||'--',     'ms',  '#00695c');
+    smallTile(pad+sw*2+20,  row2y,    sw, sh, isKo?'효율점수':'EFFICIENCY', effScore,            '/ 100', effC);
+    const row3y = row2y + sh + 14;
+    smallTile(pad,          row3y, sw, sh, 'VERT RATIO',                   data.vertRatio||'--', '%',   '#6a1b9a');
+    smallTile(pad+sw+10,    row3y, sw, sh, isKo?'체공시간':'FLIGHT',        data.flight||'--',    '%',   '#0277bd');
+    smallTile(pad+sw*2+20,  row3y, sw, sh, isKo?'케이던스 밸':'CAD BAL',    data.cadenceBal||'50:50', '', '#37474f');
+    ctx.strokeStyle = '#e0e0e0'; ctx.lineWidth = 1;
+    const divY = row3y + sh + 20;
+    ctx.beginPath(); ctx.moveTo(pad, divY); ctx.lineTo(W-pad, divY); ctx.stroke();
+    const barY = divY + 24;
+    ctx.fillStyle = '#555'; ctx.font = 'bold 18px Arial, sans-serif';
+    ctx.fillText(isKo ? '효율 점수' : 'Efficiency Score', pad, barY + 18);
+    ctx.fillStyle = '#e0e0e0'; roundRect(ctx, pad, barY + 28, W - pad*2 - 160, 24, 12); ctx.fill();
+    const barW = Math.round((W - pad*2 - 160) * effScore / 100);
+    ctx.fillStyle = effC; roundRect(ctx, pad, barY + 28, barW, 24, 12); ctx.fill();
+    ctx.fillStyle = '#333'; ctx.font = 'bold 22px Arial, sans-serif';
+    ctx.fillText(effScore + ' pts', W - pad - 148, barY + 47);
+    const urlY = barY + 72;
+    ctx.fillStyle = '#00897b'; ctx.font = 'bold 19px Arial, sans-serif';
+    ctx.fillText('⚡ Jenny Run Pro', pad, urlY);
+    ctx.fillStyle = '#888'; ctx.font = '17px Arial, sans-serif';
+    ctx.fillText('AI-powered running dynamics tracker', pad, urlY + 26);
+    ctx.fillStyle = '#00e676'; ctx.fillRect(0, H - 50, W, 50);
+    ctx.fillStyle = '#000'; ctx.font = 'bold 20px Arial, sans-serif';
+    ctx.fillText('Jenny Run Pro  |  Track smarter, Run better', pad, H - 16);
+    canvas.toBlob((blob) => resolve(blob), 'image/png');
+  });
+}
+async function shareRunCardImage(data, isKo, shareTextFallback) {
+  const blob = await generateRunCardBlob(data, isKo);
+  const file = new File([blob], 'jennyrunpro_record.png', { type: 'image/png' });
+  if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ title: 'Jenny Run Pro', text: (isKo ? '내 러닝 기록을 공유합니다!' : 'Check out my run!'), files: [file] }); return; } catch(e) {}
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'jennyrunpro_record.png';
+  a.click();
+  if (window.AndroidShare && shareTextFallback) {
+    window.AndroidShare.share(shareTextFallback);
+  }
+  appAlert(isKo ? '이미지가 저장되었습니다! SNS에 공유해보세요' : 'Image saved! Share it on SNS');
+}
+
+function appAlert(msg) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('app-alert-overlay');
+    const msgEl = document.getElementById('app-alert-msg');
+    const okBtn = document.getElementById('app-alert-ok');
+    if (!overlay || !msgEl || !okBtn) { window.__nativeAlert ? window.__nativeAlert(msg) : null; resolve(); return; }
+    msgEl.textContent = msg;
+    overlay.style.display = 'flex';
+    const onOk = () => { overlay.style.display = 'none'; okBtn.removeEventListener('click', onOk); resolve(); };
+    okBtn.addEventListener('click', onOk);
+  });
+}
+window.__nativeAlert = window.alert;
+window.alert = function(msg) { appAlert(msg); };
+
 // ========== 전역 상수 (문자열 오류 방지) ==========
 const INVALID_PACE = "--'--\"";
 // ========== 번역 객체 (원본 유지) ==========
@@ -1652,176 +1761,27 @@ if (!record) return;
 const lang = storage.getLang();
 const isKo = lang === 'ko';
 
-// 단위 변환
 let displayDist = parseFloat(record.dist);
 if(this.currentUnit === 'mile') displayDist = displayDist * 0.621371;
 let displayPace = record.avgPace || record.pace;
 if(displayPace && displayPace !== INVALID_PACE && this.currentUnit === 'mile') displayPace = this.convertPaceToUnit(displayPace, 'mile');
 const unitText = this.currentUnit === 'km' ? 'km' : 'mi';
 
-// VERT RATIO 폴백
 const cadence = record.cadence || 170;
 const vertRatioVal = record.vertRatio ? record.vertRatio : (7.5 - (cadence - 160) * 0.05).toFixed(1);
-
-// 효율점수 계산
 const gct = record.gct || 250;
 const flight = record.flight || 25;
 const cadScore = Math.min(100, Math.max(0, ((cadence - 150) / 35) * 100));
 const gctScore = Math.min(100, Math.max(0, ((400 - gct) / 160) * 100));
 const flightScore = Math.min(100, Math.max(0, ((flight - 20) / 30) * 100));
 const effScore = Math.round(cadScore * 0.4 + gctScore * 0.4 + flightScore * 0.2);
-
-// Canvas 생성
-const W = 750, H = 1000;
-const canvas = document.createElement('canvas');
-canvas.width = W; canvas.height = H;
-const ctx = canvas.getContext('2d');
-
-// 배경: 흰색
-ctx.fillStyle = '#ffffff';
-ctx.fillRect(0, 0, W, H);
-
-// 상단 그린 헤더 띠
-const hdrH = 180;
-ctx.fillStyle = '#00e676';
-ctx.fillRect(0, 0, W, hdrH);
-
-// 헤더 아이콘 + 앱명
-ctx.fillStyle = '#000000';
-ctx.font = 'bold 38px Arial, sans-serif';
-ctx.fillText('Jenny Run Pro', 40, 68);
-ctx.font = '22px Arial, sans-serif';
-ctx.fillStyle = '#1a1a1a';
 const dateStr = record.date ? record.date.split(' ')[0] : '';
-ctx.fillText((isKo ? '러닝 기록' : 'Running Record') + '  ' + dateStr, 42, 108);
 
-// 주요 3지표 (거리/시간/페이스) - 큰 타일
-const tile = (x, y, w, h, label, val, unit, color) => {
-  ctx.fillStyle = '#f5f5f5';
-  roundRect(ctx, x, y, w, h, 18);
-  ctx.fill();
-  ctx.fillStyle = '#888';
-  ctx.font = '18px Arial, sans-serif';
-  ctx.fillText(label, x + 18, y + 34);
-  ctx.fillStyle = color || '#111';
-  ctx.font = 'bold 48px Arial, sans-serif';
-  ctx.fillText(val, x + 18, y + 88);
-  ctx.fillStyle = '#888';
-  ctx.font = '20px Arial, sans-serif';
-  ctx.fillText(unit, x + 18, y + 118);
-};
-
-const smallTile = (x, y, w, h, label, val, unit, color) => {
-  ctx.fillStyle = '#f0faf4';
-  roundRect(ctx, x, y, w, h, 14);
-  ctx.fill();
-  ctx.fillStyle = '#555';
-  ctx.font = '15px Arial, sans-serif';
-  ctx.fillText(label, x + 14, y + 28);
-  ctx.fillStyle = color || '#111';
-  ctx.font = 'bold 32px Arial, sans-serif';
-  ctx.fillText(val, x + 14, y + 68);
-  ctx.fillStyle = '#888';
-  ctx.font = '15px Arial, sans-serif';
-  ctx.fillText(unit, x + 14, y + 90);
-};
-
-function roundRect(c, x, y, w, h, r) {
-  c.beginPath();
-  c.moveTo(x+r, y);
-  c.lineTo(x+w-r, y); c.quadraticCurveTo(x+w, y, x+w, y+r);
-  c.lineTo(x+w, y+h-r); c.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
-  c.lineTo(x+r, y+h); c.quadraticCurveTo(x, y+h, x, y+h-r);
-  c.lineTo(x, y+r); c.quadraticCurveTo(x, y, x+r, y);
-  c.closePath();
-}
-
-const pad = 28, tw = (W - pad*2 - 16) / 3;
-const row1y = hdrH + 24;
-tile(pad,           row1y, tw, 140, isKo?'거리':'DIST', displayDist.toFixed(2), unitText, '#00897b');
-tile(pad+tw+8,      row1y, tw, 140, isKo?'시간':'TIME', record.time || '--', '', '#1565c0');
-tile(pad+tw*2+16,   row1y, tw, 140, isKo?'페이스':'PACE', displayPace || '--', '/'+unitText, '#6a1b9a');
-
-// 구분선
-ctx.strokeStyle = '#e0e0e0';
-ctx.lineWidth = 1;
-ctx.beginPath();
-ctx.moveTo(pad, row1y+155); ctx.lineTo(W-pad, row1y+155);
-ctx.stroke();
-
-// 섹션 타이틀 - 러닝 다이나믹스
-ctx.fillStyle = '#444';
-ctx.font = 'bold 20px Arial, sans-serif';
-ctx.fillText(isKo ? '🔬 러닝 다이나믹스' : '🔬 Running Dynamics', pad, row1y+185);
-
-// 작은 타일 6개: cadence, GCT, effScore, vertRatio, flight, cadenceBal
-const sw = (W - pad*2 - 20) / 3, sh = 110, row2y = row1y + 198;
-const effC = effScore >= 75 ? '#2e7d32' : effScore >= 50 ? '#e65100' : '#c62828';
-smallTile(pad,          row2y,    sw, sh, isKo?'케이던스':'CADENCE',    record.cadence||'--', 'SPM', '#1565c0');
-smallTile(pad+sw+10,    row2y,    sw, sh, 'GCT',                        record.gct||'--',     'ms',  '#00695c');
-smallTile(pad+sw*2+20,  row2y,    sw, sh, isKo?'효율점수':'EFFICIENCY', effScore,              '/ 100', effC);
-
-const row3y = row2y + sh + 14;
-smallTile(pad,          row3y, sw, sh, 'VERT RATIO',                   vertRatioVal,          '%',   '#6a1b9a');
-smallTile(pad+sw+10,    row3y, sw, sh, isKo?'체공시간':'FLIGHT',        record.flight||'--',   '%',   '#0277bd');
-smallTile(pad+sw*2+20,  row3y, sw, sh, isKo?'케이던스 밸':'CAD BAL',    record.cadenceBal||'50:50', '', '#37474f');
-
-// 구분선
-ctx.strokeStyle = '#e0e0e0';
-ctx.lineWidth = 1;
-const divY = row3y + sh + 20;
-ctx.beginPath(); ctx.moveTo(pad, divY); ctx.lineTo(W-pad, divY); ctx.stroke();
-
-// 하단: URL + 효율점수 바
-const barY = divY + 24;
-ctx.fillStyle = '#555';
-ctx.font = 'bold 18px Arial, sans-serif';
-ctx.fillText(isKo ? '효율 점수' : 'Efficiency Score', pad, barY + 18);
-// 바 배경
-ctx.fillStyle = '#e0e0e0';
-roundRect(ctx, pad, barY + 28, W - pad*2 - 160, 24, 12); ctx.fill();
-// 바 채우기
-const barW = Math.round((W - pad*2 - 160) * effScore / 100);
-ctx.fillStyle = effC;
-roundRect(ctx, pad, barY + 28, barW, 24, 12); ctx.fill();
-ctx.fillStyle = '#333';
-ctx.font = 'bold 22px Arial, sans-serif';
-ctx.fillText(effScore + ' pts', W - pad - 148, barY + 47);
-
-// 앱 URL
-const urlY = barY + 72;
-ctx.fillStyle = '#00897b';
-ctx.font = 'bold 19px Arial, sans-serif';
-ctx.fillText('⚡ Jenny Run Pro', pad, urlY);
-ctx.fillStyle = '#888';
-ctx.font = '17px Arial, sans-serif';
-ctx.fillText('AI-powered running dynamics tracker', pad, urlY + 26);
-
-// 하단 초록 띠
-ctx.fillStyle = '#00e676';
-ctx.fillRect(0, H - 50, W, 50);
-ctx.fillStyle = '#000';
-ctx.font = 'bold 20px Arial, sans-serif';
-ctx.fillText('Jenny Run Pro  |  Track smarter, Run better', pad, H - 16);
-
-// 이미지로 변환 후 공유
-canvas.toBlob(async (blob) => {
-  const file = new File([blob], 'jennyrunpro_record.png', { type: 'image/png' });
-  if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-    navigator.share({
-      title: 'Jenny Run Pro',
-      text: (isKo ? '내 러닝 기록을 공유합니다!' : 'Check out my run!'),
-      files: [file]
-    }).catch(err => console.log(err));
-  } else {
-    // 파일 공유 불가 시 이미지 다운로드
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'jennyrunpro_record.png';
-    a.click();
-    alert(isKo ? '이미지가 저장되었습니다! SNS에 공유해보세요' : 'Image saved! Share it on SNS');
-  }
-}, 'image/png');
+shareRunCardImage({
+  dist: displayDist.toFixed(2), distUnit: unitText, time: record.time, pace: displayPace,
+  cadence: record.cadence, gct: record.gct, flight: record.flight, vertRatio: vertRatioVal,
+  cadenceBal: record.cadenceBal, effScore, dateStr
+}, isKo, null);
 }
 openDiag(id) {
 const h = storage.loadHistory();
@@ -2650,15 +2610,25 @@ async compressPhoto(file) {
     const records = await this.loadFeed();
     const r = records.find(x => x.id === recordId);
     if (!r) return;
+    const lang = (storage.getLang && storage.getLang()) || 'ko';
+    const isKo = lang === 'ko';
     const text = `${r.nickname}'s Run: ${parseFloat(r.distance_km||0).toFixed(2)}km in ${this.formatDuration(r.duration_sec)} @ ${this.formatPaceSec(r.pace_sec_per_km)}/km${r.message ? '\n' + r.message : ''}`;
-    if (window.AndroidShare) {
-      window.AndroidShare.share(text);
-    } else if (navigator.share) {
-      navigator.share({ title: r.title || "Jenny Run", text }).catch(() => {});
-    } else {
-      navigator.clipboard && navigator.clipboard.writeText(text);
-      alert('Copied to clipboard!');
+    const cadence = r.cadence || 0;
+    const gct = r.gct || 0;
+    const flight = r.flight || 0;
+    let effScore = 0;
+    if (cadence && gct && flight) {
+      const cadScore = Math.min(100, Math.max(0, ((cadence - 150) / 35) * 100));
+      const gctScore = Math.min(100, Math.max(0, ((400 - gct) / 160) * 100));
+      const flightScore = Math.min(100, Math.max(0, ((flight - 20) / 30) * 100));
+      effScore = Math.round(cadScore * 0.4 + gctScore * 0.4 + flightScore * 0.2);
     }
+    shareRunCardImage({
+      nickname: r.nickname,
+      dist: parseFloat(r.distance_km||0).toFixed(2), distUnit: 'km',
+      time: this.formatDuration(r.duration_sec), pace: this.formatPaceSec(r.pace_sec_per_km),
+      cadence: r.cadence, gct: r.gct, flight: r.flight, cadenceBal: r.cadenceBal, effScore
+    }, isKo, text);
   }
   async toggleLike(recordId) {
     const uid = await this.ensureUserId();
