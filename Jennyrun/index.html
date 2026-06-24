@@ -568,17 +568,30 @@ function generateRunCardBlob(data, isKo) {
 }
 async function shareRunCardImage(data, isKo, shareTextFallback) {
   const blob = await generateRunCardBlob(data, isKo);
+  const shareText = shareTextFallback || (isKo ? '내 러닝 기록을 공유합니다! ⚡ Jenny Run Pro' : 'Check out my run! ⚡ Jenny Run Pro');
+
+  // 1순위: AndroidBridge 이미지 공유 (카카오톡 등 직접 공유)
+  if (window.AndroidShare && window.AndroidShare.shareImage) {
+    const reader = new FileReader();
+    reader.onload = function() {
+      const base64 = reader.result.split(',')[1];
+      window.AndroidShare.shareImage(base64, shareText);
+    };
+    reader.readAsDataURL(blob);
+    return;
+  }
+
+  // 2순위: navigator.share (파일 공유 지원 브라우저)
   const file = new File([blob], 'jennyrunpro_record.png', { type: 'image/png' });
   if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-    try { await navigator.share({ title: 'Jenny Run Pro', text: (isKo ? '내 러닝 기록을 공유합니다!' : 'Check out my run!'), files: [file] }); return; } catch(e) {}
+    try { await navigator.share({ title: 'Jenny Run Pro', text: shareText, files: [file] }); return; } catch(e) {}
   }
+
+  // 3순위: 다운로드 폴백
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'jennyrunpro_record.png';
   a.click();
-  if (window.AndroidShare && shareTextFallback) {
-    window.AndroidShare.share(shareTextFallback);
-  }
   appAlert(isKo ? '이미지가 저장되었습니다! SNS에 공유해보세요' : 'Image saved! Share it on SNS');
 }
 
