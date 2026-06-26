@@ -1118,48 +1118,34 @@ y+=cardH+10;
 ctx.strokeStyle='#2c2c2e';ctx.beginPath();ctx.moveTo(CARD_PAD,y);ctx.lineTo(W-CARD_PAD,y);ctx.stroke();y+=12;
 ctx.fillStyle='#9a9aaa';ctx.font=`12px -apple-system,sans-serif`;ctx.fillText('PRO ANALYSIS · AI-powered Running Coach',CARD_PAD,y+14);
 ctx.fillStyle=NEON;ctx.textAlign='right';ctx.fillText('🏃 Check out my run!',W-CARD_PAD,y+14);ctx.textAlign='left';
-// 공유 (동기 처리: canvas.toBlob은 비동기라 사용자 제스처가 만료될 수 있어 toDataURL로 동기 변환 후 즉시 share 호출)
+// 공유
 const dataUrl=canvas.toDataURL('image/png');
-const byteStr=atob(dataUrl.split(',')[1]);
+const base64=dataUrl.split(',')[1];
+let shared=false;
+// 1순위: Android JS Interface (Jenny Run 방식 — WebView에서 진짜 공유창 띄움)
+if(!shared&&window.AndroidShare&&typeof window.AndroidShare.shareImage==='function'){
+try{
+window.AndroidShare.shareImage(base64);
+shared=true;
+}catch(e1){}
+}
+// 2순위: Web Share API (파일 공유 지원 브라우저)
+if(!shared&&typeof navigator!=='undefined'&&navigator.share){
+try{
+const byteStr=atob(base64);
 const byteArr=new Uint8Array(byteStr.length);
 for(let i=0;i<byteStr.length;i++)byteArr[i]=byteStr.charCodeAt(i);
 const blob=new Blob([byteArr],{type:'image/png'});
-let shared=false;
-let webShareAttempted=false;
-if(typeof navigator!=='undefined'&&navigator.share){
-webShareAttempted=true;
-try{
 const file=new File([blob],'solution.png',{type:'image/png'});
 if(navigator.canShare&&navigator.canShare({files:[file]})){
 await navigator.share({title,files:[file]});
 shared=true;
 }
 }catch(e2){}
+}
+// 3순위: 토스트 안내 (WebView fallback — window.open/download는 WebView에서 동작 안 함)
 if(!shared){
-try{
-await navigator.share({title,text:title});
-shared=true;
-}catch(e3){}
-}
-}
-if(!shared){
-// Web Share API가 없거나(일반 Android WebView 다수) 실패한 경우: 새 창으로 이미지를 열어 길게 눌러 저장/공유할 수 있게 함
-try{
-const w=window.open('','_blank');
-if(w&&w.document){
-w.document.write(`<html><head><title>${title}</title></head><body style="margin:0;background:#0a0a0c;display:flex;align-items:center;justify-content:center;min-height:100vh;"><img src="${dataUrl}" style="max-width:100%;" /></body></html>`);
-shared=true;
-}
-}catch(e4){}
-}
-if(!shared){
-try{
-const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='solution.png';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
-shared=true;
-}catch(e5){}
-}
-if(!shared){
-this.showToast('⚠️','공유할 수 없습니다. 화면을 캡처해 공유해주세요.');
+this.showToast('⚠️','공유하려면 Kotlin AndroidShare 인터페이스를 연결해주세요.');
 }
 }catch(err){
 this.showToast('⚠️','공유 중 오류가 발생했습니다: '+(err&&err.message?err.message:err));
