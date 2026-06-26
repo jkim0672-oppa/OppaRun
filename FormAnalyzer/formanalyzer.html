@@ -1024,108 +1024,111 @@ closeSavedList() { document.getElementById('savedListModal').style.display='none
 closeSolutionRoom() { AppControl.switchRoom('auto'); },
 async _captureAndShare(sourceIds,title){
 try{
-const W=720,CARD_PAD=36,LINE_H=28,TAG_H=26,CARD_R=14,TITLE_SIZE=22,SUB_SIZE=15,DESC_SIZE=13,TAG_SIZE=12;
-const BG='#f0f4f8',CARD_BG='#ffffff',NEON='#4f46e5',BLUE='#2563eb',GRAY='#374151',WHITE='#111827',BORDER='#6d28d9';
-// 둥근 사각형 (구형 WebView는 ctx.roundRect를 지원하지 않을 수 있어 직접 경로로 그림)
+// ── Jenny Run 스타일 공유 카드 ──
+const W=720, PAD=40, GAP=12, R=16;
+const BG='#ffffff', CARD='#f4f4f4', GREEN='#22c55e', BLACK='#111111', GRAY='#6b7280', BORDER='#e5e7eb';
+const canvas=document.createElement('canvas');
+const ctx=canvas.getContext('2d');
+const lang=I18n.currentLang||'en';
+// 둥근 사각형
 const rr=(x,y,w,h,r)=>{
-let tl=0,tr=0,br=0,bl=0;
-if(Array.isArray(r)){[tl,tr,br,bl]=r;}else{tl=tr=br=bl=r;}
-ctx.beginPath();
-ctx.moveTo(x+tl,y);
-ctx.lineTo(x+w-tr,y);
-ctx.arcTo(x+w,y,x+w,y+tr,tr);
-ctx.lineTo(x+w,y+h-br);
-ctx.arcTo(x+w,y+h,x+w-br,y+h,br);
-ctx.lineTo(x+bl,y+h);
-ctx.arcTo(x,y+h,x,y+h-bl,bl);
-ctx.lineTo(x,y+tl);
-ctx.arcTo(x,y,x+tl,y,tl);
-ctx.closePath();
+ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.arcTo(x+w,y,x+w,y+r,r);
+ctx.lineTo(x+w,y+h-r);ctx.arcTo(x+w,y+h,x+w-r,y+h,r);
+ctx.lineTo(x+r,y+h);ctx.arcTo(x,y+h,x,y+h-r,r);
+ctx.lineTo(x,y+r);ctx.arcTo(x,y,x+r,y,r);ctx.closePath();
+};
+const wrapText=(text,maxW,size,weight='400')=>{
+ctx.font=`${weight} ${size}px -apple-system,sans-serif`;
+const words=text.split(' ');let lines=[],cur='';
+words.forEach(w=>{const t=cur?cur+' '+w:w;if(ctx.measureText(t).width>maxW&&cur){lines.push(cur);cur=w;}else cur=t;});
+if(cur)lines.push(cur);return lines;
 };
 // 데이터 수집
-const keys=['Knee','Dynamic','Torso'];
-const lang=I18n.currentLang||'en';
 const cardTitles={
-Knee:   lang==='ko'?'하체 익스텐션 & 롤링 (Knee Extension)':'Lower Body Extension & Rolling (Knee)',
-Dynamic:lang==='ko'?'지면 반발력 & 효율성 (GCT / Flight)':'Ground Reaction & Efficiency (GCT/Flight)',
-Torso:  lang==='ko'?'상체 밸런스 & 각도 (Torso Lean)':'Torso Balance & Angle (Torso Lean)'
+Knee:   lang==='ko'?'하체 익스텐션 & 롤링':'Knee Extension & Rolling',
+Dynamic:lang==='ko'?'지면 반발력 & 효율성':'Ground Reaction & Efficiency',
+Torso:  lang==='ko'?'상체 밸런스 & 각도':'Torso Balance & Angle'
 };
-const items=keys.map(k=>{
+const cardSubs={
+Knee:'Knee Extension',Dynamic:'GCT / Flight',Torso:'Torso Lean'
+};
+const items=['Knee','Dynamic','Torso'].map(k=>{
 const tagEl=document.getElementById(sourceIds['tag'+k]);
 const descEl=document.getElementById(sourceIds['desc'+k]);
-return {
-tag: tagEl?tagEl.innerText:'--',
-tagColor: tagEl?tagEl.style.background||'#6d28d9':'#6d28d9',
-tagText: tagEl?tagEl.style.color||'#fff':'#fff',
-desc: descEl?descEl.innerText:'',
-title: cardTitles[k]
-};
+return{tag:tagEl?tagEl.innerText:'--',tagBg:tagEl?tagEl.style.background||'#22c55e':'#22c55e',tagFg:tagEl?tagEl.style.color||'#fff':'#fff',desc:descEl?descEl.innerText:'',title:cardTitles[k],sub:cardSubs[k]};
 });
 const dateEl=sourceIds['date']?document.getElementById(sourceIds['date']):null;
 const dateStr=dateEl?dateEl.innerText:'';
-// 캔버스 높이 계산
-const canvas=document.createElement('canvas');
-const ctx=canvas.getContext('2d');
-const wrapText=(text,maxW,size)=>{
-ctx.font=`${size}px -apple-system,sans-serif`;
-const words=text.split(' ');let lines=[],cur='';
-words.forEach(w=>{const t=cur?cur+' '+w:w;if(ctx.measureText(t).width>maxW&&cur){lines.push(cur);cur=w;}else cur=t;});
-if(cur)lines.push(cur);
-return lines;
-};
-const innerW=W-CARD_PAD*2;
-let H=CARD_PAD; // 상단 패딩
-H+=40; // 타이틀
-if(dateStr)H+=24;
-H+=16; // 구분선
+// ── 높이 계산 ──
+const innerW=W-PAD*2;
+const CARD_INNER=innerW-32;
+const DESC_SIZE=13,LINE_H=20;
+let H=PAD; // 상단 여백
+H+=60; // 로고 영역
+H+=1+16; // 구분선
+H+=48; // 제목 (FormAnalyzer)
+H+=dateStr?28:0;
+H+=1+24; // 구분선2
 items.forEach(item=>{
-H+=CARD_PAD; // 카드 상단
-H+=TAG_H+8; // 제목+태그
-const descLines=wrapText(item.desc,innerW-CARD_PAD*2-4,DESC_SIZE);
-H+=descLines.length*LINE_H+CARD_PAD; // 설명+하단 패딩
-H+=10; // 카드 간격
+const lines=wrapText(item.desc,CARD_INNER-120,DESC_SIZE);
+H+=16+28+8+Math.max(lines.length,1)*LINE_H+16+GAP; // 카드 높이
 });
-H+=40+CARD_PAD; // 하단 브랜딩
+H+=PAD; // 하단 여백
+H+=44; // 푸터
 canvas.width=W; canvas.height=H;
-// 배경
+// ── 배경 ──
 ctx.fillStyle=BG; ctx.fillRect(0,0,W,H);
-let y=CARD_PAD;
-// 타이틀
-ctx.fillStyle=NEON; ctx.font=`900 ${TITLE_SIZE}px -apple-system,sans-serif`;
-ctx.fillText('BIOMECHANICS REALTIME SOLUTION ⚡',CARD_PAD,y+TITLE_SIZE); y+=TITLE_SIZE+6;
-if(dateStr){ctx.fillStyle=GRAY;ctx.font=`${SUB_SIZE}px -apple-system,sans-serif`;ctx.fillText(dateStr,CARD_PAD,y+SUB_SIZE);y+=SUB_SIZE+6;}
+let y=PAD;
+// ── 로고 영역 (JRUN 스타일 → FormAnalyzer) ──
+ctx.font=`900 38px -apple-system,sans-serif`;
+ctx.fillStyle=GREEN; ctx.fillText('Form',PAD,y+38);
+const fW=ctx.measureText('Form').width;
+ctx.fillStyle=BLACK; ctx.font=`900 28px -apple-system,sans-serif`;
+ctx.fillText('Analyzer',PAD+fW+4,y+38);
+ctx.fillStyle=GRAY; ctx.font=`13px -apple-system,sans-serif`;
+ctx.textAlign='right'; ctx.fillText('AI Running Form Coach',W-PAD,y+38); ctx.textAlign='left';
+y+=60;
 // 구분선
-ctx.strokeStyle='#d1d5db';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(CARD_PAD,y);ctx.lineTo(W-CARD_PAD,y);ctx.stroke();y+=14;
-// 카드들
+ctx.strokeStyle=BORDER;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(PAD,y);ctx.lineTo(W-PAD,y);ctx.stroke();y+=16;
+// ── 서브 제목 ──
+ctx.fillStyle=BLACK; ctx.font=`700 22px -apple-system,sans-serif`;
+ctx.fillText(lang==='ko'?'러닝 폼 분석 리포트':'Running Form Report',PAD,y+22); y+=28;
+if(dateStr){ctx.fillStyle=GRAY;ctx.font=`13px -apple-system,sans-serif`;ctx.fillText(dateStr,PAD,y+14);y+=28;}
+// 구분선2
+ctx.strokeStyle=BORDER;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(PAD,y);ctx.lineTo(W-PAD,y);ctx.stroke();y+=24;
+// ── 카드들 ──
 items.forEach(item=>{
-const descLines=wrapText(item.desc,innerW-CARD_PAD*2-4,DESC_SIZE);
-const cardH=CARD_PAD+TAG_H+8+descLines.length*LINE_H+CARD_PAD;
-// 카드 배경 + 그림자
-ctx.shadowColor='rgba(0,0,0,0.10)';ctx.shadowBlur=12;ctx.shadowOffsetY=3;
-ctx.fillStyle=CARD_BG;
-rr(CARD_PAD,y,innerW,cardH,CARD_R);ctx.fill();
-ctx.shadowColor='transparent';ctx.shadowBlur=0;ctx.shadowOffsetY=0;
-// 왼쪽 보더
-ctx.fillStyle=BORDER;rr(CARD_PAD,y,4,cardH,[CARD_R,0,0,CARD_R]);ctx.fill();
+const lines=wrapText(item.desc,CARD_INNER-120,DESC_SIZE);
+const cardH=16+28+8+Math.max(lines.length,1)*LINE_H+16;
+// 카드 배경
+ctx.fillStyle=CARD; rr(PAD,y,innerW,cardH,R); ctx.fill();
+// 카드 상단 왼쪽 강조선
+ctx.fillStyle=GREEN; ctx.fillRect(PAD,y,4,cardH);
 // 제목
-ctx.fillStyle=NEON;ctx.font=`700 ${SUB_SIZE}px -apple-system,sans-serif`;
-ctx.fillText(item.title,CARD_PAD+16,y+CARD_PAD+SUB_SIZE-4);
-// 태그 배경
+ctx.fillStyle=BLACK; ctx.font=`700 15px -apple-system,sans-serif`;
+ctx.fillText(item.title,PAD+20,y+16+15);
+// 서브라벨
+ctx.fillStyle=GRAY; ctx.font=`11px -apple-system,sans-serif`;
+ctx.fillText(item.sub,PAD+20,y+16+15+16);
+// 태그 (오른쪽)
+ctx.font=`700 12px -apple-system,sans-serif`;
 const tagW=ctx.measureText(item.tag).width+20;
-const tagX=W-CARD_PAD-tagW-8;
-ctx.fillStyle=item.tagColor;
-rr(tagX,y+CARD_PAD-2,tagW,TAG_H,6);ctx.fill();
-ctx.fillStyle=item.tagText;ctx.font=`700 ${TAG_SIZE}px -apple-system,sans-serif`;
-ctx.textAlign='center';ctx.fillText(item.tag,tagX+tagW/2,y+CARD_PAD+TAG_H/2+4);ctx.textAlign='left';
+const tagX=PAD+innerW-tagW-12;
+ctx.fillStyle=item.tagBg; rr(tagX,y+12,tagW,26,6); ctx.fill();
+ctx.fillStyle=item.tagFg; ctx.textAlign='center';
+ctx.fillText(item.tag,tagX+tagW/2,y+12+17); ctx.textAlign='left';
 // 설명
-ctx.fillStyle=GRAY;ctx.font=`${DESC_SIZE}px -apple-system,sans-serif`;
-descLines.forEach((line,i)=>{ctx.fillText(line,CARD_PAD+16,y+CARD_PAD+TAG_H+14+(i+1)*LINE_H);});
-y+=cardH+10;
+ctx.fillStyle='#444444'; ctx.font=`500 ${DESC_SIZE}px -apple-system,sans-serif`;
+lines.forEach((l,i)=>ctx.fillText(l,PAD+20,y+16+28+8+(i+1)*LINE_H));
+y+=cardH+GAP;
 });
-// 하단 브랜딩
-ctx.strokeStyle='#d1d5db';ctx.beginPath();ctx.moveTo(CARD_PAD,y);ctx.lineTo(W-CARD_PAD,y);ctx.stroke();y+=12;
-ctx.fillStyle='#6b7280';ctx.font=`12px -apple-system,sans-serif`;ctx.fillText('PRO ANALYSIS · AI-powered Running Coach',CARD_PAD,y+14);
-ctx.fillStyle=NEON;ctx.textAlign='right';ctx.fillText('🏃 Check out my run!',W-CARD_PAD,y+14);ctx.textAlign='left';
+y+=PAD-GAP;
+// ── 푸터 ──
+ctx.strokeStyle=BORDER;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(PAD,y);ctx.lineTo(W-PAD,y);ctx.stroke();y+=14;
+ctx.fillStyle=GREEN; ctx.font=`700 13px -apple-system,sans-serif`;
+ctx.fillText('⚡ FormAnalyzer',PAD,y+13);
+ctx.fillStyle=GRAY; ctx.font=`12px -apple-system,sans-serif`;
+ctx.textAlign='right'; ctx.fillText('AI Running Form Coach',W-PAD,y+13); ctx.textAlign='left';
 // 공유
 const dataUrl=canvas.toDataURL('image/png');
 const base64=dataUrl.split(',')[1];
