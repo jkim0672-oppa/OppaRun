@@ -270,6 +270,16 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 </div>
 </div>
 
+<div id="import-confirm-modal" class="custom-confirm-overlay">
+<div class="custom-confirm-box">
+<div id="import-confirm-msg" class="custom-confirm-msg">This will overwrite your current records and settings with the imported data. Continue?</div>
+<div class="custom-confirm-actions">
+<button id="btn-import-cancel" class="btn-confirm-act btn-confirm-cancel" onclick="ui.closeImportConfirmModal(false)">CANCEL</button>
+<button id="btn-import-ok" class="btn-confirm-act btn-confirm-save" onclick="ui.closeImportConfirmModal(true)">IMPORT</button>
+</div>
+</div>
+</div>
+
 </div>
 <div id="map-area">
 <div id="map-container" onclick="ui.openMainMapFullscreen()">
@@ -898,20 +908,18 @@ reader.onload = (e) => {
 try {
 const data = JSON.parse(e.target.result);
 if (!data || typeof data !== 'object') throw new Error('invalid');
-const confirmMsg = isKo
-? "가져온 데이터로 현재 기록과 설정을 덮어씁니다. 계속할까요?"
-: "This will overwrite your current records and settings with the imported data. Continue?";
-if (!confirm(confirmMsg)) { event.target.value = ''; return; }
-if (Array.isArray(data.history)) localStorage.setItem(this.HISTORY_KEY, JSON.stringify(data.history));
-if (data.profile) this.saveProfile(Object.assign({ h:175, hu:"cm", w:70, wu:"kg", age:30, devicePos:"chest" }, data.profile));
-if (data.lang) this.setLang(data.lang);
-if (data.unit) this.setUnit(data.unit);
-if (data.gender) this.setGender(data.gender);
-if (data.mapTheme) this.setMapTheme(data.mapTheme);
-alert(isKo ? "데이터를 성공적으로 불러왔습니다. 앱을 새로고침합니다." : "Data imported successfully. Reloading app.");
-window.location.reload();
+this._pendingImportData = data;
+this._pendingImportEvent = event;
+const msgEl = document.getElementById('import-confirm-msg');
+const cancelBtn = document.getElementById('btn-import-cancel');
+const okBtn = document.getElementById('btn-import-ok');
+const modal = document.getElementById('import-confirm-modal');
+if(msgEl) msgEl.textContent = isKo ? '가져온 데이터로 현재 기록과 설정을 덮어씁니다. 계속할까요?' : 'This will overwrite your current records and settings with the imported data. Continue?';
+if(cancelBtn) cancelBtn.textContent = isKo ? '취소' : 'CANCEL';
+if(okBtn) okBtn.textContent = isKo ? '가져오기' : 'IMPORT';
+if(modal) modal.style.display = 'flex';
 } catch (err) {
-alert(isKo ? "파일을 읽을 수 없습니다. 올바른 백업 파일인지 확인하세요." : "Could not read file. Please check it is a valid backup file.");
+ui.showAppAlert(isKo ? '파일을 읽을 수 없습니다. 올바른 백업 파일인지 확인하세요.' : 'Could not read file. Please check it is a valid backup file.');
 }
 event.target.value = '';
 };
@@ -1580,6 +1588,30 @@ const t = translations[lang] || translations['en'];
 alert(t.saveSuccessMsg);
 }
 this.pendingSaveId = null;
+}
+closeImportConfirmModal(isConfirmed) {
+const modal = document.getElementById('import-confirm-modal');
+if(modal) modal.style.display = 'none';
+if (!isConfirmed || !storage._pendingImportData) return;
+const data = storage._pendingImportData;
+const isKo = storage.getLang() === 'ko';
+if (Array.isArray(data.history)) localStorage.setItem(storage.HISTORY_KEY, JSON.stringify(data.history));
+if (data.profile) storage.saveProfile(Object.assign({ h:175, hu:'cm', w:70, wu:'kg', age:30, devicePos:'chest' }, data.profile));
+if (data.lang) storage.setLang(data.lang);
+if (data.unit) storage.setUnit(data.unit);
+if (data.gender) storage.setGender(data.gender);
+if (data.mapTheme) storage.setMapTheme(data.mapTheme);
+storage._pendingImportData = null;
+this.showAppAlert(isKo ? '데이터를 성공적으로 불러왔습니다.\n앱을 새로고침합니다.' : 'Data imported successfully.\nReloading app.', () => window.location.reload());
+}
+showAppAlert(msg, callback) {
+const overlay = document.getElementById('app-alert-overlay');
+const msgEl = document.getElementById('app-alert-msg');
+const okBtn = document.getElementById('app-alert-ok');
+if(!overlay || !msgEl || !okBtn) { alert(msg); if(callback) callback(); return; }
+msgEl.textContent = msg;
+overlay.style.display = 'flex';
+okBtn.onclick = () => { overlay.style.display = 'none'; if(callback) callback(); };
 }
 openShareCrewModal(record) {
 this.pendingShareRecord = record;
@@ -2951,13 +2983,13 @@ async compressPhoto(file) {
         <!-- 액션 버튼 -->
         <div style="display:flex; border-top:1px solid #f0f0f0; padding-top:12px;">
           <button onclick="community.toggleLike('${r.id}')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:none; border:none; color:${iLiked ? '#e53935' : '#999'}; font-size:13px; font-weight:700; padding:6px 0; cursor:pointer;">
-            ${iLiked ? '&#9829;' : '&#9825;'} ${likeCount > 0 ? likeCount + ' ' : ''}${t.crewLike}
+            ${likeCount > 0 ? likeCount + ' ' : ''}${t.crewLike}
           </button>
           <button onclick="community.toggleComments('${r.id}')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:none; border:none; border-left:1px solid #f0f0f0; color:#666; font-size:13px; font-weight:800; padding:6px 0; cursor:pointer;">
-            &#9825; ${commentCount > 0 ? commentCount + ' ' : ''}${t.crewComment}
+            ${commentCount > 0 ? commentCount + ' ' : ''}${t.crewComment}
           </button>
           <button onclick="community.shareRecord('${r.id}')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:none; border:none; border-left:1px solid #f0f0f0; color:#666; font-size:13px; font-weight:800; padding:6px 0; cursor:pointer;">
-            &#8679; Share
+            ${t.crewShare||'Share'}
           </button>
         </div>
 
