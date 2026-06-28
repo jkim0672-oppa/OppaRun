@@ -2649,7 +2649,9 @@ vertRatio: measuredVertRatio,
 kcal: calculatedKcal,
 alt: this.state.currentAlt,
 path: this.state.pathCoords,
-splits: this.state.splits
+splits: this.state.splits,
+avgHr: hrManager._hr > 0 ? hrManager._hr : null,
+hrZone: hrManager._hr > 0 ? 'Z' + hrManager.getZone(hrManager._hr).z : null
 };
 storage.saveRecord(record);
 // 커뮤니티 업로드는 선택사항: 공유 모달을 띄워 사용자가 선택
@@ -2846,7 +2848,9 @@ async compressPhoto(file) {
         path: shareRoute ? (record.path || null) : null,
         splits: record.splits || null,
         photo_url: photoUrl,
-        message: message || null
+        message: message || null,
+        avg_hr: record.avgHr || null,
+        hr_zone: record.hrZone || null
       };
       const { error } = await _sb.from('records').insert(payload);
       if (error) {
@@ -2864,7 +2868,7 @@ async compressPhoto(file) {
     try {
       const { data, error } = await _sb
         .from('records')
-        .select('id, nickname, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, photo_url, message')
+        .select('id, nickname, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, photo_url, message, avg_hr, hr_zone')
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) throw error;
@@ -2898,7 +2902,8 @@ async compressPhoto(file) {
       nickname: r.nickname,
       dist: parseFloat(r.distance_km||0).toFixed(2), distUnit: 'km',
       time: this.formatDuration(r.duration_sec), pace: this.formatPaceSec(r.pace_sec_per_km),
-      cadence: r.cadence, gct: r.gct_ms, flight: r.flight_pct, effScore
+      cadence: r.cadence, gct: r.gct_ms, flight: r.flight_pct, effScore,
+      avgHr: r.avg_hr || null, hrZone: r.hr_zone || null
     }, isKo, text);
   }
   async toggleLike(recordId) {
@@ -3229,9 +3234,16 @@ const hrManager = {
     }
   },
   async connect() {
-    if (!navigator.bluetooth) { document.getElementById('hr-modal-status').textContent='Bluetooth not supported.'; return; }
     const btn = document.getElementById('btn-hr-connect');
     const status = document.getElementById('hr-modal-status');
+    // AndroidHrBridge 우선 사용 (WebView 환경)
+    if (window.AndroidHrBridge) {
+      if(btn){btn.disabled=true;btn.textContent='Searching...';}
+      if(status) status.textContent='Scanning for HR devices...';
+      window.AndroidHrBridge.startScan();
+      return;
+    }
+    if (!navigator.bluetooth) { document.getElementById('hr-modal-status').textContent='Bluetooth not supported.'; return; }
     try {
       if(btn){btn.disabled=true;btn.textContent='Searching...';}
       if(status) status.textContent='Scanning for HR devices...';
@@ -3258,7 +3270,51 @@ const hrManager = {
       if(btn){btn.disabled=false;btn.textContent='CONNECT';btn.onclick=()=>hrManager.connect();}
     }
   },
-  disconnect() { if(this.device&&this.device.gatt.connected) this.device.gatt.disconnect(); this.updateDisplay(0); }
+  disconnect() {
+    if (window.AndroidHrBridge) {
+      window.AndroidHrBridge.disconnect();
+      return;
+    }
+    if(this.device&&this.device.gatt.connected) this.device.gatt.disconnect();
+    this.updateDisplay(0);
+  },
+  // ── 네이티브 BLE 콜백 (AndroidHrBridge → JS) ──
+  onNativeScanStart() {
+    const status = document.getElementById('hr-modal-status');
+    if(status) status.textContent='Scanning for HR devices...';
+  },
+  onNativeDeviceFound(name) {
+    const status = document.getElementById('hr-modal-status');
+    if(status) status.textContent='Connecting to ' + name + '...';
+  },
+  onNativeConnected() {
+    const btn = document.getElementById('btn-hr-connect');
+    const status = document.getElementById('hr-modal-status');
+    if(status) status.textContent='Connected';
+    if(btn){btn.disabled=false;btn.textContent='DISCONNECT';btn.onclick=()=>hrManager.disconnect();}
+  },
+  onNativeHr(bpm) {
+    this.updateDisplay(bpm);
+  },
+  onNativeDisconnect() {
+    const btn = document.getElementById('btn-hr-connect');
+    const status = document.getElementById('hr-modal-status');
+    this.updateDisplay(0);
+    if(status) status.textContent='Disconnected.';
+    if(btn){btn.disabled=false;btn.textContent='CONNECT';btn.onclick=()=>hrManager.connect();}
+  },
+  onNativeScanTimeout() {
+    const btn = document.getElementById('btn-hr-connect');
+    const status = document.getElementById('hr-modal-status');
+    if(status) status.textContent='No HR device found. Try again.';
+    if(btn){btn.disabled=false;btn.textContent='CONNECT';btn.onclick=()=>hrManager.connect();}
+  },
+  onNativeError(msg) {
+    const btn = document.getElementById('btn-hr-connect');
+    const status = document.getElementById('hr-modal-status');
+    if(status) status.textContent='Error: ' + msg;
+    if(btn){btn.disabled=false;btn.textContent='CONNECT';btn.onclick=()=>hrManager.connect();}
+  }
 };
 
 const app = new OppaRunApp();
