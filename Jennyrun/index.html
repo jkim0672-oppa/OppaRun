@@ -280,6 +280,17 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 </div>
 </div>
 
+<div id="edit-title-modal" class="custom-confirm-overlay">
+<div class="custom-confirm-box">
+<div id="edit-title-label" class="custom-confirm-msg" style="margin-bottom:12px;">EDIT TITLE</div>
+<input id="edit-title-input" type="text" style="width:100%;box-sizing:border-box;background:#222;border:1px solid #444;border-bottom:2px solid var(--primary);color:#fff;font-size:16px;font-weight:700;padding:10px 8px;border-radius:6px;outline:none;margin-bottom:16px;">
+<div class="custom-confirm-actions">
+<button class="btn-confirm-act btn-confirm-cancel" onclick="ui.closeEditTitleModal(false)">CANCEL</button>
+<button class="btn-confirm-act btn-confirm-save" onclick="ui.closeEditTitleModal(true)">SAVE</button>
+</div>
+</div>
+</div>
+
 </div>
 <div id="map-area">
 <div id="map-container" onclick="ui.openMainMapFullscreen()">
@@ -1533,15 +1544,33 @@ if(this.menuBpmDisplay) this.menuBpmDisplay.textContent = "OFF";
 }
 }
 openEditTitle(id) {
-  const t = translations[storage.getLang()] || translations['en'];
-  const history = storage.loadHistory();
-  const record = history.find(r => r.id === id);
-  if (!record) return;
-  const newTitle = prompt(t.editTitle + ':', record.title || '');
-  if (newTitle === null) return;
-  const updated = history.map(r => r.id === id ? {...r, title: newTitle.trim() || r.title} : r);
-  localStorage.setItem(storage.HISTORY_KEY, JSON.stringify(updated));
-  this.renderHistory();
+const t = translations[storage.getLang()] || translations['en'];
+const history = storage.loadHistory();
+const record = history.find(r => r.id === id);
+if (!record) return;
+this._editTitleId = id;
+const modal = document.getElementById('edit-title-modal');
+const input = document.getElementById('edit-title-input');
+const label = document.getElementById('edit-title-label');
+if(label) label.textContent = t.editTitle || 'EDIT TITLE';
+if(input) input.value = record.title || '';
+const btns = modal ? modal.querySelectorAll('.btn-confirm-act') : [];
+if(btns[0]) btns[0].textContent = t.close || 'CANCEL';
+if(btns[1]) btns[1].textContent = t.saveBtn || 'SAVE';
+if(modal) { modal.style.display = 'flex'; setTimeout(()=>{ if(input) input.focus(); }, 100); }
+}
+closeEditTitleModal(isConfirmed) {
+const modal = document.getElementById('edit-title-modal');
+if(modal) modal.style.display = 'none';
+if (!isConfirmed || !this._editTitleId) return;
+const input = document.getElementById('edit-title-input');
+const newTitle = input ? input.value.trim() : '';
+if (!newTitle) return;
+const history = storage.loadHistory();
+const updated = history.map(r => r.id === this._editTitleId ? {...r, title: newTitle} : r);
+localStorage.setItem(storage.HISTORY_KEY, JSON.stringify(updated));
+this._editTitleId = null;
+this.renderHistory();
 }
 openConfirmModal(id) {
 this.pendingDeleteId = id;
@@ -1705,6 +1734,7 @@ return '<div class="history-item">' +
 '</div>' +
 '<div class="h-main-stats">' +
 '<div class="h-val-big">' + distStr + ' <span style="font-size:11px">' + unitStr + '</span></div>' +
+'<div class="h-val-big" style="font-size:22px; margin-left:16px;">' + (r.time || '--') + ' <span style="font-size:11px">' + (t.time||'TIME') + '</span></div>' +
 '<div style="font-size:10px; color:#888; font-weight:800; margin-left:auto;">ALT: <span style="color:var(--primary)">' + (r.alt || '0') + '</span>m</div>' +
 '</div>' +
 '<div class="h-details-grid">' +
@@ -1899,10 +1929,14 @@ recordPace = this.convertPaceToUnit(recordPace, 'mile');
 }
 splitLogsHtml += '<div class="detail-log-item" style="color: #ffffff; font-weight: 700;"><span>■ ' + recordDist + (this.currentUnit === 'km' ? ' km' : ' mi') + ' :</span><span>' + (t.splitPace || "Pace") + ' <b>' + recordPace + '</b> | ' + (t.splitAlt || "Alt") + ' <b>' + baseAlt + 'm</b> → <b>' + baseAlt + 'm</b> (▲0m).</span></div>'; } splitLogsHtml += '</div>';
 let dynamicsHtml = '<div class="detail-log-box" style="margin-top:12px;"><div class="detail-log-title" style="color:var(--warning)">' + (t.summaryTitle || "DYNAMICS SUMMARY") + '</div>' +
+'<div class="detail-log-item"><span>' + (t.time || "Time") + '</span><span>' + (record.time || '--') + '</span></div>' +
 '<div class="detail-log-item"><span>' + (t.avgGct || "Average GCT") + '</span><span>' + (record.gct || '--') + ' ms.</span></div>' +
 '<div class="detail-log-item"><span>' + (t.avgFlight || "Average Flight") + '</span><span>' + (record.flight || '--') + ' %.</span></div>' +
-'<div class="detail-log-item"><span>' + (t.avgCadence || "Average Cadence") + '</span><span>' + (record.cadence || 0) + ' SPM.</span></div></div>';
-let buttonRowHtml = '<div class="detail-btn-row"><button class="btn-detail-act btn-detail-save" onclick="ui.saveDetailAction(' + record.id + ')">💾 ' + (t.saveBtn || "SAVE") + '</button><button class="btn-detail-act btn-detail-share" onclick="ui.shareDetailAction(' + record.id + ')">🔗 ' + (t.shareBtn || "SHARE") + '</button></div>';
+'<div class="detail-log-item"><span>' + (t.avgCadence || "Average Cadence") + '</span><span>' + (record.cadence || 0) + ' SPM.</span></div>' +
+'<div class="detail-log-item"><span>' + (t.stride || "Stride") + '</span><span>' + (() => { const c=record.cadence; const p=record.avgPace||record.pace; if(c&&p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60);return ((kmh/3.6)/(c/60)*2).toFixed(2)+' m';} return '--'; })() + '</span></div>' +
+'<div class="detail-log-item"><span>ALT</span><span>' + (record.alt || '0') + ' m.</span></div>' +
+'</div>';
+let buttonRowHtml = '<div class="detail-btn-row"><button class="btn-detail-act btn-detail-save" onclick="ui.saveDetailAction(' + record.id + ')">' + (t.saveBtn || "SAVE") + '</button><button class="btn-detail-act btn-detail-share" onclick="ui.shareDetailAction(' + record.id + ')">' + (t.shareBtn || "SHARE") + '</button></div>';
 const detailData = document.getElementById('detail-data');
 if(detailData) detailData.innerHTML = splitLogsHtml + dynamicsHtml + buttonRowHtml;
 }
@@ -2008,12 +2042,13 @@ paceComment = totalSec < 300 ? t.diagPaceFast
 }
 let strideComment = strideVal !== '--' ? t.diagStrideGood : '';
 contentArea.innerHTML =
-'<div class="diag-card"><div class="diag-label">' + t.diagEffScore + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + effColor + '">' + effScore + ' <span style="font-size:14px;color:#aaa">/ 100</span></div><div class="diag-ref">Ref: ≥75</div></div><div class="diag-tip">' + effComment + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + t.diagPaceLabel + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + ' <span style="font-size:13px;color:#aaa">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + t.diagCadLabel + '</div><div class="diag-val-group"><div class="diag-main-val">CAD: ' + (r.cadence || 0) + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + t.diagStrideLabel + '</div><div class="diag-val-group"><div class="diag-main-val">' + strideVal + '</div><div class="diag-ref">Ref: 1.0~1.5m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + t.diagGctLabel + '</div><div class="diag-val-group"><div class="diag-main-val">GCT: ' + r.gct + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + t.diagFlightLabel + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (isNaN(flightNum)?'#aaa':this.getFlightColor(flightNum)) + '">' + flightVal + (flightVal!=='--'?' %':'') + '</div><div class="diag-ref">Ref: 30~45%</div></div><div class="diag-tip">' + flightComment + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagEffScore) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + effColor + '">' + effScore + ' <span style="font-size:14px;color:#aaa">/ 100</span></div><div class="diag-ref">Ref: ≥75</div></div><div class="diag-tip">' + effComment + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.time||'TIME') + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.time||'--') + '</div></div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + ' <span style="font-size:13px;color:#aaa">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">CAD: ' + (r.cadence || 0) + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + strideVal + '</div><div class="diag-ref">Ref: 1.0~1.5m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">GCT: ' + r.gct + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagFlightLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (isNaN(flightNum)?'#aaa':this.getFlightColor(flightNum)) + '">' + flightVal + (flightVal!=='--'?' %':'') + '</div><div class="diag-ref">Ref: 30~45%</div></div><div class="diag-tip">' + flightComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagRecov || "RECOVERY GUIDE") + '</div>' + recovHighlightHTML + '<div class="diag-tip">' + recovComment + '</div></div>';
 }
 }
