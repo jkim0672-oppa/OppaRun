@@ -562,9 +562,9 @@ alt="runner"/>
 </div>
 </div>
 <!-- 커뮤니티 뷰 -->
-<div id="community-view" class="main-content" style="display:none; background:#f2f2f2;">
-  <div style="padding: 12px 16px 10px; background:#fff; border-bottom: 1px solid #e8e8e8; flex-shrink:0;">
-    <div id="crew-title" style="font-size:18px; font-weight:900; color:#111;">JENNY RUN CREW</div>
+<div id="community-view" class="main-content" style="display:none; background:#000;">
+  <div style="padding: 12px 16px 10px; background:#111; border-bottom: 1px solid #222; flex-shrink:0;">
+    <div id="crew-title" style="font-size:18px; font-weight:900; color:var(--primary);">JENNY RUN CREW</div>
     <div id="crew-sub" style="font-size:11px; color:#666; margin-top:2px;">Today's runs from the crew</div>
   </div>
   <div id="community-list" style="flex:1; overflow-y:auto; padding-bottom: calc(var(--tabbar-h) + 20px);">
@@ -787,6 +787,40 @@ function appAlert(msg) {
     overlay.style.display = 'flex';
     const onOk = () => { overlay.style.display = 'none'; okBtn.removeEventListener('click', onOk); resolve(); };
     okBtn.addEventListener('click', onOk);
+  });
+}
+function appConfirm(msg) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('confirm-modal');
+    const msgEl = document.getElementById('confirm-modal-msg');
+    if (!modal || !msgEl) { resolve(window.confirm(msg)); return; }
+    msgEl.textContent = msg;
+    // 버튼 텍스트 임시 변경 (CANCEL / OK)
+    const cancelBtn = document.getElementById('btn-confirm-cancel');
+    const deleteBtn = document.getElementById('btn-confirm-delete');
+    const origCancel = cancelBtn ? cancelBtn.textContent : 'CANCEL';
+    const origDelete = deleteBtn ? deleteBtn.textContent : 'DELETE';
+    if (cancelBtn) cancelBtn.textContent = 'NO';
+    if (deleteBtn) { deleteBtn.textContent = 'YES'; deleteBtn.style.background = 'var(--primary)'; deleteBtn.style.color = '#000'; }
+    modal.style.display = 'flex';
+    // 기존 closeConfirmModal을 잠시 대체
+    const origClose = ui ? ui.closeConfirmModal : null;
+    const cleanup = (result) => {
+      modal.style.display = 'none';
+      if (cancelBtn) cancelBtn.textContent = origCancel;
+      if (deleteBtn) { deleteBtn.textContent = origDelete; deleteBtn.style.background = ''; deleteBtn.style.color = ''; }
+      if (ui && origClose) ui.closeConfirmModal = origClose;
+      resolve(result);
+    };
+    if (ui) {
+      ui.closeConfirmModal = (result) => cleanup(result);
+    } else {
+      // ui 없으면 버튼 직접 바인딩
+      const onYes = () => { cleanup(true); deleteBtn && deleteBtn.removeEventListener('click', onYes); cancelBtn && cancelBtn.removeEventListener('click', onNo); };
+      const onNo = () => { cleanup(false); deleteBtn && deleteBtn.removeEventListener('click', onYes); cancelBtn && cancelBtn.removeEventListener('click', onNo); };
+      deleteBtn && deleteBtn.addEventListener('click', onYes);
+      cancelBtn && cancelBtn.addEventListener('click', onNo);
+    }
   });
 }
 window.__nativeAlert = window.alert;
@@ -2713,7 +2747,8 @@ checkResume() {
 try {
 const saved = storage.loadTempSession();
 if (saved && saved.isRunning) {
-if (confirm("Resume last session?")) {
+appConfirm("Resume last session?").then(confirmed => {
+if (confirmed) {
 Object.assign(this.state, saved);
 if(ui.dom.btnStart) ui.dom.btnStart.style.display = 'none';
 if(ui.dom.btnStop) ui.dom.btnStop.style.display = 'block';
@@ -2729,6 +2764,7 @@ ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padSt
 }
 }, 1000);
 } else { storage.clearTempSession(); }
+});
 }
 } catch (e) {
 console.warn("Session recovery failed, resetting.", e);
@@ -2842,12 +2878,12 @@ async compressPhoto(file) {
       const compressed = await this.compressPhoto(photoFile);
       const path = uid + '/' + recordId + '.jpg';
       const { error: upErr } = await _sb.storage.from('run-photos').upload(path, compressed, { upsert: true, contentType: 'image/jpeg' });
-      if (upErr) { alert('사진 업로드 실패: ' + upErr.message); return null; }
+      if (upErr) { await appAlert('사진 업로드 실패: ' + upErr.message); return null; }
       const { data } = _sb.storage.from('run-photos').getPublicUrl(path);
       const url = (data && data.publicUrl) || null;
-      if (!url) { alert('URL 생성 실패'); return null; }
+      if (!url) { await appAlert('URL 생성 실패'); return null; }
       return url;
-    } catch(e) { alert('사진 업로드 예외: ' + e.message); return null; }
+    } catch(e) { await appAlert('사진 업로드 예외: ' + e.message); return null; }
   }
 
   async uploadRecord(record, photoFile, includeRoute, message) {
@@ -2914,9 +2950,12 @@ async compressPhoto(file) {
 
   async loadFeed() {
     try {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
       const { data, error } = await _sb
         .from('records')
         .select('id, nickname, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, photo_url, message, avg_hr, hr_zone')
+        .gte('created_at', todayStart.toISOString())
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) throw error;
@@ -3017,10 +3056,12 @@ async compressPhoto(file) {
 
   timeAgo(dateStr) {
     const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
-    if (diff < 60) return '방금';
-    if (diff < 3600) return Math.floor(diff/60) + '분 전';
-    if (diff < 86400) return Math.floor(diff/3600) + '시간 전';
-    return Math.floor(diff/86400) + '일 전';
+    const lang = (storage.getLang && storage.getLang()) || 'ko';
+    const isKo = lang === 'ko';
+    if (diff < 60) return isKo ? '방금' : 'Just now';
+    if (diff < 3600) return isKo ? Math.floor(diff/60) + '분 전' : Math.floor(diff/60) + 'm ago';
+    if (diff < 86400) return isKo ? Math.floor(diff/3600) + '시간 전' : Math.floor(diff/3600) + 'h ago';
+    return isKo ? Math.floor(diff/86400) + '일 전' : Math.floor(diff/86400) + 'd ago';
   }
 
   getRunTimeLabel(t, createdAt) {
@@ -3131,18 +3172,23 @@ async compressPhoto(file) {
         <div style="display:flex; border-top:1px solid #f5f5f5; border-bottom:1px solid #f5f5f5; padding:12px 0; margin-bottom:12px;">
           <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
             <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.crewDist}</div>
-            <div style="font-size:20px; font-weight:900; color:#111; line-height:1;">${parseFloat(r.distance_km||0).toFixed(2)}</div>
+            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${parseFloat(r.distance_km||0).toFixed(2)}</div>
             <div style="font-size:10px; color:#00aa55; font-weight:800; margin-top:2px;">KM</div>
           </div>
           <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
             <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.crewTime}</div>
-            <div style="font-size:20px; font-weight:900; color:#111; line-height:1;">${this.formatDuration(r.duration_sec)}</div>
+            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${this.formatDuration(r.duration_sec)}</div>
             <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">MM:SS</div>
           </div>
-          <div style="flex:1; text-align:center;">
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
             <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.crewPace}</div>
-            <div style="font-size:20px; font-weight:900; color:#111; line-height:1;">${this.formatPaceSec(r.pace_sec_per_km)}</div>
+            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${this.formatPaceSec(r.pace_sec_per_km)}</div>
             <div style="font-size:10px; color:#00aa55; font-weight:800; margin-top:2px;">/KM</div>
+          </div>
+          <div style="flex:1; text-align:center;">
+            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.speed||'SPEED'}</div>
+            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${r.pace_sec_per_km && r.pace_sec_per_km > 0 ? (3600 / r.pace_sec_per_km).toFixed(1) : '--'}</div>
+            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">KM/H</div>
           </div>
         </div>
 
