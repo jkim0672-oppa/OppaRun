@@ -2445,21 +2445,51 @@ setTimeout(tryInit, 300);
 }
 updatePosition(p) {
 if(!this.map) return;
-const pos = [p.coords.latitude, p.coords.longitude];
+const rawLat = p.coords.latitude;
+const rawLng = p.coords.longitude;
 const accuracy = Math.round(p.coords.accuracy);
-const speedKmh = (p.coords.speed || 0) * 3.6;
 this.state.currentAlt = p.coords.altitude ? Math.round(p.coords.altitude) : 0;
+
+// ── 1. 칼만 필터로 GPS 좌표 스무딩 ──────────────────────
+// 정확도가 낮을수록(숫자 클수록) 측정 노이즈가 크므로 Q/R 비율 조정
+if (!this._kalman) {
+  // 초기화: 첫 포인트를 그대로 사용
+  this._kalman = {
+    lat: rawLat, lng: rawLng,
+    // 오차 공분산 (초기값 클수록 첫 포인트에 빠르게 수렴)
+    pLat: 1, pLng: 1,
+    // 프로세스 노이즈 Q: 러너가 실제로 움직이는 불확실성 (작을수록 스무딩 강함)
+    Q: 0.00001,
+  };
+}
+const K = this._kalman;
+// 측정 노이즈 R: GPS 정확도(m)가 클수록 신뢰도 낮게 반영
+const R = Math.max(0.00001, (accuracy * accuracy) * 0.000000001);
+// 예측 단계 (등속 운동 가정 → 이전 값 유지)
+K.pLat += K.Q;
+K.pLng += K.Q;
+// 업데이트 단계
+const kGainLat = K.pLat / (K.pLat + R);
+const kGainLng = K.pLng / (K.pLng + R);
+K.lat = K.lat + kGainLat * (rawLat - K.lat);
+K.lng = K.lng + kGainLng * (rawLng - K.lng);
+K.pLat = (1 - kGainLat) * K.pLat;
+K.pLng = (1 - kGainLng) * K.pLng;
+const pos = [K.lat, K.lng]; // 스무딩된 좌표 사용
+// ─────────────────────────────────────────────────────────
+
 if(ui.dom.status) ui.dom.status.textContent = 'GPS: ±' + accuracy + 'm | ALT: ' + this.state.currentAlt + 'm';
 if (this.marker) { this.marker.setLatLng(pos); this.map.panTo(pos); }
-// 전체화면 맵은 마커 위치만 업데이트 — panTo 하지 않아야 사용자가 자유롭게 드래그 가능
 if (_mainMapFull && _mainMapFullLocMarker) { _mainMapFullLocMarker.setLatLng(pos); }
+
 if (this.state.isRunning && !this.state.isPaused) {
-if (speedKmh < 1.5) {
+// 오토포즈 판단은 raw GPS speed 기준 유지
+const rawSpeedKmhForPause = (p.coords.speed || 0) * 3.6;
+if (rawSpeedKmhForPause < 1.5) {
 if (!this.state.lowSpeedStartTime) this.state.lowSpeedStartTime = Date.now();
 else if ((Date.now() - this.state.lowSpeedStartTime) > 4000 && !this.state.isAutoPaused) {
 this.state.isAutoPaused = true;
 if(ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'block';
-// [FIX] auto-paused 상태에서는 시간 증가 멈춤 (타이머는 계속 돌지만 증가하지 않음)
 }
 } else {
 if (this.state.isAutoPaused) {
@@ -2468,11 +2498,14 @@ if(ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'none';
 }
 this.state.lowSpeedStartTime = null;
 }
-if (!this.state.isAutoPaused && accuracy < 40) {
+
+// ── 2. 거리 계산: 정확도 25m 이하 + 칼만 스무딩 좌표 사용 ──
+if (!this.state.isAutoPaused && accuracy < 25) {
 if (this.state.lastPos) {
 let d = this.map.distance(this.state.lastPos, pos) / 1000;
 let timeDelta = (Date.now() - (this.state.lastPosTimestamp || Date.now())) / 1000;
-let maxJump = speedKmh > 25 ? 0.25 : 0.20;
+// maxJump: 순간 최대 이동 거리 (칼만 스무딩으로 이상치 많이 걸러짐)
+let maxJump = 0.18;
 if (d > 0.002 && d < maxJump) {
 this.state.totalDist += d;
 this.state.pathCoords.push(pos);
@@ -2493,8 +2526,9 @@ this.state.lastKmCheckpoint = currentTargetKm;
 this.state.lastKmSeconds = this.state.seconds;
 this.state.lastKmAlt = this.state.currentAlt;
 }
-} else if (timeDelta > 4 && d < 0.5) {
-let corrected = Math.min(d, 0.1); // 80m→100m로 소폭 완화
+} else if (timeDelta > 4 && d < 0.4) {
+// GPS 갭(터널 등) 후 복구: 보수적으로 반영
+let corrected = Math.min(d, 0.08);
 this.state.totalDist += corrected;
 this.state.pathCoords.push(pos);
 if(this.polyline) this.polyline.setLatLngs(this.state.pathCoords);
@@ -2508,32 +2542,47 @@ this.state.lastPos = pos;
 this.state.lastPosTimestamp = Date.now();
 this.state.lastKmAlt = this.state.currentAlt;
 }
-} // ← if (!isAutoPaused && accuracy < 40)
-// ── 페이스 스무딩 ──────────────────────────────────────
-// 1) GPS speed가 유효한 경우에만 버퍼에 추가 (null/0 무시)
+} else if (!this.state.isAutoPaused && accuracy >= 25 && accuracy < 40) {
+// 정확도 25~40m 구간: 경로 포인트는 추가하되 거리는 미반영 (지도 표시용)
+if (this.state.pathCoords.length > 0) {
+this.state.pathCoords.push(pos);
+if(this.polyline) this.polyline.setLatLngs(this.state.pathCoords);
+if(_mainMapFullPolyline) _mainMapFullPolyline.setLatLngs(this.state.pathCoords);
+}
+}
+
+// ── 3. 페이스: GPS speed 가중 이동평균 (최신값 더 높은 가중치) ──
 let rawSpeedKmh = p.coords.speed != null ? p.coords.speed * 3.6 : -1;
 if (rawSpeedKmh > 0.5) {
-// 이상치 필터: 버퍼 평균의 2.5배 초과하면 무시
+// 이상치 필터: 버퍼 가중평균의 2배 초과 시 클램핑
 if (this.state.speedBuffer.length >= 2) {
-const bufAvg = this.state.speedBuffer.reduce((a,b)=>a+b,0) / this.state.speedBuffer.length;
-if (rawSpeedKmh > bufAvg * 2.5) rawSpeedKmh = bufAvg; // 튀는 값 클램핑
+const n = this.state.speedBuffer.length;
+const wSum = this.state.speedBuffer.reduce((acc, v, i) => acc + v * (i + 1), 0);
+const wDiv = (n * (n + 1)) / 2;
+const wAvg = wSum / wDiv;
+if (rawSpeedKmh > wAvg * 2.0) rawSpeedKmh = wAvg;
 }
 this.state.speedBuffer.push(rawSpeedKmh);
-if (this.state.speedBuffer.length > 5) this.state.speedBuffer.shift(); // 최근 5개 유지
+if (this.state.speedBuffer.length > 8) this.state.speedBuffer.shift(); // 최근 8개
 this.state.lastValidSpeed = rawSpeedKmh;
 }
-// 2) 버퍼가 있으면 평균, 없으면 마지막 유효값 사용
+// 가중 이동평균: 최신 포인트에 더 높은 가중치
 let smoothedKmh = 0;
 if (this.state.speedBuffer.length > 0) {
-smoothedKmh = this.state.speedBuffer.reduce((a,b)=>a+b,0) / this.state.speedBuffer.length;
+const n = this.state.speedBuffer.length;
+const wSum = this.state.speedBuffer.reduce((acc, v, i) => acc + v * (i + 1), 0);
+const wDiv = (n * (n + 1)) / 2;
+smoothedKmh = wSum / wDiv;
 } else if (this.state.lastValidSpeed > 0) {
 smoothedKmh = this.state.lastValidSpeed;
 }
-// 3) 거리 기반 보조 속도 (GPS speed가 없을 때 백업)
-if (smoothedKmh < 0.5 && this.state.lastPos && this.state.seconds > 0) {
+// 백업: GPS speed 없는 기기 대응 (전체 평균 속도)
+if (smoothedKmh < 0.5 && this.state.seconds > 10) {
 const backupKmh = this.state.totalDist / (this.state.seconds / 3600);
 if (backupKmh > 0.5) smoothedKmh = backupKmh;
 }
+// ─────────────────────────────────────────────────────────
+
 const currentPaceStr = this.formatPace(smoothedKmh);
 const avgKmh = this.state.seconds > 0 ? (this.state.totalDist / (this.state.seconds / 3600)) : 0;
 const unit = storage.getUnit();
@@ -2544,7 +2593,6 @@ const unitSpeedEl = document.getElementById('unit-speed');
 if(curSpeedEl) curSpeedEl.textContent = speedDisplay;
 if(unitSpeedEl) unitSpeedEl.textContent = speedUnit;
 ui.updateRunningDisplay({ pace: currentPaceStr, avgPace: this.formatPace(avgKmh) });
-// ──────────────────────────────────────────────────────
 storage.saveTempSession(this.state);
 }
 }
@@ -2633,6 +2681,7 @@ this.state.lowSpeedStartTime = null;
 this.state.lastPosTimestamp = Date.now();
 this.state.speedBuffer = [];
 this.state.lastValidSpeed = 0;
+this._kalman = null; // 칼만 필터 리셋 (새 러닝 시작 시 첫 GPS 포인트로 재초기화)
 if(this.motion) this.motion.reset();
 if(ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'none';
 if(ui.dom.btnStart) ui.dom.btnStart.style.display = 'none';
