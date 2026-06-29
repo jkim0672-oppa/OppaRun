@@ -2451,7 +2451,8 @@ const speedKmh = (p.coords.speed || 0) * 3.6;
 this.state.currentAlt = p.coords.altitude ? Math.round(p.coords.altitude) : 0;
 if(ui.dom.status) ui.dom.status.textContent = 'GPS: ±' + accuracy + 'm | ALT: ' + this.state.currentAlt + 'm';
 if (this.marker) { this.marker.setLatLng(pos); this.map.panTo(pos); }
-if (_mainMapFull && _mainMapFullLocMarker) { _mainMapFullLocMarker.setLatLng(pos); _mainMapFull.panTo(pos); }
+// 전체화면 맵은 마커 위치만 업데이트 — panTo 하지 않아야 사용자가 자유롭게 드래그 가능
+if (_mainMapFull && _mainMapFullLocMarker) { _mainMapFullLocMarker.setLatLng(pos); }
 if (this.state.isRunning && !this.state.isPaused) {
 if (speedKmh < 1.5) {
 if (!this.state.lowSpeedStartTime) this.state.lowSpeedStartTime = Date.now();
@@ -2476,6 +2477,7 @@ if (d > 0.002 && d < maxJump) {
 this.state.totalDist += d;
 this.state.pathCoords.push(pos);
 if(this.polyline) this.polyline.setLatLngs(this.state.pathCoords);
+if(_mainMapFullPolyline) _mainMapFullPolyline.setLatLngs(this.state.pathCoords);
 this.drawArrows();
 ui.updateRunningDisplay({dist: this.state.totalDist.toFixed(2)});
 this.state.lastPos = pos;
@@ -2496,6 +2498,7 @@ let corrected = Math.min(d, 0.1); // 80m→100m로 소폭 완화
 this.state.totalDist += corrected;
 this.state.pathCoords.push(pos);
 if(this.polyline) this.polyline.setLatLngs(this.state.pathCoords);
+if(_mainMapFullPolyline) _mainMapFullPolyline.setLatLngs(this.state.pathCoords);
 this.drawArrows();
 this.state.lastPos = pos;
 this.state.lastPosTimestamp = Date.now();
@@ -3461,6 +3464,7 @@ ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padSt
 let _mainMapFull = null;
 let _detailMapFull = null;
 let _mainMapFullLocMarker = null;
+let _mainMapFullPolyline = null;
 UIManager.prototype.openMainMapFullscreen = function() {
 const overlay = document.getElementById('map-fullscreen-overlay');
 const container = document.getElementById('map-fullscreen-el');
@@ -3477,7 +3481,7 @@ _mainMapFull = L.map(container, { zoomControl: true, attributionControl: false }
 .setView(curPos, app.map.getZoom());
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(_mainMapFull);
 if (app.state.pathCoords && app.state.pathCoords.length > 0) {
-L.polyline(app.state.pathCoords, { color: '#ff3333', weight: 2 }).addTo(_mainMapFull);
+_mainMapFullPolyline = L.polyline(app.state.pathCoords, { color: '#ff3333', weight: 2 }).addTo(_mainMapFull);
 }
 _mainMapFullLocMarker = L.marker(curPos, { icon: locIcon }).addTo(_mainMapFull);
 // JRUN 로고
@@ -3493,15 +3497,37 @@ const JRunLogoFull = L.Control.extend({
   }
 });
 new JRunLogoFull().addTo(_mainMapFull);
+// 내 위치로 이동 버튼
+const LocBtn = L.Control.extend({
+  options:{position:'topleft'},
+  onAdd:function(){
+    const div=L.DomUtil.create('div');
+    div.innerHTML='<button id="btn-fullmap-locate" style="width:36px;height:36px;background:#111;border:1.5px solid #444;border-radius:8px;color:#00ff88;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.5);">◎</button>';
+    L.DomEvent.disableClickPropagation(div);
+    div.querySelector('#btn-fullmap-locate').addEventListener('click', function(){
+      const p = app.state.lastPos;
+      if(p && _mainMapFull) _mainMapFull.setView(p, _mainMapFull.getZoom());
+    });
+    return div;
+  }
+});
+new LocBtn().addTo(_mainMapFull);
 if (storage.getMapTheme() === 'dark') {
 container.classList.add('dark-map-layer');
 }
 } else {
+// 재오픈 시: 현재 위치로 이동 + 경로 갱신
 _mainMapFull.setView(curPos, app.map.getZoom());
 if (_mainMapFullLocMarker) {
 _mainMapFullLocMarker.setLatLng(curPos);
 } else {
 _mainMapFullLocMarker = L.marker(curPos, { icon: locIcon }).addTo(_mainMapFull);
+}
+// 경로 폴리라인 갱신
+if (_mainMapFullPolyline) {
+_mainMapFullPolyline.setLatLngs(app.state.pathCoords);
+} else if (app.state.pathCoords && app.state.pathCoords.length > 0) {
+_mainMapFullPolyline = L.polyline(app.state.pathCoords, { color: '#ff3333', weight: 2 }).addTo(_mainMapFull);
 }
 }
 setTimeout(() => { if (_mainMapFull) _mainMapFull.invalidateSize(); }, 200);
