@@ -644,32 +644,37 @@ function generateRunCardBlob(data, isKo) {
     ctx.strokeStyle = DIVIDER; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(PAD, nameY + 46); ctx.lineTo(W - PAD, nameY + 46); ctx.stroke();
 
-    // ── 메인 3대 지표 (DISTANCE / TIME / PACE) ──
+    // ── 메인 4대 지표 (DISTANCE / TIME / PACE / SPEED) ──
     const mainY = nameY + 66;
-    const tw = (W - PAD*2 - 2) / 3;
+    const tw = (W - PAD*2 - 3) / 4;
 
     const mainTile = (x, y, w, label, val, unit) => {
-      ctx.font = 'bold 14px Arial, sans-serif';
+      ctx.font = 'bold 12px Arial, sans-serif';
       ctx.fillStyle = GRAY;
       ctx.fillText(label, x, y);
-      ctx.font = 'bold 48px Arial, sans-serif';
+      ctx.font = 'bold 36px Arial, sans-serif';
       ctx.fillStyle = BLACK;
-      ctx.fillText(val, x, y + 54);
-      ctx.font = 'bold 15px Arial, sans-serif';
+      ctx.fillText(val, x, y + 48);
+      ctx.font = 'bold 13px Arial, sans-serif';
       ctx.fillStyle = GREEN;
-      ctx.fillText(unit, x, y + 76);
+      ctx.fillText(unit, x, y + 68);
     };
 
-    mainTile(PAD,          mainY, tw, 'DISTANCE', data.dist,       data.distUnit||'KM');
-    mainTile(PAD+tw+1,     mainY, tw, 'TIME',     data.time||'--', 'MM:SS');
-    mainTile(PAD+tw*2+2,   mainY, tw, 'PACE',     data.pace||'--', '/'+(data.distUnit||'KM'));
+    const speedKmhCard = (() => { const p=data.pace; if(p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60); return isKo||(data.distUnit||'KM')==='KM'?(kmh).toFixed(1):(kmh*0.621371).toFixed(1);} return '--'; })();
+    const speedUnitCard = (data.distUnit||'KM')==='MI' ? 'MI/H' : 'KM/H';
+
+    mainTile(PAD,            mainY, tw, isKo?'거리':'DISTANCE', data.dist, data.distUnit||'KM');
+    mainTile(PAD+tw+1,       mainY, tw, isKo?'시간':'TIME',     data.time||'--', 'MM:SS');
+    mainTile(PAD+tw*2+2,     mainY, tw, isKo?'페이스':'PACE',   data.pace||'--', '/'+(data.distUnit||'KM'));
+    mainTile(PAD+tw*3+3,     mainY, tw, isKo?'속도':'SPEED',    speedKmhCard, speedUnitCard);
 
     // 가로 구분선
     ctx.strokeStyle = DIVIDER; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(PAD, mainY + 96); ctx.lineTo(W - PAD, mainY + 96); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(PAD, mainY + 86); ctx.lineTo(W - PAD, mainY + 86); ctx.stroke();
     // 세로 구분선
-    ctx.beginPath(); ctx.moveTo(PAD+tw, mainY - 4); ctx.lineTo(PAD+tw, mainY + 92); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(PAD+tw*2+2, mainY - 4); ctx.lineTo(PAD+tw*2+2, mainY + 92); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(PAD+tw,   mainY - 4); ctx.lineTo(PAD+tw,   mainY + 82); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(PAD+tw*2+2, mainY - 4); ctx.lineTo(PAD+tw*2+2, mainY + 82); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(PAD+tw*3+3, mainY - 4); ctx.lineTo(PAD+tw*3+3, mainY + 82); ctx.stroke();
 
     // ── 6개 지표 그리드 ──
     const effScore = data.effScore != null ? data.effScore : 0;
@@ -1827,8 +1832,14 @@ return '<div class="history-item">' +
 '</div>' +
 '</div>' +
 '<div class="h-main-stats">' +
+'<div style="display:flex;flex-direction:column;align-items:flex-start;">' +
+'<div style="font-size:9px;color:#888;font-weight:900;">' + (t.dist||'DIST') + '</div>' +
 '<div class="h-val-big" style="font-size:20px;">' + distStr + ' <span style="font-size:10px">' + unitStr + '</span></div>' +
-'<div class="h-val-big" style="font-size:20px; margin-left:12px;">' + (r.time || '--') + ' <span style="font-size:10px">' + (t.time||'TIME') + '</span></div>' +
+'</div>' +
+'<div style="display:flex;flex-direction:column;align-items:flex-start;margin-left:12px;">' +
+'<div style="font-size:9px;color:#888;font-weight:900;">' + (t.time||'TIME') + '</div>' +
+'<div class="h-val-big" style="font-size:20px;">' + (r.time || '--') + '</div>' +
+'</div>' +
 ((() => {
 const unit = storage.getUnit();
 let speedVal = '--';
@@ -1840,9 +1851,12 @@ const kmh = 60 / (min + sec / 60);
 speedVal = unit === 'mi' ? (kmh * 0.621371).toFixed(1) : kmh.toFixed(1);
 }
 const speedUnitStr = unit === 'mi' ? 'MI/H' : 'KM/H';
-return '<div class="h-val-big" style="font-size:20px; margin-left:12px;">' + speedVal + ' <span style="font-size:10px">' + speedUnitStr + '</span></div>';
+return '<div style="display:flex;flex-direction:column;align-items:flex-start;margin-left:12px;">' +
+'<div style="font-size:9px;color:#888;font-weight:900;">' + speedUnitStr + '</div>' +
+'<div class="h-val-big" style="font-size:20px;">' + speedVal + '</div>' +
+'</div>';
 })()) +
-'<div style="font-size:10px; color:#888; font-weight:800; margin-left:auto;">ALT: <span style="color:var(--primary)">' + (r.alt || '0') + '</span>m</div>' +
+'<div style="font-size:10px;color:#888;font-weight:800;margin-left:auto;align-self:center;">ALT: <span style="color:var(--primary)">' + (r.alt || '0') + '</span>m</div>' +
 '</div>' +
 '<div class="h-details-grid">' +
 '<div class="h-det-box"><div class="h-det-label">' + t.pace + '</div><div class="h-det-val">' + displayPace + '</div></div>' +
@@ -2037,6 +2051,7 @@ recordPace = this.convertPaceToUnit(recordPace, 'mile');
 splitLogsHtml += '<div class="detail-log-item" style="color: #ffffff; font-weight: 700;"><span>■ ' + recordDist + (this.currentUnit === 'km' ? ' km' : ' mi') + ' :</span><span>' + (t.splitPace || "Pace") + ' <b>' + recordPace + '</b> | ' + (t.splitAlt || "Alt") + ' <b>' + baseAlt + 'm</b> → <b>' + baseAlt + 'm</b> (▲0m).</span></div>'; } splitLogsHtml += '</div>';
 let dynamicsHtml = '<div class="detail-log-box" style="margin-top:12px;"><div class="detail-log-title" style="color:var(--warning)">' + (t.summaryTitle || "DYNAMICS SUMMARY") + '</div>' +
 '<div class="detail-log-item"><span>' + (t.time || "Time") + '</span><span>' + (record.time || '--') + '</span></div>' +
+'<div class="detail-log-item"><span>' + (t.speed || "Speed") + '</span><span>' + (() => { const p=record.avgPace||record.pace; if(p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60); return this.currentUnit==='mile'?(kmh*0.621371).toFixed(1)+' mi/h':kmh.toFixed(1)+' km/h';} return '--'; })() + '</span></div>' +
 '<div class="detail-log-item"><span>' + (t.avgGct || "Average GCT") + '</span><span>' + (record.gct || '--') + ' ms.</span></div>' +
 '<div class="detail-log-item"><span>' + (t.avgFlight || "Average Flight") + '</span><span>' + (record.flight || '--') + ' %.</span></div>' +
 '<div class="detail-log-item"><span>' + (t.avgCadence || "Average Cadence") + '</span><span>' + (record.cadence || 0) + ' SPM.</span></div>' +
@@ -2150,7 +2165,9 @@ paceComment = totalSec < 300 ? t.diagPaceFast
 let strideComment = strideVal !== '--' ? t.diagStrideGood : '';
 contentArea.innerHTML =
 '<div class="diag-card"><div class="diag-label">' + (t.diagEffScore) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + effColor + '">' + effScore + ' <span style="font-size:14px;color:#aaa">/ 100</span></div><div class="diag-ref">Ref: ≥75</div></div><div class="diag-tip">' + effComment + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.time||'TIME') + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.time||'--') + '</div></div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.time||'TIME') + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.time||'--') + '</div></div>' +
+'<div style="margin-top:6px;font-size:12px;color:#aaa;font-weight:700;">' + (t.speed||'SPEED') + ' : ' + (() => { const p=r.avgPace||r.pace; if(p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60); return this.currentUnit==='mile'?(kmh*0.621371).toFixed(1)+' mi/h':kmh.toFixed(1)+' km/h';} return '--'; })() + '</div>' +
+'</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + ' <span style="font-size:13px;color:#aaa">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">CAD: ' + (r.cadence || 0) + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + strideVal + '</div><div class="diag-ref">Ref: 1.0~1.5m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
