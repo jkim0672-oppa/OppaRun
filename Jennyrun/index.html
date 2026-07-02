@@ -2479,6 +2479,7 @@ this.sideGctCount = [0, 0];
 this.sideStepCount = [0, 0];
 this.impactTime = 0;
 this.belowThresholdSince = 0;
+this.quietPhaseSinceLastStep = false; // [추가] 걸음 이중 감지 방지용 플래그
 // 착용 위치별 기본값 (chest 기준)
 this.groundThreshold = 11.0;
 this.impactThreshold = 10.5;
@@ -2525,6 +2526,7 @@ this.sideGctCount = [0, 0];
 this.sideStepCount = [0, 0];
 this.impactTime = 0;
 this.belowThresholdSince = 0;
+this.quietPhaseSinceLastStep = false; // [추가] 걸음 이중 감지 방지용 플래그
 this.vertMin = Infinity;
 this.vertMax = -Infinity;
 this.vertAmplitudeAccumulator = 0;
@@ -2547,13 +2549,31 @@ if (acc.z > this.vertMax) this.vertMax = acc.z;
 if (force < this.groundThreshold) {
 // 가속도가 낮음 = 발이 지면에 닿아 충격이 흡수/안정된 구간으로 추정
 if (this.belowThresholdSince === 0) this.belowThresholdSince = now;
+// [수정] 걸음 이중 감지(더블 카운트) 방지용 플래그.
+// belowThresholdSince는 힘이 다시 올라가면 0으로 리셋되어 버려서,
+// 임팩트가 감지되는 바로 그 샘플 시점엔 이미 0일 수 있음(레이스 컨디션).
+// 그래서 "마지막 걸음 이후 조용한 구간을 한 번이라도 지났는지"는
+// 별도의 지속 플래그로 추적하고, 새 걸음이 확정될 때만 리셋한다.
+this.quietPhaseSinceLastStep = true;
 } else {
 this.belowThresholdSince = 0;
 }
 
-if (force > this.impactThreshold && (now - this.lastStepTime) > this.minStepInterval) {
+// [수정] 걸음 이중 감지(더블 카운트) 방지:
+// 착지 충격 직후의 잔진동이 minStepInterval(예:230ms)보다 늦게 한 번 더
+// impactThreshold를 넘으면, 그동안은 그냥 새 걸음으로 잘못 세고 있었음.
+// → "마지막 걸음 이후 실제로 조용한(스윙) 구간을 한 번이라도 지나왔을 때만"
+//    새 걸음으로 인정하도록 조건 추가.
+// 단, 조용한 구간이 어떤 이유로든 감지되지 않는 경우(착용 위치/노이즈 등)
+// 오히려 걸음이 누락(언더카운트)되는 걸 막기 위해, 마지막 걸음 후 시간이
+// 충분히(minStepInterval의 2.5배) 지났으면 조용한 구간 없이도 인정하는
+// 안전장치를 둠.
+const stepTimeoutFallback = (now - this.lastStepTime) > this.minStepInterval * 2.5;
+if (force > this.impactThreshold && (now - this.lastStepTime) > this.minStepInterval &&
+    (this.quietPhaseSinceLastStep || this.lastStepTime === 0 || stepTimeoutFallback)) {
 let cycleTime = now - this.lastStepTime;
 this.lastStepTime = now;
+this.quietPhaseSinceLastStep = false; // 다음 걸음 판정을 위해 리셋
 let result = { cycleTime, gct: 0, flight: 0, side: this.stepSide };
 
 // [추가] 이번 스텝 사이클 동안의 z축 진폭(최대-최소)을 누적, 평균 진폭(m/s^2) 산출
@@ -2754,9 +2774,19 @@ if (this.marker) { this.marker.setLatLng(pos); this.map.panTo(pos); }
 if (_mainMapFull && _mainMapFullLocMarker) { _mainMapFullLocMarker.setLatLng(pos); }
 
 if (this.state.isRunning && !this.state.isPaused) {
-// 오토포즈 판단은 raw GPS speed 기준 유지
+// [수정] 오토포즈 판단: 기존엔 raw GPS speed 하나에만 의존했음.
+// coords.speed는 기종/환경에 따라 오차가 커서, 실제로 멈춰있어도
+// GPS 위치 지터(jitter) 때문에 1.5km/h를 계속 넘겨버려 정지 판정이
+// 아예 시작되지 않는 경우가 있었음(오토포즈 미작동의 원인).
+// → 가속도계 걸음 감지(MotionManager)에서 "최근 일정 시간 동안 걸음이
+//    한 번도 안 잡혔는지"도 함께 확인해서, 둘 중 하나라도 정지를
+//    가리키면 저속/정지로 판단하도록 보강. 모션 권한이 없는 기기는
+//    lastStepTime이 계속 0이라 자동으로 기존 GPS 속도 방식으로만 동작함.
 const rawSpeedKmhForPause = (p.coords.speed || 0) * 3.6;
-if (rawSpeedKmhForPause < 1.5) {
+const stepsHaltedRecently = this.motion && this.motion.lastStepTime > 0 &&
+  (Date.now() - this.motion.lastStepTime) > 3500;
+const looksStoppedNow = (rawSpeedKmhForPause < 1.5) || stepsHaltedRecently;
+if (looksStoppedNow) {
 if (!this.state.lowSpeedStartTime) this.state.lowSpeedStartTime = Date.now();
 else if ((Date.now() - this.state.lowSpeedStartTime) > 4000 && !this.state.isAutoPaused) {
 this.state.isAutoPaused = true;
