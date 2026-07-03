@@ -2967,6 +2967,12 @@ L.marker(mid, { icon, interactive: false }).addTo(this.arrowLayer);
 }
 formatPace(kmh) { if (!kmh || kmh < 0.5) return INVALID_PACE; let s = 3600 / kmh; return Math.floor(s/60) + "'" + String(Math.floor(s%60)).padStart(2,'0') + '"'; }
 async requestMotionPermission() {
+// [신규] 네이티브 앱(안드로이드 래퍼) 안에서는 가속도계가
+// LocationForegroundService → onNativeMotionUpdate 경로로 들어오므로,
+// 브라우저 devicemotion 리스너는 붙이지 않는다 (걸음 중복 카운트 방지).
+if (window.AndroidLocationBridge) {
+return;
+}
 if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
 try {
 const permissionState = await DeviceMotionEvent.requestPermission();
@@ -3220,6 +3226,17 @@ timestamp: timestamp
 });
 }
 } catch (e) { console.error('onNativeLocationUpdate error', e); }
+};
+
+// [신규] 화면 꺼짐 대응: 네이티브 LocationForegroundService가 가속도계를 수집하면
+// MainActivity(Kotlin)가 이 함수를 호출해서 기존 MotionManager.handleMotion() 로직으로 합류시킴
+window.onNativeMotionUpdate = function (x, y, z, timestamp) {
+try {
+if (typeof app !== 'undefined' && app && app.motion &&
+    app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
+app.motion.handleMotion({ accelerationIncludingGravity: { x: x, y: y, z: z } });
+}
+} catch (e) { console.error('onNativeMotionUpdate error', e); }
 };
 
 const SUPABASE_URL = 'https://ujodpspxsisoycniswwl.supabase.co';
@@ -4164,7 +4181,6 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
 </label>
 <div class="custom-confirm-actions">
 <button id="btn-share-crew-skip" class="btn-confirm-act btn-confirm-cancel" onclick="ui.closeShareCrewModal(false)">SKIP</button>
-  
 <button id="btn-share-crew-share" class="btn-confirm-act btn-confirm-save" onclick="ui.closeShareCrewModal(true)">SHARE</button>
 </div>
 </div>
