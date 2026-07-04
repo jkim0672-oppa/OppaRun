@@ -3318,7 +3318,8 @@ class CommunityManager {
     this.AVATAR_POS_KEY = 'jennyRunAvatarPos';
     this.userId = null;
     this._editorFile = null;
-    this._editorPreviewUrl = null;
+    this._editorCompressedBlob = null;
+    this._editorPreviewDataUrl = null;
     this._editorPos = { x: 50, y: 50 };
     this._editorDragBound = false;
   }
@@ -3392,44 +3393,68 @@ class CommunityManager {
     this.refreshAvatarPreview();
   }
 
+  _blobToDataURL(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('read failed'));
+      reader.readAsDataURL(blob);
+    });
+  }
+
   // 사진 선택 시 또는 기존 사진 위치조절 아이콘 클릭 시 호출됨
-  openAvatarEditor(file) {
+  async openAvatarEditor(file) {
     const modal = document.getElementById('avatar-editor-modal');
     const frame = document.getElementById('avatar-editor-frame');
     if (!modal || !frame) return;
 
     if (file) {
-      // 새로 선택한 사진: 로컬에서 즉시 미리보기 (네트워크 업로드와 무관하게 바로 보임)
+      // 새로 선택한 사진: blob: URL은 일부 웹뷰에서 배경이미지로 표시가 안 되는 경우가 있어
+      // 압축한 뒤 data: URL(base64)로 바로 미리보기를 만든다.
       this._editorFile = file;
-      this._editorPreviewUrl = URL.createObjectURL(file);
+      this._editorCompressedBlob = null;
+      this._editorPreviewDataUrl = null;
       this._editorPos = { x: 50, y: 50 };
-      frame.style.backgroundImage = `url('${this._editorPreviewUrl}')`;
+      frame.style.backgroundImage = '';
+      modal.style.display = 'flex';
+      this._attachEditorDrag(frame);
+      try {
+        const compressed = await this.compressPhoto(file);
+        this._editorCompressedBlob = compressed;
+        const dataUrl = await this._blobToDataURL(compressed);
+        this._editorPreviewDataUrl = dataUrl;
+        frame.style.backgroundImage = `url('${dataUrl}')`;
+        frame.style.backgroundPosition = '50% 50%';
+      } catch(e) {
+        console.warn('사진 미리보기 생성 실패:', e.message);
+      }
     } else {
       // 기존 사진 위치 재조정
       const existingUrl = this.getAvatarUrl();
       if (!existingUrl) return;
       this._editorFile = null;
-      this._editorPreviewUrl = null;
+      this._editorCompressedBlob = null;
+      this._editorPreviewDataUrl = null;
       this._editorPos = this.getAvatarPos();
       frame.style.backgroundImage = `url('${existingUrl}')`;
+      frame.style.backgroundPosition = this._editorPos.x + '% ' + this._editorPos.y + '%';
+      modal.style.display = 'flex';
+      this._attachEditorDrag(frame);
     }
-    frame.style.backgroundPosition = this._editorPos.x + '% ' + this._editorPos.y + '%';
-    modal.style.display = 'flex';
-    this._attachEditorDrag(frame);
   }
 
   cancelAvatarEditor() {
     const modal = document.getElementById('avatar-editor-modal');
     if (modal) modal.style.display = 'none';
-    if (this._editorPreviewUrl) { URL.revokeObjectURL(this._editorPreviewUrl); }
     this._editorFile = null;
-    this._editorPreviewUrl = null;
+    this._editorCompressedBlob = null;
+    this._editorPreviewDataUrl = null;
   }
 
   async confirmAvatarEditor() {
     const modal = document.getElementById('avatar-editor-modal');
-    const saveBtn = document.getElementById('avatar-editor-save-label');
-    const originalSaveText = saveBtn ? saveBtn.textContent : '';
+    const saveLabel = document.getElementById('avatar-editor-save-label');
+    const originalSaveText = saveLabel ? saveLabel.textContent : '';
     const pos = this._editorPos;
     const file = this._editorFile;
 
@@ -3441,25 +3466,39 @@ class CommunityManager {
       return;
     }
 
-    // 새 사진: 즉시 로컬 미리보기를 설정에 반영한 뒤, 백그라운드로 업로드
-    const localUrl = this._editorPreviewUrl;
+    // 압축/미리보기 생성이 아직 안 끝났으면 잠깐 대기
+    if (!this._editorPreviewDataUrl || !this._editorCompressedBlob) {
+      if (saveLabel) saveLabel.textContent = '...';
+      try {
+        const compressed = await this.compressPhoto(file);
+        this._editorCompressedBlob = compressed;
+        this._editorPreviewDataUrl = await this._blobToDataURL(compressed);
+      } catch(e) { console.warn('사진 압축 실패:', e.message); }
+      if (saveLabel) saveLabel.textContent = originalSaveText;
+    }
+
+    const dataUrl = this._editorPreviewDataUrl;
+    const compressed = this._editorCompressedBlob;
     const preview = document.getElementById('avatar-preview');
     const removeBtn = document.getElementById('avatar-remove-btn');
     const editBadge = document.getElementById('avatar-edit-badge');
-    if (preview) {
-      preview.style.backgroundImage = `url('${localUrl}')`;
+
+    if (preview && dataUrl) {
+      preview.style.backgroundImage = `url('${dataUrl}')`;
       preview.style.backgroundPosition = pos.x + '% ' + pos.y + '%';
       preview.textContent = '';
     }
     if (removeBtn) removeBtn.style.display = 'block';
     if (editBadge) editBadge.style.display = 'flex';
     this.saveAvatarPos(pos);
+    // 업로드가 늦거나 실패해도 사진이 사라지지 않도록 압축본을 우선 로컬에 저장
+    if (dataUrl) localStorage.setItem(this.AVATAR_KEY, dataUrl);
     if (modal) modal.style.display = 'none';
 
-    if (saveBtn) saveBtn.textContent = '...';
+    if (!compressed) { this._editorFile = null; return; }
+
     try {
       const uid = await this.ensureUserId();
-      const compressed = await this.compressPhoto(file);
       const path = 'avatars/' + uid + '.jpg';
       const { error: upErr } = await _sb.storage.from('run-photos').upload(path, compressed, { upsert: true, contentType: 'image/jpeg' });
       if (upErr) { console.warn('프로필 사진 업로드 실패:', upErr.message); return; }
@@ -3471,9 +3510,9 @@ class CommunityManager {
     } catch(e) {
       console.warn('프로필 사진 업로드 예외:', e.message);
     } finally {
-      if (saveBtn) saveBtn.textContent = originalSaveText;
-      if (this._editorPreviewUrl) { URL.revokeObjectURL(this._editorPreviewUrl); this._editorPreviewUrl = null; }
       this._editorFile = null;
+      this._editorCompressedBlob = null;
+      this._editorPreviewDataUrl = null;
     }
   }
 
