@@ -557,10 +557,10 @@ alt="runner"/>
   <div id="email-linked-box" style="display:none;">
     <div style="display:flex; align-items:center; justify-content:space-between; background:#152a1c; border:1.5px solid #00c853; padding:14px 16px; border-radius:12px;">
       <div>
-        <div id="email-connected-label" style="font-size:10px; color:#00ff88; font-weight:900; margin-bottom:2px;">CONNECTED</div>
+        <div id="email-connected-label" style="font-size:10px; color:#00ff88; font-weight:900; margin-bottom:2px;">로그인됨</div>
         <div id="email-linked-text" style="font-size:13px; color:#fff; font-weight:700;"></div>
       </div>
-      <button id="email-signout-btn" onclick="community.signOutEmail()" style="background:none; border:1.5px solid #663333; color:#e57373; padding:10px 14px; border-radius:10px; font-size:12px; font-weight:800; cursor:pointer;">연결 해제</button>
+      <button id="email-signout-btn" onclick="community.signOutEmail()" style="background:none; border:1.5px solid #663333; color:#e57373; padding:10px 14px; border-radius:10px; font-size:12px; font-weight:800; cursor:pointer;">로그아웃</button>
     </div>
   </div>
   <div id="email-hint" style="font-size:10px; color:#666; margin-top:8px; font-weight:700;">이메일을 인증하면 앱을 지우거나 기기를 바꿔도 크루 기록이 그대로 유지됩니다</div>
@@ -1148,11 +1148,11 @@ emailSyncLabel: "EMAIL SYNC", emailPlaceholder: "Email address", emailSendBtn: "
 emailCodePlaceholder: "Verification code", emailVerifyBtn: "VERIFY", emailRetryLink: "Re-enter email",
 emailSentPrefix: "Enter the code sent to ", emailSentSuffix: "",
 emailHint: "Verify your email to keep your crew records even if you reinstall the app or switch devices",
-emailConnectedLabel: "CONNECTED", emailDisconnectBtn: "DISCONNECT",
+emailConnectedLabel: "LOGGED IN", emailDisconnectBtn: "LOG OUT",
 emailInvalidAlert: "Please enter a valid email address", emailCodeSendFail: "Failed to send code: ",
 emailCodeEmptyAlert: "Please enter the verification code", emailNeedEmailAlert: "Please enter your email first",
-emailVerifyFail: "Verification failed: ", emailLinkedAlert: "Email connected. Your crew records will now stay in sync across devices.",
-emailErrorAlert: "Error: ", emailDisconnectConfirm: "Disconnecting will switch this device to a new local account. Continue?"
+emailVerifyFail: "Verification failed: ", emailLinkedAlert: "Logged in. Your crew records will now stay in sync across devices.",
+emailErrorAlert: "Error: ", emailDisconnectConfirm: "Logging out will switch this device to a new local account. Continue?"
 },
 ko: {
 pace: "페이스", dist: "거리", time: "시간", avg: "평균", speed: "속도", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", cal: "칼로리", start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료", run: "러닝", history: "기록", list: "목록", total: "통계", info: "정보", settings: "설정", selLang: "언어 설정", unitLabel: "거리 단위", genderLabel: "성별", autoPauseLabel: "자동 멈춤", metro: "리듬 어시스턴트", clear: "전체 기록 삭제", confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.", route: "경로", diag: "진단", close: "닫기", alt: "고도", mapStart: "시작", mapFinish: "종료",
@@ -1214,11 +1214,11 @@ emailSyncLabel: "EMAIL SYNC", emailPlaceholder: "이메일 주소", emailSendBtn
 emailCodePlaceholder: "인증코드", emailVerifyBtn: "확인", emailRetryLink: "이메일 다시 입력",
 emailSentPrefix: "", emailSentSuffix: "로 전송된 인증코드를 입력하세요",
 emailHint: "이메일을 인증하면 앱을 지우거나 기기를 바꿔도 크루 기록이 그대로 유지됩니다",
-emailConnectedLabel: "CONNECTED", emailDisconnectBtn: "연결 해제",
+emailConnectedLabel: "로그인됨", emailDisconnectBtn: "로그아웃",
 emailInvalidAlert: "올바른 이메일 주소를 입력해주세요", emailCodeSendFail: "인증코드 전송 실패: ",
 emailCodeEmptyAlert: "인증코드를 입력해주세요", emailNeedEmailAlert: "이메일을 먼저 입력해주세요",
-emailVerifyFail: "인증 실패: ", emailLinkedAlert: "이메일이 연결되었습니다. 이제 기기를 바꿔도 크루 기록이 유지됩니다.",
-emailErrorAlert: "오류: ", emailDisconnectConfirm: "연결을 해제하면 이 기기는 새로운 로컬 계정으로 전환됩니다. 계속할까요?"
+emailVerifyFail: "인증 실패: ", emailLinkedAlert: "로그인되었습니다. 이제 기기를 바꿔도 크루 기록이 유지됩니다.",
+emailErrorAlert: "오류: ", emailDisconnectConfirm: "로그아웃하면 이 기기는 새로운 로컬 계정으로 전환됩니다. 계속할까요?"
 }
 };
 // ========== RunningStorage ==========
@@ -3392,6 +3392,7 @@ class CommunityManager {
     this.EMAIL_KEY = 'jennyRunEmail';
     this.userId = null;
     this.pendingEmail = null;
+    this.pendingIsExistingLogin = false;
     this._editorFile = null;
     this._editorCompressedBlob = null;
     this._editorPreviewDataUrl = null;
@@ -3741,13 +3742,21 @@ class CommunityManager {
       const { data: userRes } = await _sb.auth.getUser();
       const isAnon = !!(userRes && userRes.user && userRes.user.is_anonymous);
       let error;
+      let isExistingLogin = false;
       if (isAnon) {
         ({ error } = await _sb.auth.updateUser({ email }));
+        if (error && this._isEmailTakenError(error)) {
+          // 이미 인증된 이메일 -> 새 계정 연결이 아니라 기존 계정으로 재로그인 코드 발송
+          isExistingLogin = true;
+          ({ error } = await _sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false } }));
+        }
       } else {
+        isExistingLogin = true;
         ({ error } = await _sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true } }));
       }
       if (error) { await appAlert(t.emailCodeSendFail + error.message); return; }
       this.pendingEmail = email;
+      this.pendingIsExistingLogin = isExistingLogin;
       const s1 = document.getElementById('email-step1');
       const s2 = document.getElementById('email-step2');
       if (s1) s1.style.display = 'none';
@@ -3760,6 +3769,14 @@ class CommunityManager {
     }
   }
 
+  // updateUser 실패 원인이 "이미 등록된 이메일"인지 판별
+  _isEmailTakenError(error) {
+    const msg = ((error && error.message) || '').toLowerCase();
+    const code = ((error && error.code) || '').toLowerCase();
+    return code.includes('exist') || code.includes('taken') ||
+      msg.includes('already') || msg.includes('registered') || msg.includes('taken') || msg.includes('exists');
+  }
+
   // 2단계: 인증코드 확인
   async verifyEmailCode(code) {
     const t = this._t();
@@ -3769,19 +3786,18 @@ class CommunityManager {
     const btn = document.getElementById('email-verify-btn');
     if (btn) { btn.disabled = true; }
     try {
-      const { data: userRes } = await _sb.auth.getUser();
-      const wasAnon = !!(userRes && userRes.user && userRes.user.is_anonymous);
-      const type = wasAnon ? 'email_change' : 'email';
+      const type = this.pendingIsExistingLogin ? 'email' : 'email_change';
       const res = await _sb.auth.verifyOtp({ email: this.pendingEmail, token: code, type });
       if (res.error) { await appAlert(t.emailVerifyFail + res.error.message); return; }
       const newUser = res.data && res.data.user;
       if (newUser && newUser.id) {
-        // 다른 기기에서 기존 계정으로 로그인한 경우 uid가 바뀜 -> 로컬 캐시 갱신
+        // 기존 계정으로 (재)로그인한 경우 uid가 바뀜 -> 로컬 캐시 갱신
         localStorage.setItem(this.USER_ID_KEY, newUser.id);
         this.userId = newUser.id;
       }
       localStorage.setItem(this.EMAIL_KEY, this.pendingEmail);
       this.pendingEmail = null;
+      this.pendingIsExistingLogin = false;
       const codeInput = document.getElementById('email-code-input');
       if (codeInput) codeInput.value = '';
       this.refreshEmailUI();
