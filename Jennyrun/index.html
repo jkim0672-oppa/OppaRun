@@ -549,7 +549,7 @@ alt="runner"/>
       <button id="email-verify-btn" onclick="community.verifyEmailCode(document.getElementById('email-code-input').value)"
         style="width:100%; margin-top:10px; background:#00c853; border:none; color:#fff; padding:16px 14px; border-radius:12px; font-size:14px; font-weight:900; cursor:pointer;">확인</button>
       <div style="text-align:center; margin-top:10px;">
-        <span id="email-retry-link" onclick="document.getElementById('email-step1').style.display='block'; document.getElementById('email-step2').style.display='none';"
+        <span id="email-retry-link" onclick="community.resetToEmailStep()"
           style="color:#666; font-size:11px; font-weight:700; cursor:pointer; text-decoration:underline;">이메일 다시 입력</span>
       </div>
     </div>
@@ -1150,7 +1150,8 @@ emailConnectedLabel: "LOGGED IN", emailDisconnectBtn: "LOG OUT",
 emailInvalidAlert: "Please enter a valid email address", emailCodeSendFail: "Failed to send code: ",
 emailCodeEmptyAlert: "Please enter the verification code", emailNeedEmailAlert: "Please enter your email first",
 emailVerifyFail: "Verification failed: ", emailLinkedAlert: "Logged in. Your crew records will now stay in sync across devices.",
-emailErrorAlert: "Error: ", emailDisconnectConfirm: "Logging out will switch this device to a new local account. Continue?"
+emailErrorAlert: "Error: ", emailDisconnectConfirm: "Logging out will switch this device to a new local account. Continue?",
+emailCodeTimeoutAlert: "Verification timed out. Please enter your email again."
 },
 ko: {
 pace: "페이스", dist: "거리", time: "시간", avg: "평균", speed: "속도", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", cal: "칼로리", start: "러닝 시작", stop: "정지", resume: "재개", finish: "종료", run: "러닝", history: "기록", list: "목록", total: "통계", info: "정보", settings: "설정", selLang: "언어 설정", unitLabel: "거리 단위", genderLabel: "성별", autoPauseLabel: "자동 멈춤", metro: "리듬 어시스턴트", clear: "전체 기록 삭제", confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.", route: "경로", diag: "진단", close: "닫기", alt: "고도", mapStart: "시작", mapFinish: "종료",
@@ -1214,7 +1215,8 @@ emailConnectedLabel: "로그인됨", emailDisconnectBtn: "로그아웃",
 emailInvalidAlert: "올바른 이메일 주소를 입력해주세요", emailCodeSendFail: "인증코드 전송 실패: ",
 emailCodeEmptyAlert: "인증코드를 입력해주세요", emailNeedEmailAlert: "이메일을 먼저 입력해주세요",
 emailVerifyFail: "인증 실패: ", emailLinkedAlert: "로그인되었습니다. 이제 기기를 바꿔도 크루 기록이 유지됩니다.",
-emailErrorAlert: "오류: ", emailDisconnectConfirm: "로그아웃하면 이 기기는 새로운 로컬 계정으로 전환됩니다. 계속할까요?"
+emailErrorAlert: "오류: ", emailDisconnectConfirm: "로그아웃하면 이 기기는 새로운 로컬 계정으로 전환됩니다. 계속할까요?",
+emailCodeTimeoutAlert: "입력 시간이 초과되었습니다. 이메일을 다시 입력해주세요."
 }
 };
 // ========== RunningStorage ==========
@@ -3380,6 +3382,8 @@ class CommunityManager {
     this.userId = null;
     this.pendingEmail = null;
     this.pendingIsExistingLogin = false;
+    this._codeTimer = null;
+    this.CODE_TIMEOUT_MS = 5 * 60 * 1000;
     this._editorFile = null;
     this._editorCompressedBlob = null;
     this._editorPreviewDataUrl = null;
@@ -3680,6 +3684,34 @@ class CommunityManager {
     return localStorage.getItem(this.EMAIL_KEY) || '';
   }
 
+  startEmailCodeTimer() {
+    this.clearEmailCodeTimer();
+    this._codeTimer = setTimeout(() => this.handleEmailCodeTimeout(), this.CODE_TIMEOUT_MS);
+  }
+
+  clearEmailCodeTimer() {
+    if (this._codeTimer) { clearTimeout(this._codeTimer); this._codeTimer = null; }
+  }
+
+  async handleEmailCodeTimeout() {
+    const t = this._t();
+    this.resetToEmailStep();
+    await appAlert(t.emailCodeTimeoutAlert);
+  }
+
+  // 처음(이메일 입력) 화면으로 복귀: 타이머/대기중 이메일 초기화
+  resetToEmailStep() {
+    this.clearEmailCodeTimer();
+    this.pendingEmail = null;
+    this.pendingIsExistingLogin = false;
+    const s1 = document.getElementById('email-step1');
+    const s2 = document.getElementById('email-step2');
+    const codeInput = document.getElementById('email-code-input');
+    if (s1) s1.style.display = 'block';
+    if (s2) s2.style.display = 'none';
+    if (codeInput) codeInput.value = '';
+  }
+
   _t() {
     return translations[storage.getLang()] || translations['en'];
   }
@@ -3749,6 +3781,7 @@ class CommunityManager {
       if (s1) s1.style.display = 'none';
       if (s2) s2.style.display = 'block';
       this.refreshEmailSentPrefix();
+      this.startEmailCodeTimer();
     } catch (e) {
       await appAlert(t.emailErrorAlert + e.message);
     } finally {
@@ -3775,7 +3808,12 @@ class CommunityManager {
     try {
       const type = this.pendingIsExistingLogin ? 'email' : 'email_change';
       const res = await _sb.auth.verifyOtp({ email: this.pendingEmail, token: code, type });
-      if (res.error) { await appAlert(t.emailVerifyFail + res.error.message); return; }
+      if (res.error) {
+        this.resetToEmailStep();
+        await appAlert(t.emailVerifyFail + res.error.message);
+        return;
+      }
+      this.clearEmailCodeTimer();
       const newUser = res.data && res.data.user;
       if (newUser && newUser.id) {
         // 기존 계정으로 (재)로그인한 경우 uid가 바뀜 -> 로컬 캐시 갱신
@@ -3802,6 +3840,7 @@ class CommunityManager {
     const t = this._t();
     const ok = await appConfirm(t.emailDisconnectConfirm);
     if (!ok) return;
+    this.clearEmailCodeTimer();
     try { await _sb.auth.signOut(); } catch (e) { console.warn('signOut error', e); }
     localStorage.removeItem(this.EMAIL_KEY);
     localStorage.removeItem(this.USER_ID_KEY);
