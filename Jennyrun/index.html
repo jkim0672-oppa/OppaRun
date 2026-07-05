@@ -611,6 +611,16 @@ alt="runner"/>
 <div id="devpos-armband" class="gender-btn" onclick="ui.setDevicePos('armband')">ARMBAND</div>
 <div id="devpos-hand" class="gender-btn" onclick="ui.setDevicePos('hand')">HAND</div>
 </div><div id="device-pos-warning" style="display:none; font-size:11px; color:var(--warning); font-weight:800; margin-top:8px; line-height:1.5;"></div></div>
+<div class="settings-group" id="calib-group">
+<div id="label-calib-title" class="settings-label">STRIDE CALIBRATION</div>
+<div id="calib-desc" style="font-size:11px; color:#888; margin:2px 0 10px; line-height:1.5;">Run a known, exact distance (a track lap, etc.) so the app can learn your real stride length instead of an estimate — this improves stride, cadence, and efficiency-score accuracy going forward.</div>
+<div class="gender-toggle-row">
+<div id="calib-dist-400" class="gender-btn active" onclick="ui.selectCalibDist(400)">400 m (track)</div>
+<div id="calib-dist-1000" class="gender-btn" onclick="ui.selectCalibDist(1000)">1000 m</div>
+</div>
+<button id="btn-start-calib" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:16px; border-radius:12px; width:100%; font-weight:900; font-size:13px; margin-top:10px;" onclick="ui.startCalibrationRun()">START CALIBRATION RUN</button>
+<div id="calib-current-factor" style="font-size:11px; color:#888; margin-top:10px;">Current correction factor: 1.00 (default, not yet calibrated)</div>
+</div>
 <div class="settings-group">
 <div id="label-data-backup" class="settings-label">DATA BACKUP</div>
 <div style="display:flex; gap:10px;">
@@ -995,12 +1005,19 @@ function trimmedMeanCadence(samples) {
 // 키 보정: 다리길이 ≈ 키 × 0.47 (인체 비율), 기준키 175cm 대비 비율로 미세 보정
 // 키가 클수록 같은 케이던스에서 자연 보폭이 길어지는 경향 반영
 // 보정계수는 ±8% 이내로 클램프 (과보정 방지)
-function calcStride(speedKmh, cadence, heightCm) {
+// [추가] personalFactor: 캘리브레이션 러닝으로 학습한 개인 보정계수 (기본 1.0)
+// 키 기반 추정만으로는 개인 착지 습관/실제 다리길이 차이를 다 반영 못하므로,
+// 실측 캘리브레이션 결과가 있으면 이걸로 한 번 더 미세 보정한다.
+function calcStride(speedKmh, cadence, heightCm, personalFactor) {
   const rawStride = (speedKmh / 3.6) / (cadence / 60);
-  if (!heightCm || heightCm <= 0) return rawStride;
-  const legRatio = (heightCm * 0.47) / (175 * 0.47); // 기준 175cm 대비
-  const correction = Math.max(0.92, Math.min(1.08, legRatio));
-  return rawStride * correction;
+  let stride = rawStride;
+  if (heightCm && heightCm > 0) {
+    const legRatio = (heightCm * 0.47) / (175 * 0.47); // 기준 175cm 대비
+    const correction = Math.max(0.92, Math.min(1.08, legRatio));
+    stride = rawStride * correction;
+  }
+  const pf = (typeof personalFactor === 'number' && personalFactor > 0) ? personalFactor : 1.0;
+  return stride * pf;
 }
 // [추가] 개인 맞춤 피드백 생성 함수
 // record(케이던스/GCT/보폭/밸런스 등)와 profile(키/나이)+gender를 조합해
@@ -1148,6 +1165,13 @@ diagGctBad: "Ground contact time is prolonged. Focus on quick pull-off.", diagGc
 diagFlightShort: "Short flight time. Improve elastic energy return.", diagFlightGood: "Good flight time range.", diagFlightLong: "Long flight time. Check for excessive vertical oscillation.",
 diagRecovSkip: "Distance under 100m, recovery analysis not provided.",
 devposHandWarning: "⚠ Holding the phone in your hand significantly reduces the accuracy of cadence, GCT, and balance data due to arm-swing motion. Chest, waist, or armband placement is recommended.",
+calibTitle: "STRIDE CALIBRATION", calibDesc: "Run a known, exact distance (a track lap, etc.) so the app can learn your real stride length instead of an estimate — this improves stride, cadence, and efficiency-score accuracy going forward.",
+calibDist400: "400 m (track)", calibDist1000: "1000 m", calibStartBtn: "START CALIBRATION RUN",
+calibCurrentLabel: "Current correction factor", calibDefaultTag: "default, not yet calibrated",
+calibConfirmMsg: "Run exactly {d}m, then press FINISH as usual. Start only once you're ready to begin moving immediately.",
+calibTooShort: "Not enough steps were detected for a reliable calibration. Please try again with a longer, steady run.",
+calibResultMsg: "Calibration complete! Personal correction factor: {f} (stride readings adjusted by {p}%). This run was not saved to your history.",
+calibOutOfRange: "The result was far outside a normal range, so it wasn't applied — please check GPS signal and device placement, then try again.",
 crewTitle: "JENNY RUN CREW", crewSub: "Latest runs from the crew",
 crewLoading: "Loading...", crewEmpty: "No runs yet", crewEmptySub: "Be the first runner!",
 crewLike: "Like", crewComment: "Comment", crewDelete: "Delete",
@@ -1213,6 +1237,13 @@ diagGctBad: "지면 접촉 시간이 다소 깁니다. 발을 빠르게 회수�
 diagFlightShort: "체공시간이 짧습니다. 탄성 에너지 활용을 높여보세요.", diagFlightGood: "적절한 체공시간입니다.", diagFlightLong: "체공시간이 깁니다. 과도한 수직 낭비가 있을 수 있습니다.",
 diagRecovSkip: "100m 미만 거리는 회복 분석이 제공되지 않습니다.",
 devposHandWarning: "⚠ 휴대폰을 손에 들고 뛰면 팔 흔들림으로 인해 케이던스, GCT, 밸런스 데이터의 정확도가 크게 떨어집니다. 가슴, 허리, 암밴드 착용을 권장합니다.",
+calibTitle: "정밀 보폭 캘리브레이션", calibDesc: "정확히 알고 있는 거리(트랙 한 바퀴 등)를 뛰어서, 추정값 대신 실제 보폭을 앱이 학습하게 하세요 — 이후 보폭, 케이던스, 효율점수 정확도가 개선됩니다.",
+calibDist400: "400m (트랙)", calibDist1000: "1000m", calibStartBtn: "캘리브레이션 러닝 시작",
+calibCurrentLabel: "현재 보정계수", calibDefaultTag: "기본값, 아직 보정 안됨",
+calibConfirmMsg: "정확히 {d}m를 뛴 뒤 평소처럼 FINISH를 눌러주세요. 바로 움직일 준비가 됐을 때 시작하세요.",
+calibTooShort: "신뢰할 만한 보정을 하기엔 감지된 걸음 수가 너무 적어요. 좀 더 길고 꾸준한 페이스로 다시 시도해주세요.",
+calibResultMsg: "보정 완료! 개인 보정계수: {f} (보폭 값이 {p}% 조정됩니다). 이번 러닝은 기록에 저장되지 않았어요.",
+calibOutOfRange: "결과가 정상 범위를 크게 벗어나 적용하지 않았어요. GPS 신호와 기기 착용 위치를 확인한 뒤 다시 시도해주세요.",
 crewTitle: "JENNY RUN CREW", crewSub: "러너들의 최신 기록",
 crewLoading: "불러오는 중...", crewEmpty: "아직 기록이 없어요", crewEmptySub: "첫 번째 러너가 되어보세요!",
 crewLike: "좋아요", crewComment: "댓글", crewDelete: "삭제",
@@ -1338,7 +1369,7 @@ reader.readAsText(file);
 }
 saveProfile(profile) { localStorage.setItem(this.PROFILE_KEY, JSON.stringify(profile)); }
 loadProfile() {
-const defaultProfile = { h: 175, hu: "cm", w: 70, wu: "kg", age: 30, devicePos: "chest" };
+const defaultProfile = { h: 175, hu: "cm", w: 70, wu: "kg", age: 30, devicePos: "chest", strideCorrectionFactor: 1.0 };
 const data = localStorage.getItem(this.PROFILE_KEY);
 // [수정] 기존 저장 데이터에 새 필드(age, devicePos)가 없을 경우 기본값으로 보완
 return data ? Object.assign({}, defaultProfile, JSON.parse(data)) : defaultProfile;
@@ -1683,7 +1714,7 @@ if(min > 0) speedKmh = 60 / (min + (sec / 60));
 const strideCalculated = (() => {
   const prof = storage.loadProfile();
   const heightCm = prof.hu === 'inch' ? Math.round(prof.h * 2.54) : prof.h;
-  return calcStride(speedKmh, cadence, heightCm).toFixed(2);
+  return calcStride(speedKmh, cadence, heightCm, prof.strideCorrectionFactor).toFixed(2);
 })();
 const vertRatioCalculated = (7.5 - (cadence - 160) * 0.05).toFixed(1);
 const setVal = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
@@ -1830,6 +1861,18 @@ const devposArmband = document.getElementById('devpos-armband');
 if(devposArmband) devposArmband.textContent = t.devposArmband;
 const devposHand = document.getElementById('devpos-hand');
 if(devposHand) devposHand.textContent = t.devposHand;
+// [추가] 정밀 보폭 캘리브레이션 UI 번역 적용
+const calibTitle = document.getElementById('label-calib-title');
+if(calibTitle) calibTitle.textContent = t.calibTitle;
+const calibDesc = document.getElementById('calib-desc');
+if(calibDesc) calibDesc.textContent = t.calibDesc;
+const calibDist400 = document.getElementById('calib-dist-400');
+if(calibDist400) calibDist400.textContent = t.calibDist400;
+const calibDist1000 = document.getElementById('calib-dist-1000');
+if(calibDist1000) calibDist1000.textContent = t.calibDist1000;
+const calibStartBtn = document.getElementById('btn-start-calib');
+if(calibStartBtn) calibStartBtn.textContent = t.calibStartBtn;
+this.updateCalibFactorDisplay();
 // 기기 착용 위치 경고 문구 재적용 (언어 변경시)
 const currentProfile = storage.loadProfile();
 this.updateDevicePosUI(currentProfile.devicePos);
@@ -2037,6 +2080,42 @@ warningEl.style.display = 'none';
 warningEl.textContent = '';
 }
 }
+// [추가] 정밀 보폭 캘리브레이션: 사용자가 알고 있는 정확한 거리를 뛰게 해서
+// 개인 보폭 보정계수를 학습시키는 기능 (4번 개선사항)
+selectedCalibDistance = 400;
+selectCalibDist(d) {
+this.selectedCalibDistance = d;
+const el400 = document.getElementById('calib-dist-400');
+const el1000 = document.getElementById('calib-dist-1000');
+if(el400) el400.classList.toggle('active', d === 400);
+if(el1000) el1000.classList.toggle('active', d === 1000);
+}
+updateCalibFactorDisplay() {
+const lang = storage.getLang();
+const t = translations[lang] || translations['en'];
+const prof = storage.loadProfile();
+const factor = (typeof prof.strideCorrectionFactor === 'number' && prof.strideCorrectionFactor > 0) ? prof.strideCorrectionFactor : 1.0;
+const el = document.getElementById('calib-current-factor');
+if(!el) return;
+const label = t.calibCurrentLabel || 'Current correction factor';
+if (Math.abs(factor - 1.0) < 0.001) {
+el.textContent = label + ': 1.00 (' + (t.calibDefaultTag || 'default') + ')';
+} else {
+el.textContent = label + ': ' + factor.toFixed(2);
+}
+}
+async startCalibrationRun() {
+const lang = storage.getLang();
+const t = translations[lang] || translations['en'];
+const dist = this.selectedCalibDistance || 400;
+const msg = (t.calibConfirmMsg || '').replace('{d}', dist);
+const ok = await appConfirm(msg);
+if (!ok) return;
+if (typeof app === 'undefined' || !app) return;
+app.state.isCalibrationRun = true;
+app.state.calibrationKnownDistanceM = dist;
+this.showTab('run');
+}
 openMetronome() { const mv = document.getElementById('metronome-view'); if(mv) mv.style.display = 'flex'; }
 closeMetronome() { const mv = document.getElementById('metronome-view'); if(mv) mv.style.display = 'none'; }
 updateQuickMetroBtn() {
@@ -2150,7 +2229,7 @@ if (!isConfirmed || !storage._pendingImportData) return;
 const data = storage._pendingImportData;
 const isKo = storage.getLang() === 'ko';
 if (Array.isArray(data.history)) localStorage.setItem(storage.HISTORY_KEY, JSON.stringify(data.history));
-if (data.profile) storage.saveProfile(Object.assign({ h:175, hu:'cm', w:70, wu:'kg', age:30, devicePos:'chest' }, data.profile));
+if (data.profile) storage.saveProfile(Object.assign({ h:175, hu:'cm', w:70, wu:'kg', age:30, devicePos:'chest', strideCorrectionFactor:1.0 }, data.profile));
 if (data.lang) storage.setLang(data.lang);
 if (data.unit) storage.setUnit(data.unit);
 if (data.gender) storage.setGender(data.gender);
@@ -2303,7 +2382,7 @@ if (r.stride) {
   const speedKmh = 60 / (min + sec / 60);
   const prof = storage.loadProfile();
   const heightCm = prof.hu === 'inch' ? Math.round(prof.h * 2.54) : prof.h;
-  strideVal = calcStride(speedKmh, r.cadence, heightCm).toFixed(2);
+  strideVal = calcStride(speedKmh, r.cadence, heightCm, prof.strideCorrectionFactor).toFixed(2);
 }
 return '<div class="h-det-box"><div class="h-det-label">' + t.stride + '</div><div class="h-det-val" style="color:#aaa">' + strideVal + ' <span style="font-size:7px">M</span></div></div>';
 })()) +
@@ -2572,7 +2651,7 @@ if (r.stride) {
   const speedKmh = 60 / (min + sec / 60);
   const _prof2 = storage.loadProfile();
   const _hcm2 = _prof2.hu === 'inch' ? Math.round(_prof2.h * 2.54) : _prof2.h;
-  strideVal = calcStride(speedKmh, r.cadence, _hcm2).toFixed(2) + ' m';
+  strideVal = calcStride(speedKmh, r.cadence, _hcm2, _prof2.strideCorrectionFactor).toFixed(2) + ' m';
 }
 // 체공시간
 const flightVal = r.flight && r.flight !== '--' ? r.flight : '--';
@@ -2892,7 +2971,8 @@ currentAlt: 0, lowSpeedStartTime: null, wakeLock: null,
 maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
 splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
 lastPosTimestamp: Date.now(),
-speedBuffer: [], lastValidSpeed: 0, cadenceSamples: []
+speedBuffer: [], lastValidSpeed: 0, cadenceSamples: [],
+isCalibrationRun: false, calibrationKnownDistanceM: 0
 };
 this.map = null; this.marker = null; this.polyline = null; this.timer = null;
 this.motion = new MotionManager((data) => this.updateMetrics(data));
@@ -3288,6 +3368,12 @@ ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padSt
 onFinish() {
 if(this.timer) clearInterval(this.timer);
 this.stopSilentKeepAlive();
+// [추가] 캘리브레이션 러닝(4번 개선사항)이면 일반 기록 저장 대신
+// 개인 보폭 보정계수만 계산해서 저장하고 종료한다.
+if (this.state.isCalibrationRun) {
+this.finishCalibrationRun();
+return;
+}
 const p = storage.loadProfile();
 const weightKg = p.wu === 'lb' ? p.w * 0.453592 : p.w;
 let totalAltGain = 0;
@@ -3312,7 +3398,7 @@ if (avgCadence > 0 && avgPaceSec > 0) {
 const speedKmh = 3600 / avgPaceSec;
 const _profVert = storage.loadProfile();
 const _hcmVert = _profVert.hu === 'inch' ? Math.round(_profVert.h * 2.54) : _profVert.h;
-strideForVert = calcStride(speedKmh, avgCadence, _hcmVert);
+strideForVert = calcStride(speedKmh, avgCadence, _hcmVert, _profVert.strideCorrectionFactor);
 }
 const measuredVertRatio = this.motion ? this.motion.getVertRatio(strideForVert) : null;
 if (this.state.totalDist > this.state.lastKmCheckpoint + 0.01 && this.state.seconds > this.state.lastKmSeconds) {
@@ -3335,7 +3421,7 @@ const _snapshotStride = (() => {
     const spd = 3600 / avgPaceSec;
     const prof = storage.loadProfile();
     const hcm = prof.hu === 'inch' ? Math.round(prof.h * 2.54) : prof.h;
-    return parseFloat(calcStride(spd, avgCadence, hcm).toFixed(2));
+    return parseFloat(calcStride(spd, avgCadence, hcm, prof.strideCorrectionFactor).toFixed(2));
   }
   return null;
 })();
@@ -3373,6 +3459,67 @@ AndroidLocationBridge.stopTracking();
 }
 ui.openShareCrewModal(record);
 }
+// [추가] 정밀 보폭 캘리브레이션 러닝 종료 처리 (4번 개선사항)
+// 사용자가 알고 있는 정확한 거리(트랙 400m 등)를 뛰었다는 전제 하에,
+// GPS 거리 대신 그 알려진 거리를 사용해 개인 보폭을 역산하고,
+// 기존 키 기반 추정 보폭과 비교해 개인 보정계수를 뽑아낸다.
+async finishCalibrationRun() {
+const lang = storage.getLang();
+const t = translations[lang] || translations['en'];
+const knownDistanceM = this.state.calibrationKnownDistanceM || 0;
+const totalSteps = this.state.steps || 0;
+const totalSeconds = this.state.seconds || 0;
+// 정리는 결과와 상관없이 먼저 수행 (러닝 상태 원복)
+const cleanupAndReload = () => {
+storage.clearTempSession();
+this.state.isRunning = false;
+this.state.isPaused = false;
+this.state.isAutoPaused = false;
+this.state.isCalibrationRun = false;
+this.state.calibrationKnownDistanceM = 0;
+if (window.AndroidLocationBridge && AndroidLocationBridge.stopTracking) {
+AndroidLocationBridge.stopTracking();
+}
+window.location.reload();
+};
+// 데이터가 너무 부족하면(걸음 수/시간) 신뢰할 수 없는 보정이므로 중단
+if (totalSteps < 30 || totalSeconds < 10 || knownDistanceM <= 0) {
+await appAlert(t.calibTooShort);
+cleanupAndReload();
+return;
+}
+const avgCadence = (this.state.cadenceSamples && this.state.cadenceSamples.length > 0)
+  ? trimmedMeanCadence(this.state.cadenceSamples)
+  : Math.round((totalSteps / totalSeconds) * 60);
+// GPS 거리 대신 사용자가 알고 있는 정확한 거리로 평균 속도를 계산 (더 정확함)
+const avgSpeedKmh = (knownDistanceM / 1000) / (totalSeconds / 3600);
+// 실측 개인 보폭 (한 걸음 기준) = 알려진 거리 ÷ 걸음 수
+const personalStrideM = knownDistanceM / totalSteps;
+const prof = storage.loadProfile();
+const heightCm = prof.hu === 'inch' ? Math.round(prof.h * 2.54) : prof.h;
+// 보정계수 없이(1.0) 키 기반으로만 계산한 이론적 보폭과 비교
+const theoreticalStride = calcStride(avgSpeedKmh, avgCadence, heightCm, 1.0);
+if (!theoreticalStride || theoreticalStride <= 0) {
+await appAlert(t.calibTooShort);
+cleanupAndReload();
+return;
+}
+const factor = personalStrideM / theoreticalStride;
+// 비정상적으로 큰 보정치는(GPS 오차, 잘못된 거리 입력 등) 적용하지 않고 방어
+if (factor < 0.7 || factor > 1.3) {
+await appAlert(t.calibOutOfRange);
+cleanupAndReload();
+return;
+}
+const roundedFactor = Math.round(factor * 100) / 100;
+storage.saveProfile(Object.assign({}, prof, { strideCorrectionFactor: roundedFactor }));
+const percentChange = Math.round((roundedFactor - 1) * 100);
+const msg = (t.calibResultMsg || '')
+  .replace('{f}', roundedFactor.toFixed(2))
+  .replace('{p}', (percentChange >= 0 ? '+' : '') + percentChange);
+await appAlert(msg);
+cleanupAndReload();
+}
 checkResume() {
 try {
 const saved = storage.loadTempSession();
@@ -3406,7 +3553,8 @@ currentAlt: 0, lowSpeedStartTime: null, wakeLock: null,
 maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
 splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
 lastPosTimestamp: Date.now(),
-speedBuffer: [], lastValidSpeed: 0, cadenceSamples: []
+speedBuffer: [], lastValidSpeed: 0, cadenceSamples: [],
+isCalibrationRun: false, calibrationKnownDistanceM: 0
 };
 window.location.reload();
 }
