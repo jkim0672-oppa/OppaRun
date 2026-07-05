@@ -471,7 +471,7 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 <div class="diag-card"><div id="info-oscillation-title" style="color:var(--primary); font-weight:900; margin-bottom:5px;">VERTICAL OSCILLATION</div><div id="info-oscillation-desc" style="font-size:12px; color:#ccc;">Minimize bouncing. Keep energy moving forward, not up.</div></div>
 <div class="diag-card"><div id="info-rolling-title" style="color:var(--primary); font-weight:900; margin-bottom:5px;">KNEE LEADING & ROLLING</div><div id="info-rolling-desc" style="font-size:12px; color:#ccc;">Drive forward with your knees. Focus on smooth ankle rolling.</div></div>
 <div class="diag-card"><div id="info-posture-title" style="color:var(--primary); font-weight:900; margin-bottom:5px;">POSTURE & BREATHING</div><div id="info-posture-desc" style="font-size:12px; color:#ccc;">Keep your chest open and shoulders relaxed. Look straight ahead.</div></div>
-<div class="diag-card"><div id="info-ranges-title" style="color:var(--primary); font-weight:900; margin-bottom:5px;">QUICK REFERENCE RANGES</div><div id="info-ranges-desc" style="font-size:12px; color:#ccc;">Cadence: 170~185 SPM is a common target range. GCT: under ~240ms is generally efficient. Flight time: roughly 30~45% of cycle time. Stride length: about 1.0~1.5m for recreational runners. These are general guidelines, not strict rules — individual body types vary.</div></div>
+<div class="diag-card"><div id="info-ranges-title" style="color:var(--primary); font-weight:900; margin-bottom:5px;">QUICK REFERENCE RANGES</div><div id="info-ranges-desc" style="font-size:12px; color:#ccc;">Cadence: 170~185 SPM is a common target range. GCT: under ~240ms is generally efficient. Flight time: roughly 30~45% of cycle time. Stride length: about 0.5~0.75m (single step) for recreational runners. These are general guidelines, not strict rules — individual body types vary.</div></div>
 <div class="diag-card"><div id="info-warmup-title" style="color:var(--primary); font-weight:900; margin-bottom:5px;">WARM-UP & COOL-DOWN</div><div id="info-warmup-desc" style="font-size:12px; color:#ccc;">Start with 5~10 min of light jogging or dynamic stretching to raise your heart rate gradually. After running, walk and stretch for 5~10 min to help recovery and reduce muscle soreness.</div></div>
 <div class="diag-card"><div id="info-hydration-title" style="color:var(--primary); font-weight:900; margin-bottom:5px;">HYDRATION & FUELING</div><div id="info-hydration-desc" style="font-size:12px; color:#ccc;">For runs over 60 minutes, drink small amounts of water regularly. For runs over 90 minutes, consider light carbohydrate intake (gels, bananas, sports drinks).</div></div>
 <div class="diag-card"><div id="info-recovery-title" style="color:var(--primary); font-weight:900; margin-bottom:5px;">REST & RECOVERY DAYS</div><div id="info-recovery-desc" style="font-size:12px; color:#ccc;">Muscles rebuild during rest. Beginners should take at least 1~2 full rest days per week, and avoid running through persistent joint pain.</div></div>
@@ -942,7 +942,8 @@ function calcEffScore(record) {
   const strideM = parseFloat(record.stride) || 0;
   const strideScore = (() => {
     if (!strideM || strideM <= 0 || !legLen) return 70;
-    const ratio = strideM / (legLen * 2);
+    // [수정] stride가 이제 한 걸음 기준값이라 legLen*2가 아닌 legLen과 비교
+    const ratio = strideM / legLen;
     if (ratio >= 0.9 && ratio <= 1.3)  return 100;
     if (ratio >= 0.7 && ratio < 0.9)   return Math.round(70 + (ratio - 0.7) * 150);
     if (ratio > 1.3 && ratio <= 1.6)   return Math.round(100 - (ratio - 1.3) * 100);
@@ -974,12 +975,28 @@ function calcEffScore(record) {
     hrBonus
   )));
 }
-// 원리: 보폭(stride) = 속도 ÷ 케이던스 × 2 (순수 물리값)
+// [추가] 케이던스 안정화용 트림 평균(trimmed mean) 계산
+// 러닝 중 수집된 10초 윈도우 케이던스 샘플들에서 상/하위 10%씩(과도한 노이즈/스파이크)
+// 제외하고 남은 값들의 평균을 낸다. 샘플이 적으면(<5개) 그냥 단순 평균으로 폴백.
+function trimmedMeanCadence(samples) {
+  if (!samples || samples.length === 0) return 0;
+  if (samples.length < 5) {
+    return Math.round(samples.reduce((a, b) => a + b, 0) / samples.length);
+  }
+  const sorted = [...samples].sort((a, b) => a - b);
+  const trimCount = Math.floor(sorted.length * 0.1);
+  const trimmed = sorted.slice(trimCount, sorted.length - trimCount);
+  const base = trimmed.length > 0 ? trimmed : sorted;
+  return Math.round(base.reduce((a, b) => a + b, 0) / base.length);
+}
+// 원리: 보폭(stride) = 속도 ÷ 케이던스 (한 걸음 기준, 순수 물리값)
+// [수정] 기존에는 ×2를 적용해 "양발 한 사이클" 거리(전문 러닝 용어 기준)를 냈으나,
+// 일반 사용자는 보폭을 "한 걸음"으로 인식하므로 ×2를 제거해 한 걸음 길이로 변경.
 // 키 보정: 다리길이 ≈ 키 × 0.47 (인체 비율), 기준키 175cm 대비 비율로 미세 보정
 // 키가 클수록 같은 케이던스에서 자연 보폭이 길어지는 경향 반영
 // 보정계수는 ±8% 이내로 클램프 (과보정 방지)
 function calcStride(speedKmh, cadence, heightCm) {
-  const rawStride = ((speedKmh / 3.6) / (cadence / 60)) * 2;
+  const rawStride = (speedKmh / 3.6) / (cadence / 60);
   if (!heightCm || heightCm <= 0) return rawStride;
   const legRatio = (heightCm * 0.47) / (175 * 0.47); // 기준 175cm 대비
   const correction = Math.max(0.92, Math.min(1.08, legRatio));
@@ -1043,7 +1060,8 @@ function buildPersonalFeedback(record, profile, gender, isKo) {
   if (strideM > 0 && profile.h) {
     const heightCm = profile.hu === 'inch' ? Math.round(profile.h * 2.54) : profile.h;
     const legLen = (heightCm * 0.47) / 100;
-    const ratio = legLen ? strideM / (legLen * 2) : 0;
+    // [수정] stride가 한 걸음 기준값이라 legLen*2가 아닌 legLen과 비교
+    const ratio = legLen ? strideM / legLen : 0;
     const strideTxt = strideM.toFixed(2);
     if (ratio && ratio < 0.9) {
       parts.stride = isKo
@@ -1100,7 +1118,7 @@ infWarmup: "WARM-UP & COOL-DOWN", infWarmupD: "Start with 5~10 min of light jogg
 infHydration: "HYDRATION & FUELING", infHydrationD: "For runs over 60 minutes, drink small amounts of water regularly. For runs over 90 minutes, consider light carbohydrate intake (gels, bananas, sports drinks).",
 infRecovery: "REST & RECOVERY DAYS", infRecoveryD: "Muscles rebuild during rest. Beginners should take at least 1~2 full rest days per week, and avoid running through persistent joint pain.",
 infInjury: "INJURY WARNING SIGNS", infInjuryD: "Sharp, localized, or one-sided pain that worsens during a run is a warning sign. Stop running and rest; if pain persists more than a few days, consult a medical professional.",
-infRanges: "QUICK REFERENCE RANGES", infRangesD: "Cadence: 170~185 SPM is a common target range. GCT: under ~240ms is generally efficient. Flight time: roughly 30~45% of cycle time. Stride length: about 1.0~1.5m for recreational runners. These are general guidelines, not strict rules — individual body types vary.",
+infRanges: "QUICK REFERENCE RANGES", infRangesD: "Cadence: 170~185 SPM is a common target range. GCT: under ~240ms is generally efficient. Flight time: roughly 30~45% of cycle time. Stride length: about 0.5~0.75m (single step) for recreational runners. These are general guidelines, not strict rules — individual body types vary.",
 infHeartRate: "HEART RATE & ZONES", infHeartRateD: "Heart rate zones help you train at the right intensity. Zone 1~2 (50~70% max HR) builds aerobic base and aids recovery. Zone 3 (70~80%) improves cardiovascular efficiency. Zone 4~5 (80~100%) develops speed and power but requires adequate recovery time. Max HR is roughly estimated as 220 minus your age.",
 height: "HEIGHT", weight: "WEIGHT",
 age: "AGE", devicePos: "DEVICE PLACEMENT", dataBackup: "DATA BACKUP", exportBtn: "EXPORT", importBtn: "IMPORT",
@@ -1125,7 +1143,7 @@ diagStrideLabel: "STRIDE LENGTH", diagGctLabel: "RUNNING DYNAMICS", diagFlightLa
 diagEffGood: "Excellent running efficiency!", diagEffAvg: "Average. Work on GCT and cadence.", diagEffBad: "Needs improvement. Metronome training recommended.",
 diagPaceFast: "Fast pace. Check sustainability.", diagPaceGood: "Good aerobic pace.", diagPaceEasy: "Easy pace. Try pushing a bit more.",
 diagCadGood: "Optimal step frequency.", diagCadLow: "Slightly low cadence. Sync with metronome.",
-diagStrideGood: "Full stride (one cycle). 1.0~1.5m is ideal.",
+diagStrideGood: "Single step length. 0.5~0.75m is ideal.",
 diagGctBad: "Ground contact time is prolonged. Focus on quick pull-off.", diagGctGood: "Excellent movement elasticity.",
 diagFlightShort: "Short flight time. Improve elastic energy return.", diagFlightGood: "Good flight time range.", diagFlightLong: "Long flight time. Check for excessive vertical oscillation.",
 diagRecovSkip: "Distance under 100m, recovery analysis not provided.",
@@ -1165,7 +1183,7 @@ infWarmup: "워밍업 & 쿨다운", infWarmupD: "러닝 전 5~10분간 가볍게
 infHydration: "수분 & 에너지 보충", infHydrationD: "60분 이상 러닝 시 소량의 물을 규칙적으로 섭취하세요. 90분 이상 러닝 시에는 젤, 바나나, 스포츠음료 등 가벼운 탄수화물 보충을 고려하세요.",
 infRecovery: "휴식 & 회복일", infRecoveryD: "근육은 휴식 중에 회복됩니다. 초보자는 주 1~2일 이상의 완전한 휴식일을 가지는 것이 좋고, 관절 통증이 지속될 경우 무리하게 뛰지 마세요.",
 infInjury: "부상 경고 신호", infInjuryD: "러닝 중 악화되는 날카롭고 한쪽에 집중된 통증은 경고 신호입니다. 즉시 멈추고 휴식을 취하고, 며칠 이상 지속되면 전문가의 진단을 받으세요.",
-infRanges: "주요 지표 참고 범위", infRangesD: "케이던스: 일반적으로 170~185 SPM이 권장 범위입니다. GCT: 약 240ms 이하가 효율적인 편입니다. 체공시간: 한 주기의 약 30~45% 수준이 일반적입니다. 보폭: 일반 러너 기준 약 1.0~1.5m입니다. 이는 참고용 일반 가이드라인이며, 체형과 개인차에 따라 다를 수 있습니다.",
+infRanges: "주요 지표 참고 범위", infRangesD: "케이던스: 일반적으로 170~185 SPM이 권장 범위입니다. GCT: 약 240ms 이하가 효율적인 편입니다. 체공시간: 한 주기의 약 30~45% 수준이 일반적입니다. 보폭: 일반 러너 기준 약 0.5~0.75m(한 걸음 기준)입니다. 이는 참고용 일반 가이드라인이며, 체형과 개인차에 따라 다를 수 있습니다.",
 infHeartRate: "심박수 & 존 가이드", infHeartRateD: "심박수 존은 올바른 강도로 훈련하는 데 도움이 됩니다. 존 1~2 (최대 심박수의 50~70%)는 유산소 기반을 다지고 회복을 돕습니다. 존 3 (70~80%)는 심폐 효율을 향상시킵니다. 존 4~5 (80~100%)는 스피드와 파워를 키우지만 충분한 회복이 필요합니다. 최대 심박수는 220에서 나이를 뺀 값으로 추정합니다.",
 height: "신장", weight: "체중",
 age: "나이", devicePos: "기기 착용 위치", dataBackup: "데이터 백업", exportBtn: "내보내기", importBtn: "가져오기",
@@ -1190,7 +1208,7 @@ diagStrideLabel: "보폭 (STRIDE)", diagGctLabel: "러닝 다이내믹스 (GCT)"
 diagEffGood: "우수한 러닝 효율입니다!", diagEffAvg: "보통 수준입니다. GCT와 케이던스를 개선해보세요.", diagEffBad: "효율 개선이 필요합니다. 메트로놈 훈련을 권장합니다.",
 diagPaceFast: "빠른 페이스입니다. 지속 가능한지 확인하세요.", diagPaceGood: "적절한 유산소 페이스입니다.", diagPaceEasy: "여유 있는 페이스입니다. 조금 더 빠르게 도전해보세요.",
 diagCadGood: "이상적인 보폭 빈도입니다.", diagCadLow: "케이던스가 다소 낮습니다. 메트로놈에 맞춰보세요.",
-diagStrideGood: "양발 한 사이클 기준 보폭입니다. 1.0~1.5m가 이상적입니다.",
+diagStrideGood: "한 걸음 기준 보폭입니다. 0.5~0.75m가 이상적입니다.",
 diagGctBad: "지면 접촉 시간이 다소 깁니다. 발을 빠르게 회수하세요.", diagGctGood: "매우 뛰어난 탄력성입니다.",
 diagFlightShort: "체공시간이 짧습니다. 탄성 에너지 활용을 높여보세요.", diagFlightGood: "적절한 체공시간입니다.", diagFlightLong: "체공시간이 깁니다. 과도한 수직 낭비가 있을 수 있습니다.",
 diagRecovSkip: "100m 미만 거리는 회복 분석이 제공되지 않습니다.",
@@ -2605,7 +2623,7 @@ contentArea.innerHTML =
 '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + ' <span style="font-size:13px;color:#aaa">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">CAD: ' + (r.cadence || 0) + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + strideVal + '</div><div class="diag-ref">Ref: 1.0~1.5m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + strideVal + '</div><div class="diag-ref">Ref: 0.5~0.75m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">GCT: ' + r.gct + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagFlightLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (isNaN(flightNum)?'#aaa':this.getFlightColor(flightNum)) + '">' + flightVal + (flightVal!=='--'?' %':'') + '</div><div class="diag-ref">Ref: 30~45%</div></div><div class="diag-tip">' + flightComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagRecov || "RECOVERY GUIDE") + '</div>' + recovHighlightHTML + '<div class="diag-tip">' + recovComment + '</div></div>';
@@ -2648,6 +2666,10 @@ this.vertMin = Infinity;
 this.vertMax = -Infinity;
 this.vertAmplitudeAccumulator = 0;
 this.vertAmplitudeCount = 0;
+// [추가] 개인별 적응형 임계값 보정 상태
+this.calibDone = false;
+this.calibStartTime = null;
+this.calibForceSamples = [];
 // 저장된 착용 위치 프로파일 즉시 적용
 const savedPos = (() => { try { return storage.loadProfile().devicePos || 'chest'; } catch(e) { return 'chest'; } })();
 this.applyDevicePos(savedPos);
@@ -2671,6 +2693,34 @@ this.gctFallbackRatio = p.gctFallbackRatio;
 this.vertScale        = p.vertScale;
 this.minStepInterval  = p.minStepInterval;
 this.vertEnabled      = p.vertEnabled;
+// [추가] 적응형 보정의 기준(중심)이 되는 위치별 기본값을 별도 보관.
+// 보정된 threshold는 항상 이 기본값의 ±15% 이내로만 움직이게 해서 과보정을 방지.
+this.baseGroundThreshold = p.groundThreshold;
+this.baseImpactThreshold = p.impactThreshold;
+// 착용 위치가 바뀌면 그 위치 기준으로 다시 캘리브레이션해야 하므로 초기화
+this.calibDone = false;
+this.calibStartTime = null;
+this.calibForceSamples = [];
+}
+// [추가] 러닝 시작 후 첫 6초간 수집한 원시 가속도 힘(force) 샘플로
+// 개인별 진폭에 맞춰 groundThreshold/impactThreshold를 미세 조정한다.
+// 위치별 고정 임계값 하나로는 사람마다 다른 상하 진동 폭(체중, 착지 스타일,
+// 폰 고정 정도)을 다 커버하지 못해 오감지/언더카운트가 생기던 문제를 완화.
+finishCalibration() {
+const samples = this.calibForceSamples;
+this.calibDone = true;
+if (!samples || samples.length < 30) { this.calibForceSamples = []; return; } // 데이터 부족 시 기본값 유지
+const min = Math.min(...samples);
+const max = Math.max(...samples);
+const amplitude = max - min;
+this.calibForceSamples = []; // 메모리 정리
+if (amplitude < 1.0) return; // 사실상 정지 상태로 보정 의미 없음 → 기본값 유지
+const mid = (min + max) / 2;
+const rawImpact = mid + amplitude * 0.18;
+const rawGround = mid - amplitude * 0.05;
+// 위치별 기본값 대비 ±15% 이내로만 보정 허용 (과보정 방지 안전장치)
+this.impactThreshold = Math.max(this.baseImpactThreshold * 0.85, Math.min(this.baseImpactThreshold * 1.15, rawImpact));
+this.groundThreshold  = Math.max(this.baseGroundThreshold * 0.85, Math.min(this.baseGroundThreshold * 1.15, rawGround));
 }
 reset() {
 this.lastStepTime = 0;
@@ -2688,12 +2738,28 @@ this.vertMin = Infinity;
 this.vertMax = -Infinity;
 this.vertAmplitudeAccumulator = 0;
 this.vertAmplitudeCount = 0;
+// [추가] 매 러닝 시작 시 적응형 임계값 캘리브레이션도 새로 수행
+// (같은 착용위치라도 조임 정도, 옷차림 등이 매번 다를 수 있으므로)
+this.groundThreshold = this.baseGroundThreshold;
+this.impactThreshold = this.baseImpactThreshold;
+this.calibDone = false;
+this.calibStartTime = null;
+this.calibForceSamples = [];
 }
 handleMotion(e) {
 let acc = e.accelerationIncludingGravity;
 if (!acc || acc.z === null) return;
 let force = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
 let now = Date.now();
+
+// [추가] 적응형 임계값 캘리브레이션: 러닝 시작 후 첫 6초간 원시 force 값을
+// 모아서 개인별 진폭에 맞게 groundThreshold/impactThreshold를 보정한다.
+// (이 구간에도 기존 위치별 기본값으로 걸음 감지 자체는 정상 동작함)
+if (!this.calibDone) {
+if (!this.calibStartTime) this.calibStartTime = now;
+this.calibForceSamples.push(force);
+if (now - this.calibStartTime >= 6000) this.finishCalibration();
+}
 
 // [추가] 수직(z축) 가속도 진폭 추적: 한 걸음(스텝) 사이클 동안의
 // z축 가속도 최대/최소값을 기록해 두었다가, 스텝이 끊길 때 진폭(max-min)을 누적
@@ -2826,7 +2892,7 @@ currentAlt: 0, lowSpeedStartTime: null, wakeLock: null,
 maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
 splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
 lastPosTimestamp: Date.now(),
-speedBuffer: [], lastValidSpeed: 0
+speedBuffer: [], lastValidSpeed: 0, cadenceSamples: []
 };
 this.map = null; this.marker = null; this.polyline = null; this.timer = null;
 this.motion = new MotionManager((data) => this.updateMetrics(data));
@@ -2893,7 +2959,7 @@ updatePosition(p) {
 if(!this.map) return;
 const rawLat = p.coords.latitude;
 const rawLng = p.coords.longitude;
-const accuracy = Math.round(p.coords.accuracy);
+const accuracy = Number.isFinite(p.coords.accuracy) ? Math.round(p.coords.accuracy) : 999;
 this.state.currentAlt = p.coords.altitude ? Math.round(p.coords.altitude) : 0;
 // GPS 고도는 오차가 크므로 비정상적인 음수값 클램핑 (해수면 아래 -50m 이상은 오차로 판단)
 if (this.state.currentAlt < -50) this.state.currentAlt = 0;
@@ -3012,8 +3078,13 @@ this.state.lastKmAlt = this.state.currentAlt;
 }
 
 // ── 3. 페이스: GPS speed 가중 이동평균 (최신값 더 높은 가중치) ──
+// [수정] GPS 정확도(accuracy)가 나쁜 샘플은 애초에 speedBuffer에 넣지 않음.
+// 위치 좌표는 이미 칼만필터로 accuracy 가중 보정을 받지만, coords.speed는
+// 그 보정을 거치지 않은 원시값이라 accuracy가 나쁠 때(도심 빌딩 사이, 실내 등)
+// 튀는 속도가 그대로 페이스/보폭 계산에 들어갈 수 있었음.
+const SPEED_ACCURACY_LIMIT_M = 20; // 이보다 정확도가 나쁜(숫자가 큰) 샘플은 신뢰 안 함
 let rawSpeedKmh = p.coords.speed != null ? p.coords.speed * 3.6 : -1;
-if (rawSpeedKmh > 0.5) {
+if (rawSpeedKmh > 0.5 && accuracy <= SPEED_ACCURACY_LIMIT_M) {
 // 이상치 필터: 버퍼 가중평균의 2배 초과 시 클램핑
 if (this.state.speedBuffer.length >= 2) {
 const n = this.state.speedBuffer.length;
@@ -3071,6 +3142,18 @@ this.state.stepTimes = this.state.stepTimes.filter(t => now - t <= 10000);
 const windowSec = Math.min(10, this.state.seconds || 1);
 const cadVal = Math.round((this.state.stepTimes.length / windowSec) * 60);
 ui.updateRunningDisplay({cadence: cadVal, gct: data.gct || 0, flight: data.flight || 0});
+// [수정] 케이던스 안정화: steps/전체시간 대신, 실시간 10초 윈도우 값들을
+// 계속 누적해뒀다가 종료 시점에 이 샘플들의 평균(트림 평균)을 최종 기록에 사용.
+// → 시작 워밍업 구간이나 순간적인 오감지로 인한 값 튐이 평균 과정에서 완화됨.
+// 윈도우가 최소 3초 이상 찼을 때부터 샘플링(초반 1~2초의 극단값 배제).
+// [추가] 사람이 걷거나 뛸 때 낼 수 있는 물리적 케이던스 범위(대략 60~280 SPM)를
+// 벗어난 순간값은 오감지/노이즈로 간주해 샘플에 넣지 않음.
+const CADENCE_MIN_SPM = 60;
+const CADENCE_MAX_SPM = 280;
+if (windowSec >= 3 && cadVal >= CADENCE_MIN_SPM && cadVal <= CADENCE_MAX_SPM) {
+if (!this.state.cadenceSamples) this.state.cadenceSamples = [];
+this.state.cadenceSamples.push(cadVal);
+}
 }
 }
 drawArrows() {
@@ -3139,6 +3222,7 @@ this.state.pathCoords = [];
 this.state.totalGct = 0;
 this.state.totalFlight = 0;
 this.state.stepCount = 0;
+this.state.cadenceSamples = [];
 this.state.splits = [];
 this.state.lastKmCheckpoint = 0;
 this.state.lastKmSeconds = 0;
@@ -3212,7 +3296,12 @@ totalAltGain = this.state.splits.reduce((sum, split) => sum + Math.max(0, split.
 }
 const avgPaceSec = ui.parsePaceToSeconds(ui.dom.avgPace.textContent);
 const calculatedKcal = ui.calculateCalories(weightKg, this.state.totalDist, avgPaceSec, totalAltGain, ui.currentGender, p.age);
-const avgCadence = this.state.seconds > 0 ? Math.round((this.state.steps / this.state.seconds) * 60) : 0;
+// [수정] steps/전체시간 대신, 러닝 중 누적된 10초 윈도우 케이던스 샘플들의
+// 트림 평균을 사용해 순간적 오감지/워밍업 구간으로 인한 값 튐을 완화.
+// 샘플이 없는 경우(예: 매우 짧은 러닝)에는 기존 방식으로 폴백.
+const avgCadence = (this.state.cadenceSamples && this.state.cadenceSamples.length > 0)
+  ? trimmedMeanCadence(this.state.cadenceSamples)
+  : (this.state.seconds > 0 ? Math.round((this.state.steps / this.state.seconds) * 60) : 0);
 const avgGct = this.state.stepCount > 0 ? Math.round(this.state.totalGct / this.state.stepCount) : 0;
 const avgFlight = this.state.stepCount > 0 ? Math.round(this.state.totalFlight / this.state.stepCount) : 0;
 // [추가] 좌/우 케이던스 밸런스 및 GCT 밸런스 (실측값, 더미 50:50 제거)
@@ -3317,7 +3406,7 @@ currentAlt: 0, lowSpeedStartTime: null, wakeLock: null,
 maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
 splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
 lastPosTimestamp: Date.now(),
-speedBuffer: [], lastValidSpeed: 0
+speedBuffer: [], lastValidSpeed: 0, cadenceSamples: []
 };
 window.location.reload();
 }
