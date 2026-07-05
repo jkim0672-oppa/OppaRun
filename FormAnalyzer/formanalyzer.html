@@ -10,6 +10,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 /* (기존 스타일 그대로 - 길이상 생략, 실제 복붙 시에는 위에 제공된 스타일 전체를 그대로 넣어야 함) */
 :root {
@@ -270,6 +271,42 @@ canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer
     <div class="settings-card">
       <div class="settings-card-label" id="lblSetupAge">Age</div>
       <input type="number" class="settings-input" id="setupAge" value="30" onchange="AppControl.saveSettings()">
+    </div>
+  </div>
+  <div class="settings-section-title" id="txtSetupAccount">Account Sync</div>
+  <div class="settings-grid-2col">
+    <div class="settings-card" style="grid-column:1/-1; align-items:stretch;">
+      <div id="fa-email-login-box">
+        <div id="fa-email-step1">
+          <input id="fa-email-input" type="email" placeholder="이메일 주소" autocomplete="email" autocapitalize="off"
+            style="width:100%; background:#0a1e2e; color:#fff; border:1.5px solid #0d2e44; padding:14px; border-radius:10px; font-size:14px; font-weight:600; outline:none; box-sizing:border-box;">
+          <button id="fa-email-send-btn" onclick="FAAuth.sendEmailCode(document.getElementById('fa-email-input').value)"
+            style="width:100%; margin-top:8px; background:var(--neon); border:none; color:#031418; padding:14px; border-radius:10px; font-size:14px; font-weight:800; cursor:pointer;">인증코드 받기</button>
+        </div>
+        <div id="fa-email-step2" style="display:none;">
+          <div style="font-size:11px; color:#5a8a9a; font-weight:600; margin-bottom:8px;">
+            <span id="fa-email-sent-to"></span><span id="fa-email-sent-suffix">로 전송된 인증코드를 입력하세요</span>
+          </div>
+          <input id="fa-email-code-input" type="text" inputmode="numeric" maxlength="8" placeholder="인증코드"
+            style="width:100%; background:#0a1e2e; color:#fff; border:1.5px solid #0d2e44; padding:14px; border-radius:10px; font-size:14px; font-weight:700; outline:none; letter-spacing:4px; text-align:center; box-sizing:border-box;">
+          <button id="fa-email-verify-btn" onclick="FAAuth.verifyEmailCode(document.getElementById('fa-email-code-input').value)"
+            style="width:100%; margin-top:8px; background:var(--neon); border:none; color:#031418; padding:14px; border-radius:10px; font-size:14px; font-weight:800; cursor:pointer;">확인</button>
+          <div style="text-align:center; margin-top:8px;">
+            <span id="fa-email-retry-link" onclick="document.getElementById('fa-email-step1').style.display='block'; document.getElementById('fa-email-step2').style.display='none';"
+              style="color:#5a8a9a; font-size:11px; font-weight:600; cursor:pointer; text-decoration:underline;">이메일 다시 입력</span>
+          </div>
+        </div>
+      </div>
+      <div id="fa-email-linked-box" style="display:none;">
+        <div style="display:flex; align-items:center; justify-content:space-between; background:#0a2e1e; border:1.5px solid var(--neon); padding:12px 14px; border-radius:10px;">
+          <div>
+            <div id="fa-email-connected-label" style="font-size:10px; color:var(--neon); font-weight:800; margin-bottom:2px;">로그인됨</div>
+            <div id="fa-email-linked-text" style="font-size:13px; color:#fff; font-weight:700;"></div>
+          </div>
+          <button id="fa-email-signout-btn" onclick="FAAuth.signOutEmail()" style="background:none; border:1.5px solid #663333; color:#e57373; padding:8px 12px; border-radius:8px; font-size:12px; font-weight:700; cursor:pointer;">로그아웃</button>
+        </div>
+      </div>
+      <div id="fa-email-hint" style="font-size:10px; color:#5a8a9a; margin-top:8px; font-weight:600;">이메일을 인증하면 앱을 지우거나 기기를 바꿔도 신체정보가 그대로 유지됩니다</div>
     </div>
   </div>
   <div class="settings-section-title" id="txtSetupLangSection">Language</div>
@@ -906,6 +943,7 @@ userGender = document.getElementById('setupGender').value || 'male';
 const lang = I18n.currentLang || 'en';
 localStorage.setItem('proAnalysisUser', JSON.stringify({height:userHeight,weight:userWeight,age:userAge,gender:userGender}));
 localStorage.setItem('faSettings', JSON.stringify({height:userHeight,weight:userWeight,age:userAge,gender:userGender,lang:lang,setupDone:true}));
+if (typeof FAAuth !== 'undefined') FAAuth.pushProfile();
 },
 openReportModal() {
 document.getElementById('repValKnee').innerText = document.getElementById('valKneeA').innerText;
@@ -1379,6 +1417,212 @@ localStorage.setItem('proAnalysisReports', JSON.stringify(saved));
 this.renderSavedList();
 }
 };
+// ======================== Supabase / FAAuth (이메일 로그인 & 신체정보 클라우드 동기화) ========================
+const SUPABASE_URL = 'https://nupnksxqsrtojeetxpai.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_YlUH07nBqxQEEIlABs9aaA_viR1vV2Q';
+const _fasb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+function faAlert(msg) {
+  return new Promise(resolve => {
+    const overlay = document.getElementById('customConfirm');
+    const msgEl = document.getElementById('txtConfirmMsg');
+    const btnContainer = document.getElementById('confirmBtnContainer');
+    overlay.style.display = 'flex';
+    msgEl.innerHTML = msg;
+    btnContainer.innerHTML = `<button class="confirm-btn no" style="grid-column: span 2; background:var(--blue);">OK</button>`;
+    btnContainer.querySelector('button').onclick = () => { overlay.style.display = 'none'; resolve(); };
+  });
+}
+function faConfirm(msg) {
+  return new Promise(resolve => {
+    const overlay = document.getElementById('customConfirm');
+    const msgEl = document.getElementById('txtConfirmMsg');
+    const btnContainer = document.getElementById('confirmBtnContainer');
+    const p = I18n[I18n.currentLang];
+    overlay.style.display = 'flex';
+    msgEl.innerHTML = msg;
+    btnContainer.innerHTML = `<button class="confirm-btn yes">${p.confirmYes}</button><button class="confirm-btn no">${p.confirmNo}</button>`;
+    const btns = btnContainer.querySelectorAll('button');
+    btns[0].onclick = () => { overlay.style.display = 'none'; resolve(true); };
+    btns[1].onclick = () => { overlay.style.display = 'none'; resolve(false); };
+  });
+}
+
+const FAAuth = {
+  USER_ID_KEY: 'faUserId',
+  EMAIL_KEY: 'faEmail',
+  userId: null,
+  pendingEmail: null,
+  pendingIsExistingLogin: false,
+
+  getLinkedEmail() { return localStorage.getItem(this.EMAIL_KEY) || ''; },
+
+  async ensureUserId() {
+    if (this.userId) return this.userId;
+    let uid = localStorage.getItem(this.USER_ID_KEY);
+    if (uid && uid.match(/^[0-9a-f-]{36}$/)) { this.userId = uid; return uid; }
+    try {
+      const { data } = await _fasb.auth.signInAnonymously();
+      if (data && data.user) {
+        uid = data.user.id;
+        localStorage.setItem(this.USER_ID_KEY, uid);
+        this.userId = uid;
+        return uid;
+      }
+    } catch (e) { console.warn('Supabase anon login failed', e); }
+    return null;
+  },
+
+  _isEmailTakenError(error) {
+    const msg = ((error && error.message) || '').toLowerCase();
+    const code = ((error && error.code) || '').toLowerCase();
+    return code.includes('exist') || code.includes('taken') || msg.includes('already') || msg.includes('registered') || msg.includes('taken') || msg.includes('exists');
+  },
+
+  refreshEmailUI() {
+    const email = this.getLinkedEmail();
+    const box = document.getElementById('fa-email-login-box');
+    const linkedBox = document.getElementById('fa-email-linked-box');
+    const linkedText = document.getElementById('fa-email-linked-text');
+    if (!box || !linkedBox) return;
+    if (email) {
+      box.style.display = 'none';
+      linkedBox.style.display = 'block';
+      if (linkedText) linkedText.textContent = email;
+    } else {
+      box.style.display = 'block';
+      linkedBox.style.display = 'none';
+      const s1 = document.getElementById('fa-email-step1');
+      const s2 = document.getElementById('fa-email-step2');
+      if (s1) s1.style.display = 'block';
+      if (s2) s2.style.display = 'none';
+    }
+  },
+
+  refreshEmailSentPrefix() {
+    const el = document.getElementById('fa-email-sent-to');
+    if (!el || !this.pendingEmail) return;
+    el.textContent = this.pendingEmail;
+  },
+
+  async sendEmailCode(email) {
+    const p = I18n[I18n.currentLang];
+    email = (email || '').trim().toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { await faAlert(p.emailInvalidAlert); return; }
+    const btn = document.getElementById('fa-email-send-btn');
+    if (btn) { btn.disabled = true; btn.textContent = p.emailSendingBtn; }
+    try {
+      await this.ensureUserId();
+      const { data: userRes } = await _fasb.auth.getUser();
+      const isAnon = !!(userRes && userRes.user && userRes.user.is_anonymous);
+      let error;
+      let isExistingLogin = false;
+      if (isAnon) {
+        ({ error } = await _fasb.auth.updateUser({ email }));
+        if (error && this._isEmailTakenError(error)) {
+          isExistingLogin = true;
+          ({ error } = await _fasb.auth.signInWithOtp({ email, options: { shouldCreateUser: false } }));
+        }
+      } else {
+        isExistingLogin = true;
+        ({ error } = await _fasb.auth.signInWithOtp({ email, options: { shouldCreateUser: true } }));
+      }
+      if (error) { await faAlert(p.emailCodeSendFail + error.message); return; }
+      this.pendingEmail = email;
+      this.pendingIsExistingLogin = isExistingLogin;
+      const s1 = document.getElementById('fa-email-step1');
+      const s2 = document.getElementById('fa-email-step2');
+      if (s1) s1.style.display = 'none';
+      if (s2) s2.style.display = 'block';
+      this.refreshEmailSentPrefix();
+    } catch (e) {
+      await faAlert(p.emailErrorAlert + e.message);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = p.emailSendBtn; }
+    }
+  },
+
+  async verifyEmailCode(code) {
+    const p = I18n[I18n.currentLang];
+    code = (code || '').trim();
+    if (!code) { await faAlert(p.emailCodeEmptyAlert); return; }
+    if (!this.pendingEmail) { await faAlert(p.emailNeedEmailAlert); return; }
+    const btn = document.getElementById('fa-email-verify-btn');
+    if (btn) btn.disabled = true;
+    try {
+      const type = this.pendingIsExistingLogin ? 'email' : 'email_change';
+      const res = await _fasb.auth.verifyOtp({ email: this.pendingEmail, token: code, type });
+      if (res.error) { await faAlert(p.emailVerifyFail + res.error.message); return; }
+      const newUser = res.data && res.data.user;
+      if (newUser && newUser.id) {
+        localStorage.setItem(this.USER_ID_KEY, newUser.id);
+        this.userId = newUser.id;
+      }
+      localStorage.setItem(this.EMAIL_KEY, this.pendingEmail);
+      this.pendingEmail = null;
+      this.pendingIsExistingLogin = false;
+      const codeInput = document.getElementById('fa-email-code-input');
+      if (codeInput) codeInput.value = '';
+      this.refreshEmailUI();
+      await this.syncAfterLogin();
+      await faAlert(p.emailLinkedAlert);
+    } catch (e) {
+      await faAlert(p.emailErrorAlert + e.message);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  },
+
+  async signOutEmail() {
+    const p = I18n[I18n.currentLang];
+    const ok = await faConfirm(p.emailDisconnectConfirm);
+    if (!ok) return;
+    try { await _fasb.auth.signOut(); } catch (e) { console.warn('signOut error', e); }
+    localStorage.removeItem(this.EMAIL_KEY);
+    localStorage.removeItem(this.USER_ID_KEY);
+    this.userId = null;
+    await this.ensureUserId();
+    this.refreshEmailUI();
+  },
+
+  // 로그인 성공 시: 클라우드에 기존 데이터가 있으면 그걸로 로컬을 덮어쓰고, 없으면 현재 로컬 값을 클라우드로 올림
+  async syncAfterLogin() {
+    const p = I18n[I18n.currentLang];
+    try {
+      const uid = await this.ensureUserId();
+      if (!uid) return;
+      const { data, error } = await _fasb.from('profiles').select('*').eq('id', uid).maybeSingle();
+      if (error) { console.warn('profile fetch error', error); return; }
+      if (data) {
+        userHeight = data.height || userHeight;
+        userWeight = data.weight || userWeight;
+        userAge = data.age || userAge;
+        userGender = data.gender || userGender;
+        const eH = document.getElementById('setupHeight'); if (eH) eH.value = userHeight;
+        const eW = document.getElementById('setupWeight'); if (eW) eW.value = userWeight;
+        const eA = document.getElementById('setupAge'); if (eA) eA.value = userAge;
+        const eG = document.getElementById('setupGender'); if (eG) eG.value = userGender;
+        localStorage.setItem('faSettings', JSON.stringify({ height: userHeight, weight: userWeight, age: userAge, gender: userGender, lang: I18n.currentLang }));
+        AppControl.showToast('☁️', p.emailSyncPulledMsg);
+      } else {
+        await this.pushProfile();
+        AppControl.showToast('☁️', p.emailSyncPushedMsg);
+      }
+    } catch (e) { console.warn('syncAfterLogin error', e); }
+  },
+
+  // 신체정보 저장 시(saveSettings) 로그인 되어 있으면 클라우드에도 업로드
+  async pushProfile() {
+    if (!this.getLinkedEmail()) return;
+    try {
+      const uid = await this.ensureUserId();
+      if (!uid) return;
+      await _fasb.from('profiles').upsert({
+        id: uid, height: userHeight, weight: userWeight, age: userAge, gender: userGender, lang: I18n.currentLang, updated_at: new Date().toISOString()
+      });
+    } catch (e) { console.warn('pushProfile error', e); }
+  }
+};
 // ======================== I18n ========================
 const I18n = {
 currentLang:'en',
@@ -1397,7 +1641,14 @@ guideCard3Title:"촬영 각도: 측면 90°", guideCard3Desc:"달리는 방향�
 guideCard4Title:"밝은 환경 권장", guideCard4Desc:"역광이나 어두운 환경은 AI 인식률을 크게 낮춥니다. 자연광이 앞에서 오는 환경이 가장 좋아요.",
 guideCard5Title:"대비되는 의상 착용", guideCard5Desc:"배경과 구분되는 밝거나 색깔 있는 옷을 입으면 관절 추적 정확도가 향상됩니다.",
 guideCard6Title:"최소 10~20초 구간 촬영", guideCard6Desc:"GCT, Flight, 보폭은 여러 보 평균값이므로 충분한 구간이 필요해요. 10초 이상 일정한 페이스로 달리는 영상을 준비하세요.",
-guideCard7Title:"가로 모드 60fps 권장", guideCard7Desc:"빠른 동작 분석에는 60fps 영상이 유리합니다. 스마트폰의 슬로모션 모드도 효과적이에요."
+guideCard7Title:"가로 모드 60fps 권장", guideCard7Desc:"빠른 동작 분석에는 60fps 영상이 유리합니다. 스마트폰의 슬로모션 모드도 효과적이에요.",
+txtSetupAccount:"계정 동기화", emailPlaceholder:"이메일 주소", emailSendBtn:"인증코드 받기", emailSendingBtn:"전송중...",
+emailCodePlaceholder:"인증코드", emailVerifyBtn:"확인", emailRetryLink:"이메일 다시 입력", emailSentSuffix:"로 전송된 인증코드를 입력하세요",
+emailConnectedLabel:"로그인됨", emailSignoutBtn:"로그아웃", emailHint:"이메일을 인증하면 앱을 지우거나 기기를 바꿔도 신체정보가 그대로 유지됩니다",
+emailInvalidAlert:"올바른 이메일 주소를 입력해주세요", emailCodeSendFail:"인증코드 전송 실패: ", emailCodeEmptyAlert:"인증코드를 입력해주세요",
+emailNeedEmailAlert:"이메일을 먼저 입력해주세요", emailVerifyFail:"인증 실패: ", emailErrorAlert:"오류가 발생했습니다: ",
+emailLinkedAlert:"이메일이 연결되었습니다!", emailDisconnectConfirm:"이메일 연결을 해제할까요? 이 기기는 로그아웃됩니다.",
+emailSyncPulledMsg:"클라우드에서 신체정보를 불러왔습니다", emailSyncPushedMsg:"신체정보가 클라우드에 저장되었습니다"
 },
 en: {
 mainTitle:"PRO ANALYSIS v5.6", openFile:"Open Video", btnPlay:"▶ Play", btnPause:"Pause", btnReport:"Report", btnReset:"Reset All", btnReturn:"Reset Loop", btnSetting:"Settings", cardKnee:"Knee", cardElbow:"Elbow", cardTorso:"Torso", cardStride:"Stride", gctManual:"GCT", gctAuto:"Avg GCT", flightManual:"Flight", flightAuto:"Avg Flight", galleryTitle:"MY SNAPSHOTS", galleryClose:"Close", confirmMsg:"Delete this snapshot permanently?", confirmYes:"Delete", confirmNo:"Cancel", reportTitle:"RUNNING ANALYSIS REPORT", thMetric:"Metrics", thGuide:"Recommended Range", thValue:"My Data", repKnee:"Knee Angle (Avg Extension)", repElbow:"Elbow Angle (Avg)", repTorso:"Torso Angle (Avg Lean)", repGct:"Avg GCT (Ground Contact)", repFlight:"Avg Flight Time", repStride:"Avg Stride Distance", repSteps:"Total Tracked Steps", alertNoVideo:"Please load a video first!", alertInvalidRange:"Start point must be less than end point and within video duration.", lblStart:"START", lblEnd:"END", btnSave:"Save", btnDelete:"🗑️ Delete", saveSuccess:"Report saved!", deleteConfirm:"Clear current report data?", savedListTitle:"Saved Reports", savedListBack:"Back to Main", savedListEmpty:"No saved reports yet.\nSave after analysis.", savedListView:"View Saved", aiStart:"Start AI Live Tracking", aiStop:"Stop AI Tracking", solutionTitle:"BIOMECHANICS REALTIME SOLUTION", solKneeTitle:"Lower Body Extension & Rolling (Knee Extension)", solKneeDesc:"Play the video or start AI tracking to analyze your knee joint range of motion and heel rolling mechanism, providing customized biomechanical solutions.", solDynamicTitle:"Ground Reaction Force & Efficiency (GCT / Flight)", solDynamicDesc:"Track ground contact time (GCT) and flight time ratio to maximize elastic energy utilization and optimize running posture.", solTorsoTitle:"Upper Body Balance & Angle (Torso Lean)", solTorsoDesc:"Precisely monitor torso lean angle to reduce lumbar load and convert gravity into forward propulsion.", solTagWait:"Awaiting Diagnosis", contact:"Contact", takeoff:"Takeoff",
@@ -1414,7 +1665,14 @@ guideCard3Title:"Filming Angle: 90° Side View", guideCard3Desc:"Film perpendicu
 guideCard4Title:"Bright Environment Recommended", guideCard4Desc:"Backlighting or dark environments greatly reduce AI recognition accuracy. Natural light from the front works best.",
 guideCard5Title:"Wear Contrasting Clothing", guideCard5Desc:"Bright or colorful clothing that stands out from the background improves joint tracking accuracy.",
 guideCard6Title:"Film at Least 10–20 Seconds", guideCard6Desc:"GCT, flight time, and stride are averaged over multiple steps, so enough footage is needed. Prepare a video of at least 10 seconds at a steady pace.",
-guideCard7Title:"Landscape Mode, 60fps Recommended", guideCard7Desc:"60fps video works better for analyzing fast movement. Your smartphone's slow-motion mode is also effective."
+guideCard7Title:"Landscape Mode, 60fps Recommended", guideCard7Desc:"60fps video works better for analyzing fast movement. Your smartphone's slow-motion mode is also effective.",
+txtSetupAccount:"Account Sync", emailPlaceholder:"Email address", emailSendBtn:"Send Code", emailSendingBtn:"Sending...",
+emailCodePlaceholder:"Verification code", emailVerifyBtn:"Verify", emailRetryLink:"Re-enter email", emailSentSuffix:" — enter the code sent to this address",
+emailConnectedLabel:"Logged in", emailSignoutBtn:"Sign out", emailHint:"Verifying your email keeps your body data safe even if you delete the app or switch devices",
+emailInvalidAlert:"Please enter a valid email address", emailCodeSendFail:"Failed to send code: ", emailCodeEmptyAlert:"Please enter the verification code",
+emailNeedEmailAlert:"Please enter your email first", emailVerifyFail:"Verification failed: ", emailErrorAlert:"An error occurred: ",
+emailLinkedAlert:"Email linked successfully!", emailDisconnectConfirm:"Disconnect this email? This device will be signed out.",
+emailSyncPulledMsg:"Body info restored from cloud", emailSyncPushedMsg:"Body info saved to cloud"
 },
 setLanguage(lang) { this.currentLang=lang; localStorage.setItem('proAnalysisLang',lang); const sel2=document.getElementById('setupLang'); if(sel2) sel2.value=lang; this.updateUIStrings(); },
 updateUIStrings() {
@@ -1467,6 +1725,16 @@ document.getElementById('btnReportSave').innerText=p.btnSave;
 document.getElementById('btnReportDelete').innerText=p.btnDelete;
 document.getElementById('btnReportAuto').innerText = p.btnReport;
 const svTitle=document.getElementById('savedListTitle'); if(svTitle) svTitle.innerText=p.savedListTitle;
+const accTitle=document.getElementById('txtSetupAccount'); if(accTitle) accTitle.innerText=p.txtSetupAccount;
+const emIn=document.getElementById('fa-email-input'); if(emIn) emIn.placeholder=p.emailPlaceholder;
+const emSendBtn=document.getElementById('fa-email-send-btn'); if(emSendBtn) emSendBtn.innerText=p.emailSendBtn;
+const emCodeIn=document.getElementById('fa-email-code-input'); if(emCodeIn) emCodeIn.placeholder=p.emailCodePlaceholder;
+const emVerifyBtn=document.getElementById('fa-email-verify-btn'); if(emVerifyBtn) emVerifyBtn.innerText=p.emailVerifyBtn;
+const emRetry=document.getElementById('fa-email-retry-link'); if(emRetry) emRetry.innerText=p.emailRetryLink;
+const emSuffix=document.getElementById('fa-email-sent-suffix'); if(emSuffix) emSuffix.innerText=p.emailSentSuffix;
+const emConnLabel=document.getElementById('fa-email-connected-label'); if(emConnLabel) emConnLabel.innerText=p.emailConnectedLabel;
+const emSignout=document.getElementById('fa-email-signout-btn'); if(emSignout) emSignout.innerText=p.emailSignoutBtn;
+const emHint=document.getElementById('fa-email-hint'); if(emHint) emHint.innerText=p.emailHint;
 const svBack=document.getElementById('savedListBack'); if(svBack) svBack.innerText=p.savedListBack;
 const svView=document.getElementById('btnSavedListView'); if(svView) svView.innerText=p.savedListView;
 const empty=document.getElementById('savedListEmpty'); if(empty) empty.innerHTML=p.savedListEmpty.replace('\n','<br>');
@@ -1570,8 +1838,13 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('setupLang').value = savedLang;
     I18n.updateUIStrings();
   } catch(e) { I18n.updateUIStrings(); }
+  // 이메일 로그인 상태 UI 반영 + 익명 세션 확보 (실패해도 앱 사용에는 지장 없음)
+  try {
+    FAAuth.refreshEmailUI();
+    FAAuth.ensureUserId();
+  } catch(e) { console.warn('FAAuth init error', e); }
 });
 </script>
 </div><!-- /pageMain -->
 </body>
-   </html>
+</html>
