@@ -565,6 +565,7 @@ alt="runner"/>
 </div>
 <input type="file" id="import-file-input" accept="application/json" style="display:none" onchange="storage.importData(event)">
 </div>
+<button id="btn-export-precision-log" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:12px; margin-top:10px;" onclick="storage.exportPrecisionLog()">EXPORT PRECISION LOG (CSV)</button>
 <button id="btn-clear-history" style="background:#2a2a2a; color:var(--danger); border:1.5px solid #444; padding:18px; border-radius:12px; width:100%; font-weight:900; font-size:14px; margin-top:20px;" onclick="storage.clearHistory()">CLEAR ALL HISTORY</button>
 <div style="margin-top: 20px; text-align: center;">
 <a id="link-privacy" href="#" style="color: #666; font-size: 10px; text-decoration: none;">Privacy Policy</a>
@@ -1352,6 +1353,34 @@ if (window.AndroidDownload && typeof window.AndroidDownload.saveFile === 'functi
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+}
+}
+// [추가] 정밀 비교용 초당 로그를 CSV로 내보내기 (가민 워치 FIT 데이터와 대조용)
+// 기존 exportData()와 동일한 AndroidDownload 브릿지를 재사용하므로
+// 안드로이드 쪽 코드를 새로 추가할 필요가 없음.
+exportPrecisionLog() {
+const log = (typeof app !== 'undefined' && app.state && app.state.precisionLog) ? app.state.precisionLog : [];
+const isKo = this.getLang() === 'ko';
+if (!log.length) {
+alert(isKo ? '기록된 로그가 없습니다. 러닝을 먼저 진행해주세요.' : 'No log data yet. Record a run first.');
+return;
+}
+const headers = ['t_sec','dist_km','speed_kmh','cadence_spm','gct_ms','flight_pct','hr_bpm','hr_zone'];
+const rows = log.map(r => [r.t, r.distKm, r.speedKmh, r.cadence, r.gctMs, r.flightPct, r.hrBpm, r.hrZone].join(','));
+const csvStr = headers.join(',') + '\n' + rows.join('\n');
+const dateStr = new Date().toISOString().slice(0,10);
+const timeStr = new Date().toTimeString().slice(0,8).replace(/:/g,'');
+const fileName = 'precision-log-' + dateStr + '-' + timeStr + '.csv';
+if (window.AndroidDownload && typeof window.AndroidDownload.saveFile === 'function') {
+window.AndroidDownload.saveFile(csvStr, fileName);
+alert(isKo ? '다운로드 폴더에 저장되었습니다: ' + fileName : 'Saved to Downloads folder: ' + fileName);
+} else {
+const a = document.createElement('a');
+a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvStr);
+a.download = fileName;
+document.body.appendChild(a);
+a.click();
+document.body.removeChild(a);
 }
 }
 // [추가] 데이터 가져오기: JSON 파일을 읽어 localStorage에 복원
@@ -3307,6 +3336,23 @@ L.marker(mid, { icon, interactive: false }).addTo(this.arrowLayer);
 }
 }
 formatPace(kmh) { if (!kmh || kmh < 0.5) return INVALID_PACE; let s = 3600 / kmh; return Math.floor(s/60) + "'" + String(Math.floor(s%60)).padStart(2,'0') + '"'; }
+// [추가] 정밀 비교용 로그 샘플 1개 기록.
+// 기존 계산 로직을 절대 건드리지 않고, 이미 화면에 표시되고 있는 DOM 값들을
+// 그대로 "읽기만" 해서 배열에 쌓는다 (부작용 없음, read-only).
+logPrecisionSample() {
+if (!this.state.precisionLog) this.state.precisionLog = [];
+const getTxt = (id) => { const el = document.getElementById(id); return el ? el.textContent.trim() : ''; };
+this.state.precisionLog.push({
+t: this.state.seconds,
+distKm: this.state.totalDist ? this.state.totalDist.toFixed(3) : '0.000',
+speedKmh: getTxt('curSpeed'),
+cadence: getTxt('cadence'),
+gctMs: getTxt('gct'),
+flightPct: getTxt('flight'),
+hrBpm: getTxt('hr-val'),
+hrZone: getTxt('hr-zone-val')
+});
+}
 async requestMotionPermission() {
 // [신규] 네이티브 앱(안드로이드 래퍼) 안에서는 가속도계가
 // LocationForegroundService → onNativeMotionUpdate 경로로 들어오므로,
@@ -3353,6 +3399,7 @@ this.state.totalFlight = 0;
 this.state.stepCount = 0;
 this.state.cadenceSamples = [];
 this.state.splits = [];
+this.state.precisionLog = []; // [추가] 정밀 비교용 초당 로그 (가민 워치 데이터와 대조용)
 this.state.lastKmCheckpoint = 0;
 this.state.lastKmSeconds = 0;
 this.state.lastKmAlt = this.state.currentAlt;
@@ -3381,6 +3428,14 @@ let s = this.state.seconds % 60;
 ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')});
 }
 }, 1000);
+// [추가] 정밀 비교용 로깅 타이머 (기존 this.timer와 완전히 독립적으로 동작,
+// 기존 로직에는 전혀 영향을 주지 않고 화면에 표시되는 값을 그대로 1초마다 기록만 함)
+if (this.precisionLogTimer) clearInterval(this.precisionLogTimer);
+this.precisionLogTimer = setInterval(() => {
+if (this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
+this.logPrecisionSample();
+}
+}, 1000);
 }
 onStop() {
 this.state.isPaused = true;
@@ -3391,6 +3446,10 @@ if(ui.dom.afterStop) ui.dom.afterStop.style.display = 'flex';
 if (this.timer) {
 clearInterval(this.timer);
 this.timer = null;
+}
+if (this.precisionLogTimer) {
+clearInterval(this.precisionLogTimer);
+this.precisionLogTimer = null;
 }
 }
 onResume() {
@@ -3413,9 +3472,17 @@ ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padSt
 }
 }, 1000);
 }
+if (!this.precisionLogTimer) {
+this.precisionLogTimer = setInterval(() => {
+if (this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
+this.logPrecisionSample();
+}
+}, 1000);
+}
 }
 onFinish() {
 if(this.timer) clearInterval(this.timer);
+if(this.precisionLogTimer) { clearInterval(this.precisionLogTimer); this.precisionLogTimer = null; }
 this.stopSilentKeepAlive();
 // [추가] 캘리브레이션 러닝(4번 개선사항)이면 일반 기록 저장 대신
 // 개인 보폭 보정계수만 계산해서 저장하고 종료한다.
