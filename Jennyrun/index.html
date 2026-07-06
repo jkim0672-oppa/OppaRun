@@ -1367,8 +1367,8 @@ if (!log.length) {
 alert(isKo ? '기록된 로그가 없습니다. 러닝을 먼저 진행해주세요.' : 'No log data yet. Record a run first.');
 return;
 }
-const headers = ['t_sec','dist_km','speed_kmh','cadence_spm','gct_ms','flight_pct','hr_bpm','hr_zone'];
-const rows = log.map(r => [r.t, r.distKm, r.speedKmh, r.cadence, r.gctMs, r.flightPct, r.hrBpm, r.hrZone].join(','));
+const headers = ['t_sec','timestamp','lat','lng','gps_accuracy_m','dist_km','speed_kmh','cadence_spm','gct_ms','flight_pct','hr_bpm','hr_zone'];
+const rows = log.map(r => [r.t, r.timestamp || '', r.lat || '', r.lng || '', r.gpsAcc != null ? r.gpsAcc : '', r.distKm, r.speedKmh, r.cadence, r.gctMs, r.flightPct, r.hrBpm, r.hrZone].join(','));
 const csvStr = headers.join(',') + '\n' + rows.join('\n');
 const dateStr = new Date().toISOString().slice(0,10);
 const timeStr = new Date().toTimeString().slice(0,8).replace(/:/g,'');
@@ -3160,6 +3160,7 @@ if(!this.map) return;
 const rawLat = p.coords.latitude;
 const rawLng = p.coords.longitude;
 const accuracy = Number.isFinite(p.coords.accuracy) ? Math.round(p.coords.accuracy) : 999;
+this.state.lastGpsAccuracy = accuracy; // [추가] 정밀로그에서 참조할 GPS 정확도 저장
 this.state.currentAlt = p.coords.altitude ? Math.round(p.coords.altitude) : 0;
 // GPS 고도는 오차가 크므로 비정상적인 음수값 클램핑 (해수면 아래 -50m 이상은 오차로 판단)
 if (this.state.currentAlt < -50) this.state.currentAlt = 0;
@@ -3384,8 +3385,19 @@ formatPace(kmh) { if (!kmh || kmh < 0.5) return INVALID_PACE; let s = 3600 / kmh
 logPrecisionSample() {
 if (!this.state.precisionLog) this.state.precisionLog = [];
 const getTxt = (id) => { const el = document.getElementById(id); return el ? el.textContent.trim() : ''; };
+// [추가] 가민 워치 데이터와의 정밀 대조를 위한 실제 시각 / GPS 좌표 / 정확도
+// (기존엔 "러닝 시작 후 경과초"만 있어서, 앱과 워치를 정확히 동시에 누르지 않으면
+//  시간축이 어긋나 비교가 부정확했음 → 실제 시각(timestamp)으로 정렬 가능하게 함)
+const nowIso = new Date().toISOString();
+const lat = (this.state.lastPos && this.state.lastPos[0] != null) ? this.state.lastPos[0].toFixed(6) : '';
+const lng = (this.state.lastPos && this.state.lastPos[1] != null) ? this.state.lastPos[1].toFixed(6) : '';
+const gpsAcc = (this.state.lastGpsAccuracy != null) ? this.state.lastGpsAccuracy : '';
 this.state.precisionLog.push({
 t: this.state.seconds,
+timestamp: nowIso,
+lat: lat,
+lng: lng,
+gpsAcc: gpsAcc,
 distKm: this.state.totalDist ? this.state.totalDist.toFixed(3) : '0.000',
 speedKmh: getTxt('curSpeed'),
 cadence: getTxt('cadence'),
