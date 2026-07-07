@@ -3002,7 +3002,14 @@ this.vertMin = Infinity;
 this.vertMax = -Infinity;
 this.vertAmplitudeAccumulator = 0;
 this.vertAmplitudeCount = 0;
-// [추가] 개인별 적응형 임계값 보정 상태
+// [추가] 잔진동(2차 충격) 오감지 필터용 최근 걸음 주기 버퍼
+this.recentCycleTimes = [];
+// [추가] 자이로스코프 기반 노이즈 필터: 스텝 사이클 동안의 최대 회전각속도(deg/s)
+// 임계값은 1차 추정치 — 실측 테스트로 조정이 필요할 수 있음.
+// 네이티브 백그라운드 경로(onNativeMotionUpdate)는 rotationRate를 주지 않으므로
+// 그 경로에서는 이 값이 항상 0으로 남아 필터가 자동으로 비활성 상태가 됨.
+this.rotPeakSinceLastStep = 0;
+this.rotRejectThreshold = 220;
 this.calibDone = false;
 this.calibStartTime = null;
 this.calibForceSamples = [];
@@ -3074,6 +3081,8 @@ this.vertMin = Infinity;
 this.vertMax = -Infinity;
 this.vertAmplitudeAccumulator = 0;
 this.vertAmplitudeCount = 0;
+this.recentCycleTimes = [];
+this.rotPeakSinceLastStep = 0;
 // [추가] 매 러닝 시작 시 적응형 임계값 캘리브레이션도 새로 수행
 // (같은 착용위치라도 조임 정도, 옷차림 등이 매번 다를 수 있으므로)
 this.groundThreshold = this.baseGroundThreshold;
@@ -3101,6 +3110,17 @@ if (now - this.calibStartTime >= 6000) this.finishCalibration();
 // z축 가속도 최대/최소값을 기록해 두었다가, 스텝이 끊길 때 진폭(max-min)을 누적
 if (acc.z < this.vertMin) this.vertMin = acc.z;
 if (acc.z > this.vertMax) this.vertMax = acc.z;
+
+// [추가] 자이로스코프 기반 노이즈 추적: 폰이 주머니/암밴드 안에서 회전하며
+// 덜렁거리는 움직임은 회전각속도가 크게 튀는 경향이 있음. 브라우저
+// devicemotion 이벤트에는 rotationRate가 함께 오므로(네이티브 백그라운드
+// 경로는 없음 — 그 경우 아래는 그냥 실행되지 않고 0으로 유지됨), 이번
+// 스텝 사이클 동안의 최대 회전량을 추적해 두었다가 걸음 판정 시 활용.
+if (e.rotationRate) {
+const rr = e.rotationRate;
+const rotMag = Math.sqrt((rr.alpha || 0) * (rr.alpha || 0) + (rr.beta || 0) * (rr.beta || 0) + (rr.gamma || 0) * (rr.gamma || 0));
+if (rotMag > this.rotPeakSinceLastStep) this.rotPeakSinceLastStep = rotMag;
+}
 
 // [추가] GCT(지면 접촉 시간) 실측: 충격(impact) 발생 시점부터
 // 다음 충격까지의 시간 중, 가속도가 '안정 구간'(접지 상태로 추정)에
@@ -3131,6 +3151,33 @@ const stepTimeoutFallback = (now - this.lastStepTime) > this.minStepInterval * 2
 if (force > this.impactThreshold && (now - this.lastStepTime) > this.minStepInterval &&
     (this.quietPhaseSinceLastStep || this.lastStepTime === 0 || stepTimeoutFallback)) {
 let cycleTime = now - this.lastStepTime;
+
+// [추가] 잔진동(2차 충격) 오감지 필터: 러닝쪼끼 주머니처럼 폰이 몸에
+// 완전히 밀착 고정되지 않은 경우, 착지 충격 직후 폰이 안에서 한 번 더
+// 덜렁거리며 튀는 '가짜 충격'이 minStepInterval을 넘겨서 진짜 걸음처럼
+// 잡히는 경우가 있었음(케이던스 과다 카운트 + GCT 과소 측정의 원인).
+// 최근 걸음 주기 평균 대비 비정상적으로(55% 미만) 짧은 주기는
+// 걸음으로 세지 않고 무시한다(상태 변경 없이 그냥 return).
+if (this.lastStepTime !== 0 && this.recentCycleTimes.length >= 3) {
+const rollingAvg = this.recentCycleTimes.reduce((a, b) => a + b, 0) / this.recentCycleTimes.length;
+if (cycleTime < rollingAvg * 0.55) {
+return;
+}
+}
+
+// [추가] 자이로스코프 기반 노이즈 필터: 이번 스텝 사이클 동안 회전각속도
+// 최댓값이 임계값(rotRejectThreshold)을 넘었다면, 착지 충격이 아니라
+// 폰이 회전/덜렁거린 흔들림으로 보고 걸음으로 세지 않는다.
+if (this.rotPeakSinceLastStep > this.rotRejectThreshold) {
+this.rotPeakSinceLastStep = 0; // 이번 흔들림은 소모됨, 다음 사이클을 위해 리셋
+return;
+}
+
+if (this.lastStepTime !== 0) {
+this.recentCycleTimes.push(cycleTime);
+if (this.recentCycleTimes.length > 8) this.recentCycleTimes.shift();
+}
+
 this.lastStepTime = now;
 this.quietPhaseSinceLastStep = false; // 다음 걸음 판정을 위해 리셋
 let result = { cycleTime, gct: 0, flight: 0, side: this.stepSide };
@@ -3143,6 +3190,7 @@ this.vertAmplitudeCount++;
 }
 this.vertMin = Infinity;
 this.vertMax = -Infinity;
+this.rotPeakSinceLastStep = 0;
 result.avgVertAmplitude = this.vertAmplitudeCount > 0 ? (this.vertAmplitudeAccumulator / this.vertAmplitudeCount) : 0;
 
 if (this.isFeetOnGround) {
@@ -3906,11 +3954,26 @@ timestamp: timestamp
 
 // [신규] 화면 꺼짐 대응: 네이티브 LocationForegroundService가 가속도계를 수집하면
 // MainActivity(Kotlin)가 이 함수를 호출해서 기존 MotionManager.handleMotion() 로직으로 합류시킴
-window.onNativeMotionUpdate = function (x, y, z, timestamp) {
+// [수정] gx, gy, gz(자이로스코프 회전각속도, 단위: deg/s)는 선택 인자.
+// 네이티브(Kotlin) 쪽이 아직 자이로스코프를 안 보내면 undefined로 들어오고,
+// 그러면 회전 기반 노이즈 필터는 자동으로 비활성 상태로 남는다(기존 동작 그대로).
+// ------------------------------------------------------------------
+// [네이티브 개발자 참고] 화면 꺼짐 상태에서도 자이로 필터를 쓰려면 Kotlin 쪽에서:
+//   1) LocationForegroundService에 SensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE) 등록
+//   2) onSensorChanged에서 받은 값(단위: rad/s)을 deg/s로 변환: value * (180.0 / PI)
+//   3) 아래처럼 6개 인자로 호출:
+//      onNativeMotionUpdate(x, y, z, timestamp, gxDeg, gyDeg, gzDeg)
+// 이렇게만 해주면 JS 쪽 필터 로직은 수정 없이 바로 동작함.
+// ------------------------------------------------------------------
+window.onNativeMotionUpdate = function (x, y, z, timestamp, gx, gy, gz) {
 try {
 if (typeof app !== 'undefined' && app && app.motion &&
     app.state && app.state.isRunning && !app.state.isPaused) {
-app.motion.handleMotion({ accelerationIncludingGravity: { x: x, y: y, z: z } });
+const evt = { accelerationIncludingGravity: { x: x, y: y, z: z } };
+if (gx !== undefined && gy !== undefined && gz !== undefined) {
+evt.rotationRate = { alpha: gx, beta: gy, gamma: gz };
+}
+app.motion.handleMotion(evt);
 }
 } catch (e) { console.error('onNativeMotionUpdate error', e); }
 };
@@ -5628,4 +5691,4 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
 </div>
 </div>
 </body>
-  </html>
+                                                                                                                                                                                                                  </html>
