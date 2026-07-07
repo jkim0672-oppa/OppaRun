@@ -562,6 +562,22 @@ alt="runner"/>
   <div id="garmin-import-list" style="margin-top:10px;"></div>
 </div>
 </div>
+<!-- [추가] 캘리브레이션 비교: 선택된 가민 기록 vs 저장된 정밀 로그를 비교해서
+     groundThreshold/gctFallbackRatio/rotRejectThreshold 조정 힌트를 보여준다.
+     기존 계산 로직은 전혀 건드리지 않는 읽기 전용 진단 도구. -->
+<div class="diag-card" style="margin: 0 0 10px 0;">
+<div id="garmin-calib-title" style="color:var(--primary); font-weight:900; font-size:14px; margin-bottom:8px;">CALIBRATION CHECK</div>
+<div id="garmin-calib-desc" style="font-size:11px; color:#888; margin-bottom:10px; line-height:1.6;">Compare this Garmin record with a saved precision log from the same run to see how far cadence/GCT are off, and get a suggested starting point for retuning.</div>
+<div style="position:relative;">
+  <div id="calib-preclog-select-btn" onclick="ui.toggleDropdown('calib-preclog-dropdown-options')" class="dropdown-select" style="padding:12px 14px; font-size:13px;">
+    <span id="current-calib-preclog-text">정밀 로그 선택</span><span style="font-size:10px; color:var(--primary);">▼</span>
+  </div>
+  <div id="calib-preclog-dropdown-options" class="precision-dropdown-options" style="width:100%;"></div>
+</div>
+<button id="btn-run-calib-compare" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:12px; margin-top:10px;" onclick="garmin.runCalibrationCompare()">COMPARE</button>
+<div id="garmin-calib-result" style="margin-top:12px;"></div>
+</div>
+<!-- [/추가] 캘리브레이션 비교 -->
 </div>
 <!-- ===== [/GARMIN IMPORT] ===== -->
 </div>
@@ -5055,7 +5071,10 @@ const garmin = (function () {
     0x8C: { size: 4, invalid: 0, read: (v,o,le) => v.getUint32(o, le) },
     0x0D: { size: 1, invalid: 0xFF, read: (v,o,le) => v.getUint8(o) },
   };
-  const RECORD_FIELDS = { 253:'timestamp',0:'positionLat',1:'positionLong',2:'altitude',3:'heartRate',4:'cadence',5:'distance',6:'speed',73:'enhancedSpeed',78:'enhancedAltitude' };
+  // [추가] 39=vertical_oscillation(mm, scale 10), 41=stance_time(ms, scale 10, = GCT 실측값).
+  // 러닝 다이나믹스 액세서리(HRM-Run/Pro, 러닝 파드 등)로 기록된 파일에만 값이 들어있고,
+  // 없는 파일은 그냥 null로 남아서 기존 동작에 영향 없음.
+  const RECORD_FIELDS = { 253:'timestamp',0:'positionLat',1:'positionLong',2:'altitude',3:'heartRate',4:'cadence',5:'distance',6:'speed',73:'enhancedSpeed',78:'enhancedAltitude',39:'verticalOscillation',41:'stanceTime' };
   const RECORD_MESG_NUM = 20;
 
   function readDataFields(view, offset, def) {
@@ -5079,7 +5098,10 @@ const garmin = (function () {
       heartRate: values[3] != null ? values[3] : null,
       cadence: values[4] != null ? values[4] : null,
       distance: values[5] != null ? (values[5]/100) : null,
-      speed: values[73] != null ? (values[73]/1000) : (values[6] != null ? (values[6]/1000) : null)
+      speed: values[73] != null ? (values[73]/1000) : (values[6] != null ? (values[6]/1000) : null),
+      // [추가] 가민 실측 GCT(ms) / 수직진동(mm). 다이나믹스 액세서리 없으면 null.
+      stanceTimeMs: values[41] != null ? (values[41]/10) : null,
+      verticalOscillationMm: values[39] != null ? (values[39]/10) : null
     });
   }
 
@@ -5159,10 +5181,15 @@ const garmin = (function () {
 
     let hrSum = 0, hrCount = 0, hrMax = 0;
     let cadSum = 0, cadCount = 0;
+    // [추가] 가민 러닝 다이나믹스 실측값 평균 (있는 경우에만)
+    let gctSum = 0, gctCount = 0;
+    let voSum = 0, voCount = 0;
     let gain = 0, lastAlt = null;
     records.forEach(r => {
       if (r.heartRate != null) { hrSum += r.heartRate; hrCount++; if (r.heartRate > hrMax) hrMax = r.heartRate; }
       if (r.cadence != null) { cadSum += r.cadence; cadCount++; }
+      if (r.stanceTimeMs != null) { gctSum += r.stanceTimeMs; gctCount++; }
+      if (r.verticalOscillationMm != null) { voSum += r.verticalOscillationMm; voCount++; }
       if (r.altitude != null) {
         if (lastAlt != null && (r.altitude - lastAlt) > 0.5) gain += (r.altitude - lastAlt);
         lastAlt = r.altitude;
@@ -5174,9 +5201,16 @@ const garmin = (function () {
       avgHr: hrCount ? Math.round(hrSum / hrCount) : null,
       maxHr: hrCount ? hrMax : null,
       avgCadence: cadCount ? Math.round(cadSum / cadCount) : null,
+      avgGctMs: gctCount ? Math.round(gctSum / gctCount) : null,
+      avgVertOscMm: voCount ? Math.round((voSum / voCount) * 10) / 10 : null,
       avgPaceSecPerKm: distanceKm > 0.01 ? (durationSec / distanceKm) : null,
       elevationGain: Math.round(gain),
-      recordCount: records.length
+      recordCount: records.length,
+      // [추가] 시간 축 정렬 비교(캘리브레이션)용 원본 초당 레코드. 케이던스/GCT만 남겨서
+      // localStorage 용량을 아낀다 (위경도 등은 캘리브레이션에 불필요).
+      records: records.map(r => ({
+        unixMs: r.unixMs, cadence: r.cadence, stanceTimeMs: r.stanceTimeMs, verticalOscillationMm: r.verticalOscillationMm
+      }))
     };
   }
 
@@ -5205,6 +5239,7 @@ const garmin = (function () {
   }
 
   let selectedId = null; // 드롭다운에서 현재 선택된 가민 기록 id
+  let selectedPrecLogId = null; // [추가] 캘리브레이션 비교용으로 선택된 정밀 로그 id
 
   function renderBox(item, isKo) {
     if (!item) {
@@ -5217,6 +5252,8 @@ const garmin = (function () {
       [isKo ? '평균 심박수' : 'AVG HR', item.avgHr != null ? item.avgHr + ' bpm' : '--'],
       [isKo ? '최고 심박수' : 'MAX HR', item.maxHr != null ? item.maxHr + ' bpm' : '--'],
       [isKo ? '케이던스' : 'CADENCE', item.avgCadence != null ? item.avgCadence + ' spm' : '--'],
+      [isKo ? '평균 GCT' : 'AVG GCT', item.avgGctMs != null ? item.avgGctMs + ' ms' : '--'],
+      [isKo ? '수직진동' : 'VERT OSC', item.avgVertOscMm != null ? item.avgVertOscMm + ' mm' : '--'],
       [isKo ? '상승고도' : 'ELEV GAIN', item.elevationGain + ' m'],
       [isKo ? '레코드 수' : 'RECORDS', item.recordCount]
     ];
@@ -5247,6 +5284,12 @@ const garmin = (function () {
     setText('btn-import-garmin-fit', isKo ? '가민 데이터 가져오기 (.FIT)' : 'IMPORT GARMIN DATA (.FIT)');
     setText('label-garmin-import', isKo ? '가져온 기록' : 'IMPORTED RECORDS');
     setText('garmin-clear-all-btn', isKo ? '전체삭제' : 'CLEAR ALL');
+    // [추가] 캘리브레이션 비교 카드 다국어 처리
+    setText('garmin-calib-title', isKo ? '캘리브레이션 비교' : 'CALIBRATION CHECK');
+    setText('garmin-calib-desc', isKo
+      ? '이 가민 기록과 같은 러닝의 저장된 정밀 로그를 비교해서 케이던스/GCT가 얼마나 차이 나는지 확인하고, 값 조정을 위한 제안값을 받아보세요.'
+      : 'Compare this Garmin record with a saved precision log from the same run to see how far cadence/GCT are off, and get a suggested starting point for retuning.');
+    setText('btn-run-calib-compare', isKo ? '비교하기' : 'COMPARE');
   }
 
   function render() {
@@ -5282,6 +5325,42 @@ const garmin = (function () {
     currentText.textContent = fmtDate(selected.startMs);
     wrap.innerHTML = renderBox(selected, isKo);
     if (clearAllBtn) clearAllBtn.style.display = 'block';
+
+    renderPrecLogDropdown(isKo);
+  }
+
+  // [추가] 캘리브레이션 비교용 정밀 로그 드롭다운 채우기.
+  // storage.loadPrecisionLogs()를 재사용하므로 정밀 로그 저장 구조를 새로 만들지 않는다.
+  function renderPrecLogDropdown(isKo) {
+    const dropdown = document.getElementById('calib-preclog-dropdown-options');
+    const currentText = document.getElementById('current-calib-preclog-text');
+    if (!dropdown || !currentText) return;
+    let logs = [];
+    try { logs = (typeof storage !== 'undefined') ? storage.loadPrecisionLogs() : []; } catch (e) { logs = []; }
+    if (!logs.length) {
+      selectedPrecLogId = null;
+      currentText.textContent = isKo ? '저장된 정밀 로그 없음' : 'NO PRECISION LOGS';
+      dropdown.innerHTML = '<div class="dropdown-option precision-option" style="color:#666; text-align:center;">' + (isKo ? '정밀 로그가 없습니다' : 'No precision logs') + '</div>';
+      return;
+    }
+    if (!selectedPrecLogId || !logs.find(l => l.id === selectedPrecLogId)) {
+      selectedPrecLogId = logs[0].id;
+    }
+    dropdown.innerHTML = logs.map(l => {
+      const label = fmtDate(new Date(l.savedAt).getTime()) + ' · ' + l.log.length + (isKo ? '개' : ' rows');
+      const escapedLabel = label.replace(/'/g, "&#39;");
+      return '<div class="dropdown-option precision-option" onclick="garmin.selectPrecLog(\'' + l.id + '\', \'' + escapedLabel + '\')">' + label + '</div>';
+    }).join('');
+    const cur = logs.find(l => l.id === selectedPrecLogId);
+    currentText.textContent = fmtDate(new Date(cur.savedAt).getTime()) + ' · ' + cur.log.length + (isKo ? '개' : ' rows');
+  }
+
+  function selectPrecLog(id, labelText) {
+    selectedPrecLogId = id;
+    const currentText = document.getElementById('current-calib-preclog-text');
+    if (currentText && labelText) currentText.textContent = labelText;
+    const dropdown = document.getElementById('calib-preclog-dropdown-options');
+    if (dropdown) dropdown.style.display = 'none';
   }
 
   function selectImport(id, dateText) {
@@ -5344,7 +5423,106 @@ const garmin = (function () {
     }
   }
 
-  return { importFitFile, deleteImport, clearAll, selectImport, render };
+  // [추가] 캘리브레이션 비교: 선택된 가민 기록과 선택된 정밀 로그의 케이던스/GCT
+  // 전체 평균을 비교해서 오차율(%)을 계산하고, 현재 MotionManager 설정값 기준으로
+  // 다음 테스트에 시도해볼만한 조정값을 "출발점"으로만 제안한다.
+  // 주의: 이건 자동 보정이 아니라 진단/제안 도구임 — 실제 값 변경은 코드에서
+  // 수동으로 하고, 반드시 다시 뛰어서 재검증해야 함.
+  function avgFromPrecLog(log, field) {
+    let sum = 0, count = 0;
+    log.forEach(r => {
+      const v = parseFloat(r[field]);
+      if (!isNaN(v) && v > 0) { sum += v; count++; }
+    });
+    return count ? (sum / count) : null;
+  }
+
+  function runCalibrationCompare() {
+    const isKo = isKoLang();
+    const resultBox = document.getElementById('garmin-calib-result');
+    if (!resultBox) return;
+    const list = loadImports();
+    const garminItem = list.find(i => i.id === selectedId);
+    let precLogs = [];
+    try { precLogs = (typeof storage !== 'undefined') ? storage.loadPrecisionLogs() : []; } catch (e) { precLogs = []; }
+    const precItem = precLogs.find(l => l.id === selectedPrecLogId);
+
+    if (!garminItem || !precItem) {
+      resultBox.innerHTML = '<div class="garmin-import-empty">' + (isKo ? '가민 기록과 정밀 로그를 먼저 선택하세요.' : 'Select a Garmin record and a precision log first.') + '</div>';
+      return;
+    }
+    if (garminItem.avgCadence == null) {
+      resultBox.innerHTML = '<div class="garmin-import-empty">' + (isKo ? '이 가민 파일엔 케이던스 데이터가 없습니다.' : 'This Garmin file has no cadence data.') + '</div>';
+      return;
+    }
+
+    const phoneAvgCadence = avgFromPrecLog(precItem.log, 'cadence');
+    const phoneAvgGct = avgFromPrecLog(precItem.log, 'gctMs');
+    const garminAvgCadence = garminItem.avgCadence;
+    const garminAvgGct = garminItem.avgGctMs;
+
+    const cadDiffPct = phoneAvgCadence ? ((phoneAvgCadence - garminAvgCadence) / garminAvgCadence * 100) : null;
+    const gctDiffPct = (phoneAvgGct && garminAvgGct) ? ((phoneAvgGct - garminAvgGct) / garminAvgGct * 100) : null;
+
+    // 현재 MotionManager 설정값 (실행 중이 아니어도 OppaRunApp 생성 시 저장된
+    // 착용 위치 프로파일이 이미 적용돼 있음)
+    let curGround = null, curGct = null, curRot = null;
+    try {
+      if (typeof app !== 'undefined' && app && app.motion) {
+        curGround = app.motion.groundThreshold;
+        curGct = app.motion.gctFallbackRatio;
+        curRot = app.motion.rotRejectThreshold;
+      }
+    } catch (e) {}
+
+    // [제안] 케이던스가 garmin보다 X% 높으면, 회전 노이즈 거부 임계값을 대략
+    // 그 비율만큼 낮춰서 다음 테스트에 시도해볼 것을 제안 (선형 근사 — 정밀한
+    // 역산이 아니라 "다음 실험값" 정도의 출발점).
+    const suggestedRot = (curRot != null && phoneAvgCadence && cadDiffPct != null && cadDiffPct > 3)
+      ? Math.max(60, Math.round(curRot * (garminAvgCadence / phoneAvgCadence))) : null;
+    const suggestedGct = (curGct != null && phoneAvgGct && garminAvgGct)
+      ? Math.round(curGct * (garminAvgGct / phoneAvgGct) * 1000) / 1000 : null;
+
+    const row = (label, phoneVal, garminVal, diffPct, unit) => {
+      const diffTxt = diffPct != null ? (diffPct > 0 ? '+' : '') + diffPct.toFixed(1) + '%' : '--';
+      const diffColor = diffPct == null ? '#888' : (Math.abs(diffPct) < 5 ? 'var(--good)' : (Math.abs(diffPct) < 15 ? 'var(--warning)' : 'var(--danger)'));
+      return '<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #2a2a2a;">'
+        + '<div style="font-size:11px; color:#999; font-weight:800;">' + label + '</div>'
+        + '<div style="font-size:12px; font-weight:900;">' + (phoneVal != null ? phoneVal.toFixed(0) + unit : '--') + ' <span style="color:#666;">vs</span> ' + (garminVal != null ? garminVal.toFixed(0) + unit : '--') + '</div>'
+        + '<div style="font-size:12px; font-weight:900; color:' + diffColor + '; min-width:52px; text-align:right;">' + diffTxt + '</div>'
+        + '</div>';
+    };
+
+    let html = '<div class="garmin-import-item">'
+      + '<div style="font-size:10px; color:#888; font-weight:800; margin-bottom:8px; display:flex; justify-content:space-between;">'
+      + '<span>' + (isKo ? '폰' : 'PHONE') + '</span><span>' + (isKo ? '가민' : 'GARMIN') + '</span><span>' + (isKo ? '오차' : 'DIFF') + '</span>'
+      + '</div>'
+      + row(isKo ? '케이던스 (spm)' : 'CADENCE (spm)', phoneAvgCadence, garminAvgCadence, cadDiffPct, '')
+      + row(isKo ? 'GCT (ms)' : 'GCT (ms)', phoneAvgGct, garminAvgGct, gctDiffPct, '');
+
+    if (suggestedRot != null || suggestedGct != null) {
+      html += '<div style="margin-top:12px; font-size:11px; color:#ccc; line-height:1.7;">'
+        + '<div style="color:var(--primary); font-weight:900; margin-bottom:4px;">' + (isKo ? '다음 테스트 제안값 (참고용)' : 'SUGGESTED NEXT TEST VALUES (reference only)') + '</div>';
+      if (suggestedRot != null) {
+        html += (isKo
+          ? ('rotRejectThreshold: ' + curRot + ' → <b>' + suggestedRot + '</b> (deg/s)')
+          : ('rotRejectThreshold: ' + curRot + ' → <b>' + suggestedRot + '</b> (deg/s)')) + '<br>';
+      }
+      if (suggestedGct != null) {
+        html += (isKo
+          ? ('gctFallbackRatio: ' + curGct + ' → <b>' + suggestedGct + '</b>')
+          : ('gctFallbackRatio: ' + curGct + ' → <b>' + suggestedGct + '</b>')) + '<br>';
+      }
+      html += '<div style="color:#888; margin-top:6px;">' + (isKo
+        ? '⚠️ 자동 반영되지 않습니다. 코드에서 직접 값을 바꾼 뒤, 같은 방식으로 한 번 더 비교해서 오차가 줄었는지 확인하세요.'
+        : '⚠️ Not applied automatically. Change these in code manually, then re-run this comparison to confirm the error shrank.') + '</div>'
+        + '</div>';
+    }
+    html += '</div>';
+    resultBox.innerHTML = html;
+  }
+
+  return { importFitFile, deleteImport, clearAll, selectImport, selectPrecLog, runCalibrationCompare, render };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
