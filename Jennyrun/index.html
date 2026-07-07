@@ -645,7 +645,7 @@ alt="runner"/>
     <div class="settings-label" id="label-precision-log" style="margin-bottom:0;">PRECISION LOGS</div>
     <div id="precision-log-clear-all-btn" class="garmin-import-item-del" style="display:none;" onclick="storage.clearAllPrecisionLogs()">CLEAR ALL</div>
   </div>
-  <div id="precision-log-list" style="max-height:320px; overflow-y:auto; padding-right:2px;"></div>
+  <div id="precision-log-list" style="max-height:210px; overflow-y:auto; padding-right:2px;"></div>
 </div>
 <button id="btn-clear-history" style="background:#2a2a2a; color:var(--danger); border:1.5px solid #444; padding:18px; border-radius:12px; width:100%; font-weight:900; font-size:14px; margin-top:20px;" onclick="storage.clearHistory()">CLEAR ALL HISTORY</button>
 <div style="margin-top: 20px; text-align: center;">
@@ -1276,8 +1276,9 @@ crewCommentPlaceholder: "Leave a comment...", crewSend: "Send",
 crewNoComments: "No comments yet", crewConfirmDelete: "Delete this record from community?",
 crewMorning: "Morning Run", crewAfternoon: "Afternoon Run", crewEvening: "Evening Run", crewNight: "Night Run",
 crewDist: "Distance", crewTime: "Time", crewPace: "Pace", crewEff: "Efficiency", crewMe: "Me", editTitle: "EDIT TITLE",
-crewSharePrompt: "Share this run with the crew?", crewIncludeRoute: "Include route map", crewAddPhoto: "Add a photo (optional)",
-crewShareBtn: "SHARE", crewSkipBtn: "SKIP", crewChangePhoto: "Change photo",
+crewSharePrompt: "Save this run with the crew?", crewIncludeRoute: "Include route map", crewAddPhoto: "Add a photo (optional)",
+crewShareBtn: "SHARE", crewSkipBtn: "WITHOUT CREW", crewChangePhoto: "Change photo",
+crewCancelBtn: "CANCEL", crewExitBtn: "EXIT", crewCancelConfirm: "Discard this run without saving it to history?",
 crewNicknameLabel: "CREW NICKNAME", nicknamePlaceholder: "Nickname (max 4 chars)", nicknameHint: "Your records will be shared publicly under this name",
 profilePhotoLabel: "PROFILE PHOTO", profilePhotoUpload: "UPLOAD PHOTO", profilePhotoHint: "This photo will be shown on your community posts", profilePhotoRemove: "REMOVE",
 profilePhotoPosition: "PHOTO POSITION", profilePhotoPositionHint: "Drag the photo to reposition",
@@ -1355,7 +1356,8 @@ crewNoComments: "아직 댓글이 없어요", crewConfirmDelete: "이 커뮤니�
 crewMorning: "아침 러닝", crewAfternoon: "오후 러닝", crewEvening: "저녁 러닝", crewNight: "야간 러닝",
 crewDist: "거리", crewTime: "시간", crewPace: "페이스", crewEff: "효율", crewMe: "나", editTitle: "제목 수정",
 crewSharePrompt: "이 러닝을 크루에 공유할까요?", crewIncludeRoute: "경로 지도 포함", crewAddPhoto: "사진 추가 (선택)",
-crewShareBtn: "공유하기", crewSkipBtn: "건너뛰기", crewChangePhoto: "사진 변경",
+crewShareBtn: "공유하기", crewSkipBtn: "크루 없이", crewChangePhoto: "사진 변경",
+crewCancelBtn: "취소", crewExitBtn: "종료", crewCancelConfirm: "이 러닝 기록을 저장하지 않고 취소할까요?",
 crewNicknameLabel: "크루 닉네임", nicknamePlaceholder: "닉네임 (최대 4자)", nicknameHint: "커뮤니티에 기록이 이 이름으로 공개됩니다",
 profilePhotoLabel: "프로필 사진", profilePhotoUpload: "사진 업로드", profilePhotoHint: "이 사진이 커뮤니티 게시물에 표시됩니다", profilePhotoRemove: "삭제",
 profilePhotoPosition: "사진 위치 조절", profilePhotoPositionHint: "사진을 드래그해서 위치를 조절하세요",
@@ -2525,6 +2527,10 @@ if(checkbox) checkbox.checked = true;
 if(fileInput) fileInput.value = '';
 if(skipBtn) skipBtn.textContent = t.crewSkipBtn;
 if(shareBtn) shareBtn.textContent = t.crewShareBtn;
+const cancelRunBtn = document.getElementById('btn-share-crew-cancel-run');
+const exitAppBtn = document.getElementById('btn-share-crew-exit-app');
+if(cancelRunBtn) cancelRunBtn.textContent = t.crewCancelBtn;
+if(exitAppBtn) exitAppBtn.textContent = t.crewExitBtn;
 const modal = document.getElementById('share-crew-modal');
 if(modal) modal.style.display = 'flex';
 }
@@ -2569,6 +2575,34 @@ window.location.reload();
 }
 this.pendingShareRecord = null;
 this.pendingSharePhotoFile = null;
+}
+// [추가] "CANCEL" 버튼: 방금 저장된 러닝 기록을 저장소에서 삭제하고 메인 화면으로 복귀.
+// 이미 storage.saveRecord()가 finish 시점에 먼저 실행된 뒤 이 모달이 뜨는 구조라,
+// 단순히 모달만 닫으면 기록이 남아있게 되므로 storage.deleteRecord()로 되돌린다.
+cancelFinishAndDiscard() {
+if (this._sharing) return;
+const lang = storage.getLang();
+const t = translations[lang] || translations['en'];
+const record = this.pendingShareRecord;
+if (!record) { window.location.reload(); return; }
+if (!confirm(t.crewCancelConfirm)) return;
+storage.deleteRecord(record.id);
+this.pendingShareRecord = null;
+this.pendingSharePhotoFile = null;
+const modal = document.getElementById('share-crew-modal');
+if(modal) modal.style.display = 'none';
+window.location.reload();
+}
+// [추가] "EXIT" 버튼: 이미 구현되어 있던 앱 종료 컨펌 다이얼로그(showExitDialog)를 재사용.
+// 이 경우 러닝 기록은 이미 저장된 상태이므로 그대로 두고 앱만 종료한다 (CANCEL과는 별개 동작).
+exitAppFromShareModal() {
+const modal = document.getElementById('share-crew-modal');
+if(modal) modal.style.display = 'none';
+if (typeof window.showAppExitDialog === 'function') {
+window.showAppExitDialog();
+} else if (window.AndroidBridge && window.AndroidBridge.exitApp) {
+window.AndroidBridge.exitApp();
+}
 }
 updateHistoryList() {
 const h = storage.loadHistory(); const lang = storage.getLang(); const t = translations[lang] || translations['en'];
@@ -5923,6 +5957,8 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
   function showExitDialog() {
     overlay.classList.add('active');
   }
+  // [추가] 러닝 종료 후 공유 모달의 EXIT 버튼에서도 동일한 종료 확인 다이얼로그를 재사용
+  window.showAppExitDialog = showExitDialog;
   function hideExitDialog() {
     overlay.classList.remove('active');
     // 다시 히스토리 쌓아서 다음 뒤로가기도 가로챔
@@ -6007,6 +6043,10 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
 <div class="custom-confirm-actions">
 <button id="btn-share-crew-skip" class="btn-confirm-act btn-confirm-cancel" onclick="ui.closeShareCrewModal(false)">SKIP</button>
 <button id="btn-share-crew-share" class="btn-confirm-act btn-confirm-save" onclick="ui.closeShareCrewModal(true)">SHARE</button>
+</div>
+<div class="custom-confirm-actions" style="margin-top:10px;">
+<button id="btn-share-crew-cancel-run" class="btn-confirm-act btn-confirm-delete" onclick="ui.cancelFinishAndDiscard()">CANCEL</button>
+<button id="btn-share-crew-exit-app" class="btn-confirm-act btn-confirm-cancel" onclick="ui.exitAppFromShareModal()">EXIT</button>
 </div>
 </div>
 </div>
