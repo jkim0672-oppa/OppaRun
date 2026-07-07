@@ -3457,7 +3457,9 @@ maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
 splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
 lastPosTimestamp: Date.now(),
 speedBuffer: [], lastValidSpeed: 0, cadenceSamples: [],
-isCalibrationRun: false, calibrationKnownDistanceM: 0
+isCalibrationRun: false, calibrationKnownDistanceM: 0,
+// [추가] GPS 고도 보정용 - Open-Elevation API 지형고도값 기반 offset 보정
+elevOffset: 0, elevOffsetReady: false, lastElevFetchTime: 0, lastElevFetchPos: null, elevFetchInFlight: false
 };
 this.map = null; this.marker = null; this.polyline = null; this.timer = null;
 this.motion = new MotionManager((data) => this.updateMetrics(data));
@@ -3520,15 +3522,57 @@ setTimeout(() => { if(this.map) this.map.invalidateSize(); }, 800);
 };
 setTimeout(tryInit, 300);
 }
+// [추가] GPS 고도 보정용 지형고도 API(Open-Elevation) 호출
+// - 너무 자주 호출하지 않도록 "30초 경과 OR 50m 이상 이동" 조건을 모두 만족할 때만 호출
+// - offset = (API가 준 실제 지형고도) - (그 시점의 GPS raw 고도)
+//   이후 GPS raw 고도 + offset 을 화면에 표시 → GPS의 튀는 값은 유지하면서 기준선만 API로 고정
+maybeFetchElevationOffset(lat, lng, rawAlt) {
+if (this.state.elevFetchInFlight) return;
+const now = Date.now();
+const last = this.state.lastElevFetchPos;
+let movedM = Infinity;
+if (last) {
+const R = 6371000;
+const dLat = (lat - last.lat) * Math.PI / 180;
+const dLng = (lng - last.lng) * Math.PI / 180;
+const a = Math.sin(dLat/2) ** 2 + Math.cos(last.lat*Math.PI/180) * Math.cos(lat*Math.PI/180) * Math.sin(dLng/2) ** 2;
+movedM = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+const timeOk = (now - this.state.lastElevFetchTime) > 30000; // 30초
+const distOk = movedM > 50; // 50m
+if (last && !timeOk && !distOk) return; // 처음(last==null)은 무조건 호출
+
+this.state.elevFetchInFlight = true;
+this.state.lastElevFetchTime = now;
+this.state.lastElevFetchPos = { lat: lat, lng: lng };
+
+fetch('https://api.open-elevation.com/api/v1/lookup?locations=' + lat.toFixed(5) + ',' + lng.toFixed(5))
+.then(function(r) { return r.ok ? r.json() : null; })
+.then((data) => {
+const terrainAlt = (data && data.results && data.results[0]) ? data.results[0].elevation : null;
+if (terrainAlt != null) {
+this.state.elevOffset = terrainAlt - rawAlt;
+this.state.elevOffsetReady = true;
+}
+})
+.catch(function() { /* 네트워크 오류 시 기존 GPS raw 고도값을 계속 사용 (조용히 무시) */ })
+.finally(() => { this.state.elevFetchInFlight = false; });
+}
+
 updatePosition(p) {
 if(!this.map) return;
 const rawLat = p.coords.latitude;
 const rawLng = p.coords.longitude;
 const accuracy = Number.isFinite(p.coords.accuracy) ? Math.round(p.coords.accuracy) : 999;
 this.state.lastGpsAccuracy = accuracy; // [추가] 정밀로그에서 참조할 GPS 정확도 저장
-this.state.currentAlt = p.coords.altitude ? Math.round(p.coords.altitude) : 0;
+const rawAlt = p.coords.altitude ? Math.round(p.coords.altitude) : 0;
+// [수정] GPS raw 고도 대신, Open-Elevation API로 받은 offset을 보정해 사용
+// (오차가 큰 GPS 고도값을 실제 지형 고도 기준으로 맞춤 - 가민 워치의 기압계 고도와 유사한 결과)
+this.state.currentAlt = this.state.elevOffsetReady ? Math.round(rawAlt + this.state.elevOffset) : rawAlt;
 // GPS 고도는 오차가 크므로 비정상적인 음수값 클램핑 (해수면 아래 -50m 이상은 오차로 판단)
 if (this.state.currentAlt < -50) this.state.currentAlt = 0;
+// [추가] 30초 또는 50m 이동마다 지형고도 API를 호출해 offset 갱신 (너무 잦은 호출 방지)
+this.maybeFetchElevationOffset(rawLat, rawLng, rawAlt);
 
 // ── 1. 칼만 필터로 GPS 좌표 스무딩 ──────────────────────
 // 정확도가 낮을수록(숫자 클수록) 측정 노이즈가 크므로 Q/R 비율 조정
@@ -4098,7 +4142,8 @@ maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
 splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
 lastPosTimestamp: Date.now(),
 speedBuffer: [], lastValidSpeed: 0, cadenceSamples: [],
-isCalibrationRun: false, calibrationKnownDistanceM: 0
+isCalibrationRun: false, calibrationKnownDistanceM: 0,
+elevOffset: 0, elevOffsetReady: false, lastElevFetchTime: 0, lastElevFetchPos: null, elevFetchInFlight: false
 };
 window.location.reload();
 }
