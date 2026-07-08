@@ -143,7 +143,7 @@ filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
 .recovery-highlight { color: var(--primary); font-size: 26px; font-weight: 900; margin: 10px 0; display: block; letter-spacing: -0.5px; }
 .settings-container { padding: 20px 0; }
 .settings-group { margin-bottom: 25px; position: relative; }
-.section-title { font-size: 12px; font-weight: 900; color: var(--primary); letter-spacing: 1px; text-transform: uppercase; padding-bottom: 8px; margin: 4px 0 14px; border-bottom: 1px solid #2c2c2c; }
+.section-title { display: none; }
 .settings-label { font-size: 11px; color: var(--primary); font-weight: 900; margin-bottom: 10px; letter-spacing: 1px; text-transform: uppercase; }
 .dropdown-select { background: #2a2a2a; color: #fff; border: 1.5px solid #444; padding: 18px; border-radius: 12px; font-size: 16px; font-weight: 800; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
 .dropdown-options { display: none; position: absolute; top: 105%; left: 0; width: 100%; background: #2a2a2a; border: 1.5px solid #444; border-radius: 12px; z-index: 1000; overflow-y: auto; max-height: 250px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
@@ -615,6 +615,7 @@ alt="runner"/>
 <div class="section-title" id="section-title-run">RUN SETTINGS</div>
 <div class="settings-group"><div id="label-unit" class="settings-label">DISTANCE UNIT</div><div class="unit-toggle-row"><div id="unit-km" class="unit-btn active" onclick="ui.setUnit('km')">KM</div><div id="unit-mile" class="unit-btn" onclick="ui.setUnit('mile')">MILE</div></div></div>
 <div class="settings-group"><div class="unit-toggle-row"><div id="autopause-switch-box" class="unit-btn active" onclick="ui.toggleAutoPause()" style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; padding:8px 4px; overflow:hidden;"><span id="label-autopause" style="font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%;">AUTO PAUSE</span><span id="autopause-status" style="font-size:10px; font-weight:900;">ON</span></div><div id="metro-switch-box" class="unit-btn" onclick="ui.openMetronome()" style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; padding:8px 4px; overflow:hidden;"><span id="label-metro-menu" style="font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%;">Metronome</span><span id="menu-bpm-display" style="font-size:10px; color:var(--primary); font-weight:900;">OFF</span></div></div></div>
+<div class="settings-group"><div id="label-activity-mode" class="settings-label">ACTIVITY MODE</div><div class="gender-toggle-row"><div id="mode-run" class="gender-btn active" onclick="ui.setActivityMode('run')">RUN</div><div id="mode-walk" class="gender-btn" onclick="ui.setActivityMode('walk')">WALK</div></div></div>
 <div class="settings-group"><div id="label-device-pos" class="settings-label">DEVICE PLACEMENT</div><div class="gender-toggle-row" id="device-pos-row">
 <div id="devpos-chest" class="gender-btn" onclick="ui.setDevicePos('chest')">CHEST</div>
 <div id="devpos-waist" class="gender-btn" onclick="ui.setDevicePos('waist')">WAIST</div>
@@ -1387,6 +1388,7 @@ this.MAP_THEME_KEY = 'oppaRunMapTheme';
 this.UNIT_KEY = 'oppaRunUnit';
 this.GENDER_KEY = 'oppaRunGender';
 this.AUTO_PAUSE_KEY = 'oppaRunAutoPause';
+this.ACTIVITY_MODE_KEY = 'oppaRunActivityMode';
 }
 saveRecord(record) {
 const history = this.loadHistory();
@@ -1563,6 +1565,8 @@ getGender() { return localStorage.getItem(this.GENDER_KEY) || 'male'; }
 setGender(gender) { localStorage.setItem(this.GENDER_KEY, gender); }
 getAutoPause() { return localStorage.getItem(this.AUTO_PAUSE_KEY) !== 'off'; }
 setAutoPause(enabled) { localStorage.setItem(this.AUTO_PAUSE_KEY, enabled ? 'on' : 'off'); }
+getActivityMode() { return localStorage.getItem(this.ACTIVITY_MODE_KEY) || 'run'; }
+setActivityMode(mode) { localStorage.setItem(this.ACTIVITY_MODE_KEY, mode); }
 }
 // ========== UIManager ==========
 class UIManager {
@@ -1603,6 +1607,7 @@ this.btnMetroToggle = document.getElementById('btn-metro-toggle');
 this.currentUnit = storage.getUnit();
 this.currentGender = storage.getGender();
 this.currentAutoPause = storage.getAutoPause();
+this.currentActivityMode = storage.getActivityMode();
 
 }
 calculateCalories(weightKg, distanceKm, paceSeconds, totalAltitudeGain, gender, age) {
@@ -1639,6 +1644,16 @@ this.currentGender = gender;
 storage.setGender(gender);
 document.getElementById('gender-male').classList.toggle('active', gender === 'male');
 document.getElementById('gender-female').classList.toggle('active', gender === 'female');
+}
+setActivityMode(mode) {
+// [추가] 러닝/걷기 모드 전환 - 기존 러닝 로직/계산식은 전혀 건드리지 않음.
+// 이 값은 향후 걷기 전용 통계/화면 분기에 사용되며, 기본값은 'run'이라 기존 동작은 그대로 유지됨.
+this.currentActivityMode = mode;
+storage.setActivityMode(mode);
+const runBtn = document.getElementById('mode-run');
+const walkBtn = document.getElementById('mode-walk');
+if (runBtn) runBtn.classList.toggle('active', mode === 'run');
+if (walkBtn) walkBtn.classList.toggle('active', mode === 'walk');
 }
 toggleAutoPause() {
 this.setAutoPause(!this.currentAutoPause);
@@ -5753,6 +5768,7 @@ ui.changeLanguage(storage.getLang());
 ui.setUnit(storage.getUnit());
 ui.setGender(storage.getGender());
 ui.setAutoPause(storage.getAutoPause());
+ui.setActivityMode(storage.getActivityMode());
 // 닉네임 불러오기
 const nicknameInput = document.getElementById('nickname-input');
 if (nicknameInput) nicknameInput.value = community.getNickname();
