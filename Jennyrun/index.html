@@ -3644,9 +3644,13 @@ this.state.lowSpeedStartTime = null;
 
 // ── 2. 거리 계산: 정확도 25m 이하 + 칼만 스무딩 좌표 사용 ──
 if (!this.state.isAutoPaused && accuracy < 35) {
+// [수정] JS 실행 시점(Date.now())이 아니라 GPS fix 자체의 timestamp(p.timestamp)를 기준으로
+// timeDelta를 계산. 화면이 꺼져 WebView의 evaluateJavascript 실행이 지연/뭉쳐서 들어와도
+// (실행 시각이 아니라) 실제 위치가 측정된 시각 차이를 쓰므로 GPS 갭 판정이 왜곡되지 않는다.
+const fixTime = (p.timestamp && Number.isFinite(p.timestamp)) ? p.timestamp : Date.now();
 if (this.state.lastPos) {
 let d = this.map.distance(this.state.lastPos, pos) / 1000;
-let timeDelta = (Date.now() - (this.state.lastPosTimestamp || Date.now())) / 1000;
+let timeDelta = (fixTime - (this.state.lastPosTimestamp || fixTime)) / 1000;
 // maxJump: 순간 최대 이동 거리 (칼만 스무딩으로 이상치 많이 걸러짐)
 let maxJump = 0.18;
 if (d > 0.002 && d < maxJump) {
@@ -3657,7 +3661,7 @@ if(_mainMapFullPolyline) _mainMapFullPolyline.setLatLngs(this.state.pathCoords);
 this.drawArrows();
 ui.updateRunningDisplay({dist: this.state.totalDist.toFixed(2)});
 this.state.lastPos = pos;
-this.state.lastPosTimestamp = Date.now();
+this.state.lastPosTimestamp = fixTime;
 let currentTargetKm = this.state.lastKmCheckpoint + 1;
 if (this.state.totalDist >= currentTargetKm) {
 let splitDuration = this.state.seconds - this.state.lastKmSeconds;
@@ -3678,11 +3682,11 @@ if(this.polyline) this.polyline.setLatLngs(this.state.pathCoords);
 if(_mainMapFullPolyline) _mainMapFullPolyline.setLatLngs(this.state.pathCoords);
 this.drawArrows();
 this.state.lastPos = pos;
-this.state.lastPosTimestamp = Date.now();
+this.state.lastPosTimestamp = fixTime;
 }
 } else {
 this.state.lastPos = pos;
-this.state.lastPosTimestamp = Date.now();
+this.state.lastPosTimestamp = fixTime;
 this.state.lastKmAlt = this.state.currentAlt;
 }
 }
@@ -5766,6 +5770,11 @@ if (document.visibilityState === 'hidden') {
 /* 화면 꺼지는 순간 timestamp 기록 */
 if (app && app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
 app._hiddenAt = Date.now();
+// [수정] 화면이 꺼져있는 동안 setInterval이 (부분적으로라도) 계속 틱을 쌓으면
+// 화면이 켜질 때 아래의 "경과시간 통째로 더하기" 보정과 이중으로 더해져서
+// TIME이 실제보다 부풀려지는 버그가 있었음(화면 꺼짐 상태 러닝만 오차가 컸던 원인).
+// → hidden 되는 즉시 타이머를 완전히 멈춰서 이중 계산을 원천 차단.
+if (app.timer) { clearInterval(app.timer); app.timer = null; }
 }
 } else if (document.visibilityState === 'visible') {
 /* 화면 켜질 때 경과 시간 보정 */
