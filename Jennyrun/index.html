@@ -811,14 +811,20 @@ function generateRunCardBlob(data, isKo) {
     const nameY = LOGO_H + 44;
     ctx.font = 'bold 36px Arial, sans-serif';
     ctx.fillStyle = BLACK;
+    // [수정] 활동모드에 따라 카드 제목 문구를 구분 (러닝/걷기/트레일러닝)
+    const activityModeCard = data.activityMode || 'run';
+    const activityNounKo = activityModeCard === 'walk' ? '걷기' : activityModeCard === 'trail' ? '트레일러닝' : '러닝';
+    const activityNounEn = activityModeCard === 'walk' ? 'Walk' : activityModeCard === 'trail' ? 'Trail Run' : 'Run';
     const name = data.nickname
-      ? (isKo ? data.nickname + '님의 러닝' : data.nickname + "'s Run")
+      ? (isKo ? data.nickname + '님의 ' + activityNounKo : data.nickname + "'s " + activityNounEn)
       : 'Jenny Run Pro';
     ctx.fillText(name, PAD, nameY);
 
     ctx.font = '19px Arial, sans-serif';
     ctx.fillStyle = GRAY;
-    const subLabel = (isKo ? '러닝 기록' : 'Running Record') + (data.dateStr ? '  ·  ' + data.dateStr : '');
+    const recordNounKo = activityModeCard === 'walk' ? '걷기 기록' : activityModeCard === 'trail' ? '트레일러닝 기록' : '러닝 기록';
+    const recordNounEn = activityModeCard === 'walk' ? 'Walk Record' : activityModeCard === 'trail' ? 'Trail Run Record' : 'Running Record';
+    const subLabel = (isKo ? recordNounKo : recordNounEn) + (data.dateStr ? '  ·  ' + data.dateStr : '');
     ctx.fillText(subLabel, PAD, nameY + 28);
 
     // 구분선
@@ -878,36 +884,56 @@ function generateRunCardBlob(data, isKo) {
       ctx.fillText(unit, x + 16, y + 88);
     };
 
-    statTile(PAD,         row2y, sw, sh, isKo?'케이던스':'CADENCE',    data.cadence||'--', 'SPM');
-    statTile(PAD+sw+10,   row2y, sw, sh, 'GCT',                        data.gct||'--',     'ms');
-    statTile(PAD+sw*2+20, row2y, sw, sh, isKo?'효율점수':'EFFICIENCY',  effScore,           '/ 100');
-    statTile(PAD,         row3y, sw, sh, 'ALT',                         (data.alt != null ? data.alt : '--'), 'm');
-    statTile(PAD+sw+10,   row3y, sw, sh, isKo?'체공시간':'FLIGHT',      data.flight||'--',  '%');
-    statTile(PAD+sw*2+20, row3y, sw, sh, 'CAD BAL',                    data.cadenceBal||'50:50', '');
+    // [수정] 걷기 모드는 케이던스/GCT/체공/밸런스 대신 걸음수·SPM·스트라이드 중심으로 표시
+    if (activityModeCard === 'walk') {
+      statTile(PAD,         row2y, sw, sh, isKo?'걸음수':'STEPS',      data.steps||'--', '');
+      statTile(PAD+sw+10,   row2y, sw, sh, isKo?'분당걸음':'SPM',       data.walkSpm||'--', '');
+      statTile(PAD+sw*2+20, row2y, sw, sh, isKo?'평균심박':'AVG HR',  data.avgHr||'--',  'BPM');
+      statTile(PAD,         row3y, sw, sh, 'ALT',                         (data.alt != null ? data.alt : '--'), 'm');
+      statTile(PAD+sw+10,   row3y, sw, sh, isKo?'보폭':'STRIDE',      data.stride||'--',  'm');
+      statTile(PAD+sw*2+20, row3y, sw, sh, isKo?'칼로리':'KCAL',    data.kcal||'--', '');
+    } else {
+      statTile(PAD,         row2y, sw, sh, isKo?'케이던스':'CADENCE',    data.cadence||'--', 'SPM');
+      statTile(PAD+sw+10,   row2y, sw, sh, 'GCT',                        data.gct||'--',     'ms');
+      statTile(PAD+sw*2+20, row2y, sw, sh, isKo?'효율점수':'EFFICIENCY',  effScore,           '/ 100');
+      statTile(PAD,         row3y, sw, sh, 'ALT',                         (data.alt != null ? data.alt : '--'), 'm');
+      statTile(PAD+sw+10,   row3y, sw, sh, isKo?'체공시간':'FLIGHT',      data.flight||'--',  '%');
+      statTile(PAD+sw*2+20, row3y, sw, sh, 'CAD BAL',                    data.cadenceBal||'50:50', '');
+    }
 
-    // ── 효율 점수 바 ──
+    // ── 효율 점수 바 (걷기 모드는 의미가 없으므로 응원 문구 바로 대체) ──
     const barY = row3y + sh + 24;
-    const effC = effScore >= 75 ? '#00aa55' : effScore >= 50 ? '#f5a623' : '#e03e3e';
     ctx.fillStyle = LIGHTGRAY;
     roundRect(ctx, PAD, barY, W - PAD*2, 62, 14); ctx.fill();
 
-    ctx.font = 'bold 13px Arial, sans-serif';
-    ctx.fillStyle = GRAY;
-    ctx.fillText(isKo ? 'EFFICIENCY SCORE' : 'EFFICIENCY SCORE', PAD + 16, barY + 22);
+    if (activityModeCard === 'walk') {
+      ctx.font = 'bold 13px Arial, sans-serif';
+      ctx.fillStyle = GRAY;
+      ctx.fillText(isKo ? "TODAY'S WALK" : "TODAY'S WALK", PAD + 16, barY + 22);
+      ctx.font = 'bold 22px Arial, sans-serif';
+      ctx.fillStyle = GREEN;
+      const walkMsg = isKo ? '오늘도 걸었어요! 👣' : 'Great walk today! 👣';
+      ctx.fillText(walkMsg, PAD + 16, barY + 48);
+    } else {
+      const effC = effScore >= 75 ? '#00aa55' : effScore >= 50 ? '#f5a623' : '#e03e3e';
+      ctx.font = 'bold 13px Arial, sans-serif';
+      ctx.fillStyle = GRAY;
+      ctx.fillText(isKo ? 'EFFICIENCY SCORE' : 'EFFICIENCY SCORE', PAD + 16, barY + 22);
 
-    const bx = PAD + 16, by2 = barY + 30, bw = W - PAD*2 - 130, bh = 14;
-    ctx.fillStyle = DIVIDER;
-    roundRect(ctx, bx, by2, bw, bh, 7); ctx.fill();
-    const filled = Math.round(bw * effScore / 100);
-    if (filled > 0) {
+      const bx = PAD + 16, by2 = barY + 30, bw = W - PAD*2 - 130, bh = 14;
+      ctx.fillStyle = DIVIDER;
+      roundRect(ctx, bx, by2, bw, bh, 7); ctx.fill();
+      const filled = Math.round(bw * effScore / 100);
+      if (filled > 0) {
+        ctx.fillStyle = effC;
+        roundRect(ctx, bx, by2, filled, bh, 7); ctx.fill();
+      }
+      ctx.font = 'bold 22px Arial, sans-serif';
       ctx.fillStyle = effC;
-      roundRect(ctx, bx, by2, filled, bh, 7); ctx.fill();
+      ctx.textAlign = 'right';
+      ctx.fillText(effScore + ' pts', W - PAD - 16, barY + 48);
+      ctx.textAlign = 'left';
     }
-    ctx.font = 'bold 22px Arial, sans-serif';
-    ctx.fillStyle = effC;
-    ctx.textAlign = 'right';
-    ctx.fillText(effScore + ' pts', W - PAD - 16, barY + 48);
-    ctx.textAlign = 'left';
 
     // ── 하단 브랜드 바 (검정) ──
     const footY = H - 56;
@@ -3204,7 +3230,11 @@ const dateStr = record.date ? record.date.split(' ')[0] : '';
 shareRunCardImage({
   dist: displayDist.toFixed(2), distUnit: unitText, time: record.time, pace: displayPace,
   cadence: record.cadence, gct: record.gct, flight: record.flight, vertRatio: vertRatioVal,
-  cadenceBal: record.cadenceBal, effScore, dateStr
+  cadenceBal: record.cadenceBal, effScore, dateStr,
+  // [추가] 활동모드에 따라 카드 레이아웃(걷기용 STEPS/SPM 등)이 분기되도록 전달
+  activityMode: record.activityMode || 'run',
+  steps: record.steps, walkSpm: record.walkSpm, stride: record.stride,
+  kcal: record.kcal, alt: record.alt, avgHr: record.avgHr, nickname: null
 }, isKo, null);
 }
 openDiag(id) {
@@ -4292,9 +4322,15 @@ this.state.splits.push({ km: parseFloat(this.state.totalDist).toFixed(2), pace: 
 const _now = new Date();
 const _h = _now.getHours();
 const _isKo = storage.getLang() === 'ko';
+// [수정] 트레일 모드는 제목에도 구분 표시 (예: '아침 러닝' → '아침 트레일러닝')
+const _isTrailTitle = this.state.activityMode === 'trail';
 const _autoTitle = _isKo
-  ? (_h>=5&&_h<11?'아침 러닝':_h>=11&&_h<17?'오후 러닝':_h>=17&&_h<21?'저녁 러닝':'야간 러닝')
-  : (_h>=5&&_h<11?'Morning Run':_h>=11&&_h<17?'Afternoon Run':_h>=17&&_h<21?'Evening Run':'Night Run');
+  ? (_isTrailTitle
+      ? (_h>=5&&_h<11?'아침 트레일러닝':_h>=11&&_h<17?'오후 트레일러닝':_h>=17&&_h<21?'저녁 트레일러닝':'야간 트레일러닝')
+      : (_h>=5&&_h<11?'아침 러닝':_h>=11&&_h<17?'오후 러닝':_h>=17&&_h<21?'저녁 러닝':'야간 러닝'))
+  : (_isTrailTitle
+      ? (_h>=5&&_h<11?'Morning Trail Run':_h>=11&&_h<17?'Afternoon Trail Run':_h>=17&&_h<21?'Evening Trail Run':'Night Trail Run')
+      : (_h>=5&&_h<11?'Morning Run':_h>=11&&_h<17?'Afternoon Run':_h>=17&&_h<21?'Evening Run':'Night Run'));
 // [추가] 보폭 스냅샷: 종료 시점 속도+케이던스+키로 계산해서 저장
 // → 나중에 키/체중 바꿔도 당시 값 그대로 유지됨
 const _snapshotStride = (() => {
@@ -4308,7 +4344,9 @@ const _snapshotStride = (() => {
 })();
 const record = {
 id: Date.now(),
-activityMode: 'run', // [신규] 러닝/걷기 기록 구분용 태그 (과거 기록은 activityMode 없음 → 조회 시 'run'으로 간주)
+// [수정] 기존엔 'run'으로 하드코딩되어 있어서 TRAIL 모드로 뛰어도 항상 'run'으로
+// 저장되던 버그. this.state.activityMode를 그대로 반영하도록 수정.
+activityMode: this.state.activityMode || 'run', // 과거 기록은 activityMode 없음 → 조회 시 'run'으로 간주
 title: _autoTitle,
 date: new Date().toLocaleString(),
 dist: this.state.totalDist.toFixed(2),
@@ -5131,15 +5169,23 @@ async compressPhoto(file) {
         avatar_url: this.getAvatarUrl() || null,
         location_name: locationName,
         title: record.title || (nickname + "'s Run"),
+        // [추가] RUN/WALK/TRAIL 구분 태그. 과거 기록엔 activityMode가 없으므로 'run'으로 간주.
+        // ⚠️ Supabase 'records' 테이블에 activity_mode(text, nullable) 컬럼이 없다면 먼저 추가해야 함.
+        activity_mode: record.activityMode || 'run',
         distance_km: parseFloat(record.dist) || 0,
         duration_sec: durationSec,
         pace_sec_per_km: paceSec,
         cadence: record.cadence || null,
         gct_ms: record.gct || null,
         flight_pct: record.flight ? parseInt(record.flight) : null,
-        stride_m: null,
+        stride_m: record.stride || null,
         eff_score: effScore,
         alt: record.alt || 0,
+        // [추가] 칼로리 (기존엔 아예 업로드되지 않아 크루 카드/공유카드에서 항상 비어있었음)
+        kcal: record.kcal || null,
+        // [추가] 걷기 기록의 걸음수/분당걸음수도 함께 업로드 (크루 피드 카드에서 사용)
+        steps: record.steps || null,
+        walk_spm: record.walkSpm || null,
         path: shareRoute ? (record.path || null) : null,
         splits: record.splits || null,
         photo_url: photoUrl,
@@ -5196,7 +5242,11 @@ async compressPhoto(file) {
       dist: parseFloat(r.distance_km||0).toFixed(2), distUnit: 'km',
       time: this.formatDuration(r.duration_sec), pace: this.formatPaceSec(r.pace_sec_per_km),
       cadence: r.cadence, gct: r.gct_ms, flight: r.flight_pct, effScore,
-      avgHr: r.avg_hr || null, hrZone: r.hr_zone || null
+      avgHr: r.avg_hr || null, hrZone: r.hr_zone || null,
+      // [추가] 활동모드에 따라 카드 레이아웃이 분기되도록 전달
+      activityMode: r.activity_mode || 'run',
+      steps: r.steps, walkSpm: r.walk_spm, stride: r.stride_m,
+      kcal: r.kcal, alt: r.alt
     }, isKo, text);
   }
   async toggleLike(recordId) {
@@ -5315,6 +5365,14 @@ async compressPhoto(file) {
       const runLabel = this.getRunTimeLabel(t, r.created_at);
       const effColor = r.eff_score >= 75 ? '#2e7d32' : r.eff_score >= 50 ? '#e65100' : '#c62828';
       const effBg = r.eff_score >= 75 ? '#e8f5e9' : r.eff_score >= 50 ? '#fff3e0' : '#ffebee';
+      // [추가] RUN/WALK/TRAIL 배지 (과거 기록엔 activity_mode가 없으므로 'run'으로 간주)
+      const activityMode = r.activity_mode || 'run';
+      const isKoFeed = storage.getLang() === 'ko';
+      const modeBadge = activityMode === 'walk'
+        ? { label: isKoFeed ? '걷기' : 'WALK', bg: '#eef2ff', color: '#4338ca' }
+        : activityMode === 'trail'
+          ? { label: isKoFeed ? '트레일' : 'TRAIL', bg: '#fff7ed', color: '#c2410c' }
+          : { label: isKoFeed ? '러닝' : 'RUN', bg: '#e8f5e9', color: '#2e7d32' };
 
       const commentsHTML = recordComments.map(c => `
         <div style="display:flex; justify-content:space-between; align-items:flex-start; padding:8px 0; border-bottom:1px solid #f0f0f0;">
@@ -5343,7 +5401,10 @@ async compressPhoto(file) {
         </div>
 
         <!-- 러닝 제목 -->
-        <div style="font-size:16px; font-weight:900; color:#111; margin-bottom:${r.message ? '4px' : '12px'};">${r.title || runLabel}</div>
+        <div style="display:flex; align-items:center; gap:6px; margin-bottom:${r.message ? '4px' : '12px'};">
+          <div style="font-size:16px; font-weight:900; color:#111;">${r.title || runLabel}</div>
+          <span style="font-size:9px; font-weight:800; padding:3px 7px; border-radius:6px; background:${modeBadge.bg}; color:${modeBadge.color}; flex-shrink:0;">${modeBadge.label}</span>
+        </div>
         ${r.message ? `<div style="font-size:13px; color:#555; margin-bottom:12px;">${r.message}</div>` : ''}
 
         <!-- 스탯 -->
@@ -5372,6 +5433,28 @@ async compressPhoto(file) {
 
         <!-- 세부 지표 (상단 스탯과 동일한 스타일로 크게 표시) -->
         <div style="display:flex; border-bottom:1px solid #f5f5f5; padding:8px 0; margin-bottom:14px;">
+          ${activityMode === 'walk' ? `
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
+            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.stepsLabel||'STEPS'}</div>
+            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${r.steps || '--'}</div>
+            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">&nbsp;</div>
+          </div>
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
+            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.spmLabel||'SPM'}</div>
+            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${r.walk_spm || '--'}</div>
+            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">&nbsp;</div>
+          </div>
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
+            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.stride||'STRIDE'}</div>
+            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${r.stride_m || '--'}</div>
+            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">M</div>
+          </div>
+          <div style="flex:1; text-align:center;">
+            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.alt||'ALT'}</div>
+            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${(r.alt !== undefined && r.alt !== null) ? r.alt : '--'}</div>
+            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">M</div>
+          </div>
+          ` : `
           <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
             <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.cadence||'CADENCE'}</div>
             <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${r.cadence || '--'}</div>
@@ -5392,6 +5475,7 @@ async compressPhoto(file) {
             <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${(r.alt !== undefined && r.alt !== null) ? r.alt : '--'}</div>
             <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">M</div>
           </div>
+          `}
         </div>
 
         <!-- 이미지/지도 -->
