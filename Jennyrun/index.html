@@ -1702,6 +1702,16 @@ return Math.round(met * weightKg * hours * genderBonus * inclineBonus * ageBonus
 }
 // [신규] 걷기 모드 메인화면 카드 갱신 (CADENCE 카드 자리→STEPS, FLIGHT 카드 자리→SPM, GCT 카드 자리→STRIDE)
 // 러닝 전용 updateRunningDisplay()는 전혀 건드리지 않고 완전히 별도 함수로 분리
+// [신규] 하단 탭바의 RUN 탭 라벨을 현재 선택된 활동 모드(RUN/WALK/TRAIL)에 맞춰 동기화
+updateTabRunLabel() {
+const t = translations[storage.getLang()] || translations['en'];
+const tabRun = document.getElementById('tab-run');
+if (!tabRun) return;
+const mode = this.currentActivityMode || 'run';
+if (mode === 'walk') tabRun.textContent = t.modeWalkLabel;
+else if (mode === 'trail') tabRun.textContent = t.modeTrailLabel;
+else tabRun.textContent = t.run;
+}
 updateWalkDisplay(data) {
 if (data.steps !== undefined && this.dom.cadence) this.dom.cadence.textContent = data.steps;
 if (data.spm !== undefined && this.dom.flight) this.dom.flight.textContent = data.spm;
@@ -1766,6 +1776,8 @@ if (labelFlight) labelFlight.textContent = 'FLIGHT';
 if (gctUnit) gctUnit.textContent = ' MS';
 if (flightUnit) flightUnit.textContent = ' %';
 }
+// [신규] 하단 탭바의 RUN 탭 라벨도 선택된 모드에 맞춰 즉시 갱신
+this.updateTabRunLabel();
 }
 toggleAutoPause() {
 this.setAutoPause(!this.currentAutoPause);
@@ -2151,9 +2163,8 @@ const resumeBtn = document.getElementById('btn-resume');
 const finishBtn = document.getElementById('btn-finish');
 if(resumeBtn) resumeBtn.textContent = t.resume;
 if(finishBtn) finishBtn.textContent = t.finish;
-const tabRun = document.getElementById('tab-run');
+this.updateTabRunLabel();
 const tabHistory = document.getElementById('tab-history');
-if(tabRun) tabRun.textContent = t.run;
 if(tabHistory) tabHistory.textContent = t.history;
 const subList = document.getElementById('sub-tab-list');
 const subTotal = document.getElementById('sub-tab-total');
@@ -4607,13 +4618,21 @@ timestamp: timestamp
 // ------------------------------------------------------------------
 window.onNativeMotionUpdate = function (x, y, z, timestamp, gx, gy, gz) {
 try {
-if (typeof app !== 'undefined' && app && app.motion &&
-    app.state && app.state.isRunning && !app.state.isPaused) {
+if (typeof app !== 'undefined' && app &&
+    app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
 const evt = { accelerationIncludingGravity: { x: x, y: y, z: z } };
 if (gx !== undefined && gy !== undefined && gz !== undefined) {
 evt.rotationRate = { alpha: gx, beta: gy, gamma: gz };
 }
-app.motion.handleMotion(evt);
+// [수정] 걷기 모드일 때는 걷기 전용 walkMotion(WalkStepDetector)으로,
+// 러닝/트레일 모드일 때는 기존 motion(MotionManager)으로 라우팅.
+// 기존엔 이 분기가 없어서 걷기 모드에서도 항상 러닝용 케이던스 계산기가 호출되어
+// STEPS 칸에 실제 걸음수 대신 러닝 케이던스 값(초반에 부풀려지고 출렁이는 값)이 표시되던 버그.
+if (app.state.activityMode === 'walk') {
+if (app.walkMotion) app.walkMotion.handleMotion(evt);
+} else {
+if (app.motion) app.motion.handleMotion(evt);
+}
 }
 } catch (e) { console.error('onNativeMotionUpdate error', e); }
 };
