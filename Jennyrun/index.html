@@ -5232,7 +5232,7 @@ async compressPhoto(file) {
     try {
       const { data, error } = await _sb
         .from('records')
-        .select('id, nickname, avatar_url, location_name, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, photo_url, message, avg_hr, hr_zone')
+        .select('id, nickname, avatar_url, location_name, title, activity_mode, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, photo_url, message, avg_hr, hr_zone, steps, walk_spm, stride_m')
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) throw error;
@@ -5260,16 +5260,25 @@ async compressPhoto(file) {
     if (!r) return;
     const lang = (storage.getLang && storage.getLang()) || 'ko';
     const isKo = lang === 'ko';
-    const text = `${r.nickname}'s Run: ${parseFloat(r.distance_km||0).toFixed(2)}km in ${this.formatDuration(r.duration_sec)} @ ${this.formatPaceSec(r.pace_sec_per_km)}/km${r.message ? '\n' + r.message : ''}`;
+    const activityMode = r.activity_mode || 'run';
+    // [수정] 언어설정(한/영) + 활동모드(러닝/걷기/트레일)를 함께 반영해 공유 캡션 문구 생성
+    const activityNounKo = activityMode === 'walk' ? '걷기' : activityMode === 'trail' ? '트레일러닝' : '러닝';
+    const activityNounEn = activityMode === 'walk' ? 'Walk' : activityMode === 'trail' ? 'Trail Run' : 'Run';
+    const distText = parseFloat(r.distance_km||0).toFixed(2);
+    const durText = this.formatDuration(r.duration_sec);
+    const paceText = this.formatPaceSec(r.pace_sec_per_km);
+    const text = isKo
+      ? `${r.nickname}님의 ${activityNounKo}: ${distText}km · ${durText} · 페이스 ${paceText}/km${r.message ? '\n' + r.message : ''}`
+      : `${r.nickname}'s ${activityNounEn}: ${distText}km in ${durText} @ ${paceText}/km${r.message ? '\n' + r.message : ''}`;
     const effScore = r.eff_score || 0;
     shareRunCardImage({
       nickname: r.nickname,
-      dist: parseFloat(r.distance_km||0).toFixed(2), distUnit: 'km',
-      time: this.formatDuration(r.duration_sec), pace: this.formatPaceSec(r.pace_sec_per_km),
+      dist: distText, distUnit: 'km',
+      time: durText, pace: paceText,
       cadence: r.cadence, gct: r.gct_ms, flight: r.flight_pct, effScore,
       avgHr: r.avg_hr || null, hrZone: r.hr_zone || null,
       // [추가] 활동모드에 따라 카드 레이아웃이 분기되도록 전달
-      activityMode: r.activity_mode || 'run',
+      activityMode: activityMode,
       steps: r.steps, walkSpm: r.walk_spm, stride: r.stride_m,
       kcal: r.kcal, alt: r.alt
     }, isKo, text);
