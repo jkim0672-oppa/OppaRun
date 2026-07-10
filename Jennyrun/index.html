@@ -1007,13 +1007,15 @@ function appConfirm(msg) {
     const msgEl = document.getElementById('confirm-modal-msg');
     if (!modal || !msgEl) { resolve(window.confirm(msg)); return; }
     msgEl.textContent = msg;
-    // 버튼 텍스트 임시 변경 (CANCEL / OK)
+    // 버튼 텍스트 임시 변경 (언어설정에 맞는 NO/YES)
     const cancelBtn = document.getElementById('btn-confirm-cancel');
     const deleteBtn = document.getElementById('btn-confirm-delete');
     const origCancel = cancelBtn ? cancelBtn.textContent : 'CANCEL';
     const origDelete = deleteBtn ? deleteBtn.textContent : 'DELETE';
-    if (cancelBtn) cancelBtn.textContent = 'NO';
-    if (deleteBtn) { deleteBtn.textContent = 'YES'; deleteBtn.style.background = 'var(--primary)'; deleteBtn.style.color = '#000'; }
+    const _lang = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang() : 'en';
+    const _t = translations[_lang] || translations['en'];
+    if (cancelBtn) cancelBtn.textContent = _t.noBtn;
+    if (deleteBtn) { deleteBtn.textContent = _t.yesBtn; deleteBtn.style.background = 'var(--primary)'; deleteBtn.style.color = '#000'; }
     modal.style.display = 'flex';
     // 기존 closeConfirmModal을 잠시 대체
     const origClose = ui ? ui.closeConfirmModal : null;
@@ -1347,7 +1349,10 @@ emailErrorAlert: "Error: ", emailDisconnectConfirm: "Logging out will switch thi
 emailCodeTimeoutAlert: "Verification timed out. Please enter your email again.",
 prSectionTitle: "PERSONAL RECORDS", prBestPace: "BEST PACE", prLongestDist: "LONGEST RUN", prLongestDuration: "LONGEST DURATION", prBestCadence: "BEST CADENCE",
 streakTitle: "RUN STREAK", streakCurrentLabel: "CURRENT STREAK", streakLongestLabel: "BEST STREAK", streakDaysUnit: "days", streakNone: "Start today!",
-heatmapSectionTitle: "ACTIVITY", heatmapLess: "Less", heatmapMore: "More", noRecShort: "--"
+heatmapSectionTitle: "ACTIVITY", heatmapLess: "Less", heatmapMore: "More", noRecShort: "--",
+yesBtn: "YES", noBtn: "NO", resumeSessionMsg: "Resume last session?",
+exitCancelBtn: "Cancel", exitCloseBtn: "Close",
+exitClosedTitle: "App Closed", exitClosedMsg: "Press the Home button<br>to return to your home screen"
 },
 ko: {
 
@@ -1426,7 +1431,10 @@ emailErrorAlert: "오류: ", emailDisconnectConfirm: "로그아웃하면 이 기
 emailCodeTimeoutAlert: "입력 시간이 초과되었습니다. 이메일을 다시 입력해주세요.",
 prSectionTitle: "개인 기록", prBestPace: "최고 페이스", prLongestDist: "최장 거리", prLongestDuration: "최장 시간", prBestCadence: "최고 케이던스",
 streakTitle: "연속 러닝", streakCurrentLabel: "현재 연속", streakLongestLabel: "최장 연속", streakDaysUnit: "일", streakNone: "오늘부터 시작해보세요!",
-heatmapSectionTitle: "활동 기록", heatmapLess: "적음", heatmapMore: "많음", noRecShort: "--"
+heatmapSectionTitle: "활동 기록", heatmapLess: "적음", heatmapMore: "많음", noRecShort: "--",
+yesBtn: "예", noBtn: "아니오", resumeSessionMsg: "마지막 세션을 이어서 할까요?",
+exitCancelBtn: "취소", exitCloseBtn: "닫기",
+exitClosedTitle: "앱 종료됨", exitClosedMsg: "홈 버튼을 눌러<br>홈 화면으로 돌아가세요"
 }
 };
 // ========== RunningStorage ==========
@@ -1774,16 +1782,17 @@ const labelGct = document.getElementById('label-gct');
 const labelFlight = document.getElementById('label-flight');
 const gctUnit = document.getElementById('gct-unit');
 const flightUnit = document.getElementById('flight-unit');
+const _tMode = translations[storage.getLang()] || translations['en'];
 if (mode === 'walk') {
-if (labelCadence) labelCadence.textContent = 'STEPS';
-if (labelGct) labelGct.textContent = 'STRIDE';
-if (labelFlight) labelFlight.textContent = 'SPM';
+if (labelCadence) labelCadence.textContent = _tMode.stepsLabel;
+if (labelGct) labelGct.textContent = _tMode.stride;
+if (labelFlight) labelFlight.textContent = _tMode.spmLabel;
 if (gctUnit) gctUnit.textContent = ' M';
 if (flightUnit) flightUnit.textContent = '';
 } else {
-if (labelCadence) labelCadence.textContent = 'CADENCE';
-if (labelGct) labelGct.textContent = 'GCT';
-if (labelFlight) labelFlight.textContent = 'FLIGHT';
+if (labelCadence) labelCadence.textContent = _tMode.cadence;
+if (labelGct) labelGct.textContent = _tMode.gct;
+if (labelFlight) labelFlight.textContent = _tMode.flight;
 if (gctUnit) gctUnit.textContent = ' MS';
 if (flightUnit) flightUnit.textContent = ' %';
 }
@@ -2151,6 +2160,8 @@ if(fb) fb.innerHTML = feedback.combined;
 }changeLanguage(lang) {
 storage.setLang(lang);
 const t = translations[lang] || translations['en'];
+// [추가] 뒤로가기 종료 확인 다이얼로그 / 검은 종료화면 텍스트도 함께 갱신
+if (window.applyExitDialogLang) window.applyExitDialogLang();
 ['pace','dist','time','avg','cadence','gct','flight'].forEach(id => {
 const el = document.getElementById('label-'+id); if(el) el.textContent = t[id];
 });
@@ -4542,7 +4553,9 @@ checkResume() {
 try {
 const saved = storage.loadTempSession();
 if (saved && saved.isRunning) {
-appConfirm("Resume last session?").then(confirmed => {
+const _resumeLang = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang() : 'en';
+const _resumeT = translations[_resumeLang] || translations['en'];
+appConfirm(_resumeT.resumeSessionMsg).then(confirmed => {
 if (confirmed) {
 Object.assign(this.state, saved);
 if(ui.dom.btnStart) ui.dom.btnStart.style.display = 'none';
@@ -6497,6 +6510,20 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
         ((app.state.totalDist || 0) > 0 || (app.state.seconds || 0) > 5));
     } catch (e) { return false; }
   }
+  // [추가] Cancel/Close 버튼 및 검은 종료화면 텍스트를 현재 언어설정에 맞게 적용
+  function applyExitDialogLang() {
+    try {
+      const lang = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang() : 'en';
+      const t = translations[lang] || translations['en'];
+      if (btnCancel) btnCancel.textContent = t.exitCancelBtn;
+      if (btnConfirm) btnConfirm.textContent = t.exitCloseBtn;
+      const esTitle = document.getElementById('exit-screen-title');
+      const esMsg = document.getElementById('exit-screen-msg');
+      if (esTitle) esTitle.textContent = t.exitClosedTitle;
+      if (esMsg) esMsg.innerHTML = t.exitClosedMsg;
+    } catch (e) {}
+  }
+  window.applyExitDialogLang = applyExitDialogLang;
   // 히스토리 스택에 현재 상태 추가 (뒤로가기 가로채기용)
   history.pushState({ exitGuard: true }, '');
   function showExitDialog() {
@@ -6529,12 +6556,13 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
   `;
   exitScreen.innerHTML = `
     <div style="font-size:36px; margin-bottom:20px;">🚪</div>
-    <div style="color:#fff; font-size:20px; font-weight:900; margin-bottom:10px;">App Closed</div>
-    <div style="color:#666; font-size:13px; font-weight:600; text-align:center; line-height:1.8;">
+    <div id="exit-screen-title" style="color:#fff; font-size:20px; font-weight:900; margin-bottom:10px;">App Closed</div>
+    <div id="exit-screen-msg" style="color:#666; font-size:13px; font-weight:600; text-align:center; line-height:1.8;">
       Press the Home button<br>to return to your home screen
     </div>
   `;
   document.body.appendChild(exitScreen);
+  applyExitDialogLang();
   // 실제 종료 처리 (AndroidBridge가 있으면 앱 종료, 없으면 PWA 검은 화면 표시)
   function performExit() {
     // [수정] 완전 종료 시 진행 중이던 임시 세션을 삭제해서 다음 실행 때 "Resume last session?"이 뜨지 않도록 함
