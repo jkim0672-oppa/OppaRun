@@ -1043,6 +1043,17 @@ const INVALID_PACE = "--'--\"";
 
 // [추가] 효율 점수 공통 계산 함수 (6개 지표 + 밸런스 패널티 + HR 보너스)
 // record 객체를 받아서 0~100 점수 반환. 데이터 없으면 null 반환.
+// [추가] 크루 피드 등에서 사용자 입력(닉네임/메시지/타이틀 등)을 innerHTML에 넣기 전
+// HTML 특수문자를 이스케이프해서 XSS(스크립트 삽입)를 막기 위한 공용 헬퍼
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 function calcEffScore(record) {
   const cadence = parseInt(record.cadence);
   const gct     = parseInt(record.gct);
@@ -5395,7 +5406,7 @@ async compressPhoto(file) {
       const iLiked = recordLikes.some(l => l.user_id === uid);
       const recordComments = allComments.filter(c => c.record_id === r.id);
       const commentCount = recordComments.length;
-      const initial = this.getInitial(r.nickname);
+      const initial = escapeHtml(this.getInitial(r.nickname));
       const runLabel = this.getRunTimeLabel(t, r.created_at);
       const effColor = r.eff_score >= 75 ? '#2e7d32' : r.eff_score >= 50 ? '#e65100' : '#c62828';
       const effBg = r.eff_score >= 75 ? '#e8f5e9' : r.eff_score >= 50 ? '#fff3e0' : '#ffebee';
@@ -5411,9 +5422,9 @@ async compressPhoto(file) {
       const commentsHTML = recordComments.map(c => `
         <div style="display:flex; justify-content:space-between; align-items:flex-start; padding:8px 0; border-bottom:1px solid #f0f0f0;">
           <div>
-            <span style="font-size:12px; font-weight:900; color:${c.user_id === uid ? '#00aa55' : '#111'};">${c.nickname}${c.user_id === uid ? ' (' + t.crewMe + ')' : ''}</span>
+            <span style="font-size:12px; font-weight:900; color:${c.user_id === uid ? '#00aa55' : '#111'};">${escapeHtml(c.nickname)}${c.user_id === uid ? ' (' + t.crewMe + ')' : ''}</span>
             <span style="font-size:10px; color:#bbb; margin-left:6px;">${this.timeAgo(c.created_at)}</span>
-            <div style="font-size:13px; color:#333; margin-top:3px;">${c.message}</div>
+            <div style="font-size:13px; color:#333; margin-top:3px;">${escapeHtml(c.message)}</div>
           </div>
           ${c.user_id === uid ? `<button onclick="community.deleteComment('${c.id}')" style="background:none; border:none; color:#ccc; font-size:16px; cursor:pointer; padding:0 4px; flex-shrink:0;">x</button>` : ''}
         </div>
@@ -5426,9 +5437,9 @@ async compressPhoto(file) {
           <div style="display:flex; align-items:center; gap:10px;">
             <div style="width:40px; height:40px; border-radius:50%; background:${r.avatar_url ? '#eee' : (isMine ? 'linear-gradient(135deg,#00c853,#00ff88)' : this.getAvatarColor(r.user_id))}; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:900; color:#fff; flex-shrink:0; overflow:hidden;">${r.avatar_url ? `<img src="${r.avatar_url}" style="width:100%; height:100%; object-fit:cover; display:block;">` : initial}</div>
             <div>
-              <div style="font-size:14px; font-weight:900; color:${isMine ? '#00aa55' : '#111'};">${r.nickname || 'Runner'}${isMine ? ' <span style="font-size:10px; color:#00aa55; font-weight:700;">' + t.crewMe + '</span>' : ''}</div>
+              <div style="font-size:14px; font-weight:900; color:${isMine ? '#00aa55' : '#111'};">${escapeHtml(r.nickname) || 'Runner'}${isMine ? ' <span style="font-size:10px; color:#00aa55; font-weight:700;">' + t.crewMe + '</span>' : ''}</div>
               <div style="font-size:11px; color:#666; margin-top:1px;">${this.timeAgo(r.created_at)} · ${new Date(r.created_at).toLocaleString(storage.getLang()==='ko'?'ko-KR':'en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
-              ${r.location_name ? `<div style="font-size:11px; color:#888; margin-top:2px;">📍 ${r.location_name}</div>` : ''}
+              ${r.location_name ? `<div style="font-size:11px; color:#888; margin-top:2px;">📍 ${escapeHtml(r.location_name)}</div>` : ''}
             </div>
           </div>
           ${isMine ? `<button onclick="community.confirmDelete('${r.id}')" style="background:none; border:1px solid #e0e0e0; color:#bbb; font-size:10px; padding:4px 10px; border-radius:6px; font-weight:700; cursor:pointer;">${t.crewDelete}</button>` : ''}
@@ -5436,10 +5447,10 @@ async compressPhoto(file) {
 
         <!-- 러닝 제목 -->
         <div style="display:flex; align-items:center; gap:6px; margin-bottom:${r.message ? '4px' : '12px'};">
-          <div style="font-size:16px; font-weight:900; color:#111;">${r.title || runLabel}</div>
+          <div style="font-size:16px; font-weight:900; color:#111;">${escapeHtml(r.title) || runLabel}</div>
           <span style="font-size:9px; font-weight:800; padding:3px 7px; border-radius:6px; background:${modeBadge.bg}; color:${modeBadge.color}; flex-shrink:0;">${modeBadge.label}</span>
         </div>
-        ${r.message ? `<div style="font-size:13px; color:#555; margin-bottom:12px;">${r.message}</div>` : ''}
+        ${r.message ? `<div style="font-size:13px; color:#555; margin-bottom:12px;">${escapeHtml(r.message)}</div>` : ''}
 
         <!-- 스탯 -->
         <div style="display:flex; border-top:1px solid #f5f5f5; border-bottom:1px solid #f5f5f5; padding:12px 0;">
@@ -6420,6 +6431,13 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
       text-align: center;
       box-shadow: 0 8px 40px rgba(0,0,0,0.8);
     }
+    #exit-confirm-msg {
+      font-size: 13px;
+      color: #bbb;
+      margin-bottom: 18px;
+      line-height: 1.5;
+      display: none;
+    }
     #exit-confirm-btns {
       display: flex;
       gap: 10px;
@@ -6455,6 +6473,7 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
   div.id = 'exit-confirm-overlay';
   div.innerHTML = `
     <div id="exit-confirm-box">
+      <div id="exit-confirm-msg"></div>
       <div id="exit-confirm-btns">
         <button id="btn-exit-cancel">Cancel</button>
         <button id="btn-exit-confirm">Close</button>
@@ -6465,15 +6484,32 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
   const overlay = document.getElementById('exit-confirm-overlay');
   const btnCancel = document.getElementById('btn-exit-cancel');
   const btnConfirm = document.getElementById('btn-exit-confirm');
+  const exitMsgEl = document.getElementById('exit-confirm-msg');
+  // [추가] Close 버튼 2단계 확인 로직: 진행 중인 러닝 기록이 있을 때만
+  // 한 번 더 심플한 확인 메시지를 보여주고, 재확인 시에만 실제 종료.
+  let exitConfirmStep = 1;
+  function resetExitDialogUI() {
+    if (exitMsgEl) { exitMsgEl.style.display = 'none'; exitMsgEl.textContent = ''; }
+  }
+  function hasActiveRunProgress() {
+    try {
+      return !!(typeof app !== 'undefined' && app.state && app.state.isRunning &&
+        ((app.state.totalDist || 0) > 0 || (app.state.seconds || 0) > 5));
+    } catch (e) { return false; }
+  }
   // 히스토리 스택에 현재 상태 추가 (뒤로가기 가로채기용)
   history.pushState({ exitGuard: true }, '');
   function showExitDialog() {
+    exitConfirmStep = 1;
+    resetExitDialogUI();
     overlay.classList.add('active');
   }
   // [추가] 러닝 종료 후 공유 모달의 EXIT 버튼에서도 동일한 종료 확인 다이얼로그를 재사용
   window.showAppExitDialog = showExitDialog;
   function hideExitDialog() {
     overlay.classList.remove('active');
+    exitConfirmStep = 1;
+    resetExitDialogUI();
     // 다시 히스토리 쌓아서 다음 뒤로가기도 가로챔
     history.pushState({ exitGuard: true }, '');
   }
@@ -6526,7 +6562,20 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
   // [추가] 공유 모달의 EXIT 버튼에서 확인창 없이 바로 종료 처리할 때 사용
   window.performAppExit = performExit;
   // 종료 버튼
-  btnConfirm.addEventListener('click', performExit);
+  btnConfirm.addEventListener('click', function() {
+    if (exitConfirmStep === 1 && hasActiveRunProgress()) {
+      exitConfirmStep = 2;
+      const isKo = (typeof storage !== 'undefined' && storage.getLang && storage.getLang() === 'ko');
+      if (exitMsgEl) {
+        exitMsgEl.textContent = isKo
+          ? '진행 중인 기록이 저장되지 않습니다. 그래도 닫으시겠습니까?'
+          : 'Your current activity will not be saved. Close anyway?';
+        exitMsgEl.style.display = 'block';
+      }
+      return;
+    }
+    performExit();
+  });
   // 오버레이 바깥 터치 → 취소
   overlay.addEventListener('click', function(e) {
     if (e.target === overlay) hideExitDialog();
