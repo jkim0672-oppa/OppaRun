@@ -1560,8 +1560,9 @@ savePrecisionLog(log) {
 if (!log || !log.length) return;
 const list = this.loadPrecisionLogs();
 list.unshift({ id: 'plog_' + Date.now(), savedAt: new Date().toISOString(), log: log });
-// localStorage 용량 보호를 위해 최근 30개까지만 보관
-this.savePrecisionLogsList(list.slice(0, 30));
+// [수정] localStorage 용량 보호 + "지난 로그가 쌓여봐야 소용없다"는 사용 패턴 반영.
+// 기존 30개 → 최근 3개까지만 보관 (그 이상은 오래돼서 비교 의미가 떨어짐).
+this.savePrecisionLogsList(list.slice(0, 3));
 }
 deletePrecisionLog(id) {
 const list = this.loadPrecisionLogs().filter(item => item.id !== id);
@@ -1577,8 +1578,8 @@ if (typeof ui !== 'undefined') ui.renderPrecisionLogList();
 }
 }
 buildPrecisionCsv(log) {
-const headers = ['t_sec','timestamp','lat','lng','gps_accuracy_m','dist_km','speed_kmh','cadence_spm','gct_ms','flight_pct','hr_bpm','hr_zone','rot_peak_dps'];
-const rows = log.map(r => [r.t, r.timestamp || '', r.lat || '', r.lng || '', r.gpsAcc != null ? r.gpsAcc : '', r.distKm, r.speedKmh, r.cadence, r.gctMs, r.flightPct, r.hrBpm, r.hrZone, r.rotPeakDps != null ? r.rotPeakDps : ''].join(','));
+const headers = ['t_sec','timestamp','lat','lng','gps_accuracy_m','dist_km','speed_kmh','cadence_spm','gct_ms','flight_pct','step_length_m','step_length_window_m','step_length_instant_m','vert_osc_mm','hr_bpm','hr_zone','rot_peak_dps'];
+const rows = log.map(r => [r.t, r.timestamp || '', r.lat || '', r.lng || '', r.gpsAcc != null ? r.gpsAcc : '', r.distKm, r.speedKmh, r.cadence, r.gctMs, r.flightPct, r.stepLengthM != null ? r.stepLengthM : '', r.stepLengthWindowM != null ? r.stepLengthWindowM : '', r.stepLengthInstantM != null ? r.stepLengthInstantM : '', r.vertOscMm != null ? r.vertOscMm : '', r.hrBpm, r.hrZone, r.rotPeakDps != null ? r.rotPeakDps : ''].join(','));
 return headers.join(',') + '\n' + rows.join('\n');
 }
 downloadCsvFile(csvStr, fileName) {
@@ -3469,6 +3470,9 @@ this.vertMin = Infinity;
 this.vertMax = -Infinity;
 this.vertAmplitudeAccumulator = 0;
 this.vertAmplitudeCount = 0;
+// [추가] 정밀 로그(초당) 비교용: 가장 최근 걸음 1회의 순간 수직진동(cm). 러닝 누적 평균과 별개로,
+// 가민 FIT의 초당 vertical_oscillation 값과 같은 시간 해상도로 비교할 수 있도록 스텝마다 갱신됨.
+this.lastStepVertOscCm = null;
 // [추가] 잔진동(2차 충격) 오감지 필터용 최근 걸음 주기 버퍼
 this.recentCycleTimes = [];
 // [추가] 자이로스코프 기반 노이즈 필터: 스텝 사이클 동안의 최대 회전각속도(deg/s)
@@ -3563,6 +3567,7 @@ this.vertMin = Infinity;
 this.vertMax = -Infinity;
 this.vertAmplitudeAccumulator = 0;
 this.vertAmplitudeCount = 0;
+this.lastStepVertOscCm = null; // [추가] 정밀 로그용 순간 수직진동값도 매 러닝 시작 시 초기화
 this.recentCycleTimes = [];
 this.rotPeakSinceLastStep = 0;
 // [추가] 좌우 판별 진단용 변수도 매 러닝 시작 시 초기화
@@ -3687,6 +3692,10 @@ if (this.vertMax > -Infinity && this.vertMin < Infinity) {
 let amplitude = this.vertMax - this.vertMin;
 this.vertAmplitudeAccumulator += amplitude;
 this.vertAmplitudeCount++;
+// [추가] 정밀 로그(초당) 비교용: 이번 스텝 1회만의 순간 수직진동(cm).
+// getVertRatio()의 러닝 전체 누적 평균과 달리, 가민 FIT의 초당 값과 같은
+// 시간 해상도로 비교 가능하도록 스텝마다 즉시 갱신한다. 손에 들고 있으면(vertEnabled=false) null 유지.
+this.lastStepVertOscCm = this.vertEnabled ? +(amplitude * this.vertScale).toFixed(2) : null;
 }
 this.vertMin = Infinity;
 this.vertMax = -Infinity;
@@ -4266,6 +4275,10 @@ formatPace(kmh) { if (!kmh || kmh < 0.5) return INVALID_PACE; let s = 3600 / kmh
 // 기존 계산 로직을 절대 건드리지 않고, 이미 화면에 표시되고 있는 DOM 값들을
 // 그대로 "읽기만" 해서 배열에 쌓는다 (부작용 없음, read-only).
 logPrecisionSample() {
+// [추가] 걷기 모드는 정밀 로그(가민 러닝 다이나믹스 비교용) 대상이 아님.
+// 게다가 걷기 모드에선 'cadence' DOM이 실제 케이던스가 아니라 걸음수 텍스트로
+// 재활용되고 있어서, 그대로 로깅하면 의미 없는 값(케이던스/보폭 등)이 쌓이게 됨.
+if (this.state.activityMode === 'walk') return;
 if (!this.state.precisionLog) this.state.precisionLog = [];
 const getTxt = (id) => { const el = document.getElementById(id); return el ? el.textContent.trim() : ''; };
 // [추가] 가민 워치 데이터와의 정밀 대조를 위한 실제 시각 / GPS 좌표 / 정확도
@@ -4280,6 +4293,52 @@ const gpsAcc = (this.state.lastGpsAccuracy != null) ? this.state.lastGpsAccuracy
 // 기기/네이티브 경로 미지원 시에는 0으로 남아있는 게 정상(필터 비활성 상태와 동일).
 const rotPeakDps = (this.motion && typeof this.motion.rotPeakSinceLastStep === 'number')
   ? this.motion.rotPeakSinceLastStep.toFixed(1) : '';
+// [추가] 가민 FIT의 초당 step_length / vertical_oscillation과 비교하기 위한 필드.
+// 기존엔 이 두 값이 러닝 종료 시 딱 한 번만(요약 카드용) 계산되고 초당 로그엔 없었음.
+// - stepLengthM: 아래 "구간평균 + 순간공식 병행(상보 필터)" 방식으로 계산한 최종 보폭(m).
+// - vertOscMm: 방금 걸음 1회의 순간 수직진동(mm). 손에 들고 있으면(vertEnabled=false) 빈 값.
+//
+// [수정] 보폭 계산 방식: 구간평균 단독 대신, 순간공식과 "병행"해서 상보 필터로 블렌드.
+// - 구간평균(4초): 안정적이지만, 페이스가 급변하는 순간(스퍼트/언덕)엔 반응이 4초 정도 늦음.
+// - 순간공식(그 순간 속도÷케이던스): 반응은 즉각적이지만 GPS 순간 노이즈에 취약.
+// → 평소엔 구간평균이 주도(75%)하되, 순간공식을 25% 섞어서 급격한 페이스 변화에도
+//   너무 느리게 따라가지 않도록 함. 두 원본값도 CSV에 그대로 남겨서 나중에 실측
+//   데이터로 블렌드 비율(0.75/0.25)을 조정할 수 있게 해둠.
+if (!this.state.strideWindow) this.state.strideWindow = [];
+const STRIDE_WINDOW_SEC = 4;
+const STRIDE_WINDOW_WEIGHT = 0.75; // 구간평균 가중치 (나머지 0.25가 순간공식)
+this.state.strideWindow.push({ t: this.state.seconds, distKm: this.state.totalDist || 0, steps: this.state.stepCount || 0 });
+while (this.state.strideWindow.length > 1 && (this.state.seconds - this.state.strideWindow[0].t) > STRIDE_WINDOW_SEC) {
+  this.state.strideWindow.shift();
+}
+// 1) 구간평균 계산
+let stepLengthWindowM = null;
+const _swOldest = this.state.strideWindow[0];
+const _windowDistM = ((this.state.totalDist || 0) - _swOldest.distKm) * 1000;
+const _windowSteps = (this.state.stepCount || 0) - _swOldest.steps;
+if (_windowSteps > 0 && _windowDistM > 0) {
+  stepLengthWindowM = _windowDistM / _windowSteps;
+}
+// 2) 순간공식 계산 (항상 병행 계산 — 구간평균이 없을 때의 폴백 겸, 블렌드용 입력값)
+let stepLengthInstantM = null;
+const speedKmhNum = parseFloat(getTxt('curSpeed'));
+const cadenceNum = parseInt(getTxt('cadence'));
+if (speedKmhNum > 0 && cadenceNum > 0) {
+  const _prof = storage.loadProfile();
+  const _hcm = _prof.hu === 'inch' ? Math.round(_prof.h * 2.54) : _prof.h;
+  stepLengthInstantM = calcStride(speedKmhNum, cadenceNum, _hcm, _prof.strideCorrectionFactor);
+}
+// 3) 최종값: 상보 필터 블렌드. 한쪽이 없으면 있는 쪽만 사용, 러닝 초반(윈도우 미형성)엔 순간공식만.
+let stepLengthM = '';
+if (stepLengthWindowM != null && stepLengthInstantM != null) {
+  stepLengthM = (stepLengthWindowM * STRIDE_WINDOW_WEIGHT + stepLengthInstantM * (1 - STRIDE_WINDOW_WEIGHT)).toFixed(2);
+} else if (stepLengthWindowM != null) {
+  stepLengthM = stepLengthWindowM.toFixed(2);
+} else if (stepLengthInstantM != null) {
+  stepLengthM = stepLengthInstantM.toFixed(2);
+}
+const vertOscMm = (this.motion && this.motion.lastStepVertOscCm != null)
+  ? (this.motion.lastStepVertOscCm * 10).toFixed(1) : '';
 this.state.precisionLog.push({
 t: this.state.seconds,
 timestamp: nowIso,
@@ -4291,6 +4350,10 @@ speedKmh: getTxt('curSpeed'),
 cadence: getTxt('cadence'),
 gctMs: getTxt('gct'),
 flightPct: getTxt('flight'),
+stepLengthM: stepLengthM,
+stepLengthWindowM: stepLengthWindowM != null ? stepLengthWindowM.toFixed(2) : '', // [추가] 구간평균 원본(디버그/재튜닝용)
+stepLengthInstantM: stepLengthInstantM != null ? stepLengthInstantM.toFixed(2) : '', // [추가] 순간공식 원본(디버그/재튜닝용)
+vertOscMm: vertOscMm,
 hrBpm: getTxt('hr-val'),
 hrZone: getTxt('hr-zone-val'),
 rotPeakDps: rotPeakDps
@@ -4345,6 +4408,7 @@ this.state.stepCount = 0;
 this.state.cadenceSamples = [];
 this.state.splits = [];
 this.state.precisionLog = []; // [추가] 정밀 비교용 초당 로그 (가민 워치 데이터와 대조용)
+this.state.strideWindow = []; // [추가] 보폭(step_length) 구간평균 계산용 슬라이딩 윈도우 버퍼
 this.state.lastKmCheckpoint = 0;
 this.state.lastKmSeconds = 0;
 this.state.lastKmAlt = this.state.currentAlt;
@@ -5962,10 +6026,11 @@ const garmin = (function () {
     0x8C: { size: 4, invalid: 0, read: (v,o,le) => v.getUint32(o, le) },
     0x0D: { size: 1, invalid: 0xFF, read: (v,o,le) => v.getUint8(o) },
   };
-  // [추가] 39=vertical_oscillation(mm, scale 10), 41=stance_time(ms, scale 10, = GCT 실측값).
+  // [추가] 39=vertical_oscillation(mm, scale 10), 41=stance_time(ms, scale 10, = GCT 실측값),
+  // 143=step_length(mm, scale 10, 초당 실측 보폭).
   // 러닝 다이나믹스 액세서리(HRM-Run/Pro, 러닝 파드 등)로 기록된 파일에만 값이 들어있고,
   // 없는 파일은 그냥 null로 남아서 기존 동작에 영향 없음.
-  const RECORD_FIELDS = { 253:'timestamp',0:'positionLat',1:'positionLong',2:'altitude',3:'heartRate',4:'cadence',5:'distance',6:'speed',73:'enhancedSpeed',78:'enhancedAltitude',39:'verticalOscillation',41:'stanceTime' };
+  const RECORD_FIELDS = { 253:'timestamp',0:'positionLat',1:'positionLong',2:'altitude',3:'heartRate',4:'cadence',5:'distance',6:'speed',73:'enhancedSpeed',78:'enhancedAltitude',39:'verticalOscillation',41:'stanceTime',143:'stepLength' };
   const RECORD_MESG_NUM = 20;
 
   function readDataFields(view, offset, def) {
@@ -5993,9 +6058,10 @@ const garmin = (function () {
       cadence: values[4] != null ? values[4] * 2 : null,
       distance: values[5] != null ? (values[5]/100) : null,
       speed: values[73] != null ? (values[73]/1000) : (values[6] != null ? (values[6]/1000) : null),
-      // [추가] 가민 실측 GCT(ms) / 수직진동(mm). 다이나믹스 액세서리 없으면 null.
+      // [추가] 가민 실측 GCT(ms) / 수직진동(mm) / 보폭(mm). 다이나믹스 액세서리 없으면 null.
       stanceTimeMs: values[41] != null ? (values[41]/10) : null,
-      verticalOscillationMm: values[39] != null ? (values[39]/10) : null
+      verticalOscillationMm: values[39] != null ? (values[39]/10) : null,
+      stepLengthMm: values[143] != null ? (values[143]/10) : null
     });
   }
 
@@ -6078,12 +6144,14 @@ const garmin = (function () {
     // [추가] 가민 러닝 다이나믹스 실측값 평균 (있는 경우에만)
     let gctSum = 0, gctCount = 0;
     let voSum = 0, voCount = 0;
+    let slSum = 0, slCount = 0; // [추가] step_length(mm) 집계
     let gain = 0, lastAlt = null;
     records.forEach(r => {
       if (r.heartRate != null) { hrSum += r.heartRate; hrCount++; if (r.heartRate > hrMax) hrMax = r.heartRate; }
       if (r.cadence != null) { cadSum += r.cadence; cadCount++; }
       if (r.stanceTimeMs != null) { gctSum += r.stanceTimeMs; gctCount++; }
       if (r.verticalOscillationMm != null) { voSum += r.verticalOscillationMm; voCount++; }
+      if (r.stepLengthMm != null) { slSum += r.stepLengthMm; slCount++; }
       if (r.altitude != null) {
         if (lastAlt != null && (r.altitude - lastAlt) > 0.5) gain += (r.altitude - lastAlt);
         lastAlt = r.altitude;
@@ -6097,13 +6165,14 @@ const garmin = (function () {
       avgCadence: cadCount ? Math.round(cadSum / cadCount) : null,
       avgGctMs: gctCount ? Math.round(gctSum / gctCount) : null,
       avgVertOscMm: voCount ? Math.round((voSum / voCount) * 10) / 10 : null,
+      avgStepLengthMm: slCount ? Math.round((slSum / slCount) * 10) / 10 : null, // [추가]
       avgPaceSecPerKm: distanceKm > 0.01 ? (durationSec / distanceKm) : null,
       elevationGain: Math.round(gain),
       recordCount: records.length,
-      // [추가] 시간 축 정렬 비교(캘리브레이션)용 원본 초당 레코드. 케이던스/GCT만 남겨서
+      // [추가] 시간 축 정렬 비교(캘리브레이션)용 원본 초당 레코드. 케이던스/GCT/수직진동/보폭만 남겨서
       // localStorage 용량을 아낀다 (위경도 등은 캘리브레이션에 불필요).
       records: records.map(r => ({
-        unixMs: r.unixMs, cadence: r.cadence, stanceTimeMs: r.stanceTimeMs, verticalOscillationMm: r.verticalOscillationMm
+        unixMs: r.unixMs, cadence: r.cadence, stanceTimeMs: r.stanceTimeMs, verticalOscillationMm: r.verticalOscillationMm, stepLengthMm: r.stepLengthMm
       }))
     };
   }
@@ -6148,6 +6217,7 @@ const garmin = (function () {
       [isKo ? '케이던스' : 'CADENCE', item.avgCadence != null ? item.avgCadence + ' spm' : '--'],
       [isKo ? '평균 GCT' : 'AVG GCT', item.avgGctMs != null ? item.avgGctMs + ' ms' : '--'],
       [isKo ? '수직진동' : 'VERT OSC', item.avgVertOscMm != null ? item.avgVertOscMm + ' mm' : '--'],
+      [isKo ? '보폭' : 'STEP LENGTH', item.avgStepLengthMm != null ? item.avgStepLengthMm + ' mm' : '--'],
       [isKo ? '상승고도' : 'ELEV GAIN', item.elevationGain + ' m'],
       [isKo ? '레코드 수' : 'RECORDS', item.recordCount]
     ];
@@ -6361,6 +6431,17 @@ const garmin = (function () {
     const cadDiffPct = phoneAvgCadence ? ((phoneAvgCadence - garminAvgCadence) / garminAvgCadence * 100) : null;
     const gctDiffPct = (phoneAvgGct && garminAvgGct) ? ((phoneAvgGct - garminAvgGct) / garminAvgGct * 100) : null;
 
+    // [추가] 보폭(step_length)/수직진동(vert_osc) 비교. 정밀 로그엔 m/cm 단위,
+    // 가민 데이터는 mm 단위로 들어있으므로 mm 기준으로 통일해서 비교한다.
+    const phoneAvgStepM = avgFromPrecLog(precItem.log, 'stepLengthM');
+    const phoneAvgStepMm = phoneAvgStepM != null ? phoneAvgStepM * 1000 : null;
+    const garminAvgStepMm = garminItem.avgStepLengthMm;
+    const stepDiffPct = (phoneAvgStepMm && garminAvgStepMm) ? ((phoneAvgStepMm - garminAvgStepMm) / garminAvgStepMm * 100) : null;
+
+    const phoneAvgVertMm = avgFromPrecLog(precItem.log, 'vertOscMm');
+    const garminAvgVertMm = garminItem.avgVertOscMm;
+    const vertDiffPct = (phoneAvgVertMm && garminAvgVertMm) ? ((phoneAvgVertMm - garminAvgVertMm) / garminAvgVertMm * 100) : null;
+
     // 현재 MotionManager 설정값 (실행 중이 아니어도 OppaRunApp 생성 시 저장된
     // 착용 위치 프로파일이 이미 적용돼 있음)
     let curGround = null, curGct = null, curRot = null;
@@ -6395,7 +6476,9 @@ const garmin = (function () {
       + '<span>' + (isKo ? '폰' : 'PHONE') + '</span><span>' + (isKo ? '가민' : 'GARMIN') + '</span><span>' + (isKo ? '오차' : 'DIFF') + '</span>'
       + '</div>'
       + row(isKo ? '케이던스 (spm)' : 'CADENCE (spm)', phoneAvgCadence, garminAvgCadence, cadDiffPct, '')
-      + row(isKo ? 'GCT (ms)' : 'GCT (ms)', phoneAvgGct, garminAvgGct, gctDiffPct, '');
+      + row(isKo ? 'GCT (ms)' : 'GCT (ms)', phoneAvgGct, garminAvgGct, gctDiffPct, '')
+      + row(isKo ? '보폭 (mm)' : 'STEP LEN (mm)', phoneAvgStepMm, garminAvgStepMm, stepDiffPct, '')
+      + row(isKo ? '수직진동 (mm)' : 'VERT OSC (mm)', phoneAvgVertMm, garminAvgVertMm, vertDiffPct, '');
 
     if (suggestedRot != null || suggestedGct != null) {
       html += '<div style="margin-top:12px; font-size:11px; color:#ccc; line-height:1.7;">'
