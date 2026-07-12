@@ -1374,9 +1374,7 @@ streakTitle: "RUN STREAK", streakCurrentLabel: "CURRENT STREAK", streakLongestLa
 heatmapSectionTitle: "ACTIVITY", heatmapLess: "Less", heatmapMore: "More", noRecShort: "--",
 yesBtn: "YES", noBtn: "NO", resumeSessionMsg: "Resume last session?",
 exitCancelBtn: "Cancel", exitCloseBtn: "Close",
-exitClosedTitle: "App Closed", exitClosedMsg: "Press the Home button<br>to return to your home screen",
-batteryGuideTitle: "Keep GPS Running", batteryGuideMsg: "On some phones, battery saving can stop GPS tracking when the screen is off or the app is in the background. Allow JennyRun to run without restrictions for accurate tracking?",
-batteryGuideSkipBtn: "Later", batteryGuideConfirmBtn: "Allow"
+exitClosedTitle: "App Closed", exitClosedMsg: "Press the Home button<br>to return to your home screen"
 },
 ko: {
 
@@ -1466,9 +1464,7 @@ streakTitle: "연속 러닝", streakCurrentLabel: "현재 연속", streakLongest
 heatmapSectionTitle: "활동 기록", heatmapLess: "적음", heatmapMore: "많음", noRecShort: "--",
 yesBtn: "예", noBtn: "아니오", resumeSessionMsg: "마지막 세션을 이어서 할까요?",
 exitCancelBtn: "취소", exitCloseBtn: "닫기",
-exitClosedTitle: "앱 종료됨", exitClosedMsg: "홈 버튼을 눌러<br>홈 화면으로 돌아가세요",
-batteryGuideTitle: "GPS 끊김 방지", batteryGuideMsg: "일부 기기는 절전 기능 때문에 화면이 꺼지거나 앱이 백그라운드에 있을 때 GPS 기록이 끊길 수 있어요. 정확한 기록을 위해 배터리 사용 제한을 해제할까요?",
-batteryGuideSkipBtn: "나중에", batteryGuideConfirmBtn: "허용하기"
+exitClosedTitle: "앱 종료됨", exitClosedMsg: "홈 버튼을 눌러<br>홈 화면으로 돌아가세요"
 }
 };
 // ========== RunningStorage ==========
@@ -1483,10 +1479,7 @@ this.UNIT_KEY = 'oppaRunUnit';
 this.GENDER_KEY = 'oppaRunGender';
 this.AUTO_PAUSE_KEY = 'oppaRunAutoPause';
 this.ACTIVITY_MODE_KEY = 'oppaRunActivityMode';
-this.BATTERY_GUIDE_KEY = 'oppaRunBatteryGuideShown'; // [신규] 배터리 최적화 예외 안내를 이미 보여줬는지 여부 (최초 1회만 노출)
 }
-getBatteryGuideShown() { return localStorage.getItem(this.BATTERY_GUIDE_KEY) === '1'; }
-setBatteryGuideShown() { localStorage.setItem(this.BATTERY_GUIDE_KEY, '1'); }
 saveRecord(record) {
 const history = this.loadHistory();
 history.unshift(record);
@@ -1585,8 +1578,8 @@ if (typeof ui !== 'undefined') ui.renderPrecisionLogList();
 }
 }
 buildPrecisionCsv(log) {
-const headers = ['t_sec','timestamp','lat','lng','gps_accuracy_m','dist_km','speed_kmh','cadence_spm','gct_ms','flight_pct','step_length_m','step_length_window_m','step_length_instant_m','vert_osc_mm','hr_bpm','hr_zone','rot_peak_dps'];
-const rows = log.map(r => [r.t, r.timestamp || '', r.lat || '', r.lng || '', r.gpsAcc != null ? r.gpsAcc : '', r.distKm, r.speedKmh, r.cadence, r.gctMs, r.flightPct, r.stepLengthM != null ? r.stepLengthM : '', r.stepLengthWindowM != null ? r.stepLengthWindowM : '', r.stepLengthInstantM != null ? r.stepLengthInstantM : '', r.vertOscMm != null ? r.vertOscMm : '', r.hrBpm, r.hrZone, r.rotPeakDps != null ? r.rotPeakDps : ''].join(','));
+const headers = ['t_sec','timestamp','lat','lng','gps_accuracy_m','dist_km','speed_kmh','cadence_spm','gct_ms','flight_pct','step_length_m','step_length_window_m','step_length_instant_m','vert_osc_mm','hr_bpm','hr_zone','rot_peak_dps','gyro_alpha_dps','gyro_beta_dps','gyro_gamma_dps'];
+const rows = log.map(r => [r.t, r.timestamp || '', r.lat || '', r.lng || '', r.gpsAcc != null ? r.gpsAcc : '', r.distKm, r.speedKmh, r.cadence, r.gctMs, r.flightPct, r.stepLengthM != null ? r.stepLengthM : '', r.stepLengthWindowM != null ? r.stepLengthWindowM : '', r.stepLengthInstantM != null ? r.stepLengthInstantM : '', r.vertOscMm != null ? r.vertOscMm : '', r.hrBpm, r.hrZone, r.rotPeakDps != null ? r.rotPeakDps : '', r.gyroAlpha != null ? r.gyroAlpha : '', r.gyroBeta != null ? r.gyroBeta : '', r.gyroGamma != null ? r.gyroGamma : ''].join(','));
 return headers.join(',') + '\n' + rows.join('\n');
 }
 downloadCsvFile(csvStr, fileName) {
@@ -3490,6 +3483,10 @@ this.recentCycleTimes = [];
 // 아래 rotationRate 처리부의 `|| 0` 폴백 덕분에 그 경우엔 안전하게 0으로 처리됨.
 this.rotPeakSinceLastStep = 0;
 this.rotRejectThreshold = 220;
+// [추가] 정밀 로그(초당)용: 가장 최근 완료된 스텝 1회의 축별 부호 있는 자이로 평균(deg/s)
+this.lastStepGyroA = null;
+this.lastStepGyroB = null;
+this.lastStepGyroG = null;
 // [추가] 좌우 판별 진단용: 이번 스텝 사이클 동안의 자이로 3축 부호 있는 값 누적
 // (rotPeakSinceLastStep은 크기만 보는 노이즈 필터용, 이건 방향까지 보는 진단용 — 별도)
 this.gyroCycleSum = { a: 0, b: 0, g: 0 };
@@ -3584,6 +3581,9 @@ this.gyroCycleSum = { a: 0, b: 0, g: 0 };
 this.gyroCycleCount = 0;
 this.sideGyroSum = [{ a: 0, b: 0, g: 0 }, { a: 0, b: 0, g: 0 }];
 this.sideGyroCount = [0, 0];
+this.lastStepGyroA = null;
+this.lastStepGyroB = null;
+this.lastStepGyroG = null;
 // [추가] 정밀 좌우 밸런스(gyroBal) 변수도 매 러닝 시작 시 초기화
 this.gyroCycleMagSum = 0;
 this.sideGyroMagSum = [0, 0];
@@ -3756,10 +3756,17 @@ this.sideGyroCount[curSide]++;
 // [추가] 정밀 좌우 밸런스(gyroBal)용: 이번 사이클 평균 자이로 크기를 side별로 누적
 this.sideGyroMagSum[curSide] += this.gyroCycleMagSum / this.gyroCycleCount;
 this.sideGyroMagCount[curSide]++;
+// [추가] 정밀 로그(초당)용: 이번에 끝난 스텝 1회의 축별 부호 있는 평균값을 그대로 보관
+// (리셋되기 전에 저장해야 함 — 아래에서 gyroCycleSum이 0으로 초기화됨)
+this.lastStepGyroA = +(this.gyroCycleSum.a / this.gyroCycleCount).toFixed(2);
+this.lastStepGyroB = +(this.gyroCycleSum.b / this.gyroCycleCount).toFixed(2);
+this.lastStepGyroG = +(this.gyroCycleSum.g / this.gyroCycleCount).toFixed(2);
 }
 this.gyroCycleSum = { a: 0, b: 0, g: 0 };
 this.gyroCycleCount = 0;
 this.gyroCycleMagSum = 0;
+// [추가] 정밀 로그(초당)용: 가장 최근 완료된 스텝 1회의 축별 부호 있는 자이로 평균(deg/s).
+// sideGyroSum은 좌우 밸런스 산출용 누적 총합이라 초당 시계열로는 못 씀 — 로그 export용으로 별도 보관.
 this.stepSide = 1 - this.stepSide; // 다음 걸음은 반대쪽 발로 교대
 this.onStep(result);
 }
@@ -4243,16 +4250,23 @@ this.state.stepTimes.push(now);
 this.state.stepTimes = this.state.stepTimes.filter(t => now - t <= 10000);
 const windowSec = Math.min(10, this.state.seconds || 1);
 const cadVal = Math.round((this.state.stepTimes.length / windowSec) * 60);
-ui.updateRunningDisplay({cadence: cadVal, gct: data.gct || 0, flight: data.flight || 0});
+// [수정] 사람이 걷거나 뛸 때 낼 수 있는 물리적 케이던스 범위(대략 60~280 SPM)를
+// 벗어난 순간값은 오감지/노이즈로 간주. 기존엔 이 클램프가 cadenceSamples(평균 계산용)에만
+// 적용되고 실시간 화면 표시 + precision log(getTxt('cadence')로 DOM값을 그대로 읽어감)에는
+// 적용 안 돼서, 러닝 시작 직후 windowSec이 1~2초로 작을 때 노이즈 스텝 몇 개만으로도
+// 400+ SPM 같은 비현실적 값이 화면/CSV에 그대로 찍히던 문제(2026-07-12 실측 로그 t=2초,
+// cadence=420 확인)를 수정. 범위를 벗어나면 직전 유효 표시값을 유지.
+const CADENCE_MIN_SPM = 60;
+const CADENCE_MAX_SPM = 280;
+const cadValid = (cadVal >= CADENCE_MIN_SPM && cadVal <= CADENCE_MAX_SPM);
+if (cadValid) this.state.lastValidCadenceDisplay = cadVal;
+const cadDisplay = cadValid ? cadVal : (this.state.lastValidCadenceDisplay || 0);
+ui.updateRunningDisplay({cadence: cadDisplay, gct: data.gct || 0, flight: data.flight || 0});
 // [수정] 케이던스 안정화: steps/전체시간 대신, 실시간 10초 윈도우 값들을
 // 계속 누적해뒀다가 종료 시점에 이 샘플들의 평균(트림 평균)을 최종 기록에 사용.
 // → 시작 워밍업 구간이나 순간적인 오감지로 인한 값 튐이 평균 과정에서 완화됨.
 // 윈도우가 최소 3초 이상 찼을 때부터 샘플링(초반 1~2초의 극단값 배제).
-// [추가] 사람이 걷거나 뛸 때 낼 수 있는 물리적 케이던스 범위(대략 60~280 SPM)를
-// 벗어난 순간값은 오감지/노이즈로 간주해 샘플에 넣지 않음.
-const CADENCE_MIN_SPM = 60;
-const CADENCE_MAX_SPM = 280;
-if (windowSec >= 3 && cadVal >= CADENCE_MIN_SPM && cadVal <= CADENCE_MAX_SPM) {
+if (windowSec >= 3 && cadValid) {
 if (!this.state.cadenceSamples) this.state.cadenceSamples = [];
 this.state.cadenceSamples.push(cadVal);
 }
@@ -4402,6 +4416,11 @@ if (stepLengthWindowM != null && stepLengthInstantM != null) {
 }
 const vertOscMm = (this.motion && this.motion.lastStepVertOscCm != null)
   ? (this.motion.lastStepVertOscCm * 10).toFixed(1) : '';
+// [추가] 좌우 판별 진단용: 가장 최근 완료된 스텝 1회의 축별 부호 있는 자이로 평균(deg/s).
+// alpha/beta/gamma 중 어느 축이 실제 좌우와 상관관계가 있는지 실측으로 확인하기 위한 원시값.
+const gyroA = (this.motion && this.motion.lastStepGyroA != null) ? this.motion.lastStepGyroA : '';
+const gyroB = (this.motion && this.motion.lastStepGyroB != null) ? this.motion.lastStepGyroB : '';
+const gyroG = (this.motion && this.motion.lastStepGyroG != null) ? this.motion.lastStepGyroG : '';
 this.state.precisionLog.push({
 t: this.state.seconds,
 timestamp: nowIso,
@@ -4419,7 +4438,10 @@ stepLengthInstantM: stepLengthInstantM != null ? stepLengthInstantM.toFixed(2) :
 vertOscMm: vertOscMm,
 hrBpm: getTxt('hr-val'),
 hrZone: getTxt('hr-zone-val'),
-rotPeakDps: rotPeakDps
+rotPeakDps: rotPeakDps,
+gyroAlpha: gyroA,
+gyroBeta: gyroB,
+gyroGamma: gyroG
 });
 }
 // [신규] 화면 꺼짐 대응: setInterval 대신 네이티브 모션/위치 이벤트가 들어올 때마다
@@ -4488,6 +4510,7 @@ this.state.totalGct = 0;
 this.state.totalFlight = 0;
 this.state.stepCount = 0;
 this.state.cadenceSamples = [];
+this.state.lastValidCadenceDisplay = 0; // [추가] 케이던스 클램프용 직전 유효값도 새 러닝마다 초기화
 this.state.splits = [];
 this.state.precisionLog = []; // [추가] 정밀 비교용 초당 로그 (가민 워치 데이터와 대조용)
 this.state.strideWindow = []; // [추가] 보폭(step_length) 구간평균 계산용 슬라이딩 윈도우 버퍼
@@ -4523,10 +4546,6 @@ this.startSilentKeepAlive();
 // [신규] 네이티브 Foreground Service 시작 (화면 꺼져도 GPS 계속 수집)
 if (window.AndroidLocationBridge && AndroidLocationBridge.startTracking) {
 AndroidLocationBridge.startTracking();
-}
-// [신규] 배터리 최적화 예외 안내 (최초 러닝 시작 1회만, 러닝 시작을 막지 않고 위에 안내만 띄움)
-if (typeof maybeShowBatteryGuide === 'function') {
-maybeShowBatteryGuide();
 }
 // [신규] 러닝 중 주머니 안 오터치로 Home/최근앱 이탈되는 것 방지 (화면 고정)
 if (window.AndroidLockBridge && AndroidLockBridge.lockRun) {
@@ -7026,138 +7045,6 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
     // 그 외 → 종료 다이얼로그 표시
     showExitDialog();
   });
-})();
-// ========== [신규] 배터리 최적화 예외 안내 다이얼로그 ==========
-// 첫 러닝 시작 시(딱 1회) "설정하기"를 누르면 시스템 배터리 최적화 예외 화면으로 이동.
-// 러닝 시작 자체는 막지 않고, 화면 위에 안내 카드만 띄운다.
-(function() {
-  const style = document.createElement('style');
-  style.textContent = `
-    #battery-guide-overlay {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.75);
-      z-index: 999999;
-      align-items: center;
-      justify-content: center;
-    }
-    #battery-guide-overlay.active { display: flex; }
-    #battery-guide-box {
-      background: #1e1e1e;
-      border: 1.5px solid #333;
-      border-radius: 18px;
-      padding: 24px 26px;
-      width: 82%;
-      max-width: 320px;
-      text-align: center;
-      box-shadow: 0 8px 40px rgba(0,0,0,0.8);
-    }
-    #battery-guide-title {
-      font-size: 15px;
-      font-weight: 900;
-      color: #fff;
-      margin-bottom: 10px;
-    }
-    #battery-guide-msg {
-      font-size: 13px;
-      color: #bbb;
-      margin-bottom: 20px;
-      line-height: 1.6;
-    }
-    #battery-guide-btns { display: flex; gap: 10px; }
-    #btn-battery-skip {
-      flex: 1;
-      padding: 14px 0;
-      border-radius: 12px;
-      border: 1.5px solid #444;
-      background: #2a2a2a;
-      color: #aaa;
-      font-size: 15px;
-      font-weight: 900;
-      cursor: pointer;
-    }
-    #btn-battery-confirm {
-      flex: 1;
-      padding: 14px 0;
-      border-radius: 12px;
-      border: none;
-      background: var(--primary);
-      color: #000;
-      font-size: 15px;
-      font-weight: 900;
-      cursor: pointer;
-    }
-    #btn-battery-skip:active { background: #333; }
-    #btn-battery-confirm:active { filter: brightness(0.9); }
-  `;
-  document.head.appendChild(style);
-
-  const div = document.createElement('div');
-  div.id = 'battery-guide-overlay';
-  div.innerHTML = `
-    <div id="battery-guide-box">
-      <div id="battery-guide-title"></div>
-      <div id="battery-guide-msg"></div>
-      <div id="battery-guide-btns">
-        <button id="btn-battery-skip"></button>
-        <button id="btn-battery-confirm"></button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(div);
-
-  const overlay = document.getElementById('battery-guide-overlay');
-  const titleEl = document.getElementById('battery-guide-title');
-  const msgEl = document.getElementById('battery-guide-msg');
-  const btnSkip = document.getElementById('btn-battery-skip');
-  const btnConfirm = document.getElementById('btn-battery-confirm');
-
-  function applyBatteryGuideLang() {
-    try {
-      const lang = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang() : 'en';
-      const t = translations[lang] || translations['en'];
-      if (titleEl) titleEl.textContent = t.batteryGuideTitle;
-      if (msgEl) msgEl.textContent = t.batteryGuideMsg;
-      if (btnSkip) btnSkip.textContent = t.batteryGuideSkipBtn;
-      if (btnConfirm) btnConfirm.textContent = t.batteryGuideConfirmBtn;
-    } catch (e) {}
-  }
-
-  function hideBatteryGuide() {
-    overlay.classList.remove('active');
-  }
-
-  btnSkip.addEventListener('click', hideBatteryGuide);
-  btnConfirm.addEventListener('click', function() {
-    hideBatteryGuide();
-    try {
-      if (window.AndroidBatteryBridge && AndroidBatteryBridge.requestIgnoreBatteryOptimizations) {
-        AndroidBatteryBridge.requestIgnoreBatteryOptimizations();
-      }
-    } catch (e) {}
-  });
-  overlay.addEventListener('click', function(e) {
-    if (e.target === overlay) hideBatteryGuide();
-  });
-
-  // [신규] 러닝 시작 시 호출됨. 최초 1회만, 네이티브 브릿지가 있고
-  // 아직 배터리 최적화 예외가 아닐 때만 노출. 노출 여부는 사용자의 선택과
-  // 무관하게(허용/나중에 둘 다) 즉시 "본 것"으로 기록해서 매번 뜨지 않게 함.
-  window.maybeShowBatteryGuide = function() {
-    try {
-      if (typeof storage === 'undefined' || storage.getBatteryGuideShown()) return;
-      if (!window.AndroidBatteryBridge || !AndroidBatteryBridge.isIgnoringBatteryOptimizations) return;
-      if (AndroidBatteryBridge.isIgnoringBatteryOptimizations()) {
-        // 이미 예외 설정이 돼 있으면 안내할 필요 없음 → 그냥 본 것으로 처리
-        storage.setBatteryGuideShown();
-        return;
-      }
-      storage.setBatteryGuideShown();
-      applyBatteryGuideLang();
-      overlay.classList.add('active');
-    } catch (e) {}
-  };
 })();
 </script>
 <div id="share-crew-modal" class="custom-confirm-overlay">
