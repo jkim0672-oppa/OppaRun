@@ -3477,8 +3477,10 @@ this.lastStepVertOscCm = null;
 this.recentCycleTimes = [];
 // [추가] 자이로스코프 기반 노이즈 필터: 스텝 사이클 동안의 최대 회전각속도(deg/s)
 // 임계값은 1차 추정치 — 실측 테스트로 조정이 필요할 수 있음.
-// 네이티브 백그라운드 경로(onNativeMotionUpdate)는 rotationRate를 주지 않으므로
-// 그 경로에서는 이 값이 항상 0으로 남아 필터가 자동으로 비활성 상태가 됨.
+// [수정] 네이티브 백그라운드 경로(onNativeMotionUpdate)도 이제 LocationForegroundService가
+// TYPE_GYROSCOPE를 등록해서 실제 자이로 값을 같이 보내주므로 정상 동작함(더 이상 0 고정 아님).
+// 다만 자이로 미탑재 기기이거나 첫 자이로 이벤트가 아직 도착 전이면 null로 들어오는데,
+// 아래 rotationRate 처리부의 `|| 0` 폴백 덕분에 그 경우엔 안전하게 0으로 처리됨.
 this.rotPeakSinceLastStep = 0;
 this.rotRejectThreshold = 220;
 // [추가] 좌우 판별 진단용: 이번 스텝 사이클 동안의 자이로 3축 부호 있는 값 누적
@@ -3609,8 +3611,9 @@ if (acc.z > this.vertMax) this.vertMax = acc.z;
 
 // [추가] 자이로스코프 기반 노이즈 추적: 폰이 주머니/암밴드 안에서 회전하며
 // 덜렁거리는 움직임은 회전각속도가 크게 튀는 경향이 있음. 브라우저
-// devicemotion 이벤트에는 rotationRate가 함께 오므로(네이티브 백그라운드
-// 경로는 없음 — 그 경우 아래는 그냥 실행되지 않고 0으로 유지됨), 이번
+// devicemotion 이벤트와 네이티브 경로(onNativeMotionUpdate) 둘 다
+// rotationRate를 채워서 넘겨줌 — 자이로 미탑재 기기이거나 값이 아직
+// 없는 경우엔 null → 아래 `|| 0` 폴백으로 안전하게 0 처리됨. 이번
 // 스텝 사이클 동안의 최대 회전량을 추적해 두었다가 걸음 판정 시 활용.
 if (e.rotationRate) {
 const rr = e.rotationRate;
@@ -4319,6 +4322,15 @@ formatPace(kmh) { if (!kmh || kmh < 0.5) return INVALID_PACE; let s = 3600 / kmh
 // 기존 계산 로직을 절대 건드리지 않고, 이미 화면에 표시되고 있는 DOM 값들을
 // 그대로 "읽기만" 해서 배열에 쌓는다 (부작용 없음, read-only).
 logPrecisionSample() {
+// [수정] 화면 꺼짐 대응: 기존엔 this.state.seconds가 화면 켜져있을 때만 도는
+// setInterval(this.timer) 안에서만 갱신됐음. 화면 꺼진 동안엔 이 인터벌이
+// 스로틀링돼서 seconds가 멈춰있는데, 그 상태에서 로그를 찍으면 t(경과초) 값이
+// 실제 시각과 어긋나게 됨. logPrecisionSample()이 호출될 때마다 항상
+// getElapsedSeconds()로 즉시 재계산해서, 어디서 호출되든(인터벌이든 네이티브
+// 모션 이벤트든) t 값이 항상 정확하도록 함.
+if (typeof this.getElapsedSeconds === 'function') {
+this.state.seconds = this.getElapsedSeconds();
+}
 // [추가] 걷기 모드는 정밀 로그(가민 러닝 다이나믹스 비교용) 대상이 아님.
 // 게다가 걷기 모드에선 'cadence' DOM이 실제 케이던스가 아니라 걸음수 텍스트로
 // 재활용되고 있어서, 그대로 로깅하면 의미 없는 값(케이던스/보폭 등)이 쌓이게 됨.
@@ -4403,6 +4415,17 @@ hrZone: getTxt('hr-zone-val'),
 rotPeakDps: rotPeakDps
 });
 }
+// [신규] 화면 꺼짐 대응: setInterval 대신 네이티브 모션/위치 이벤트가 들어올 때마다
+// 이 함수를 호출해서, 1초가 지났으면 그때만 logPrecisionSample()을 실제로 실행.
+// setInterval을 쓰지 않으므로 화면이 꺼져 JS 타이머가 스로틀링돼도 영향받지 않고,
+// 네이티브 브릿지가 호출해주는 한 계속 1초 간격으로 로그가 쌓인다.
+maybeLogPrecisionSample() {
+const now = Date.now();
+if (!this.state.lastPrecisionLogAt || (now - this.state.lastPrecisionLogAt) >= 1000) {
+this.state.lastPrecisionLogAt = now;
+this.logPrecisionSample();
+}
+}
 async requestMotionPermission() {
 // [신규] 네이티브 앱(안드로이드 래퍼) 안에서는 가속도계가
 // LocationForegroundService → onNativeMotionUpdate 경로로 들어오므로,
@@ -4418,6 +4441,7 @@ if (!this.motionListenerAttached) {
 window.addEventListener('devicemotion', (e) => {
 if (this.state.isRunning && !this.state.isPaused) {
 if (this.state.activityMode === "walk") { this.walkMotion.handleMotion(e); } else { this.motion.handleMotion(e); }
+if (!this.state.isAutoPaused && typeof this.maybeLogPrecisionSample === 'function') { this.maybeLogPrecisionSample(); }
 }
 });
 this.motionListenerAttached = true;
@@ -4429,6 +4453,7 @@ if (!this.motionListenerAttached) {
 window.addEventListener('devicemotion', (e) => {
 if (this.state.isRunning && !this.state.isPaused) {
 if (this.state.activityMode === "walk") { this.walkMotion.handleMotion(e); } else { this.motion.handleMotion(e); }
+if (!this.state.isAutoPaused && typeof this.maybeLogPrecisionSample === 'function') { this.maybeLogPrecisionSample(); }
 }
 });
 this.motionListenerAttached = true;
@@ -4507,14 +4532,13 @@ ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padSt
 if (this.state.activityMode === "walk") { this.updateWalkLiveMetrics(); } else { this.updateLiveCalories(); }
 }
 }, 1000);
-// [추가] 정밀 비교용 로깅 타이머 (기존 this.timer와 완전히 독립적으로 동작,
-// 기존 로직에는 전혀 영향을 주지 않고 화면에 표시되는 값을 그대로 1초마다 기록만 함)
-if (this.precisionLogTimer) clearInterval(this.precisionLogTimer);
-this.precisionLogTimer = setInterval(() => {
-if (this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
-this.logPrecisionSample();
-}
-}, 1000);
+// [수정] 정밀 비교용 로깅을 기존 setInterval 방식에서 이벤트 트리거 방식으로 전환.
+// 기존엔 화면이 꺼지면 이 setInterval 자체가 스로틀링(사실상 정지)돼서
+// 화면 꺼짐 구간의 정밀 로그(precisionLog)가 텅 비는 문제가 있었음.
+// → 네이티브 모션/위치 브릿지(onNativeMotionUpdate/onNativeLocationUpdate)는
+// 화면 꺼짐과 무관하게 계속 호출되므로, 그쪽에서 maybeLogPrecisionSample()을
+// 불러 1초에 한 번씩 찍히도록 함(스로틀은 lastPrecisionLogAt으로 직접 관리).
+this.state.lastPrecisionLogAt = 0;
 }
 onStop() {
 this.state.isPaused = true;
@@ -4530,10 +4554,6 @@ if(ui.dom.afterStop) ui.dom.afterStop.style.display = 'flex';
 if (this.timer) {
 clearInterval(this.timer);
 this.timer = null;
-}
-if (this.precisionLogTimer) {
-clearInterval(this.precisionLogTimer);
-this.precisionLogTimer = null;
 }
 }
 onResume() {
@@ -4564,17 +4584,12 @@ if (this.state.activityMode === "walk") { this.updateWalkLiveMetrics(); } else {
 }
 }, 1000);
 }
-if (!this.precisionLogTimer) {
-this.precisionLogTimer = setInterval(() => {
-if (this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
-this.logPrecisionSample();
-}
-}, 1000);
-}
+// [수정] setInterval 기반 정밀 로그 타이머 제거(위 onStart 참고) - 이벤트 트리거 방식으로 전환.
+// 재개 시에는 스로틀 타임스탬프만 리셋해서 재개 직후 첫 모션/위치 이벤트에서 바로 한 번 찍히게 함.
+this.state.lastPrecisionLogAt = 0;
 }
 onFinish() {
 if(this.timer) clearInterval(this.timer);
-if(this.precisionLogTimer) { clearInterval(this.precisionLogTimer); this.precisionLogTimer = null; }
 this.stopSilentKeepAlive();
 // [추가] 캘리브레이션 러닝(4번 개선사항)이면 일반 기록 저장 대신
 // 개인 보폭 보정계수만 계산해서 저장하고 종료한다.
@@ -4905,22 +4920,23 @@ coords: { latitude: lat, longitude: lng, altitude: alt, accuracy: accuracy, spee
 timestamp: timestamp
 });
 }
+// [신규] 화면 꺼짐 대응: setInterval 대신 위치 이벤트에서도 정밀 로그 트리거 시도
+// (가속도계 이벤트가 뜸한 구간에 대한 이중 안전망 - maybeLogPrecisionSample이
+// 1초 스로틀을 직접 관리하므로 두 경로에서 불러도 중복 기록되지 않음)
+if (app && app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused &&
+    typeof app.maybeLogPrecisionSample === 'function') {
+app.maybeLogPrecisionSample();
+}
 } catch (e) { console.error('onNativeLocationUpdate error', e); }
 };
 
 // [신규] 화면 꺼짐 대응: 네이티브 LocationForegroundService가 가속도계를 수집하면
 // MainActivity(Kotlin)가 이 함수를 호출해서 기존 MotionManager.handleMotion() 로직으로 합류시킴
-// [수정] gx, gy, gz(자이로스코프 회전각속도, 단위: deg/s)는 선택 인자.
-// 네이티브(Kotlin) 쪽이 아직 자이로스코프를 안 보내면 undefined로 들어오고,
-// 그러면 회전 기반 노이즈 필터는 자동으로 비활성 상태로 남는다(기존 동작 그대로).
-// ------------------------------------------------------------------
-// [네이티브 개발자 참고] 화면 꺼짐 상태에서도 자이로 필터를 쓰려면 Kotlin 쪽에서:
-//   1) LocationForegroundService에 SensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE) 등록
-//   2) onSensorChanged에서 받은 값(단위: rad/s)을 deg/s로 변환: value * (180.0 / PI)
-//   3) 아래처럼 6개 인자로 호출:
-//      onNativeMotionUpdate(x, y, z, timestamp, gxDeg, gyDeg, gzDeg)
-// 이렇게만 해주면 JS 쪽 필터 로직은 수정 없이 바로 동작함.
-// ------------------------------------------------------------------
+// gx, gy, gz(자이로스코프 회전각속도, 단위: deg/s)는 선택 인자.
+// [수정] LocationForegroundService.kt가 TYPE_GYROSCOPE도 등록해서 rad/s→deg/s 변환 후
+// 6개 인자로 호출해주고 있음(구현 완료). 자이로 미탑재 기기이거나 첫 값이 아직
+// 안 왔을 때만 null로 들어오고, 그 경우 아래 rotationRate 처리부의 `|| 0` 폴백으로
+// 안전하게 0 처리된다.
 window.onNativeMotionUpdate = function (x, y, z, timestamp, gx, gy, gz) {
 try {
 if (typeof app !== 'undefined' && app &&
@@ -4937,6 +4953,11 @@ if (app.state.activityMode === 'walk') {
 if (app.walkMotion) app.walkMotion.handleMotion(evt);
 } else {
 if (app.motion) app.motion.handleMotion(evt);
+}
+// [신규] 화면 꺼짐 대응: setInterval 대신 여기서 정밀 로그 트리거
+// (가속도계는 보통 GPS보다 훨씬 자주 들어오므로 이쪽이 주 경로)
+if (typeof app.maybeLogPrecisionSample === 'function') {
+app.maybeLogPrecisionSample();
 }
 }
 } catch (e) { console.error('onNativeMotionUpdate error', e); }
