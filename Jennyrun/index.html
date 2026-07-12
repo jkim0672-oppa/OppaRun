@@ -1374,7 +1374,9 @@ streakTitle: "RUN STREAK", streakCurrentLabel: "CURRENT STREAK", streakLongestLa
 heatmapSectionTitle: "ACTIVITY", heatmapLess: "Less", heatmapMore: "More", noRecShort: "--",
 yesBtn: "YES", noBtn: "NO", resumeSessionMsg: "Resume last session?",
 exitCancelBtn: "Cancel", exitCloseBtn: "Close",
-exitClosedTitle: "App Closed", exitClosedMsg: "Press the Home button<br>to return to your home screen"
+exitClosedTitle: "App Closed", exitClosedMsg: "Press the Home button<br>to return to your home screen",
+batteryGuideTitle: "Keep GPS Running", batteryGuideMsg: "On some phones, battery saving can stop GPS tracking when the screen is off or the app is in the background. Allow JennyRun to run without restrictions for accurate tracking?",
+batteryGuideSkipBtn: "Later", batteryGuideConfirmBtn: "Allow"
 },
 ko: {
 
@@ -1464,7 +1466,9 @@ streakTitle: "연속 러닝", streakCurrentLabel: "현재 연속", streakLongest
 heatmapSectionTitle: "활동 기록", heatmapLess: "적음", heatmapMore: "많음", noRecShort: "--",
 yesBtn: "예", noBtn: "아니오", resumeSessionMsg: "마지막 세션을 이어서 할까요?",
 exitCancelBtn: "취소", exitCloseBtn: "닫기",
-exitClosedTitle: "앱 종료됨", exitClosedMsg: "홈 버튼을 눌러<br>홈 화면으로 돌아가세요"
+exitClosedTitle: "앱 종료됨", exitClosedMsg: "홈 버튼을 눌러<br>홈 화면으로 돌아가세요",
+batteryGuideTitle: "GPS 끊김 방지", batteryGuideMsg: "일부 기기는 절전 기능 때문에 화면이 꺼지거나 앱이 백그라운드에 있을 때 GPS 기록이 끊길 수 있어요. 정확한 기록을 위해 배터리 사용 제한을 해제할까요?",
+batteryGuideSkipBtn: "나중에", batteryGuideConfirmBtn: "허용하기"
 }
 };
 // ========== RunningStorage ==========
@@ -1479,7 +1483,10 @@ this.UNIT_KEY = 'oppaRunUnit';
 this.GENDER_KEY = 'oppaRunGender';
 this.AUTO_PAUSE_KEY = 'oppaRunAutoPause';
 this.ACTIVITY_MODE_KEY = 'oppaRunActivityMode';
+this.BATTERY_GUIDE_KEY = 'oppaRunBatteryGuideShown'; // [신규] 배터리 최적화 예외 안내를 이미 보여줬는지 여부 (최초 1회만 노출)
 }
+getBatteryGuideShown() { return localStorage.getItem(this.BATTERY_GUIDE_KEY) === '1'; }
+setBatteryGuideShown() { localStorage.setItem(this.BATTERY_GUIDE_KEY, '1'); }
 saveRecord(record) {
 const history = this.loadHistory();
 history.unshift(record);
@@ -4517,6 +4524,10 @@ this.startSilentKeepAlive();
 if (window.AndroidLocationBridge && AndroidLocationBridge.startTracking) {
 AndroidLocationBridge.startTracking();
 }
+// [신규] 배터리 최적화 예외 안내 (최초 러닝 시작 1회만, 러닝 시작을 막지 않고 위에 안내만 띄움)
+if (typeof maybeShowBatteryGuide === 'function') {
+maybeShowBatteryGuide();
+}
 // [신규] 러닝 중 주머니 안 오터치로 Home/최근앱 이탈되는 것 방지 (화면 고정)
 if (window.AndroidLockBridge && AndroidLockBridge.lockRun) {
 AndroidLockBridge.lockRun();
@@ -7015,6 +7026,138 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
     // 그 외 → 종료 다이얼로그 표시
     showExitDialog();
   });
+})();
+// ========== [신규] 배터리 최적화 예외 안내 다이얼로그 ==========
+// 첫 러닝 시작 시(딱 1회) "설정하기"를 누르면 시스템 배터리 최적화 예외 화면으로 이동.
+// 러닝 시작 자체는 막지 않고, 화면 위에 안내 카드만 띄운다.
+(function() {
+  const style = document.createElement('style');
+  style.textContent = `
+    #battery-guide-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.75);
+      z-index: 999999;
+      align-items: center;
+      justify-content: center;
+    }
+    #battery-guide-overlay.active { display: flex; }
+    #battery-guide-box {
+      background: #1e1e1e;
+      border: 1.5px solid #333;
+      border-radius: 18px;
+      padding: 24px 26px;
+      width: 82%;
+      max-width: 320px;
+      text-align: center;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.8);
+    }
+    #battery-guide-title {
+      font-size: 15px;
+      font-weight: 900;
+      color: #fff;
+      margin-bottom: 10px;
+    }
+    #battery-guide-msg {
+      font-size: 13px;
+      color: #bbb;
+      margin-bottom: 20px;
+      line-height: 1.6;
+    }
+    #battery-guide-btns { display: flex; gap: 10px; }
+    #btn-battery-skip {
+      flex: 1;
+      padding: 14px 0;
+      border-radius: 12px;
+      border: 1.5px solid #444;
+      background: #2a2a2a;
+      color: #aaa;
+      font-size: 15px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+    #btn-battery-confirm {
+      flex: 1;
+      padding: 14px 0;
+      border-radius: 12px;
+      border: none;
+      background: var(--primary);
+      color: #000;
+      font-size: 15px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+    #btn-battery-skip:active { background: #333; }
+    #btn-battery-confirm:active { filter: brightness(0.9); }
+  `;
+  document.head.appendChild(style);
+
+  const div = document.createElement('div');
+  div.id = 'battery-guide-overlay';
+  div.innerHTML = `
+    <div id="battery-guide-box">
+      <div id="battery-guide-title"></div>
+      <div id="battery-guide-msg"></div>
+      <div id="battery-guide-btns">
+        <button id="btn-battery-skip"></button>
+        <button id="btn-battery-confirm"></button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(div);
+
+  const overlay = document.getElementById('battery-guide-overlay');
+  const titleEl = document.getElementById('battery-guide-title');
+  const msgEl = document.getElementById('battery-guide-msg');
+  const btnSkip = document.getElementById('btn-battery-skip');
+  const btnConfirm = document.getElementById('btn-battery-confirm');
+
+  function applyBatteryGuideLang() {
+    try {
+      const lang = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang() : 'en';
+      const t = translations[lang] || translations['en'];
+      if (titleEl) titleEl.textContent = t.batteryGuideTitle;
+      if (msgEl) msgEl.textContent = t.batteryGuideMsg;
+      if (btnSkip) btnSkip.textContent = t.batteryGuideSkipBtn;
+      if (btnConfirm) btnConfirm.textContent = t.batteryGuideConfirmBtn;
+    } catch (e) {}
+  }
+
+  function hideBatteryGuide() {
+    overlay.classList.remove('active');
+  }
+
+  btnSkip.addEventListener('click', hideBatteryGuide);
+  btnConfirm.addEventListener('click', function() {
+    hideBatteryGuide();
+    try {
+      if (window.AndroidBatteryBridge && AndroidBatteryBridge.requestIgnoreBatteryOptimizations) {
+        AndroidBatteryBridge.requestIgnoreBatteryOptimizations();
+      }
+    } catch (e) {}
+  });
+  overlay.addEventListener('click', function(e) {
+    if (e.target === overlay) hideBatteryGuide();
+  });
+
+  // [신규] 러닝 시작 시 호출됨. 최초 1회만, 네이티브 브릿지가 있고
+  // 아직 배터리 최적화 예외가 아닐 때만 노출. 노출 여부는 사용자의 선택과
+  // 무관하게(허용/나중에 둘 다) 즉시 "본 것"으로 기록해서 매번 뜨지 않게 함.
+  window.maybeShowBatteryGuide = function() {
+    try {
+      if (typeof storage === 'undefined' || storage.getBatteryGuideShown()) return;
+      if (!window.AndroidBatteryBridge || !AndroidBatteryBridge.isIgnoringBatteryOptimizations) return;
+      if (AndroidBatteryBridge.isIgnoringBatteryOptimizations()) {
+        // 이미 예외 설정이 돼 있으면 안내할 필요 없음 → 그냥 본 것으로 처리
+        storage.setBatteryGuideShown();
+        return;
+      }
+      storage.setBatteryGuideShown();
+      applyBatteryGuideLang();
+      overlay.classList.add('active');
+    } catch (e) {}
+  };
 })();
 </script>
 <div id="share-crew-modal" class="custom-confirm-overlay">
