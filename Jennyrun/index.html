@@ -6727,6 +6727,40 @@ const garmin = (function () {
     return count ? (sum / count) : null;
   }
 
+  // [추가] 폰 vs 가민 오버롤 비교를 막대그래프로 보여준다. 항목마다 단위/스케일이
+  // 완전히 달라서(케이던스 spm, GCT ms, 보폭 mm, 수직진동 mm) 절대값으로 나란히 그리면
+  // 의미가 없으므로, 항목별로 "그 둘 중 더 큰 값"을 100%로 잡아 상대 높이로 그린다 —
+  // 즉 막대 두 개 높이가 비슷할수록 그 항목의 오차가 작다는 뜻.
+  function buildOverallChart(isKo, items) {
+    const usable = items.filter(it => it.phone != null && it.garmin != null);
+    if (!usable.length) return '';
+    const barMaxH = 64;
+    const cols = usable.map(it => {
+      const maxV = Math.max(it.phone, it.garmin, 0.0001);
+      const phoneH = Math.max(2, Math.round((it.phone / maxV) * barMaxH));
+      const garminH = Math.max(2, Math.round((it.garmin / maxV) * barMaxH));
+      return '<div style="flex:1; display:flex; flex-direction:column; align-items:center;">'
+        + '<div style="display:flex; align-items:flex-end; gap:5px; height:' + barMaxH + 'px;">'
+        + '<div style="width:16px; height:' + phoneH + 'px; background:var(--primary); border-radius:3px 3px 0 0;"></div>'
+        + '<div style="width:16px; height:' + garminH + 'px; background:#555; border-radius:3px 3px 0 0;"></div>'
+        + '</div>'
+        + '<div style="font-size:9px; color:#888; font-weight:800; text-align:center; margin-top:6px; line-height:1.3;">' + it.label + '</div>'
+        + '</div>';
+    }).join('');
+
+    return '<div style="margin-top:14px;">'
+      + '<div style="color:var(--primary); font-weight:900; font-size:11px; margin-bottom:10px;">' + (isKo ? '전체 비교 그래프' : 'OVERALL COMPARISON') + '</div>'
+      + '<div style="display:flex; gap:6px; align-items:flex-end; padding:0 2px;">' + cols + '</div>'
+      + '<div style="display:flex; gap:16px; justify-content:center; margin-top:12px; font-size:10px; color:#999; font-weight:700;">'
+      + '<div><span style="display:inline-block; width:9px; height:9px; background:var(--primary); border-radius:2px; margin-right:5px; vertical-align:middle;"></span>' + (isKo ? '폰' : 'PHONE') + '</div>'
+      + '<div><span style="display:inline-block; width:9px; height:9px; background:#555; border-radius:2px; margin-right:5px; vertical-align:middle;"></span>' + (isKo ? '가민' : 'GARMIN') + '</div>'
+      + '</div>'
+      + '<div style="font-size:9px; color:#666; margin-top:8px; line-height:1.5;">' + (isKo
+        ? '막대 두 개의 높이가 비슷할수록 그 항목의 오차가 작다는 뜻이에요(항목마다 값 범위가 달라 항목별로 상대 비교됨).'
+        : 'The closer the two bar heights, the smaller the error for that metric (each metric is scaled relative to itself, not to the others).') + '</div>'
+      + '</div>';
+  }
+
   function runCalibrationCompare() {
     const isKo = isKoLang();
     const resultBox = document.getElementById('garmin-calib-result');
@@ -6766,6 +6800,18 @@ const garmin = (function () {
     const phoneAvgVertMm = avgFromPrecLog(precItem.log, 'vertOscMm');
     const garminAvgVertMm = garminItem.avgVertOscMm;
     const vertDiffPct = (phoneAvgVertMm && garminAvgVertMm) ? ((phoneAvgVertMm - garminAvgVertMm) / garminAvgVertMm * 100) : null;
+
+    // [추가] 페이스 비교. 정밀 로그엔 순간속도(speedKmh)만 있으므로 평균속도로 변환한 뒤
+    // 가민의 avgPaceSecPerKm(전체 평균 페이스, sec/km)과 같은 단위로 맞춰 비교한다.
+    const phoneAvgSpeedKmh = avgFromPrecLog(precItem.log, 'speedKmh');
+    const phoneAvgPaceSec = phoneAvgSpeedKmh ? (3600 / phoneAvgSpeedKmh) : null;
+    const garminAvgPaceSec = garminItem.avgPaceSecPerKm;
+    const paceDiffPct = (phoneAvgPaceSec && garminAvgPaceSec) ? ((phoneAvgPaceSec - garminAvgPaceSec) / garminAvgPaceSec * 100) : null;
+
+    // [추가] 평균 심박수 비교. 심박계가 연결된 러닝에서만 양쪽 다 값이 있음.
+    const phoneAvgHr = avgFromPrecLog(precItem.log, 'hrBpm');
+    const garminAvgHr = garminItem.avgHr;
+    const hrDiffPct = (phoneAvgHr && garminAvgHr) ? ((phoneAvgHr - garminAvgHr) / garminAvgHr * 100) : null;
 
     // 현재 MotionManager 설정값 (실행 중이 아니어도 OppaRunApp 생성 시 저장된
     // 착용 위치 프로파일이 이미 적용돼 있음)
@@ -6811,6 +6857,16 @@ const garmin = (function () {
         + '<div style="font-size:12px; font-weight:900; color:' + diffColor + '; min-width:52px; text-align:right;">' + diffTxt + '</div>'
         + '</div>';
     };
+    // [추가] 페이스는 mm:ss/km 형식이라 숫자를 그대로 찍는 row()로는 안 되므로 별도 포맷 사용.
+    const rowFmt = (label, phoneVal, garminVal, diffPct, fmtFn) => {
+      const diffTxt = diffPct != null ? (diffPct > 0 ? '+' : '') + diffPct.toFixed(1) + '%' : '--';
+      const diffColor = diffPct == null ? '#888' : (Math.abs(diffPct) < 5 ? 'var(--good)' : (Math.abs(diffPct) < 15 ? 'var(--warning)' : 'var(--danger)'));
+      return '<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #2a2a2a;">'
+        + '<div style="font-size:11px; color:#999; font-weight:800;">' + label + '</div>'
+        + '<div style="font-size:12px; font-weight:900;">' + (phoneVal != null ? fmtFn(phoneVal) : '--') + ' <span style="color:#666;">vs</span> ' + (garminVal != null ? fmtFn(garminVal) : '--') + '</div>'
+        + '<div style="font-size:12px; font-weight:900; color:' + diffColor + '; min-width:52px; text-align:right;">' + diffTxt + '</div>'
+        + '</div>';
+    };
 
     let html = '<div class="garmin-import-item">'
       + '<div style="font-size:10px; color:#888; font-weight:800; margin-bottom:8px; display:flex; justify-content:space-between;">'
@@ -6819,7 +6875,19 @@ const garmin = (function () {
       + row(isKo ? '케이던스 (spm)' : 'CADENCE (spm)', phoneAvgCadence, garminAvgCadence, cadDiffPct, '')
       + row(isKo ? 'GCT (ms)' : 'GCT (ms)', phoneAvgGct, garminAvgGct, gctDiffPct, '')
       + row(isKo ? '보폭 (mm)' : 'STEP LEN (mm)', phoneAvgStepMm, garminAvgStepMm, stepDiffPct, '')
-      + row(isKo ? '수직진동 (mm)' : 'VERT OSC (mm)', phoneAvgVertMm, garminAvgVertMm, vertDiffPct, '');
+      + row(isKo ? '수직진동 (mm)' : 'VERT OSC (mm)', phoneAvgVertMm, garminAvgVertMm, vertDiffPct, '')
+      + rowFmt(isKo ? '페이스 (/km)' : 'PACE (/km)', phoneAvgPaceSec, garminAvgPaceSec, paceDiffPct, fmtPace)
+      + row(isKo ? '평균 심박수 (bpm)' : 'AVG HR (bpm)', phoneAvgHr, garminAvgHr, hrDiffPct, '');
+
+    // [추가] 오버롤 비교 그래프 (표 밑에)
+    html += buildOverallChart(isKo, [
+      { label: isKo ? '케이던스' : 'CADENCE', phone: phoneAvgCadence, garmin: garminAvgCadence },
+      { label: 'GCT', phone: phoneAvgGct, garmin: garminAvgGct },
+      { label: isKo ? '보폭' : 'STEP LEN', phone: phoneAvgStepMm, garmin: garminAvgStepMm },
+      { label: isKo ? '수직진동' : 'VERT OSC', phone: phoneAvgVertMm, garmin: garminAvgVertMm },
+      { label: isKo ? '페이스' : 'PACE', phone: phoneAvgPaceSec, garmin: garminAvgPaceSec },
+      { label: isKo ? '심박수' : 'AVG HR', phone: phoneAvgHr, garmin: garminAvgHr }
+    ]);
 
     const hasSuggestion = suggestedRot != null || suggestedGct != null || suggestedVertScale != null || suggestedStrideFactor != null;
 
