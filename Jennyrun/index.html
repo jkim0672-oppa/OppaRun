@@ -600,12 +600,10 @@ alt="runner"/>
      기존 계산 로직은 전혀 건드리지 않는 읽기 전용 진단 도구. -->
 <div class="diag-card" style="margin: 0 0 10px 0;">
 <div id="garmin-calib-title" style="color:var(--primary); font-weight:900; font-size:14px; margin-bottom:8px;">CALIBRATION CHECK</div>
-<div id="garmin-calib-desc" style="font-size:11px; color:#888; margin-bottom:10px; line-height:1.6;">Compare this Garmin record with a saved precision log from the same run to see how far cadence/GCT are off, and get a suggested starting point for retuning.</div>
+<div id="garmin-calib-desc" style="font-size:11px; color:#888; margin-bottom:10px; line-height:1.6;">Compare 1 Garmin record against the pooled average of up to 3 saved precision logs. Combining more runs gives a value less sensitive to one-off noise.</div>
 <div style="position:relative;">
-  <div id="calib-preclog-select-btn" onclick="ui.toggleDropdown('calib-preclog-dropdown-options')" class="dropdown-select" style="padding:12px 14px; font-size:13px;">
-    <span id="current-calib-preclog-text">SELECT PRECISION LOG</span><span style="font-size:10px; color:var(--primary);">▼</span>
-  </div>
-  <div id="calib-preclog-dropdown-options" class="precision-dropdown-options" style="width:100%; position:static;"></div>
+  <div id="current-calib-preclog-text" style="font-size:10px; color:#888; font-weight:800; margin-bottom:6px;">SELECT UP TO 3 PRECISION LOGS</div>
+  <div id="calib-preclog-dropdown-options" class="precision-dropdown-options" style="width:100%; position:static; max-height:220px; overflow-y:auto; display:block;"></div>
 </div>
 <button id="btn-run-calib-compare" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:12px; margin-top:10px;" onclick="garmin.runCalibrationCompare()">COMPARE</button>
 <div id="garmin-calib-result" style="margin-top:12px;"></div>
@@ -6679,7 +6677,8 @@ const garmin = (function () {
   }
 
   let selectedId = null; // 드롭다운에서 현재 선택된 가민 기록 id
-  let selectedPrecLogId = null; // [추가] 캘리브레이션 비교용으로 선택된 정밀 로그 id
+  let selectedPrecLogIds = []; // [수정] 캘리브레이션 비교용으로 선택된 정밀 로그 id들 (최대 MAX_PREC_LOGS개, 종합 비교용)
+  const MAX_PREC_LOGS = 3; // [추가] 한 번에 합산 비교할 수 있는 정밀 로그 최대 개수
   let lastSuggestion = null; // [추가] 마지막 비교에서 계산된 제안값 (APPLY 버튼이 참조)
 
   function renderBox(item, isKo) {
@@ -6729,8 +6728,8 @@ const garmin = (function () {
     // [추가] 캘리브레이션 비교 카드 다국어 처리
     setText('garmin-calib-title', isKo ? '캘리브레이션 비교' : 'CALIBRATION CHECK');
     setText('garmin-calib-desc', isKo
-      ? '이 가민 기록과 같은 러닝의 저장된 정밀 로그를 비교해서 케이던스/GCT가 얼마나 차이 나는지 확인하고, 값 조정을 위한 제안값을 받아보세요.'
-      : 'Compare this Garmin record with a saved precision log from the same run to see how far cadence/GCT are off, and get a suggested starting point for retuning.');
+      ? '이 가민 기록 1개와, 저장된 정밀 로그 중 최대 ' + MAX_PREC_LOGS + '개를 선택해 합산 평균으로 비교합니다. 여러 러닝을 합칠수록 우연한 오차에 덜 흔들리는 값을 얻을 수 있어요.'
+      : 'Compare 1 Garmin record against the pooled average of up to ' + MAX_PREC_LOGS + ' saved precision logs. Combining more runs gives a value less sensitive to one-off noise.');
     setText('btn-run-calib-compare', isKo ? '비교하기' : 'COMPARE');
   }
 
@@ -6776,8 +6775,9 @@ const garmin = (function () {
     if (clearAllBtn) clearAllBtn.style.display = 'block';
   }
 
-  // [추가] 캘리브레이션 비교용 정밀 로그 드롭다운 채우기.
+  // [수정] 캘리브레이션 비교용 정밀 로그를 체크박스로 최대 MAX_PREC_LOGS개까지 다중 선택.
   // storage.loadPrecisionLogs()를 재사용하므로 정밀 로그 저장 구조를 새로 만들지 않는다.
+  // 선택된 로그들은 runCalibrationCompare()에서 하나로 합쳐(pool)져 평균이 계산된다.
   function renderPrecLogDropdown(isKo) {
     const dropdown = document.getElementById('calib-preclog-dropdown-options');
     const currentText = document.getElementById('current-calib-preclog-text');
@@ -6785,29 +6785,44 @@ const garmin = (function () {
     let logs = [];
     try { logs = (typeof storage !== 'undefined') ? storage.loadPrecisionLogs() : []; } catch (e) { logs = []; }
     if (!logs.length) {
-      selectedPrecLogId = null;
+      selectedPrecLogIds = [];
       currentText.textContent = isKo ? '저장된 정밀 로그 없음' : 'NO PRECISION LOGS';
       dropdown.innerHTML = '<div class="dropdown-option precision-option" style="color:#666; text-align:center;">' + (isKo ? '정밀 로그가 없습니다' : 'No precision logs') + '</div>';
       return;
     }
-    if (!selectedPrecLogId || !logs.find(l => l.id === selectedPrecLogId)) {
-      selectedPrecLogId = logs[0].id;
-    }
+    // 삭제된 로그가 선택 목록에 남아있지 않도록 정리
+    selectedPrecLogIds = selectedPrecLogIds.filter(id => logs.find(l => l.id === id));
+
     dropdown.innerHTML = logs.map(l => {
       const label = fmtDate(new Date(l.savedAt).getTime()) + ' · ' + l.log.length + (isKo ? '개' : ' rows');
       const escapedLabel = label.replace(/'/g, "&#39;");
-      return '<div class="dropdown-option precision-option" onclick="garmin.selectPrecLog(\'' + l.id + '\', \'' + escapedLabel + '\')">' + label + '</div>';
+      const checked = selectedPrecLogIds.includes(l.id) ? 'checked' : '';
+      return '<label class="dropdown-option precision-option" style="display:flex; align-items:center; gap:8px; cursor:pointer;">'
+        + '<input type="checkbox" ' + checked + ' onclick="garmin.togglePrecLog(\'' + l.id + '\')" style="width:16px; height:16px; accent-color:var(--primary); flex-shrink:0;">'
+        + '<span>' + label + '</span>'
+        + '</label>';
     }).join('');
-    const cur = logs.find(l => l.id === selectedPrecLogId);
-    currentText.textContent = fmtDate(new Date(cur.savedAt).getTime()) + ' · ' + cur.log.length + (isKo ? '개' : ' rows');
+
+    const n = selectedPrecLogIds.length;
+    currentText.textContent = n
+      ? (isKo ? n + '개 선택됨 (합산 비교, 최대 ' + MAX_PREC_LOGS + '개)' : n + ' SELECTED (pooled, max ' + MAX_PREC_LOGS + ')')
+      : (isKo ? '정밀 로그를 1~' + MAX_PREC_LOGS + '개 선택하세요' : 'SELECT 1–' + MAX_PREC_LOGS + ' PRECISION LOGS');
   }
 
-  function selectPrecLog(id, labelText) {
-    selectedPrecLogId = id;
-    const currentText = document.getElementById('current-calib-preclog-text');
-    if (currentText && labelText) currentText.textContent = labelText;
-    const dropdown = document.getElementById('calib-preclog-dropdown-options');
-    if (dropdown) dropdown.style.display = 'none';
+  function togglePrecLog(id) {
+    const isKo = isKoLang();
+    const idx = selectedPrecLogIds.indexOf(id);
+    if (idx >= 0) {
+      selectedPrecLogIds.splice(idx, 1);
+    } else {
+      if (selectedPrecLogIds.length >= MAX_PREC_LOGS) {
+        alert(isKo ? '정밀 로그는 최대 ' + MAX_PREC_LOGS + '개까지 선택할 수 있습니다.' : 'You can select up to ' + MAX_PREC_LOGS + ' precision logs.');
+        renderPrecLogDropdown(isKo); // 체크박스가 다시 체크된 상태로 그려지도록 되돌림
+        return;
+      }
+      selectedPrecLogIds.push(id);
+    }
+    renderPrecLogDropdown(isKo);
   }
 
   function selectImport(id, dateText) {
@@ -6926,11 +6941,11 @@ const garmin = (function () {
     const garminItem = list.find(i => i.id === selectedId);
     let precLogs = [];
     try { precLogs = (typeof storage !== 'undefined') ? storage.loadPrecisionLogs() : []; } catch (e) { precLogs = []; }
-    const precItem = precLogs.find(l => l.id === selectedPrecLogId);
+    const precItems = precLogs.filter(l => selectedPrecLogIds.includes(l.id));
 
-    if (!garminItem || !precItem) {
+    if (!garminItem || !precItems.length) {
       lastSuggestion = null;
-      resultBox.innerHTML = '<div class="garmin-import-empty">' + (isKo ? '가민 기록과 정밀 로그를 먼저 선택하세요.' : 'Select a Garmin record and a precision log first.') + '</div>';
+      resultBox.innerHTML = '<div class="garmin-import-empty">' + (isKo ? '가민 기록과 정밀 로그를 (최소 1개, 최대 ' + MAX_PREC_LOGS + '개) 먼저 선택하세요.' : 'Select a Garmin record and 1–' + MAX_PREC_LOGS + ' precision logs first.') + '</div>';
       return;
     }
     if (garminItem.avgCadence == null) {
@@ -6939,8 +6954,14 @@ const garmin = (function () {
       return;
     }
 
-    const phoneAvgCadence = avgFromPrecLog(precItem.log, 'cadence');
-    const phoneAvgGct = avgFromPrecLog(precItem.log, 'gctMs');
+    // [수정] 선택된 정밀 로그들을 하나의 배열로 합쳐(pool) 평균을 낸다.
+    // 러닝별 표본 수가 다르더라도 전체 스텝(row) 기준 가중평균이 되므로,
+    // 러닝 1회의 우연한 노이즈에 덜 흔들리는 값이 나온다.
+    const pooledLog = precItems.reduce((acc, item) => acc.concat(item.log), []);
+    const poolCount = precItems.length;
+
+    const phoneAvgCadence = avgFromPrecLog(pooledLog, 'cadence');
+    const phoneAvgGct = avgFromPrecLog(pooledLog, 'gctMs');
     const garminAvgCadence = garminItem.avgCadence;
     const garminAvgGct = garminItem.avgGctMs;
 
@@ -6949,24 +6970,24 @@ const garmin = (function () {
 
     // [추가] 보폭(step_length)/수직진동(vert_osc) 비교. 정밀 로그엔 m/cm 단위,
     // 가민 데이터는 mm 단위로 들어있으므로 mm 기준으로 통일해서 비교한다.
-    const phoneAvgStepM = avgFromPrecLog(precItem.log, 'stepLengthM');
+    const phoneAvgStepM = avgFromPrecLog(pooledLog, 'stepLengthM');
     const phoneAvgStepMm = phoneAvgStepM != null ? phoneAvgStepM * 1000 : null;
     const garminAvgStepMm = garminItem.avgStepLengthMm;
     const stepDiffPct = (phoneAvgStepMm && garminAvgStepMm) ? ((phoneAvgStepMm - garminAvgStepMm) / garminAvgStepMm * 100) : null;
 
-    const phoneAvgVertMm = avgFromPrecLog(precItem.log, 'vertOscMm');
+    const phoneAvgVertMm = avgFromPrecLog(pooledLog, 'vertOscMm');
     const garminAvgVertMm = garminItem.avgVertOscMm;
     const vertDiffPct = (phoneAvgVertMm && garminAvgVertMm) ? ((phoneAvgVertMm - garminAvgVertMm) / garminAvgVertMm * 100) : null;
 
     // [추가] 페이스 비교. 정밀 로그엔 순간속도(speedKmh)만 있으므로 평균속도로 변환한 뒤
     // 가민의 avgPaceSecPerKm(전체 평균 페이스, sec/km)과 같은 단위로 맞춰 비교한다.
-    const phoneAvgSpeedKmh = avgFromPrecLog(precItem.log, 'speedKmh');
+    const phoneAvgSpeedKmh = avgFromPrecLog(pooledLog, 'speedKmh');
     const phoneAvgPaceSec = phoneAvgSpeedKmh ? (3600 / phoneAvgSpeedKmh) : null;
     const garminAvgPaceSec = garminItem.avgPaceSecPerKm;
     const paceDiffPct = (phoneAvgPaceSec && garminAvgPaceSec) ? ((phoneAvgPaceSec - garminAvgPaceSec) / garminAvgPaceSec * 100) : null;
 
     // [추가] 평균 심박수 비교. 심박계가 연결된 러닝에서만 양쪽 다 값이 있음.
-    const phoneAvgHr = avgFromPrecLog(precItem.log, 'hrBpm');
+    const phoneAvgHr = avgFromPrecLog(pooledLog, 'hrBpm');
     const garminAvgHr = garminItem.avgHr;
     const hrDiffPct = (phoneAvgHr && garminAvgHr) ? ((phoneAvgHr - garminAvgHr) / garminAvgHr * 100) : null;
 
@@ -7026,6 +7047,9 @@ const garmin = (function () {
     };
 
     let html = '<div class="garmin-import-item">'
+      + '<div style="font-size:9px; color:#666; font-weight:700; margin-bottom:8px;">' + (isKo
+        ? '폰 정밀 로그 ' + poolCount + '개 합산 평균 vs 가민 1개'
+        : poolCount + ' pooled phone log(s) (avg) vs 1 Garmin record') + '</div>'
       + '<div style="font-size:10px; color:#888; font-weight:800; margin-bottom:8px; display:flex; justify-content:space-between;">'
       + '<span>' + (isKo ? '폰' : 'PHONE') + '</span><span>' + (isKo ? '가민' : 'GARMIN') + '</span><span>' + (isKo ? '오차' : 'DIFF') + '</span>'
       + '</div>'
@@ -7224,7 +7248,7 @@ const garmin = (function () {
     }
   }
 
-  return { importFitFile, deleteImport, clearAll, selectImport, selectPrecLog, runCalibrationCompare, applyCalibration, resetCalibration, copySnippet, render };
+  return { importFitFile, deleteImport, clearAll, selectImport, togglePrecLog, runCalibrationCompare, applyCalibration, resetCalibration, copySnippet, render };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
