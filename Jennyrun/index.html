@@ -3546,6 +3546,9 @@ this.lastStepTime = 0;
 this.isFeetOnGround = false;
 this.gctAccumulator = 0;
 this.gctCount = 0;
+// [추가] 화면 표시용 GCT 스무딩: 순간값의 튐을 줄이기 위해 최근 N걸음만 보관(중앙값 사용).
+// 러닝 시작부터의 누적평균(gctAccumulator)과 달리 최근 걸음에만 반응해 페이스 변화에 민감함.
+this.recentGctValues = [];
 this.stepSide = 0;
 this.sideGctAccumulator = [0, 0];
 this.sideGctCount = [0, 0];
@@ -3593,6 +3596,19 @@ this.sideGyroCount = [0, 0];
 this.gyroCycleMagSum = 0;
 this.sideGyroMagSum = [0, 0];
 this.sideGyroMagCount = [0, 0];
+// [추가] 자이로 기반 좌우 리싱크: 기존 stepSide 토글+타이밍 추측(missedStepsToResync)만으로는
+// 놓친 걸음 수를 잘못 추정하면 좌/우가 러닝 끝까지 뒤바뀐 채 유지될 수 있음. 자이로 회전 부호는
+// 실제로 어느 발이 디뎠는지와 물리적 상관관계가 있는 직접 신호이므로, 초반 캘리브레이션으로
+// side0/side1을 가장 잘 가르는 축을 찾아둔 뒤, 이후 토글 예측과 자이로 예측이 계속 어긋나면
+// 자이로 쪽으로 토글을 스냅해 드리프트를 복구한다.
+this.gyroResyncCalibSteps = 20; // 판별축을 정하기 위해 모을 최소 걸음 수
+this.gyroResyncStepCount = 0; // 캘리브레이션용 걸음 카운터
+this.gyroResyncAxis = null; // 'a' | 'b' | 'g' — 캘리브레이션 후 결정되는 판별축
+this.gyroResyncMidpoint = 0; // 판별축의 side0/side1 평균 중간값(경계)
+this.gyroResyncSign = 1; // 판별축 값이 midpoint보다 클 때 side0인지(1) side1인지(-1)
+this.gyroResyncMismatchStreak = 0; // 토글 예측과 자이로 예측이 연속 불일치한 횟수
+this.gyroResyncMismatchThreshold = 3; // 이 이상 연속 불일치해야 실제로 스냅(단발 노이즈 오작동 방지)
+this._gyroResyncSnapNextSide = null; // 다음 스텝에 강제 적용할 side(스냅 발생 시에만 값 있음)
 this.calibDone = false;
 this.calibStartTime = null;
 this.calibForceSamples = [];
@@ -3677,6 +3693,7 @@ this.lastStepTime = 0;
 this.isFeetOnGround = false;
 this.gctAccumulator = 0;
 this.gctCount = 0;
+this.recentGctValues = [];
 this.stepSide = 0;
 this.sideGctAccumulator = [0, 0];
 this.sideGctCount = [0, 0];
@@ -3703,6 +3720,13 @@ this.lastStepGyroG = null;
 this.gyroCycleMagSum = 0;
 this.sideGyroMagSum = [0, 0];
 this.sideGyroMagCount = [0, 0];
+// [추가] 자이로 기반 좌우 리싱크 상태도 매 러닝 시작 시 초기화 (착용 위치/자세가 매번 다를 수 있으므로)
+this.gyroResyncStepCount = 0;
+this.gyroResyncAxis = null;
+this.gyroResyncMidpoint = 0;
+this.gyroResyncSign = 1;
+this.gyroResyncMismatchStreak = 0;
+this._gyroResyncSnapNextSide = null;
 // [추가] 매 러닝 시작 시 적응형 임계값 캘리브레이션도 새로 수행
 // (같은 착용위치라도 조임 정도, 옷차림 등이 매번 다를 수 있으므로)
 this.groundThreshold = this.baseGroundThreshold;
@@ -3855,10 +3879,20 @@ let cycleTime = now - this.lastStepTime;
 // 잡히는 경우가 있었음(케이던스 과다 카운트 + GCT 과소 측정의 원인).
 // 최근 걸음 주기 평균 대비 비정상적으로(55% 미만) 짧은 주기는
 // 걸음으로 세지 않고 무시한다(상태 변경 없이 그냥 return).
+// [추가] 좌우 케이던스 리싱크용: 이번 주기 동안 몇 걸음이 누락됐는지 추정.
+// stepSide는 매 걸음마다 단순 토글이라, 노이즈로 걸음 하나만 못 잡아도
+// 그 뒤로 좌/우가 통째로 뒤바뀐 채 러닝 끝까지 유지되는 문제가 있었음.
+let missedStepsToResync = 0;
 if (this.lastStepTime !== 0 && this.recentCycleTimes.length >= 3) {
 const rollingAvg = this.recentCycleTimes.reduce((a, b) => a + b, 0) / this.recentCycleTimes.length;
 if (cycleTime < rollingAvg * 0.55) {
 return;
+}
+// 평소 주기의 1.6배를 넘으면 중간에 걸음이 누락됐을 가능성이 높다고 보고,
+// 몇 걸음이 빠졌는지 반올림으로 추정(최소 1걸음 누락으로 취급).
+if (cycleTime > rollingAvg * 1.6) {
+const probableSteps = Math.max(1, Math.round(cycleTime / rollingAvg));
+missedStepsToResync = probableSteps - 1;
 }
 }
 
@@ -3909,11 +3943,29 @@ measuredGCT = cycleTime * this.gctFallbackRatio; // 위치별 폴백 비율
 measuredGCT = Math.max(50, Math.min(measuredGCT, cycleTime * 0.9));
 let currentGCT = Math.round(measuredGCT);
 
-// 전체 평균 GCT (기존 동작 유지)
+// [수정] result.gct는 이번 스텝의 순간 측정값을 그대로 사용한다.
+// 예전에는 러닝 시작부터의 누적평균(gctAccumulator/gctCount)을 result.gct에
+// 넣었는데, 이 값이 화면 표시 + 정밀로그 CSV(gct_ms)에 그대로 들어가고,
+// 거기다 updateMetrics()에서 이 누적평균을 다시 totalGct에 더해 최종
+// 평균을 내다 보니 "평균의 평균"이 되어 초반 페이스 변화에 거의 반응하지
+// 않고 값이 과거 쪽으로 계속 눌려있는 문제가 있었음.
+result.gct = currentGCT;
+result.flight = Math.round(((cycleTime - currentGCT) / cycleTime) * 100);
+
+// 러닝 시작부터의 누적 평균은 계속 별도로 유지(다른 곳에서 필요할 수 있어 보관만 함).
 this.gctAccumulator += currentGCT;
 this.gctCount++;
-result.gct = Math.round(this.gctAccumulator / this.gctCount);
-result.flight = Math.round(((cycleTime - result.gct) / cycleTime) * 100);
+
+// [추가] 화면에 표시할 값은 순간값 그대로 쓰면 걸음마다 값이 튀어 보이므로,
+// 최근 5걸음의 중앙값으로 한 번 스무딩한다. 케이던스 스무딩(cadValHistory)과
+// 동일한 방식(중앙값)으로, 극단치 하나가 표시값을 끌고 가지 않게 함.
+// 러닝 전체 누적평균과 달리 최근 걸음에만 반응하므로 페이스 변화에 훨씬 민감하다.
+this.recentGctValues.push(currentGCT);
+if (this.recentGctValues.length > 5) this.recentGctValues.shift();
+result.gctDisplay = this.recentGctValues.length >= 3
+? [...this.recentGctValues].sort((a, b) => a - b)[Math.floor(this.recentGctValues.length / 2)]
+: currentGCT;
+result.flightDisplay = Math.round(((cycleTime - result.gctDisplay) / cycleTime) * 100);
 
 // [추가] 좌/우 측 GCT 및 케이던스 누적 (밸런스 산출용)
 let side = this.stepSide;
@@ -3944,12 +3996,56 @@ this.lastStepGyroA = +(this.gyroCycleSum.a / this.gyroCycleCount).toFixed(2);
 this.lastStepGyroB = +(this.gyroCycleSum.b / this.gyroCycleCount).toFixed(2);
 this.lastStepGyroG = +(this.gyroCycleSum.g / this.gyroCycleCount).toFixed(2);
 }
+// [추가] 자이로 기반 좌우 리싱크: 캘리브레이션 전이면 판별축 후보 데이터(sideGyroSum)가
+// 충분히 쌓였는지 확인하고, 완료 후에는 이번 스텝의 판별축 평균으로 실제 side를 추정해
+// 토글 예측(this.stepSide)과 비교한다. this.stepSide는 아직 토글 전이라 "방금 끝난 걸음"의
+// 토글 예측값과 같다.
+if (this.gyroResyncAxis === null) {
+this.gyroResyncStepCount++;
+if (this.gyroResyncStepCount >= this.gyroResyncCalibSteps &&
+    this.sideGyroCount[0] > 0 && this.sideGyroCount[1] > 0) {
+  const mean0 = { a: this.sideGyroSum[0].a / this.sideGyroCount[0], b: this.sideGyroSum[0].b / this.sideGyroCount[0], g: this.sideGyroSum[0].g / this.sideGyroCount[0] };
+  const mean1 = { a: this.sideGyroSum[1].a / this.sideGyroCount[1], b: this.sideGyroSum[1].b / this.sideGyroCount[1], g: this.sideGyroSum[1].g / this.sideGyroCount[1] };
+  let bestAxis = 'a', bestDiff = Math.abs(mean0.a - mean1.a);
+  if (Math.abs(mean0.b - mean1.b) > bestDiff) { bestAxis = 'b'; bestDiff = Math.abs(mean0.b - mean1.b); }
+  if (Math.abs(mean0.g - mean1.g) > bestDiff) { bestAxis = 'g'; bestDiff = Math.abs(mean0.g - mean1.g); }
+  // 최소 분리도(3deg/s) 미만이면 아직 신뢰할 수 없는 것으로 보고 캘리브레이션을 다음 걸음으로 미룸
+  if (bestDiff >= 3) {
+    this.gyroResyncAxis = bestAxis;
+    this.gyroResyncMidpoint = (mean0[bestAxis] + mean1[bestAxis]) / 2;
+    this.gyroResyncSign = (mean0[bestAxis] > mean1[bestAxis]) ? 1 : -1;
+  }
+}
+} else if (this.gyroCycleCount > 0) {
+const thisAxisAvg = this.gyroCycleSum[this.gyroResyncAxis] / this.gyroCycleCount;
+const gyroPredictedSide = (this.gyroResyncSign * (thisAxisAvg - this.gyroResyncMidpoint) > 0) ? 0 : 1;
+if (gyroPredictedSide !== this.stepSide) {
+  this.gyroResyncMismatchStreak++;
+} else {
+  this.gyroResyncMismatchStreak = 0;
+}
+// 토글 예측과 자이로 예측이 연속으로(기본 3걸음) 어긋나면, 단발 노이즈가 아니라
+// 실제 드리프트로 보고 다음 스텝의 side를 자이로 예측 기준으로 스냅한다.
+if (this.gyroResyncMismatchStreak >= this.gyroResyncMismatchThreshold) {
+  this._gyroResyncSnapNextSide = 1 - gyroPredictedSide;
+  this.gyroResyncMismatchStreak = 0;
+}
+}
 this.gyroCycleSum = { a: 0, b: 0, g: 0 };
 this.gyroCycleCount = 0;
 this.gyroCycleMagSum = 0;
 // [추가] 정밀 로그(초당)용: 가장 최근 완료된 스텝 1회의 축별 부호 있는 자이로 평균(deg/s).
 // sideGyroSum은 좌우 밸런스 산출용 누적 총합이라 초당 시계열로는 못 씀 — 로그 export용으로 별도 보관.
-this.stepSide = 1 - this.stepSide; // 다음 걸음은 반대쪽 발로 교대
+// [수정] 단순 1-stepSide 토글 대신, 이번 주기에서 추정된 누락 걸음 수만큼
+// 추가로 교대해 좌/우 동기화를 복구한다. missedStepsToResync가 0이면 기존과 동일하게 동작.
+// [수정] 자이로 기반 리싱크가 스냅을 요청한 경우(_gyroResyncSnapNextSide) 타이밍 추측보다
+// 우선 적용한다 — 실제 회전 방향이라는 직접 신호이므로 타이밍 추측(간접/추정치)보다 신뢰도가 높음.
+if (this._gyroResyncSnapNextSide !== null) {
+this.stepSide = this._gyroResyncSnapNextSide;
+this._gyroResyncSnapNextSide = null;
+} else {
+this.stepSide = (this.stepSide + 1 + missedStepsToResync) % 2;
+}
 this.onStep(result);
 }
 }
@@ -4467,7 +4563,9 @@ const cadSmoothed = this.state.cadValHistory.length >= 3
 : cadVal;
 if (cadValid) this.state.lastValidCadenceDisplay = cadSmoothed;
 const cadDisplay = cadValid ? cadSmoothed : (this.state.lastValidCadenceDisplay || 0);
-ui.updateRunningDisplay({cadence: cadDisplay, gct: data.gct || 0, flight: data.flight || 0});
+// [수정] 화면에는 최근 걸음 중앙값으로 스무딩된 값(gctDisplay/flightDisplay)을 보여준다.
+// data.gct/data.flight(순간값)는 totalGct 누적·정밀로그용으로 그대로 둔다.
+ui.updateRunningDisplay({cadence: cadDisplay, gct: (data.gctDisplay != null ? data.gctDisplay : data.gct) || 0, flight: (data.flightDisplay != null ? data.flightDisplay : data.flight) || 0});
 // [수정] 케이던스 안정화: steps/전체시간 대신, 실시간 10초 윈도우 값들을
 // 계속 누적해뒀다가 종료 시점에 이 샘플들의 평균(트림 평균)을 최종 기록에 사용.
 // → 시작 워밍업 구간이나 순간적인 오감지로 인한 값 튐이 평균 과정에서 완화됨.
