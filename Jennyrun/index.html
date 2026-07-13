@@ -3785,13 +3785,34 @@ if (!this.leanBaseline) {
   const accelLeanDeg = Math.acos(dot) * 180 / Math.PI;
   // 2) 자이로: beta(phone 로컬 X축 회전 = 전후 기울임) 각속도를 적분(반응 빠름, drift 누적됨)
   const gyroBetaDps = e.rotationRate ? (e.rotationRate.beta || 0) : 0;
-  if (this._leanLastTime != null) {
-    const dt = (now - this._leanLastTime) / 1000;
-    if (dt > 0 && dt < 1) this.leanAngleDeg += gyroBetaDps * dt;
-  }
+  const dt = (this._leanLastTime != null) ? (now - this._leanLastTime) / 1000 : 0;
   this._leanLastTime = now;
-  // 3) 상보필터: 98% 자이로 적분값 유지 + 2%만 가속도계 절대값으로 보정(drift 억제)
-  this.leanAngleDeg = 0.98 * this.leanAngleDeg + 0.02 * accelLeanDeg;
+  // [수정] 상보필터 두 가지 문제를 함께 손봄:
+  // (a) 기존 0.98/0.02 고정비율은 샘플 하나당 적용되는 값이라 호출 빈도에 따라
+  //     시간당 보정 강도가 달라짐 — 프레임레이트에 무관하게 동작하도록 시간상수(TAU) 기반으로 교체.
+  // (b) [핵심 원인] accelLeanDeg는 "가속도계가 지금 중력 방향을 가리킨다"는 전제인데,
+  //     착지 충격(impact) 순간엔 acc가 중력이 아니라 충격 방향의 큰 선가속도를 포함하게 됨
+  //     (force가 groundThreshold를 크게 넘는 구간). 이 오염된 순간값이 매 스텝마다
+  //     기준값 보정에 계속 섞여 들어간 게 러닝 중 60~90도대 비현실적 값의 실제 원인으로 보임
+  //     (2026-07-13 정밀 로그 실측: lean_deg가 착지 임계값 근처 프레임부터 급등하는 패턴 확인).
+  //     → force가 "조용한 구간"(quiet phase, 착지 충격 없음)일 때의 샘플만 가속도계 기준으로 채택.
+  const isQuietPhase = force < this.groundThreshold * 1.05;
+  if (dt > 0 && dt < 1) {
+    const TAU = 1.5; // 자이로 적분을 신뢰하는 시간상수(초). 값이 클수록 반응은 빠르지만 drift 억제는 약해짐
+    const alpha = TAU / (TAU + dt);
+    const gyroEstimate = this.leanAngleDeg + gyroBetaDps * dt;
+    this.leanAngleDeg = isQuietPhase
+      ? (alpha * gyroEstimate + (1 - alpha) * accelLeanDeg)
+      : gyroEstimate; // 충격 구간엔 가속도계 보정을 건너뛰고 자이로 적분만 반영
+  } else {
+    // 첫 샘플이거나 dt가 비정상(백그라운드 복귀 등)이면 자이로 적분을 건너뛰고
+    // 가속도계 절대값으로 즉시 스냅 — 단, 이때도 충격 구간 오염값은 배제
+    if (isQuietPhase) this.leanAngleDeg = accelLeanDeg;
+  }
+  // [추가] 안전장치: 러닝 중 정상적인 전방 기울기는 대략 ±30~40도 이내.
+  // 위 (a),(b) 수정에도 불구하고 어떤 이유로든 드리프트하면, 로그/화면엔 물리적으로
+  // 말이 되는 값만 나가도록 최종 클램프.
+  this.leanAngleDeg = Math.max(-45, Math.min(45, this.leanAngleDeg));
   // 러닝 전체 평균용 누적 (부호 무시 — 캘리브레이션 기준 대비 "기울어진 정도"만 봄)
   this.leanSumForAvg += Math.abs(this.leanAngleDeg);
   this.leanCountForAvg++;
@@ -4051,7 +4072,7 @@ splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
 // [추가] 실시간 상승고도 누적 상태 (트레일 모드 실시간 칼로리의 경사 보너스 계산용)
 totalAscent: 0, lastAscentAlt: null,
 lastPosTimestamp: Date.now(),
-speedBuffer: [], lastValidSpeed: 0, cadenceSamples: [],
+speedBuffer: [], lastValidSpeed: 0, cadenceSamples: [], cadValHistory: [],
 isCalibrationRun: false, calibrationKnownDistanceM: 0,
 // [추가] GPS 고도 보정용 - Open-Elevation API 지형고도값 기반 offset 보정
 elevOffset: 0, elevOffsetReady: false, lastElevFetchTime: 0, lastElevFetchPos: null, elevFetchInFlight: false,
@@ -4431,16 +4452,30 @@ const cadVal = Math.round((this.state.stepTimes.length / windowSec) * 60);
 const CADENCE_MIN_SPM = 60;
 const CADENCE_MAX_SPM = 280;
 const cadValid = (cadVal >= CADENCE_MIN_SPM && cadVal <= CADENCE_MAX_SPM);
-if (cadValid) this.state.lastValidCadenceDisplay = cadVal;
-const cadDisplay = cadValid ? cadVal : (this.state.lastValidCadenceDisplay || 0);
+// [추가] 케이던스 스무딩: 10초 윈도우 자체는 반응성을 위해 그대로 두되(특히 초반엔
+// 윈도우가 1~2초라 노이즈에 취약), 화면/정밀로그로 나가는 최종 값은 최근 유효값
+// 3개의 중앙값(median)으로 한 번 더 걸러서 순간적인 오탐(예: 180→240→180처럼
+// 튀는 값)이 CSV에 그대로 남는 걸 줄인다. 평균이 아닌 중앙값을 쓰는 이유는
+// 극단치 하나가 스무딩값 자체를 끌고 가지 않게 하기 위함.
+if (!this.state.cadValHistory) this.state.cadValHistory = [];
+if (cadValid) {
+this.state.cadValHistory.push(cadVal);
+if (this.state.cadValHistory.length > 3) this.state.cadValHistory.shift();
+}
+const cadSmoothed = this.state.cadValHistory.length >= 3
+? [...this.state.cadValHistory].sort((a, b) => a - b)[1]
+: cadVal;
+if (cadValid) this.state.lastValidCadenceDisplay = cadSmoothed;
+const cadDisplay = cadValid ? cadSmoothed : (this.state.lastValidCadenceDisplay || 0);
 ui.updateRunningDisplay({cadence: cadDisplay, gct: data.gct || 0, flight: data.flight || 0});
 // [수정] 케이던스 안정화: steps/전체시간 대신, 실시간 10초 윈도우 값들을
 // 계속 누적해뒀다가 종료 시점에 이 샘플들의 평균(트림 평균)을 최종 기록에 사용.
 // → 시작 워밍업 구간이나 순간적인 오감지로 인한 값 튐이 평균 과정에서 완화됨.
 // 윈도우가 최소 3초 이상 찼을 때부터 샘플링(초반 1~2초의 극단값 배제).
+// [수정] 위에서 스무딩한 cadSmoothed를 누적 — 원본 노이즈가 트림평균 이전 단계부터 줄어듦.
 if (windowSec >= 3 && cadValid) {
 if (!this.state.cadenceSamples) this.state.cadenceSamples = [];
-this.state.cadenceSamples.push(cadVal);
+this.state.cadenceSamples.push(cadSmoothed);
 }
 }
 }
@@ -4566,7 +4601,10 @@ const _swOldest = this.state.strideWindow[0];
 const _windowDistM = ((this.state.totalDist || 0) - _swOldest.distKm) * 1000;
 const _windowSteps = (this.state.stepCount || 0) - _swOldest.steps;
 if (_windowSteps > 0 && _windowDistM > 0) {
-  stepLengthWindowM = _windowDistM / _windowSteps;
+  // [추가] 안전장치: GPS 튐으로 순간 거리가 스파이크치거나 걸음 오감지로 windowSteps가
+  // 비정상적으로 작을 때 비현실적인 보폭(예: 5m+)이 그대로 로그에 남는 걸 방지.
+  // getVertRatio()에 이미 있는 클램프 패턴과 일관되게 물리적 범위(0.3~2.2m)로 제한.
+  stepLengthWindowM = Math.max(0.3, Math.min(2.2, _windowDistM / _windowSteps));
 }
 // 2) 순간공식 계산 (항상 병행 계산 — 구간평균이 없을 때의 폴백 겸, 블렌드용 입력값)
 let stepLengthInstantM = null;
@@ -4575,7 +4613,8 @@ const cadenceNum = parseInt(getTxt('cadence'));
 if (speedKmhNum > 0 && cadenceNum > 0) {
   const _prof = storage.loadProfile();
   const _hcm = _prof.hu === 'inch' ? Math.round(_prof.h * 2.54) : _prof.h;
-  stepLengthInstantM = calcStride(speedKmhNum, cadenceNum, _hcm, _prof.strideCorrectionFactor);
+  // [추가] 동일한 이유로 순간공식 결과도 클램프 (케이던스 노이즈가 그대로 전파되는 것을 완화)
+  stepLengthInstantM = Math.max(0.3, Math.min(2.2, calcStride(speedKmhNum, cadenceNum, _hcm, _prof.strideCorrectionFactor)));
 }
 // 3) 최종값: 상보 필터 블렌드. 한쪽이 없으면 있는 쪽만 사용, 러닝 초반(윈도우 미형성)엔 순간공식만.
 let stepLengthM = '';
@@ -4858,9 +4897,22 @@ const _autoTitle = _isKo
   : (_isTrailTitle
       ? (_h>=5&&_h<11?'Morning Trail Run':_h>=11&&_h<17?'Afternoon Trail Run':_h>=17&&_h<21?'Evening Trail Run':'Night Trail Run')
       : (_h>=5&&_h<11?'Morning Run':_h>=11&&_h<17?'Afternoon Run':_h>=17&&_h<21?'Evening Run':'Night Run'));
-// [추가] 보폭 스냅샷: 종료 시점 속도+케이던스+키로 계산해서 저장
-// → 나중에 키/체중 바꿔도 당시 값 그대로 유지됨
+// [수정] 보폭 스냅샷: 기존엔 avgPace(총거리/총시간)와 avgCadence(트림평균)로 calcStride
+// 공식을 다시 계산해서 저장했는데, 이건 실측이 아니라 모델 추정치였음(정밀 로그용으로
+// 만든 "구간평균+순간공식" 블렌드 계산 결과가 정작 최종 기록엔 전혀 반영되지 않던 문제).
+// 총거리와 총걸음수는 런 전체에 걸쳐 이미 정확히 측정된 값이므로, 나눗셈 한 번으로
+// 모델 없이 "진짜 평균 보폭"을 직접 구할 수 있음 — 이쪽이 더 정확하고 근거도 명확함.
+// (키 보정/personalFactor는 "측정값이 없을 때"의 추정 모델용 보정이라 실측값엔 적용하지 않음)
 const _snapshotStride = (() => {
+  const stepCount = this.state.stepCount || 0;
+  const totalDistM = (this.state.totalDist || 0) * 1000;
+  if (stepCount > 0 && totalDistM > 0) {
+    const measured = totalDistM / stepCount;
+    // 안전장치: GPS 튐/걸음 오감지 등으로 비현실적인 값이 나오면 물리적 범위로 클램프
+    const clamped = Math.max(0.3, Math.min(2.2, measured));
+    return parseFloat(clamped.toFixed(2));
+  }
+  // 걸음 카운트가 없는 예외 상황(센서 미지원 등)에 한해서만 기존 모델 추정 방식으로 폴백
   if (avgCadence > 0 && avgPaceSec > 0) {
     const spd = 3600 / avgPaceSec;
     const prof = storage.loadProfile();
@@ -5090,7 +5142,7 @@ maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
 splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
 totalAscent: 0, lastAscentAlt: null,
 lastPosTimestamp: Date.now(),
-speedBuffer: [], lastValidSpeed: 0, cadenceSamples: [],
+speedBuffer: [], lastValidSpeed: 0, cadenceSamples: [], cadValHistory: [],
 isCalibrationRun: false, calibrationKnownDistanceM: 0,
 elevOffset: 0, elevOffsetReady: false, lastElevFetchTime: 0, lastElevFetchPos: null, elevFetchInFlight: false
 };
