@@ -505,7 +505,7 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 <div class="info-tab-nav">
 <button id="info-sub-tab-theory" class="info-sub-btn active" onclick="ui.toggleInfoSubTab('theory')"><span id="info-tab-theory-label">이론 가이드</span></button>
 <button id="info-sub-tab-precision" class="info-sub-btn" onclick="ui.toggleInfoSubTab('precision')"><span id="info-tab-precision-label">폼 정밀 분석실</span></button>
-<button id="info-sub-tab-garmin" class="info-sub-btn" onclick="ui.toggleInfoSubTab('garmin')"><span id="info-tab-garmin-label">GARMIN</span></button>
+<button id="info-sub-tab-garmin" class="info-sub-btn" style="display:none;" onclick="ui.toggleInfoSubTab('garmin')"><span id="info-tab-garmin-label">GARMIN</span></button>
 </div>
 <div id="info-theory-area" style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
 <div class="diag-card"><div id="info-device-title" style="color:var(--primary); font-weight:900; margin-bottom:5px;">DEVICE PLACEMENT</div><div id="info-device-desc" style="font-size:12px; color:#ccc;">For accurate cadence, GCT and balance data, fix the phone to your chest, waistband, or armband. Holding it in your hand mixes arm-swing motion with running motion and distorts the readings.</div></div>
@@ -609,6 +609,9 @@ alt="runner"/>
 </div>
 <button id="btn-run-calib-compare" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:12px; margin-top:10px;" onclick="garmin.runCalibrationCompare()">COMPARE</button>
 <div id="garmin-calib-result" style="margin-top:12px;"></div>
+<!-- [추가] 현재 적용된 보정값 상태 표시 + 초기화 버튼. 비교를 다시 하지 않아도
+     언제든 코드 기본값으로 되돌릴 수 있도록 항상 표시됨(적용된 값이 있을 때만 보임). -->
+<div id="garmin-calib-status" style="margin-top:10px;"></div>
 </div>
 <!-- [/추가] 캘리브레이션 비교 -->
 </div>
@@ -652,7 +655,7 @@ alt="runner"/>
 </div>
 <div class="section-title" id="section-title-data">DATA</div>
 <div class="settings-group">
-<div id="label-data-backup" class="settings-label">DATA BACKUP</div>
+<div id="label-data-backup" class="settings-label" onclick="ui.handleDevModeTap()" style="cursor:pointer; user-select:none;">DATA BACKUP</div>
 <div style="display:flex; gap:10px;">
 <button id="btn-export-data" style="flex:1; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:16px; border-radius:12px; font-weight:900; font-size:13px;" onclick="storage.exportData()">EXPORT</button>
 <button id="btn-import-data" style="flex:1; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:16px; border-radius:12px; font-weight:900; font-size:13px;" onclick="document.getElementById('import-file-input').click()">IMPORT</button>
@@ -1483,6 +1486,7 @@ this.UNIT_KEY = 'oppaRunUnit';
 this.GENDER_KEY = 'oppaRunGender';
 this.AUTO_PAUSE_KEY = 'oppaRunAutoPause';
 this.ACTIVITY_MODE_KEY = 'oppaRunActivityMode';
+this.DEV_MODE_KEY = 'oppaRunDevMode'; // [추가] 개발자 모드(가민 분석실 등 숨김 메뉴 노출 여부)
 }
 saveRecord(record) {
 const history = this.loadHistory();
@@ -1661,6 +1665,9 @@ setGender(gender) { localStorage.setItem(this.GENDER_KEY, gender); }
 getAutoPause() { return localStorage.getItem(this.AUTO_PAUSE_KEY) !== 'off'; }
 setAutoPause(enabled) { localStorage.setItem(this.AUTO_PAUSE_KEY, enabled ? 'on' : 'off'); }
 getActivityMode() { return localStorage.getItem(this.ACTIVITY_MODE_KEY) || 'run'; }
+// [추가] 개발자 모드 on/off — 가민 캘리브레이션 등 일반 유저에게 불필요한 메뉴를 숨기는 용도.
+getDevMode() { return localStorage.getItem(this.DEV_MODE_KEY) === '1'; }
+setDevMode(on) { localStorage.setItem(this.DEV_MODE_KEY, on ? '1' : '0'); }
 setActivityMode(mode) { localStorage.setItem(this.ACTIVITY_MODE_KEY, mode); }
 }
 // ========== UIManager ==========
@@ -2024,6 +2031,45 @@ return '<div class="garmin-import-item">'
 + '<div class="garmin-import-item-del" onclick="storage.deletePrecisionLog(\'' + item.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</div>'
 + '</div></div></div>';
 }).join('');
+}
+// [수정] 트리거를 "DATA BACKUP" 라벨(눈에 보이는 요소)로 변경 — 원래 넣었던
+// section-title-data는 .section-title { display:none } CSS 때문에 화면에
+// 아예 렌더링되지 않는 요소라 탭할 수가 없었음.
+// "DATA BACKUP" 글자를 짧은 시간 안에 7번 연속 탭하면 개발자 모드가 켜지고,
+// 켜진 상태에서 다시 7번 탭하면 꺼진다. 가민 캘리브레이션처럼 개발자 본인에게만
+// 필요한 메뉴를 일반 유저 화면에서 숨겨두기 위한 용도.
+handleDevModeTap() {
+const now = Date.now();
+if (!this._devTapTimes) this._devTapTimes = [];
+if (this._devTapTimes.length && now - this._devTapTimes[this._devTapTimes.length - 1] > 1500) {
+this._devTapTimes = [];
+}
+this._devTapTimes.push(now);
+if (this._devTapTimes.length >= 7) {
+this._devTapTimes = [];
+const isKo = storage.getLang() === 'ko';
+const nowOn = !storage.getDevMode();
+storage.setDevMode(nowOn);
+this.applyDevModeVisibility();
+alert(nowOn
+  ? (isKo ? '개발자 모드가 켜졌습니다. GARMIN 탭이 표시됩니다.' : 'Developer mode ON. The GARMIN tab is now visible.')
+  : (isKo ? '개발자 모드가 꺼졌습니다.' : 'Developer mode OFF.'));
+}
+}
+// [추가] 저장된 개발자 모드 값에 따라 GARMIN 탭 노출 여부를 반영. 앱 시작 시 1회,
+// 그리고 handleDevModeTap()에서 토글될 때마다 호출됨.
+applyDevModeVisibility() {
+const garminBtn = document.getElementById('info-sub-tab-garmin');
+if (!garminBtn) return;
+const on = storage.getDevMode();
+garminBtn.style.display = on ? '' : 'none';
+if (!on) {
+// 개발자 모드가 꺼진 상태에서 GARMIN 탭이 열려 있었다면 THEORY 탭으로 되돌림
+const garminArea = document.getElementById('info-garmin-area');
+if (garminArea && garminArea.style.display === 'flex') {
+this.toggleInfoSubTab('theory');
+}
+}
 }
 toggleInfoSubTab(target) {
 const theoryBtn = document.getElementById('info-sub-tab-theory');
@@ -3578,6 +3624,17 @@ this.gctFallbackRatio = p.gctFallbackRatio;
 this.vertScale        = p.vertScale;
 this.minStepInterval  = p.minStepInterval;
 this.vertEnabled      = p.vertEnabled;
+// [추가] 가민 캘리브레이션 비교(garmin.applyCalibration)에서 저장한 보정값이 있으면
+// 위치별 기본값 위에 덮어쓴다. 착용 위치가 바뀌면(override.devicePos 불일치) 적용하지 않음 —
+// 위치가 바뀌면 새로 비교/적용해야 함.
+try {
+  const _calibOv = storage.loadProfile().motionCalibOverride;
+  if (_calibOv && _calibOv.devicePos === pos) {
+    if (typeof _calibOv.gctFallbackRatio === 'number') this.gctFallbackRatio = _calibOv.gctFallbackRatio;
+    if (typeof _calibOv.rotRejectThreshold === 'number') this.rotRejectThreshold = _calibOv.rotRejectThreshold;
+    if (typeof _calibOv.vertScale === 'number') this.vertScale = _calibOv.vertScale;
+  }
+} catch (e) {}
 // [추가] 적응형 보정의 기준(중심)이 되는 위치별 기본값을 별도 보관.
 // 보정된 threshold는 항상 이 기본값의 ±15% 이내로만 움직이게 해서 과보정을 방지.
 this.baseGroundThreshold = p.groundThreshold;
@@ -6466,6 +6523,7 @@ const garmin = (function () {
 
   let selectedId = null; // 드롭다운에서 현재 선택된 가민 기록 id
   let selectedPrecLogId = null; // [추가] 캘리브레이션 비교용으로 선택된 정밀 로그 id
+  let lastSuggestion = null; // [추가] 마지막 비교에서 계산된 제안값 (APPLY 버튼이 참조)
 
   function renderBox(item, isKo) {
     if (!item) {
@@ -6528,6 +6586,8 @@ const garmin = (function () {
     const list = loadImports();
     const isKo = isKoLang();
     applyStaticLabels(isKo);
+    // [추가] 현재 적용된 보정값 상태도 가민 가져오기 목록 유무와 무관하게 항상 갱신.
+    renderCalibStatus(isKo);
     // [수정] 정밀 로그 드롭다운은 가민 가져오기 목록과 무관하게 항상 갱신되어야 함.
     // 기존엔 가민 파일을 하나도 가져오지 않은 상태(list.length===0)면 아래 return으로
     // 빠져나가서 renderPrecLogDropdown()이 아예 호출되지 않았고, 그 결과 러닝 후
@@ -6678,10 +6738,12 @@ const garmin = (function () {
     const precItem = precLogs.find(l => l.id === selectedPrecLogId);
 
     if (!garminItem || !precItem) {
+      lastSuggestion = null;
       resultBox.innerHTML = '<div class="garmin-import-empty">' + (isKo ? '가민 기록과 정밀 로그를 먼저 선택하세요.' : 'Select a Garmin record and a precision log first.') + '</div>';
       return;
     }
     if (garminItem.avgCadence == null) {
+      lastSuggestion = null;
       resultBox.innerHTML = '<div class="garmin-import-empty">' + (isKo ? '이 가민 파일엔 케이던스 데이터가 없습니다.' : 'This Garmin file has no cadence data.') + '</div>';
       return;
     }
@@ -6707,13 +6769,21 @@ const garmin = (function () {
 
     // 현재 MotionManager 설정값 (실행 중이 아니어도 OppaRunApp 생성 시 저장된
     // 착용 위치 프로파일이 이미 적용돼 있음)
-    let curGround = null, curGct = null, curRot = null;
+    let curGround = null, curGct = null, curRot = null, curVertScale = null;
     try {
       if (typeof app !== 'undefined' && app && app.motion) {
         curGround = app.motion.groundThreshold;
         curGct = app.motion.gctFallbackRatio;
         curRot = app.motion.rotRejectThreshold;
+        curVertScale = app.motion.vertScale;
       }
+    } catch (e) {}
+    // [추가] 보폭 보정은 MotionManager가 아니라 storage 프로필의 strideCorrectionFactor가
+    // 담당하므로(calcStride 참고) 별도로 현재값을 읽어온다.
+    let curStrideFactor = 1.0;
+    try {
+      const _p = storage.loadProfile();
+      curStrideFactor = (typeof _p.strideCorrectionFactor === 'number' && _p.strideCorrectionFactor > 0) ? _p.strideCorrectionFactor : 1.0;
     } catch (e) {}
 
     // [제안] 케이던스가 garmin보다 X% 높으면, 회전 노이즈 거부 임계값을 대략
@@ -6721,8 +6791,16 @@ const garmin = (function () {
     // 역산이 아니라 "다음 실험값" 정도의 출발점).
     const suggestedRot = (curRot != null && phoneAvgCadence && cadDiffPct != null && cadDiffPct > 3)
       ? Math.max(60, Math.round(curRot * (garminAvgCadence / phoneAvgCadence))) : null;
-    const suggestedGct = (curGct != null && phoneAvgGct && garminAvgGct)
+    const suggestedGct = (curGct != null && phoneAvgGct && garminAvgGct && gctDiffPct != null && Math.abs(gctDiffPct) > 3)
       ? Math.round(curGct * (garminAvgGct / phoneAvgGct) * 1000) / 1000 : null;
+    // [추가] 수직진동(vertScale)과 보폭(strideCorrectionFactor) 제안값.
+    // 오차가 3% 이내면 노이즈로 보고 제안하지 않음. 과보정 방지를 위해 한 번에
+    // ±30% 이상 바뀌지 않도록 clamp.
+    const clampRatio = (r) => Math.max(0.7, Math.min(1.3, r));
+    const suggestedVertScale = (curVertScale != null && curVertScale > 0 && phoneAvgVertMm && garminAvgVertMm && vertDiffPct != null && Math.abs(vertDiffPct) > 3)
+      ? Math.round(curVertScale * clampRatio(garminAvgVertMm / phoneAvgVertMm) * 1000) / 1000 : null;
+    const suggestedStrideFactor = (phoneAvgStepMm && garminAvgStepMm && stepDiffPct != null && Math.abs(stepDiffPct) > 3)
+      ? Math.round(curStrideFactor * clampRatio(garminAvgStepMm / phoneAvgStepMm) * 1000) / 1000 : null;
 
     const row = (label, phoneVal, garminVal, diffPct, unit) => {
       const diffTxt = diffPct != null ? (diffPct > 0 ? '+' : '') + diffPct.toFixed(1) + '%' : '--';
@@ -6743,29 +6821,185 @@ const garmin = (function () {
       + row(isKo ? '보폭 (mm)' : 'STEP LEN (mm)', phoneAvgStepMm, garminAvgStepMm, stepDiffPct, '')
       + row(isKo ? '수직진동 (mm)' : 'VERT OSC (mm)', phoneAvgVertMm, garminAvgVertMm, vertDiffPct, '');
 
-    if (suggestedRot != null || suggestedGct != null) {
+    const hasSuggestion = suggestedRot != null || suggestedGct != null || suggestedVertScale != null || suggestedStrideFactor != null;
+
+    if (hasSuggestion) {
       html += '<div style="margin-top:12px; font-size:11px; color:#ccc; line-height:1.7;">'
-        + '<div style="color:var(--primary); font-weight:900; margin-bottom:4px;">' + (isKo ? '다음 테스트 제안값 (참고용)' : 'SUGGESTED NEXT TEST VALUES (reference only)') + '</div>';
+        + '<div style="color:var(--primary); font-weight:900; margin-bottom:4px;">' + (isKo ? '권장 보정수치' : 'RECOMMENDED CALIBRATION') + '</div>';
       if (suggestedRot != null) {
-        html += (isKo
-          ? ('rotRejectThreshold: ' + curRot + ' → <b>' + suggestedRot + '</b> (deg/s)')
-          : ('rotRejectThreshold: ' + curRot + ' → <b>' + suggestedRot + '</b> (deg/s)')) + '<br>';
+        html += 'rotRejectThreshold: ' + curRot + ' → <b>' + suggestedRot + '</b> (deg/s)<br>';
       }
       if (suggestedGct != null) {
-        html += (isKo
-          ? ('gctFallbackRatio: ' + curGct + ' → <b>' + suggestedGct + '</b>')
-          : ('gctFallbackRatio: ' + curGct + ' → <b>' + suggestedGct + '</b>')) + '<br>';
+        html += 'gctFallbackRatio: ' + curGct + ' → <b>' + suggestedGct + '</b><br>';
       }
-      html += '<div style="color:#888; margin-top:6px;">' + (isKo
-        ? '⚠️ 자동 반영되지 않습니다. 코드에서 직접 값을 바꾼 뒤, 같은 방식으로 한 번 더 비교해서 오차가 줄었는지 확인하세요.'
-        : '⚠️ Not applied automatically. Change these in code manually, then re-run this comparison to confirm the error shrank.') + '</div>'
+      if (suggestedVertScale != null) {
+        html += 'vertScale: ' + curVertScale + ' → <b>' + suggestedVertScale + '</b><br>';
+      }
+      if (suggestedStrideFactor != null) {
+        html += (isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ': ' + curStrideFactor.toFixed(3) + ' → <b>' + suggestedStrideFactor.toFixed(3) + '</b><br>';
+      }
+      html += '<div style="color:#888; margin-top:6px; margin-bottom:10px;">' + (isKo
+        ? '아래 버튼을 누르면 이 값들이 즉시 적용되고 저장됩니다. 적용 후 러닝을 한 번 더 진행해서 오차가 줄었는지 다시 비교해보세요.'
+        : 'Tapping the button below applies and saves these values immediately. Run again afterward and re-compare to confirm the error shrank.') + '</div>'
+        + '<button id="btn-apply-calib" style="background:var(--primary); color:#000; border:none; padding:12px; border-radius:10px; width:100%; font-weight:900; font-size:12px; cursor:pointer;" onclick="garmin.applyCalibration()">' + (isKo ? '✓ 이 값으로 자동 반영' : '✓ APPLY THESE VALUES') + '</button>'
         + '</div>';
+
+      lastSuggestion = {
+        devicePos: (function () { try { return storage.loadProfile().devicePos || 'chest'; } catch (e) { return 'chest'; } })(),
+        gct: suggestedGct,
+        rot: suggestedRot,
+        vertScale: suggestedVertScale,
+        strideFactor: suggestedStrideFactor
+      };
+    } else {
+      html += '<div style="margin-top:12px; font-size:11px; color:#888;">' + (isKo
+        ? '오차가 이미 충분히 작아서(3% 이내) 제안할 보정값이 없습니다.'
+        : 'Differences are already small (within 3%) — nothing to suggest.') + '</div>';
+      lastSuggestion = null;
     }
     html += '</div>';
     resultBox.innerHTML = html;
   }
 
-  return { importFitFile, deleteImport, clearAll, selectImport, selectPrecLog, runCalibrationCompare, render };
+  // [추가] runCalibrationCompare()가 계산한 제안값을 실제로 반영한다.
+  // 1) storage 프로필에 motionCalibOverride로 저장 → 다음 실행(앱 재시작/새 러닝)에도
+  //    applyDevicePos()가 이 값을 위치별 기본값 위에 다시 얹어서 유지됨.
+  // 2) 지금 살아있는 app.motion 인스턴스에도 바로 값을 꽂아서, 재시작하지 않아도
+  //    다음 러닝부터 즉시 반영되게 함.
+  // 3) 보폭 보정계수는 MotionManager가 아니라 profile.strideCorrectionFactor이므로 같이 저장.
+  function applyCalibration() {
+    const isKo = isKoLang();
+    if (!lastSuggestion) return;
+    try {
+      const prof = storage.loadProfile();
+      const override = { devicePos: lastSuggestion.devicePos, appliedAt: new Date().toISOString() };
+      if (lastSuggestion.gct != null) override.gctFallbackRatio = lastSuggestion.gct;
+      if (lastSuggestion.rot != null) override.rotRejectThreshold = lastSuggestion.rot;
+      if (lastSuggestion.vertScale != null) override.vertScale = lastSuggestion.vertScale;
+      // [추가] 초기화(RESET) 시 정확히 원래 값으로 되돌릴 수 있도록, 보폭 보정계수를
+      // 덮어쓰기 직전의 값을 함께 저장해둔다(다른 기능인 실측거리 캘리브레이션이
+      // 이미 설정해둔 값일 수도 있으므로 무조건 1.0으로 되돌리면 안 됨).
+      if (lastSuggestion.strideFactor != null) {
+        override.prevStrideCorrectionFactor = (typeof prof.strideCorrectionFactor === 'number' && prof.strideCorrectionFactor > 0) ? prof.strideCorrectionFactor : 1.0;
+      }
+      prof.motionCalibOverride = override;
+      if (lastSuggestion.strideFactor != null) prof.strideCorrectionFactor = lastSuggestion.strideFactor;
+      storage.saveProfile(prof);
+
+      if (typeof app !== 'undefined' && app && app.motion) {
+        if (override.gctFallbackRatio != null) app.motion.gctFallbackRatio = override.gctFallbackRatio;
+        if (override.rotRejectThreshold != null) app.motion.rotRejectThreshold = override.rotRejectThreshold;
+        if (override.vertScale != null) app.motion.vertScale = override.vertScale;
+      }
+
+      const btn = document.getElementById('btn-apply-calib');
+      if (btn) {
+        btn.textContent = isKo ? '✓ 적용 완료' : '✓ APPLIED';
+        btn.disabled = true;
+        btn.style.opacity = '0.6';
+        btn.style.cursor = 'default';
+      }
+      renderCalibStatus(isKo);
+      alert(isKo ? '보정값이 적용되어 저장되었습니다. 다음 러닝부터 반영돼요.' : 'Calibration applied and saved. It will take effect from your next run.');
+    } catch (err) {
+      alert((isKo ? '적용 중 오류: ' : 'Apply error: ') + err.message);
+    }
+  }
+
+  // [추가] 현재 motionCalibOverride 적용 상태를 CALIBRATION CHECK 섹션에 표시.
+  // 적용된 게 없으면 아무것도 보여주지 않고, 있으면 언제/무엇이 바뀌었는지 요약 +
+  // 코드 기본값으로 되돌리는 RESET 버튼을 보여준다.
+  // [추가] applyDevicePos()의 위치별 기본값과 동일한 표(코드와 반드시 값이 같아야
+  // 정확한 스니펫이 나오므로, 코드 기본값을 고치면 이 표도 같이 고쳐야 함).
+  const DEVICE_PROFILE_DEFAULTS = {
+    chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.701, vertScale: 0.454, minStepInterval: 230, vertEnabled: true  },
+    waist:   { groundThreshold: 10.5, impactThreshold: 10.0, gctFallbackRatio: 0.38,  vertScale: 5.5,   minStepInterval: 230, vertEnabled: true  },
+    armband: { groundThreshold: 12.0, impactThreshold: 12.5, gctFallbackRatio: 0.33,  vertScale: 4.5,   minStepInterval: 240, vertEnabled: true  },
+    hand:    { groundThreshold: 13.5, impactThreshold: 14.0, gctFallbackRatio: 0.35,  vertScale: 0,     minStepInterval: 250, vertEnabled: false },
+  };
+  const DEFAULT_ROT_REJECT_THRESHOLD = 220;
+
+  function renderCalibStatus(isKo) {
+    const box = document.getElementById('garmin-calib-status');
+    if (!box) return;
+    let ov = null;
+    try { ov = storage.loadProfile().motionCalibOverride; } catch (e) { ov = null; }
+    if (!ov) { box.innerHTML = ''; return; }
+
+    const parts = [];
+    if (ov.gctFallbackRatio != null) parts.push('gctFallbackRatio: ' + ov.gctFallbackRatio);
+    if (ov.rotRejectThreshold != null) parts.push('rotRejectThreshold: ' + ov.rotRejectThreshold);
+    if (ov.vertScale != null) parts.push('vertScale: ' + ov.vertScale);
+    if (ov.prevStrideCorrectionFactor != null) parts.push((isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ' ' + (isKo ? '변경됨' : 'changed'));
+    const dateTxt = ov.appliedAt ? fmtDate(new Date(ov.appliedAt).getTime()) : '';
+
+    // [추가] 코드(applyDevicePos)에 그대로 붙여넣을 수 있는 스니펫 생성.
+    // 오버라이드로 바뀌지 않은 필드는 그 착용위치의 원래 기본값을 그대로 채운다.
+    const base = DEVICE_PROFILE_DEFAULTS[ov.devicePos] || DEVICE_PROFILE_DEFAULTS.chest;
+    const finalGct = ov.gctFallbackRatio != null ? ov.gctFallbackRatio : base.gctFallbackRatio;
+    const finalVert = ov.vertScale != null ? ov.vertScale : base.vertScale;
+    const snippetLine = ov.devicePos + ':   { groundThreshold: ' + base.groundThreshold + ', impactThreshold: ' + base.impactThreshold
+      + ', gctFallbackRatio: ' + finalGct + ', vertScale: ' + finalVert + ', minStepInterval: ' + base.minStepInterval
+      + ', vertEnabled: ' + base.vertEnabled + ' },';
+    const rotLine = ov.rotRejectThreshold != null ? ('this.rotRejectThreshold = ' + ov.rotRejectThreshold + ';') : null;
+    const snippet = snippetLine + (rotLine ? ('\n' + rotLine) : '');
+    const escapedSnippet = snippet.replace(/'/g, "\\'").replace(/\n/g, '\\n');
+
+    box.innerHTML = '<div class="garmin-import-item" style="border-color:#3a3a2a;">'
+      + '<div style="font-size:10px; color:var(--primary); font-weight:900; margin-bottom:6px;">' + (isKo ? '적용된 보정값' : 'CUSTOM CALIBRATION APPLIED') + '</div>'
+      + '<div style="font-size:11px; color:#ccc; line-height:1.6;">' + parts.join('<br>') + '</div>'
+      + (dateTxt ? '<div style="font-size:10px; color:#666; margin-top:6px;">' + (isKo ? '적용일: ' : 'Applied: ') + dateTxt + '</div>' : '')
+      + '<div style="font-size:9px; color:#888; font-weight:800; margin-top:12px; margin-bottom:4px;">' + (isKo ? '코드 반영용 스니펫 (applyDevicePos)' : 'CODE SNIPPET (applyDevicePos)') + '</div>'
+      + '<pre style="background:#000; border:1px solid #2a2a2a; border-radius:8px; padding:10px; font-size:10px; color:#0f0; white-space:pre-wrap; word-break:break-all; margin:0;">' + snippet.replace(/</g,'&lt;') + '</pre>'
+      + '<button id="btn-copy-calib-snippet" style="margin-top:8px; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.copySnippet(\'' + escapedSnippet + '\')">' + (isKo ? '스니펫 복사' : 'COPY SNIPPET') + '</button>'
+      + '<button id="btn-reset-calib" style="margin-top:8px; background:transparent; color:#e57373; border:1px solid #663333; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.resetCalibration()">' + (isKo ? '기본값으로 초기화' : 'RESET TO DEFAULT') + '</button>'
+      + '</div>';
+  }
+
+  // [추가] 스니펫을 클립보드로 복사(가능한 환경에서). 실패하면 조용히 무시 —
+  // 화면에 이미 텍스트가 보이므로 수동 복사도 가능함.
+  function copySnippet(text) {
+    const isKo = isKoLang();
+    const restored = text.replace(/\\n/g, '\n');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(restored)
+        .then(() => alert(isKo ? '복사되었습니다.' : 'Copied.'))
+        .catch(() => alert(isKo ? '복사에 실패했습니다. 위 텍스트를 직접 선택해 복사해주세요.' : 'Copy failed — please select and copy the text above manually.'));
+    } else {
+      alert(isKo ? '이 환경에선 자동 복사가 지원되지 않아요. 위 텍스트를 직접 선택해 복사해주세요.' : 'Auto-copy isn\'t supported here — please select and copy the text above manually.');
+    }
+  }
+
+  // [추가] 적용된 보정값을 지우고 코드 기본값(위치별 프로파일)으로 되돌린다.
+  // 보폭 보정계수는 override 적용 직전의 값으로 정확히 복원(다른 기능인 실측거리
+  // 캘리브레이션 값을 실수로 지우지 않기 위함). 지금 살아있는 app.motion에도 바로 반영.
+  function resetCalibration() {
+    const isKo = isKoLang();
+    try {
+      const prof = storage.loadProfile();
+      const ov = prof.motionCalibOverride;
+      if (!ov) return;
+      if (ov.prevStrideCorrectionFactor != null) {
+        prof.strideCorrectionFactor = ov.prevStrideCorrectionFactor;
+      }
+      delete prof.motionCalibOverride;
+      storage.saveProfile(prof);
+
+      if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
+        app.motion.applyDevicePos(prof.devicePos || 'chest');
+      }
+
+      renderCalibStatus(isKo);
+      const resultBox = document.getElementById('garmin-calib-result');
+      if (resultBox) resultBox.innerHTML = '';
+      lastSuggestion = null;
+      alert(isKo ? '기본값으로 초기화되었습니다.' : 'Reset to default values.');
+    } catch (err) {
+      alert((isKo ? '초기화 중 오류: ' : 'Reset error: ') + err.message);
+    }
+  }
+
+  return { importFitFile, deleteImport, clearAll, selectImport, selectPrecLog, runCalibrationCompare, applyCalibration, resetCalibration, copySnippet, render };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
@@ -6775,6 +7009,7 @@ const app = new OppaRunApp();
 const community = new CommunityManager();
 window.onload = () => {
 app.init();
+ui.applyDevModeVisibility(); // [추가] 개발자 모드가 아니면 GARMIN 탭 숨김
 garmin.render(); // [GARMIN IMPORT] 저장된 가민 데이터 목록을 화면에 표시
 ui.changeLanguage(storage.getLang());
 ui.setUnit(storage.getUnit());
