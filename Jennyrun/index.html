@@ -600,13 +600,19 @@ alt="runner"/>
      기존 계산 로직은 전혀 건드리지 않는 읽기 전용 진단 도구. -->
 <div class="diag-card" style="margin: 0 0 10px 0;">
 <div id="garmin-calib-title" style="color:var(--primary); font-weight:900; font-size:14px; margin-bottom:8px;">CALIBRATION CHECK</div>
-<div id="garmin-calib-desc" style="font-size:11px; color:#888; margin-bottom:10px; line-height:1.6;">Compare 1 Garmin record against the pooled average of up to 3 saved precision logs. Combining more runs gives a value less sensitive to one-off noise.</div>
+<div id="garmin-calib-desc" style="font-size:11px; color:#888; margin-bottom:10px; line-height:1.6;">Compare this Garmin record with a saved precision log from the same run to see how far cadence/GCT are off, and get a suggested starting point for retuning.</div>
 <div style="position:relative;">
-  <div id="current-calib-preclog-text" style="font-size:10px; color:#888; font-weight:800; margin-bottom:6px;">SELECT UP TO 3 PRECISION LOGS</div>
-  <div id="calib-preclog-dropdown-options" class="precision-dropdown-options" style="width:100%; position:static; max-height:220px; overflow-y:auto; display:block;"></div>
+  <div id="calib-preclog-select-btn" onclick="ui.toggleDropdown('calib-preclog-dropdown-options')" class="dropdown-select" style="padding:12px 14px; font-size:13px;">
+    <span id="current-calib-preclog-text">SELECT PRECISION LOG</span><span style="font-size:10px; color:var(--primary);">▼</span>
+  </div>
+  <div id="calib-preclog-dropdown-options" class="precision-dropdown-options" style="width:100%; position:static;"></div>
 </div>
 <button id="btn-run-calib-compare" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:12px; margin-top:10px;" onclick="garmin.runCalibrationCompare()">COMPARE</button>
 <div id="garmin-calib-result" style="margin-top:12px;"></div>
+<!-- [추가] 여러 번(다른 페이스로) 비교한 결과를 바로 적용하지 않고 모아뒀다가,
+     평균값으로 한 번만 적용할 수 있게 하는 대기목록. runCalibrationCompare()가
+     매번 여기에 결과를 쌓고, garmin.applyAveragedCalibration()이 평균 내서 적용한다. -->
+<div id="garmin-calib-pending" style="margin-top:12px;"></div>
 <!-- [추가] 현재 적용된 보정값 상태 표시 + 초기화 버튼. 비교를 다시 하지 않아도
      언제든 코드 기본값으로 되돌릴 수 있도록 항상 표시됨(적용된 값이 있을 때만 보임). -->
 <div id="garmin-calib-status" style="margin-top:10px;"></div>
@@ -1646,7 +1652,7 @@ reader.readAsText(file);
 }
 saveProfile(profile) { localStorage.setItem(this.PROFILE_KEY, JSON.stringify(profile)); }
 loadProfile() {
-const defaultProfile = { h: 175, hu: "cm", w: 70, wu: "kg", age: 30, devicePos: "chest", strideCorrectionFactor: 1.0 };
+const defaultProfile = { h: 175, hu: "cm", w: 70, wu: "kg", age: 30, devicePos: "chest", strideCorrectionFactor: 1.0, gpsDistCorrectionFactor: 1.0 };
 const data = localStorage.getItem(this.PROFILE_KEY);
 // [수정] 기존 저장 데이터에 새 필드(age, devicePos)가 없을 경우 기본값으로 보완
 return data ? Object.assign({}, defaultProfile, JSON.parse(data)) : defaultProfile;
@@ -2768,7 +2774,7 @@ if (!isConfirmed || !storage._pendingImportData) return;
 const data = storage._pendingImportData;
 const isKo = storage.getLang() === 'ko';
 if (Array.isArray(data.history)) localStorage.setItem(storage.HISTORY_KEY, JSON.stringify(data.history));
-if (data.profile) storage.saveProfile(Object.assign({ h:175, hu:'cm', w:70, wu:'kg', age:30, devicePos:'chest', strideCorrectionFactor:1.0 }, data.profile));
+if (data.profile) storage.saveProfile(Object.assign({ h:175, hu:'cm', w:70, wu:'kg', age:30, devicePos:'chest', strideCorrectionFactor:1.0, gpsDistCorrectionFactor:1.0 }, data.profile));
 if (data.lang) storage.setLang(data.lang);
 if (data.unit) storage.setUnit(data.unit);
 if (data.gender) storage.setGender(data.gender);
@@ -4414,6 +4420,13 @@ if (!this.state.isAutoPaused && accuracy < distAccuracyLimit) {
 const fixTime = (p.timestamp && Number.isFinite(p.timestamp)) ? p.timestamp : Date.now();
 if (this.state.lastPos) {
 let d = this.map.distance(this.state.lastPos, pos) / 1000;
+// [추가] 가민 대비 일정하게 나는 거리/페이스 오차를 보정하기 위한 실측 계수.
+// stride/GCT/vertOsc 계수와 달리 이 값만 실제 누적거리(totalDist)에 직접 곱해져서
+// 페이스·거리·칼로리 등 GPS 기반 수치 전체에 실질적으로 반영된다.
+try {
+  const _gf = storage.loadProfile().gpsDistCorrectionFactor;
+  if (typeof _gf === 'number' && _gf > 0) d *= _gf;
+} catch (e) {}
 let timeDelta = (fixTime - (this.state.lastPosTimestamp || fixTime)) / 1000;
 // maxJump: 순간 최대 이동 거리 (칼만 스무딩으로 이상치 많이 걸러짐)
 let maxJump = 0.18;
@@ -6677,8 +6690,7 @@ const garmin = (function () {
   }
 
   let selectedId = null; // 드롭다운에서 현재 선택된 가민 기록 id
-  let selectedPrecLogIds = []; // [수정] 캘리브레이션 비교용으로 선택된 정밀 로그 id들 (최대 MAX_PREC_LOGS개, 종합 비교용)
-  const MAX_PREC_LOGS = 3; // [추가] 한 번에 합산 비교할 수 있는 정밀 로그 최대 개수
+  let selectedPrecLogId = null; // [추가] 캘리브레이션 비교용으로 선택된 정밀 로그 id
   let lastSuggestion = null; // [추가] 마지막 비교에서 계산된 제안값 (APPLY 버튼이 참조)
 
   function renderBox(item, isKo) {
@@ -6728,8 +6740,8 @@ const garmin = (function () {
     // [추가] 캘리브레이션 비교 카드 다국어 처리
     setText('garmin-calib-title', isKo ? '캘리브레이션 비교' : 'CALIBRATION CHECK');
     setText('garmin-calib-desc', isKo
-      ? '이 가민 기록 1개와, 저장된 정밀 로그 중 최대 ' + MAX_PREC_LOGS + '개를 선택해 합산 평균으로 비교합니다. 여러 러닝을 합칠수록 우연한 오차에 덜 흔들리는 값을 얻을 수 있어요.'
-      : 'Compare 1 Garmin record against the pooled average of up to ' + MAX_PREC_LOGS + ' saved precision logs. Combining more runs gives a value less sensitive to one-off noise.');
+      ? '이 가민 기록과 같은 러닝의 저장된 정밀 로그를 비교해서 케이던스/GCT가 얼마나 차이 나는지 확인하고, 값 조정을 위한 제안값을 받아보세요.'
+      : 'Compare this Garmin record with a saved precision log from the same run to see how far cadence/GCT are off, and get a suggested starting point for retuning.');
     setText('btn-run-calib-compare', isKo ? '비교하기' : 'COMPARE');
   }
 
@@ -6744,6 +6756,7 @@ const garmin = (function () {
     applyStaticLabels(isKo);
     // [추가] 현재 적용된 보정값 상태도 가민 가져오기 목록 유무와 무관하게 항상 갱신.
     renderCalibStatus(isKo);
+    renderPendingCalibList(isKo); // [추가] 저장해둔 비교 결과 대기목록도 항상 갱신
     // [수정] 정밀 로그 드롭다운은 가민 가져오기 목록과 무관하게 항상 갱신되어야 함.
     // 기존엔 가민 파일을 하나도 가져오지 않은 상태(list.length===0)면 아래 return으로
     // 빠져나가서 renderPrecLogDropdown()이 아예 호출되지 않았고, 그 결과 러닝 후
@@ -6775,9 +6788,8 @@ const garmin = (function () {
     if (clearAllBtn) clearAllBtn.style.display = 'block';
   }
 
-  // [수정] 캘리브레이션 비교용 정밀 로그를 체크박스로 최대 MAX_PREC_LOGS개까지 다중 선택.
+  // [추가] 캘리브레이션 비교용 정밀 로그 드롭다운 채우기.
   // storage.loadPrecisionLogs()를 재사용하므로 정밀 로그 저장 구조를 새로 만들지 않는다.
-  // 선택된 로그들은 runCalibrationCompare()에서 하나로 합쳐(pool)져 평균이 계산된다.
   function renderPrecLogDropdown(isKo) {
     const dropdown = document.getElementById('calib-preclog-dropdown-options');
     const currentText = document.getElementById('current-calib-preclog-text');
@@ -6785,44 +6797,29 @@ const garmin = (function () {
     let logs = [];
     try { logs = (typeof storage !== 'undefined') ? storage.loadPrecisionLogs() : []; } catch (e) { logs = []; }
     if (!logs.length) {
-      selectedPrecLogIds = [];
+      selectedPrecLogId = null;
       currentText.textContent = isKo ? '저장된 정밀 로그 없음' : 'NO PRECISION LOGS';
       dropdown.innerHTML = '<div class="dropdown-option precision-option" style="color:#666; text-align:center;">' + (isKo ? '정밀 로그가 없습니다' : 'No precision logs') + '</div>';
       return;
     }
-    // 삭제된 로그가 선택 목록에 남아있지 않도록 정리
-    selectedPrecLogIds = selectedPrecLogIds.filter(id => logs.find(l => l.id === id));
-
+    if (!selectedPrecLogId || !logs.find(l => l.id === selectedPrecLogId)) {
+      selectedPrecLogId = logs[0].id;
+    }
     dropdown.innerHTML = logs.map(l => {
       const label = fmtDate(new Date(l.savedAt).getTime()) + ' · ' + l.log.length + (isKo ? '개' : ' rows');
       const escapedLabel = label.replace(/'/g, "&#39;");
-      const checked = selectedPrecLogIds.includes(l.id) ? 'checked' : '';
-      return '<label class="dropdown-option precision-option" style="display:flex; align-items:center; gap:8px; cursor:pointer;">'
-        + '<input type="checkbox" ' + checked + ' onclick="garmin.togglePrecLog(\'' + l.id + '\')" style="width:16px; height:16px; accent-color:var(--primary); flex-shrink:0;">'
-        + '<span>' + label + '</span>'
-        + '</label>';
+      return '<div class="dropdown-option precision-option" onclick="garmin.selectPrecLog(\'' + l.id + '\', \'' + escapedLabel + '\')">' + label + '</div>';
     }).join('');
-
-    const n = selectedPrecLogIds.length;
-    currentText.textContent = n
-      ? (isKo ? n + '개 선택됨 (합산 비교, 최대 ' + MAX_PREC_LOGS + '개)' : n + ' SELECTED (pooled, max ' + MAX_PREC_LOGS + ')')
-      : (isKo ? '정밀 로그를 1~' + MAX_PREC_LOGS + '개 선택하세요' : 'SELECT 1–' + MAX_PREC_LOGS + ' PRECISION LOGS');
+    const cur = logs.find(l => l.id === selectedPrecLogId);
+    currentText.textContent = fmtDate(new Date(cur.savedAt).getTime()) + ' · ' + cur.log.length + (isKo ? '개' : ' rows');
   }
 
-  function togglePrecLog(id) {
-    const isKo = isKoLang();
-    const idx = selectedPrecLogIds.indexOf(id);
-    if (idx >= 0) {
-      selectedPrecLogIds.splice(idx, 1);
-    } else {
-      if (selectedPrecLogIds.length >= MAX_PREC_LOGS) {
-        alert(isKo ? '정밀 로그는 최대 ' + MAX_PREC_LOGS + '개까지 선택할 수 있습니다.' : 'You can select up to ' + MAX_PREC_LOGS + ' precision logs.');
-        renderPrecLogDropdown(isKo); // 체크박스가 다시 체크된 상태로 그려지도록 되돌림
-        return;
-      }
-      selectedPrecLogIds.push(id);
-    }
-    renderPrecLogDropdown(isKo);
+  function selectPrecLog(id, labelText) {
+    selectedPrecLogId = id;
+    const currentText = document.getElementById('current-calib-preclog-text');
+    if (currentText && labelText) currentText.textContent = labelText;
+    const dropdown = document.getElementById('calib-preclog-dropdown-options');
+    if (dropdown) dropdown.style.display = 'none';
   }
 
   function selectImport(id, dateText) {
@@ -6941,11 +6938,11 @@ const garmin = (function () {
     const garminItem = list.find(i => i.id === selectedId);
     let precLogs = [];
     try { precLogs = (typeof storage !== 'undefined') ? storage.loadPrecisionLogs() : []; } catch (e) { precLogs = []; }
-    const precItems = precLogs.filter(l => selectedPrecLogIds.includes(l.id));
+    const precItem = precLogs.find(l => l.id === selectedPrecLogId);
 
-    if (!garminItem || !precItems.length) {
+    if (!garminItem || !precItem) {
       lastSuggestion = null;
-      resultBox.innerHTML = '<div class="garmin-import-empty">' + (isKo ? '가민 기록과 정밀 로그를 (최소 1개, 최대 ' + MAX_PREC_LOGS + '개) 먼저 선택하세요.' : 'Select a Garmin record and 1–' + MAX_PREC_LOGS + ' precision logs first.') + '</div>';
+      resultBox.innerHTML = '<div class="garmin-import-empty">' + (isKo ? '가민 기록과 정밀 로그를 먼저 선택하세요.' : 'Select a Garmin record and a precision log first.') + '</div>';
       return;
     }
     if (garminItem.avgCadence == null) {
@@ -6954,14 +6951,8 @@ const garmin = (function () {
       return;
     }
 
-    // [수정] 선택된 정밀 로그들을 하나의 배열로 합쳐(pool) 평균을 낸다.
-    // 러닝별 표본 수가 다르더라도 전체 스텝(row) 기준 가중평균이 되므로,
-    // 러닝 1회의 우연한 노이즈에 덜 흔들리는 값이 나온다.
-    const pooledLog = precItems.reduce((acc, item) => acc.concat(item.log), []);
-    const poolCount = precItems.length;
-
-    const phoneAvgCadence = avgFromPrecLog(pooledLog, 'cadence');
-    const phoneAvgGct = avgFromPrecLog(pooledLog, 'gctMs');
+    const phoneAvgCadence = avgFromPrecLog(precItem.log, 'cadence');
+    const phoneAvgGct = avgFromPrecLog(precItem.log, 'gctMs');
     const garminAvgCadence = garminItem.avgCadence;
     const garminAvgGct = garminItem.avgGctMs;
 
@@ -6970,26 +6961,36 @@ const garmin = (function () {
 
     // [추가] 보폭(step_length)/수직진동(vert_osc) 비교. 정밀 로그엔 m/cm 단위,
     // 가민 데이터는 mm 단위로 들어있으므로 mm 기준으로 통일해서 비교한다.
-    const phoneAvgStepM = avgFromPrecLog(pooledLog, 'stepLengthM');
+    const phoneAvgStepM = avgFromPrecLog(precItem.log, 'stepLengthM');
     const phoneAvgStepMm = phoneAvgStepM != null ? phoneAvgStepM * 1000 : null;
     const garminAvgStepMm = garminItem.avgStepLengthMm;
     const stepDiffPct = (phoneAvgStepMm && garminAvgStepMm) ? ((phoneAvgStepMm - garminAvgStepMm) / garminAvgStepMm * 100) : null;
 
-    const phoneAvgVertMm = avgFromPrecLog(pooledLog, 'vertOscMm');
+    const phoneAvgVertMm = avgFromPrecLog(precItem.log, 'vertOscMm');
     const garminAvgVertMm = garminItem.avgVertOscMm;
     const vertDiffPct = (phoneAvgVertMm && garminAvgVertMm) ? ((phoneAvgVertMm - garminAvgVertMm) / garminAvgVertMm * 100) : null;
 
     // [추가] 페이스 비교. 정밀 로그엔 순간속도(speedKmh)만 있으므로 평균속도로 변환한 뒤
     // 가민의 avgPaceSecPerKm(전체 평균 페이스, sec/km)과 같은 단위로 맞춰 비교한다.
-    const phoneAvgSpeedKmh = avgFromPrecLog(pooledLog, 'speedKmh');
+    const phoneAvgSpeedKmh = avgFromPrecLog(precItem.log, 'speedKmh');
     const phoneAvgPaceSec = phoneAvgSpeedKmh ? (3600 / phoneAvgSpeedKmh) : null;
     const garminAvgPaceSec = garminItem.avgPaceSecPerKm;
     const paceDiffPct = (phoneAvgPaceSec && garminAvgPaceSec) ? ((phoneAvgPaceSec - garminAvgPaceSec) / garminAvgPaceSec * 100) : null;
 
     // [추가] 평균 심박수 비교. 심박계가 연결된 러닝에서만 양쪽 다 값이 있음.
-    const phoneAvgHr = avgFromPrecLog(pooledLog, 'hrBpm');
+    const phoneAvgHr = avgFromPrecLog(precItem.log, 'hrBpm');
     const garminAvgHr = garminItem.avgHr;
     const hrDiffPct = (phoneAvgHr && garminAvgHr) ? ((phoneAvgHr - garminAvgHr) / garminAvgHr * 100) : null;
+
+    // [추가] 실제 거리 비교. 정밀 로그의 마지막 행 distKm(폰이 실제로 누적한 GPS 거리)과
+    // 가민 파일의 distanceKm을 직접 비교. 페이스처럼 간접 계산이 아니라 두 기기가 그
+    // 러닝에서 실제로 기록한 거리값이라 더 신뢰도가 높다. 이 값이 계속 일정한 방향으로
+    // 어긋난다면(가민보다 항상 짧거나 길게 찍힘) GPS 거리 자체의 체계적 오차이므로
+    // gpsDistCorrectionFactor로 보정 대상이 된다.
+    const phoneLastRow = precItem.log.length ? precItem.log[precItem.log.length - 1] : null;
+    const phoneDistanceKm = (phoneLastRow && phoneLastRow.distKm != null) ? parseFloat(phoneLastRow.distKm) : null;
+    const garminDistanceKm = garminItem.distanceKm;
+    const distDiffPct = (phoneDistanceKm && garminDistanceKm) ? ((phoneDistanceKm - garminDistanceKm) / garminDistanceKm * 100) : null;
 
     // 현재 MotionManager 설정값 (실행 중이 아니어도 OppaRunApp 생성 시 저장된
     // 착용 위치 프로파일이 이미 적용돼 있음)
@@ -7005,9 +7006,11 @@ const garmin = (function () {
     // [추가] 보폭 보정은 MotionManager가 아니라 storage 프로필의 strideCorrectionFactor가
     // 담당하므로(calcStride 참고) 별도로 현재값을 읽어온다.
     let curStrideFactor = 1.0;
+    let curGpsDistFactor = 1.0; // [추가]
     try {
       const _p = storage.loadProfile();
       curStrideFactor = (typeof _p.strideCorrectionFactor === 'number' && _p.strideCorrectionFactor > 0) ? _p.strideCorrectionFactor : 1.0;
+      curGpsDistFactor = (typeof _p.gpsDistCorrectionFactor === 'number' && _p.gpsDistCorrectionFactor > 0) ? _p.gpsDistCorrectionFactor : 1.0; // [추가]
     } catch (e) {}
 
     // [제안] 케이던스가 garmin보다 X% 높으면, 회전 노이즈 거부 임계값을 대략
@@ -7025,6 +7028,11 @@ const garmin = (function () {
       ? Math.round(curVertScale * clampRatio(garminAvgVertMm / phoneAvgVertMm) * 1000) / 1000 : null;
     const suggestedStrideFactor = (phoneAvgStepMm && garminAvgStepMm && stepDiffPct != null && Math.abs(stepDiffPct) > 3)
       ? Math.round(curStrideFactor * clampRatio(garminAvgStepMm / phoneAvgStepMm) * 1000) / 1000 : null;
+    // [추가] GPS 거리 보정계수 제안값. 실측 거리라 노이즈가 적으므로 1% 초과 오차부터
+    // 제안하되, 한 번에 과도하게 튀지 않도록 ±15%로 더 좁게 clamp.
+    const clampGpsRatio = (r) => Math.max(0.85, Math.min(1.15, r));
+    const suggestedGpsDistFactor = (phoneDistanceKm && garminDistanceKm && distDiffPct != null && Math.abs(distDiffPct) > 1)
+      ? Math.round(curGpsDistFactor * clampGpsRatio(garminDistanceKm / phoneDistanceKm) * 1000) / 1000 : null;
 
     const row = (label, phoneVal, garminVal, diffPct, unit) => {
       const diffTxt = diffPct != null ? (diffPct > 0 ? '+' : '') + diffPct.toFixed(1) + '%' : '--';
@@ -7045,11 +7053,10 @@ const garmin = (function () {
         + '<div style="font-size:12px; font-weight:900; color:' + diffColor + '; min-width:52px; text-align:right;">' + diffTxt + '</div>'
         + '</div>';
     };
+    // [추가] 거리는 소수점 2자리(km)로 표시해야 하므로 별도 포맷터 사용.
+    const rowKm = (label, phoneVal, garminVal, diffPct) => rowFmt(label, phoneVal, garminVal, diffPct, (v) => v.toFixed(2) + ' km');
 
     let html = '<div class="garmin-import-item">'
-      + '<div style="font-size:9px; color:#666; font-weight:700; margin-bottom:8px;">' + (isKo
-        ? '폰 정밀 로그 ' + poolCount + '개 합산 평균 vs 가민 1개'
-        : poolCount + ' pooled phone log(s) (avg) vs 1 Garmin record') + '</div>'
       + '<div style="font-size:10px; color:#888; font-weight:800; margin-bottom:8px; display:flex; justify-content:space-between;">'
       + '<span>' + (isKo ? '폰' : 'PHONE') + '</span><span>' + (isKo ? '가민' : 'GARMIN') + '</span><span>' + (isKo ? '오차' : 'DIFF') + '</span>'
       + '</div>'
@@ -7057,6 +7064,7 @@ const garmin = (function () {
       + row(isKo ? 'GCT (ms)' : 'GCT (ms)', phoneAvgGct, garminAvgGct, gctDiffPct, '')
       + row(isKo ? '보폭 (mm)' : 'STEP LEN (mm)', phoneAvgStepMm, garminAvgStepMm, stepDiffPct, '')
       + row(isKo ? '수직진동 (mm)' : 'VERT OSC (mm)', phoneAvgVertMm, garminAvgVertMm, vertDiffPct, '')
+      + rowKm(isKo ? '실제 거리 (km)' : 'DISTANCE (km)', phoneDistanceKm, garminDistanceKm, distDiffPct)
       + rowFmt(isKo ? '페이스 (/km)' : 'PACE (/km)', phoneAvgPaceSec, garminAvgPaceSec, paceDiffPct, fmtPace)
       + row(isKo ? '평균 심박수 (bpm)' : 'AVG HR (bpm)', phoneAvgHr, garminAvgHr, hrDiffPct, '');
 
@@ -7066,11 +7074,12 @@ const garmin = (function () {
       { label: 'GCT', phone: phoneAvgGct, garmin: garminAvgGct },
       { label: isKo ? '보폭' : 'STEP LEN', phone: phoneAvgStepMm, garmin: garminAvgStepMm },
       { label: isKo ? '수직진동' : 'VERT OSC', phone: phoneAvgVertMm, garmin: garminAvgVertMm },
+      { label: isKo ? '거리' : 'DISTANCE', phone: phoneDistanceKm, garmin: garminDistanceKm },
       { label: isKo ? '페이스' : 'PACE', phone: phoneAvgPaceSec, garmin: garminAvgPaceSec },
       { label: isKo ? '심박수' : 'AVG HR', phone: phoneAvgHr, garmin: garminAvgHr }
     ]);
 
-    const hasSuggestion = suggestedRot != null || suggestedGct != null || suggestedVertScale != null || suggestedStrideFactor != null;
+    const hasSuggestion = suggestedRot != null || suggestedGct != null || suggestedVertScale != null || suggestedStrideFactor != null || suggestedGpsDistFactor != null;
 
     if (hasSuggestion) {
       html += '<div style="margin-top:12px; font-size:11px; color:#ccc; line-height:1.7;">'
@@ -7087,10 +7096,14 @@ const garmin = (function () {
       if (suggestedStrideFactor != null) {
         html += (isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ': ' + curStrideFactor.toFixed(3) + ' → <b>' + suggestedStrideFactor.toFixed(3) + '</b><br>';
       }
+      if (suggestedGpsDistFactor != null) {
+        html += (isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + curGpsDistFactor.toFixed(3) + ' → <b>' + suggestedGpsDistFactor.toFixed(3) + '</b> ' + (isKo ? '(실제 거리·페이스에 직접 반영됨)' : '(directly affects real distance/pace)') + '<br>';
+      }
       html += '<div style="color:#888; margin-top:6px; margin-bottom:10px;">' + (isKo
         ? '아래 버튼을 누르면 이 값들이 즉시 적용되고 저장됩니다. 적용 후 러닝을 한 번 더 진행해서 오차가 줄었는지 다시 비교해보세요.'
         : 'Tapping the button below applies and saves these values immediately. Run again afterward and re-compare to confirm the error shrank.') + '</div>'
         + '<button id="btn-apply-calib" style="background:var(--primary); color:#000; border:none; padding:12px; border-radius:10px; width:100%; font-weight:900; font-size:12px; cursor:pointer;" onclick="garmin.applyCalibration()">' + (isKo ? '✓ 이 값으로 자동 반영' : '✓ APPLY THESE VALUES') + '</button>'
+        + '<button id="btn-save-pending-calib" style="margin-top:8px; background:transparent; color:var(--primary); border:1.5px solid #2a3a2f; padding:12px; border-radius:10px; width:100%; font-weight:900; font-size:12px; cursor:pointer;" onclick="garmin.addPendingCalib()">' + (isKo ? '＋ 대기목록에 저장 (나중에 평균으로 적용)' : '＋ SAVE TO LIST (apply averaged later)') + '</button>'
         + '</div>';
 
       lastSuggestion = {
@@ -7098,7 +7111,8 @@ const garmin = (function () {
         gct: suggestedGct,
         rot: suggestedRot,
         vertScale: suggestedVertScale,
-        strideFactor: suggestedStrideFactor
+        strideFactor: suggestedStrideFactor,
+        gpsDistFactor: suggestedGpsDistFactor
       };
     } else {
       html += '<div style="margin-top:12px; font-size:11px; color:#888;">' + (isKo
@@ -7108,6 +7122,178 @@ const garmin = (function () {
     }
     html += '</div>';
     resultBox.innerHTML = html;
+  }
+
+  // [추가] 순차 적용 문제 해결용: 여러 번(다른 페이스로) 비교한 결과를 즉시
+  // 적용하지 않고 모아뒀다가, 나중에 필드별 평균을 내서 딱 한 번만 적용하기 위한
+  // 대기목록. motionCalibOverride는 덮어쓰기 방식이라 순차 적용하면 마지막 결과만
+  // 남고 앞의 결과들은 그냥 버려지는 문제가 있었음 → 그래서 평균 후 1회 적용으로 변경.
+  const PENDING_CALIB_KEY = 'oppaRunPendingCalibRuns';
+  const MAX_PENDING_CALIB = 3;
+
+  function loadPendingCalib() {
+    try {
+      const raw = localStorage.getItem(PENDING_CALIB_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) { return []; }
+  }
+
+  function savePendingCalibList(list) {
+    try { localStorage.setItem(PENDING_CALIB_KEY, JSON.stringify(list)); } catch (e) {}
+  }
+
+  // 각 필드(rot/gct/vertScale/strideFactor)의 단순 평균. null/undefined는 제외하고 평균낸다
+  // (예: 심박수처럼 값이 없는 항목이 섞여도 나머지 필드는 정상적으로 평균됨).
+  function avgPendingField(list, key) {
+    const vals = list.map(i => i[key]).filter(v => typeof v === 'number');
+    if (!vals.length) return null;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  }
+
+  // [추가] 방금 계산된 lastSuggestion을 대기목록에 추가.
+  function addPendingCalib() {
+    const isKo = isKoLang();
+    if (!lastSuggestion) return;
+    const list = loadPendingCalib();
+    if (list.length >= MAX_PENDING_CALIB) {
+      alert(isKo ? '대기목록은 최대 ' + MAX_PENDING_CALIB + '개까지 저장할 수 있습니다. 먼저 평균 적용하거나 항목을 삭제하세요.' : 'You can save up to ' + MAX_PENDING_CALIB + ' results. Apply the average or delete an item first.');
+      return;
+    }
+    list.push({
+      id: 'pc_' + Date.now(),
+      savedAt: new Date().toISOString(),
+      devicePos: lastSuggestion.devicePos,
+      gct: lastSuggestion.gct,
+      rot: lastSuggestion.rot,
+      vertScale: lastSuggestion.vertScale,
+      strideFactor: lastSuggestion.strideFactor,
+      gpsDistFactor: lastSuggestion.gpsDistFactor
+    });
+    savePendingCalibList(list);
+    renderPendingCalibList(isKo);
+    const btn = document.getElementById('btn-save-pending-calib');
+    if (btn) { btn.textContent = isKo ? '✓ 저장됨' : '✓ SAVED'; btn.disabled = true; btn.style.opacity = '0.6'; btn.style.cursor = 'default'; }
+  }
+
+  function removePendingCalib(id) {
+    const isKo = isKoLang();
+    savePendingCalibList(loadPendingCalib().filter(i => i.id !== id));
+    renderPendingCalibList(isKo);
+  }
+
+  function clearPendingCalib() {
+    const isKo = isKoLang();
+    savePendingCalibList([]);
+    renderPendingCalibList(isKo);
+  }
+
+  // [추가] 대기목록에 쌓인 N개의 제안값을 필드별로 평균 내서 보여주고,
+  // '평균값 적용' 버튼으로 1회만 반영할 수 있게 렌더링.
+  function renderPendingCalibList(isKo) {
+    const box = document.getElementById('garmin-calib-pending');
+    if (!box) return;
+    const list = loadPendingCalib();
+    if (!list.length) { box.innerHTML = ''; return; }
+
+    const avgRot = avgPendingField(list, 'rot') != null ? Math.round(avgPendingField(list, 'rot')) : null;
+    const avgGct = avgPendingField(list, 'gct') != null ? Math.round(avgPendingField(list, 'gct') * 1000) / 1000 : null;
+    const avgVertScale = avgPendingField(list, 'vertScale') != null ? Math.round(avgPendingField(list, 'vertScale') * 1000) / 1000 : null;
+    const avgStrideFactor = avgPendingField(list, 'strideFactor') != null ? Math.round(avgPendingField(list, 'strideFactor') * 1000) / 1000 : null;
+    const avgGpsDistFactor = avgPendingField(list, 'gpsDistFactor') != null ? Math.round(avgPendingField(list, 'gpsDistFactor') * 1000) / 1000 : null;
+
+    const rows = list.map((item, idx) => {
+      const parts = [];
+      if (item.rot != null) parts.push('rot ' + item.rot);
+      if (item.gct != null) parts.push('gct ' + item.gct);
+      if (item.vertScale != null) parts.push('vert ' + item.vertScale);
+      if (item.strideFactor != null) parts.push((isKo ? '보폭' : 'stride') + ' ' + item.strideFactor.toFixed(3));
+      if (item.gpsDistFactor != null) parts.push((isKo ? '거리' : 'dist') + ' ' + item.gpsDistFactor.toFixed(3));
+      return '<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid #2a2a2a; font-size:11px; gap:6px;">'
+        + '<div style="color:#999; flex-shrink:0;">#' + (idx + 1) + ' · ' + fmtDate(new Date(item.savedAt).getTime()) + '</div>'
+        + '<div style="color:#ccc; text-align:right;">' + (parts.join(' / ') || '--') + '</div>'
+        + '<div style="color:#e57373; font-weight:800; cursor:pointer; flex-shrink:0;" onclick="garmin.removePendingCalib(\'' + item.id + '\')">' + (isKo ? '삭제' : 'DEL') + '</div>'
+        + '</div>';
+    }).join('');
+
+    let html = '<div class="garmin-import-item">'
+      + '<div style="font-size:10px; color:var(--primary); font-weight:900; margin-bottom:8px;">' + (isKo
+        ? '저장된 비교 결과 (' + list.length + '/' + MAX_PENDING_CALIB + ')'
+        : 'SAVED RESULTS (' + list.length + '/' + MAX_PENDING_CALIB + ')') + '</div>'
+      + rows
+      + '<div style="margin-top:10px; font-size:11px; color:#ccc; line-height:1.7;">'
+      + '<div style="color:var(--primary); font-weight:900; margin-bottom:4px;">' + (isKo ? '평균 보정값' : 'AVERAGED CALIBRATION') + '</div>';
+    if (avgRot != null) html += 'rotRejectThreshold → <b>' + avgRot + '</b> (deg/s)<br>';
+    if (avgGct != null) html += 'gctFallbackRatio → <b>' + avgGct + '</b><br>';
+    if (avgVertScale != null) html += 'vertScale → <b>' + avgVertScale + '</b><br>';
+    if (avgStrideFactor != null) html += (isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ' → <b>' + avgStrideFactor.toFixed(3) + '</b><br>';
+    if (avgGpsDistFactor != null) html += (isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ' → <b>' + avgGpsDistFactor.toFixed(3) + '</b><br>';
+    html += '</div>';
+
+    if (list.length < MAX_PENDING_CALIB) {
+      html += '<div style="font-size:10px; color:#888; margin-top:8px;">' + (isKo
+        ? MAX_PENDING_CALIB + '개를 다 모으면 더 안정적인 평균값이 됩니다. 지금 상태로도 적용은 가능해요.'
+        : 'Collecting all ' + MAX_PENDING_CALIB + ' gives a more stable average, but you can apply now too.') + '</div>';
+    }
+
+    html += '<button id="btn-apply-avg-calib" style="margin-top:10px; background:var(--primary); color:#000; border:none; padding:12px; border-radius:10px; width:100%; font-weight:900; font-size:12px; cursor:pointer;" onclick="garmin.applyAveragedCalibration()">' + (isKo ? '✓ 평균값 적용' : '✓ APPLY AVERAGE') + '</button>'
+      + '<button style="margin-top:8px; background:transparent; color:#e57373; border:1px solid #663333; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.clearPendingCalib()">' + (isKo ? '대기목록 전체삭제' : 'CLEAR LIST') + '</button>'
+      + '</div>';
+
+    box.innerHTML = html;
+  }
+
+  // [추가] 평균 보정값을 applyCalibration()과 동일한 저장 경로(motionCalibOverride)로
+  // 1회만 반영. 적용 후에는 대기목록을 비워서 다음 3번 세트를 새로 쌓을 수 있게 한다.
+  function applyAveragedCalibration() {
+    const isKo = isKoLang();
+    const list = loadPendingCalib();
+    if (!list.length) return;
+    const avgSuggestion = {
+      devicePos: list[list.length - 1].devicePos,
+      rot: avgPendingField(list, 'rot') != null ? Math.round(avgPendingField(list, 'rot')) : null,
+      gct: avgPendingField(list, 'gct') != null ? Math.round(avgPendingField(list, 'gct') * 1000) / 1000 : null,
+      vertScale: avgPendingField(list, 'vertScale') != null ? Math.round(avgPendingField(list, 'vertScale') * 1000) / 1000 : null,
+      strideFactor: avgPendingField(list, 'strideFactor') != null ? Math.round(avgPendingField(list, 'strideFactor') * 1000) / 1000 : null,
+      gpsDistFactor: avgPendingField(list, 'gpsDistFactor') != null ? Math.round(avgPendingField(list, 'gpsDistFactor') * 1000) / 1000 : null
+    };
+    try {
+      const prof = storage.loadProfile();
+      const override = { devicePos: avgSuggestion.devicePos, appliedAt: new Date().toISOString() };
+      if (avgSuggestion.gct != null) override.gctFallbackRatio = avgSuggestion.gct;
+      if (avgSuggestion.rot != null) override.rotRejectThreshold = avgSuggestion.rot;
+      if (avgSuggestion.vertScale != null) override.vertScale = avgSuggestion.vertScale;
+      if (avgSuggestion.strideFactor != null) {
+        override.prevStrideCorrectionFactor = (typeof prof.strideCorrectionFactor === 'number' && prof.strideCorrectionFactor > 0) ? prof.strideCorrectionFactor : 1.0;
+      }
+      if (avgSuggestion.gpsDistFactor != null) {
+        override.prevGpsDistCorrectionFactor = (typeof prof.gpsDistCorrectionFactor === 'number' && prof.gpsDistCorrectionFactor > 0) ? prof.gpsDistCorrectionFactor : 1.0;
+      }
+      // [추가] 평균값 적용 직전 상태도 동일하게 스냅샷 저장 (되돌리기용)
+      prof.motionCalibUndo = {
+        prevOverride: prof.motionCalibOverride ? JSON.parse(JSON.stringify(prof.motionCalibOverride)) : null,
+        prevStrideCorrectionFactor: (typeof prof.strideCorrectionFactor === 'number' && prof.strideCorrectionFactor > 0) ? prof.strideCorrectionFactor : 1.0,
+        prevGpsDistCorrectionFactor: (typeof prof.gpsDistCorrectionFactor === 'number' && prof.gpsDistCorrectionFactor > 0) ? prof.gpsDistCorrectionFactor : 1.0,
+        savedAt: new Date().toISOString()
+      };
+      prof.motionCalibOverride = override;
+      if (avgSuggestion.strideFactor != null) prof.strideCorrectionFactor = avgSuggestion.strideFactor;
+      if (avgSuggestion.gpsDistFactor != null) prof.gpsDistCorrectionFactor = avgSuggestion.gpsDistFactor;
+      storage.saveProfile(prof);
+
+      if (typeof app !== 'undefined' && app && app.motion) {
+        if (override.gctFallbackRatio != null) app.motion.gctFallbackRatio = override.gctFallbackRatio;
+        if (override.rotRejectThreshold != null) app.motion.rotRejectThreshold = override.rotRejectThreshold;
+        if (override.vertScale != null) app.motion.vertScale = override.vertScale;
+      }
+
+      const appliedCount = list.length;
+      savePendingCalibList([]); // 적용 완료했으니 대기목록 비우고 다음 세트를 새로 쌓게 함
+      renderCalibStatus(isKo);
+      renderPendingCalibList(isKo);
+      alert(isKo ? appliedCount + '개 결과의 평균값이 적용되어 저장되었습니다. 다음 러닝부터 반영돼요.' : 'The average of ' + appliedCount + ' results has been applied and saved. It will take effect from your next run.');
+    } catch (err) {
+      alert((isKo ? '적용 중 오류: ' : 'Apply error: ') + err.message);
+    }
   }
 
   // [추가] runCalibrationCompare()가 계산한 제안값을 실제로 반영한다.
@@ -7131,8 +7317,20 @@ const garmin = (function () {
       if (lastSuggestion.strideFactor != null) {
         override.prevStrideCorrectionFactor = (typeof prof.strideCorrectionFactor === 'number' && prof.strideCorrectionFactor > 0) ? prof.strideCorrectionFactor : 1.0;
       }
+      if (lastSuggestion.gpsDistFactor != null) {
+        override.prevGpsDistCorrectionFactor = (typeof prof.gpsDistCorrectionFactor === 'number' && prof.gpsDistCorrectionFactor > 0) ? prof.gpsDistCorrectionFactor : 1.0;
+      }
+      // [추가] 덮어쓰기 직전 상태를 스냅샷으로 저장 → 나중에 '되돌리기'로 정확히 복원 가능.
+      // (override가 없었으면 prevOverride는 null로 저장 → 되돌릴 때 override 자체를 삭제)
+      prof.motionCalibUndo = {
+        prevOverride: prof.motionCalibOverride ? JSON.parse(JSON.stringify(prof.motionCalibOverride)) : null,
+        prevStrideCorrectionFactor: (typeof prof.strideCorrectionFactor === 'number' && prof.strideCorrectionFactor > 0) ? prof.strideCorrectionFactor : 1.0,
+        prevGpsDistCorrectionFactor: (typeof prof.gpsDistCorrectionFactor === 'number' && prof.gpsDistCorrectionFactor > 0) ? prof.gpsDistCorrectionFactor : 1.0,
+        savedAt: new Date().toISOString()
+      };
       prof.motionCalibOverride = override;
       if (lastSuggestion.strideFactor != null) prof.strideCorrectionFactor = lastSuggestion.strideFactor;
+      if (lastSuggestion.gpsDistFactor != null) prof.gpsDistCorrectionFactor = lastSuggestion.gpsDistFactor;
       storage.saveProfile(prof);
 
       if (typeof app !== 'undefined' && app && app.motion) {
@@ -7171,15 +7369,33 @@ const garmin = (function () {
   function renderCalibStatus(isKo) {
     const box = document.getElementById('garmin-calib-status');
     if (!box) return;
-    let ov = null;
-    try { ov = storage.loadProfile().motionCalibOverride; } catch (e) { ov = null; }
-    if (!ov) { box.innerHTML = ''; return; }
+    let ov = null, hasUndo = false;
+    try {
+      const p = storage.loadProfile();
+      ov = p.motionCalibOverride;
+      hasUndo = !!p.motionCalibUndo; // [추가] 직전 적용 이전 상태가 저장돼있는지
+    } catch (e) { ov = null; }
+    if (!ov) {
+      // [추가] 적용된 값은 없어졌어도(RESET 등으로) 되돌릴 스냅샷이 남아있을 수 있으니
+      // 그 경우엔 UNDO 버튼만이라도 보여준다.
+      box.innerHTML = hasUndo
+        ? '<div class="garmin-import-item" style="border-color:#3a3a2a;">'
+          + '<button id="btn-undo-calib" style="background:transparent; color:var(--primary); border:1.5px solid #2a3a2f; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.undoLastCalibration()">' + (isKo ? '↩ 직전 적용 이전으로 되돌리기' : '↩ UNDO LAST APPLY') + '</button>'
+          + '</div>'
+        : '';
+      return;
+    }
 
     const parts = [];
     if (ov.gctFallbackRatio != null) parts.push('gctFallbackRatio: ' + ov.gctFallbackRatio);
     if (ov.rotRejectThreshold != null) parts.push('rotRejectThreshold: ' + ov.rotRejectThreshold);
     if (ov.vertScale != null) parts.push('vertScale: ' + ov.vertScale);
     if (ov.prevStrideCorrectionFactor != null) parts.push((isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ' ' + (isKo ? '변경됨' : 'changed'));
+    if (ov.prevGpsDistCorrectionFactor != null) {
+      let curGpsVal = null;
+      try { curGpsVal = storage.loadProfile().gpsDistCorrectionFactor; } catch (e) {}
+      parts.push((isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + (typeof curGpsVal === 'number' ? curGpsVal.toFixed(3) : '1.000'));
+    }
     const dateTxt = ov.appliedAt ? fmtDate(new Date(ov.appliedAt).getTime()) : '';
 
     // [추가] 코드(applyDevicePos)에 그대로 붙여넣을 수 있는 스니펫 생성.
@@ -7201,6 +7417,7 @@ const garmin = (function () {
       + '<div style="font-size:9px; color:#888; font-weight:800; margin-top:12px; margin-bottom:4px;">' + (isKo ? '코드 반영용 스니펫 (applyDevicePos)' : 'CODE SNIPPET (applyDevicePos)') + '</div>'
       + '<pre style="background:#000; border:1px solid #2a2a2a; border-radius:8px; padding:10px; font-size:10px; color:#0f0; white-space:pre-wrap; word-break:break-all; margin:0;">' + snippet.replace(/</g,'&lt;') + '</pre>'
       + '<button id="btn-copy-calib-snippet" style="margin-top:8px; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.copySnippet(\'' + escapedSnippet + '\')">' + (isKo ? '스니펫 복사' : 'COPY SNIPPET') + '</button>'
+      + (hasUndo ? '<button id="btn-undo-calib" style="margin-top:8px; background:transparent; color:var(--primary); border:1.5px solid #2a3a2f; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.undoLastCalibration()">' + (isKo ? '↩ 직전 적용 이전으로 되돌리기' : '↩ UNDO LAST APPLY') + '</button>' : '')
       + '<button id="btn-reset-calib" style="margin-top:8px; background:transparent; color:#e57373; border:1px solid #663333; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.resetCalibration()">' + (isKo ? '기본값으로 초기화' : 'RESET TO DEFAULT') + '</button>'
       + '</div>';
   }
@@ -7219,6 +7436,48 @@ const garmin = (function () {
     }
   }
 
+  // [추가] applyCalibration()/applyAveragedCalibration() 직전에 저장해둔 스냅샷으로
+  // 정확히 되돌린다. resetCalibration()과 다른 점: RESET은 항상 코드 기본값(위치별
+  // 프로파일)으로 가지만, UNDO는 "이번에 적용하기 직전 상태"로 돌아간다 — 만약 그 전에도
+  // 커스텀 보정값이 적용돼 있었다면 코드 기본값이 아니라 그 이전 커스텀 값으로 복원됨.
+  // 1단계(직전 1회)만 되돌릴 수 있고, 되돌린 뒤엔 스냅샷을 지운다.
+  function undoLastCalibration() {
+    const isKo = isKoLang();
+    try {
+      const prof = storage.loadProfile();
+      const undo = prof.motionCalibUndo;
+      if (!undo) {
+        alert(isKo ? '되돌릴 이전 상태가 없습니다.' : 'Nothing to undo.');
+        return;
+      }
+      if (undo.prevOverride) {
+        prof.motionCalibOverride = undo.prevOverride;
+      } else {
+        delete prof.motionCalibOverride;
+      }
+      prof.strideCorrectionFactor = (typeof undo.prevStrideCorrectionFactor === 'number' && undo.prevStrideCorrectionFactor > 0) ? undo.prevStrideCorrectionFactor : 1.0;
+      prof.gpsDistCorrectionFactor = (typeof undo.prevGpsDistCorrectionFactor === 'number' && undo.prevGpsDistCorrectionFactor > 0) ? undo.prevGpsDistCorrectionFactor : 1.0;
+      delete prof.motionCalibUndo;
+      storage.saveProfile(prof);
+
+      if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
+        // 위치별 기본값을 먼저 다시 깔고, 복원된 override(있다면)를 그 위에 얹는다.
+        app.motion.applyDevicePos(prof.devicePos || 'chest');
+        if (prof.motionCalibOverride) {
+          if (prof.motionCalibOverride.gctFallbackRatio != null) app.motion.gctFallbackRatio = prof.motionCalibOverride.gctFallbackRatio;
+          if (prof.motionCalibOverride.rotRejectThreshold != null) app.motion.rotRejectThreshold = prof.motionCalibOverride.rotRejectThreshold;
+          if (prof.motionCalibOverride.vertScale != null) app.motion.vertScale = prof.motionCalibOverride.vertScale;
+        }
+      }
+
+      renderCalibStatus(isKo);
+      renderPendingCalibList(isKo);
+      alert(isKo ? '직전 적용 이전 상태로 되돌렸습니다.' : 'Reverted to the state before the last apply.');
+    } catch (err) {
+      alert((isKo ? '되돌리기 중 오류: ' : 'Undo error: ') + err.message);
+    }
+  }
+
   // [추가] 적용된 보정값을 지우고 코드 기본값(위치별 프로파일)으로 되돌린다.
   // 보폭 보정계수는 override 적용 직전의 값으로 정확히 복원(다른 기능인 실측거리
   // 캘리브레이션 값을 실수로 지우지 않기 위함). 지금 살아있는 app.motion에도 바로 반영.
@@ -7230,6 +7489,9 @@ const garmin = (function () {
       if (!ov) return;
       if (ov.prevStrideCorrectionFactor != null) {
         prof.strideCorrectionFactor = ov.prevStrideCorrectionFactor;
+      }
+      if (ov.prevGpsDistCorrectionFactor != null) {
+        prof.gpsDistCorrectionFactor = ov.prevGpsDistCorrectionFactor;
       }
       delete prof.motionCalibOverride;
       storage.saveProfile(prof);
@@ -7248,7 +7510,7 @@ const garmin = (function () {
     }
   }
 
-  return { importFitFile, deleteImport, clearAll, selectImport, togglePrecLog, runCalibrationCompare, applyCalibration, resetCalibration, copySnippet, render };
+  return { importFitFile, deleteImport, clearAll, selectImport, selectPrecLog, runCalibrationCompare, applyCalibration, resetCalibration, undoLastCalibration, copySnippet, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, render };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
