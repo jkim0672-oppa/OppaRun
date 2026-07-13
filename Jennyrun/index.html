@@ -549,6 +549,7 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 <div class="precision-card"><div class="precision-label" id="p-label-hr">심박수 (평균/최고)</div><div id="precision-hr" class="precision-value">-- BPM</div></div>
 <div class="precision-card"><div class="precision-label" id="p-label-hrzone">HR ZONE</div><div id="precision-hrzone" class="precision-value">--</div></div>
 <div class="precision-card"><div class="precision-label" id="p-label-lean">전방 기울기 (LEAN)</div><div id="precision-lean" class="precision-value">-- °</div></div>
+<div class="precision-card"><div class="precision-label" id="p-label-gyrodiag">GYRO DIAG (A/B/G)</div><div id="precision-gyrodiag" class="precision-value" style="font-size:10.5px; line-height:1.5;">--</div></div>
 </div>
 </div>
 <div class="detail-log-box" style="margin-top: 5px; padding: 10px;">
@@ -590,7 +591,7 @@ alt="runner"/>
     <div id="garmin-dropdown-select-btn" onclick="ui.toggleDropdown('garmin-record-dropdown-options')" class="dropdown-select" style="padding:12px 14px; font-size:13px;">
       <span id="current-garmin-record-text">가져온 기록 없음</span><span style="font-size:10px; color:var(--primary);">▼</span>
     </div>
-    <div id="garmin-record-dropdown-options" class="precision-dropdown-options" style="width:100%;"></div>
+    <div id="garmin-record-dropdown-options" class="precision-dropdown-options" style="width:100%; position:static;"></div>
   </div>
   <div id="garmin-import-list" style="margin-top:10px;"></div>
 </div>
@@ -605,7 +606,7 @@ alt="runner"/>
   <div id="calib-preclog-select-btn" onclick="ui.toggleDropdown('calib-preclog-dropdown-options')" class="dropdown-select" style="padding:12px 14px; font-size:13px;">
     <span id="current-calib-preclog-text">SELECT PRECISION LOG</span><span style="font-size:10px; color:var(--primary);">▼</span>
   </div>
-  <div id="calib-preclog-dropdown-options" class="precision-dropdown-options" style="width:100%;"></div>
+  <div id="calib-preclog-dropdown-options" class="precision-dropdown-options" style="width:100%; position:static;"></div>
 </div>
 <button id="btn-run-calib-compare" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:12px; margin-top:10px;" onclick="garmin.runCalibrationCompare()">COMPARE</button>
 <div id="garmin-calib-result" style="margin-top:12px;"></div>
@@ -2169,6 +2170,7 @@ setText('precision-stride', '-- m');
 setText('precision-hr', '-- BPM');
 setText('precision-hrzone', '--');
 setText('precision-lean', '-- °');
+setText('precision-gyrodiag', '--');
 const fb = document.getElementById('precision-feedback-text');
 if(fb) fb.textContent = isKo ? "기록이 존재하지 않습니다." : "No records found.";
 return;
@@ -2228,6 +2230,13 @@ if(hrEl && hrVal !== '--') {
 setVal('precision-hrzone', hrZoneVal);
 // [추가] 전방 기울기(LEAN) - 값 없는 기록(캘리브레이션 미완료/hand 착용 등)이면 '--'
 setVal('precision-lean', (record.leanDeg != null ? record.leanDeg : '--') + ' °');
+// [이동] 통계 페이지에서 옮겨온 GYRO DIAG(임시 진단) — gyroBal 축 검증용, 개발자 모드 전용
+if (record.gyroDiag) {
+  const gd = record.gyroDiag;
+  setVal('precision-gyrodiag', 'A ' + gd.side0.a + '/' + gd.side1.a + ' · B ' + gd.side0.b + '/' + gd.side1.b + ' · G ' + gd.side0.g + '/' + gd.side1.g + ' (' + gd.count0 + '/' + gd.count1 + (isKo ? '보' : ' steps') + ')');
+} else {
+  setVal('precision-gyrodiag', '--');
+}
 const feedbackProfile = storage.loadProfile();
 const feedbackGender = storage.getGender();
 const feedbackData = {
@@ -3513,7 +3522,6 @@ contentArea.innerHTML =
 '<div class="diag-card"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">GCT: ' + r.gct + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
 (r.leanDeg != null ? ('<div class="diag-card"><div class="diag-label">' + (t.lean) + '</div><div class="diag-val-group"><div class="diag-main-val">' + r.leanDeg + ' <span style="font-size:13px;color:#aaa">°</span></div></div><div class="diag-tip">' + (storage.getLang()==='ko' ? '러닝 시작 직후 정자세 대비 상체가 앞으로 기울어진 평균 각도입니다. 절대 기준값은 아니며, 같은 착용 위치에서 본인 런들끼리 비교하는 용도로 참고하세요.' : 'Average forward lean of the torso relative to your stance at the start of the run. Not an absolute benchmark — best used to compare your own runs with the same device placement.') + '</div></div>') : '') +
 '<div class="diag-card"><div class="diag-label">' + (t.diagBalanceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.cadenceBal || '50:50') + ' <span style="font-size:11px;color:#aaa">L:R</span></div><div class="diag-ref">GCT ' + (r.gctBal || '50:50') + ' &nbsp;·&nbsp; GYRO ' + (r.gyroBal || '50:50') + '</div></div><div class="diag-tip">' + diagFeedback.balance + '</div><div style="font-size:11px;color:#888;font-weight:600;line-height:1.5;margin-top:8px;padding-top:8px;border-top:1px solid #222;">' + (t.diagBalanceExplain || '') + '</div></div>' +
-(r.gyroDiag ? ('<div class="diag-card"><div class="diag-label">GYRO DIAG (임시/TEMP)</div><div class="diag-val-group"><div class="diag-main-val" style="font-size:14px">A ' + r.gyroDiag.side0.a + ' / ' + r.gyroDiag.side1.a + '</div><div class="diag-ref">B ' + r.gyroDiag.side0.b + ' / ' + r.gyroDiag.side1.b + ' &nbsp;·&nbsp; G ' + r.gyroDiag.side0.g + ' / ' + r.gyroDiag.side1.g + '</div></div><div class="diag-tip">side0(' + r.gyroDiag.count0 + '보) vs side1(' + r.gyroDiag.count1 + '보) 평균 deg/s. 부호가 뚜렷하게 반대로 갈리는 축을 찾으세요.</div></div>') : '') +
 '<div class="diag-card"><div class="diag-label">' + (t.diagFlightLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (isNaN(flightNum)?'#aaa':this.getFlightColor(flightNum)) + '">' + flightVal + (flightVal!=='--'?' %':'') + '</div><div class="diag-ref">Ref: 30~45%</div></div><div class="diag-tip">' + flightComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagHrLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + hrColor + '">' + hrMainVal + '</div><div class="diag-ref">' + t.hrZoneLabel + ': ' + hrZoneDisplay + '</div></div><div class="diag-tip">' + hrComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagRecov || "RECOVERY GUIDE") + '</div>' + recovHighlightHTML + '<div class="diag-tip">' + recovComment + '</div></div>';
