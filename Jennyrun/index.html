@@ -78,6 +78,13 @@ z-index: 50000; background: #000; flex-direction: column;
 #detail-map-fullscreen-overlay.active { display: flex; }
 #detail-map-fullscreen-inner { flex: 1; width: 100%; position: relative; padding-top: var(--top-inset); box-sizing: border-box; background: #000; }
 #detail-map-fullscreen-el { width: 100%; height: 100%; }
+#btn-detail-route-play {
+position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 51000;
+background: #1a1a1a; color: var(--primary); border: 1.5px solid var(--primary);
+padding: 10px 22px; border-radius: 24px; font-weight: 900; font-size: 13px; cursor: pointer;
+box-shadow: 0 2px 12px rgba(0,255,136,0.25);
+}
+#btn-detail-route-play.playing { background: var(--primary); color: #000; }
 #btn-detail-map-fullscreen-close {
 position: absolute; top: calc(var(--top-inset) + 5px); right: 18px; z-index: 51000;
 background: var(--primary); color: #000; border: none;
@@ -400,6 +407,7 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 <div id="detail-map-fullscreen-overlay">
 <div id="detail-map-fullscreen-inner">
 <div id="detail-map-fullscreen-el"></div>
+<button id="btn-detail-route-play" onclick="ui.toggleRoutePlayback()">▶ PLAY</button>
 <button id="btn-detail-map-fullscreen-close" onclick="ui.closeDetailMapFullscreen()">✕ CLOSE</button>
 </div>
 </div>
@@ -3293,6 +3301,8 @@ periodCards +
 }
 openDetail(id) {
 const h = storage.loadHistory(); const record = h.find(r => r.id === id); if (!record) return;
+this._currentDetailPath = (record.path && record.path.length > 1) ? record.path : null;
+this.stopRoutePlayback();
 const lang = storage.getLang(); const t = translations[lang] || translations['en'];
 const detailView = document.getElementById('detail-view');
 if(detailView) detailView.style.display = 'flex';
@@ -7587,6 +7597,13 @@ ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padSt
 // ========== 맵 전체화면 ==========
 let _mainMapFull = null;
 let _detailMapFull = null;
+let _routePlaybackMarker = null;
+let _routePlaybackRAF = null;
+let _routePlaybackCum = null; // 누적 거리 배열
+let _routePlaybackTotal = 0;
+let _routePlaybackStartTs = 0;
+let _routePlaybackElapsedAtPause = 0;
+let _routePlaybackPlaying = false;
 let _mainMapFullLocMarker = null;
 let _mainMapFullPolyline = null;
 UIManager.prototype.openMainMapFullscreen = function() {
@@ -7692,8 +7709,90 @@ setTimeout(() => { if (_detailMapFull) _detailMapFull.invalidateSize(); }, 200);
 UIManager.prototype.closeDetailMapFullscreen = function() {
 const overlay = document.getElementById('detail-map-fullscreen-overlay');
 if (overlay) overlay.classList.remove('active');
+this.stopRoutePlayback();
 // 다음번 열 때 갱신 위해 초기화
 if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
+};
+// ========== 히스토리 경로 재생 (전체화면 지도) ==========
+UIManager.prototype._buildRouteCumulative = function(path) {
+let cum = [0];
+for (let i = 1; i < path.length; i++) {
+const d = L.latLng(path[i - 1]).distanceTo(L.latLng(path[i]));
+cum.push(cum[i - 1] + d);
+}
+return cum;
+};
+UIManager.prototype.toggleRoutePlayback = function() {
+if (!_detailMapFull || !this._currentDetailPath) return;
+if (_routePlaybackPlaying) { this.pauseRoutePlayback(); }
+else { this.startRoutePlayback(); }
+};
+UIManager.prototype.startRoutePlayback = function() {
+const path = this._currentDetailPath;
+if (!path || path.length < 2 || !_detailMapFull) return;
+const btn = document.getElementById('btn-detail-route-play');
+if (!_routePlaybackMarker) {
+_routePlaybackCum = this._buildRouteCumulative(path);
+_routePlaybackTotal = _routePlaybackCum[_routePlaybackCum.length - 1];
+_routePlaybackMarker = L.marker(path[0], {
+icon: L.divIcon({
+className: '',
+html: '<div style="width:16px;height:16px;border-radius:50%;background:var(--primary);border:2px solid #fff;box-shadow:0 0 8px rgba(0,255,136,0.9);"></div>',
+iconSize: [16, 16], iconAnchor: [8, 8]
+}),
+interactive: false, zIndexOffset: 1000
+}).addTo(_detailMapFull);
+_routePlaybackElapsedAtPause = 0;
+}
+// 경로 길이에 비례하되 8~30초 사이로 제한된 재생 시간
+const duration = Math.min(30000, Math.max(8000, path.length * 60));
+_routePlaybackStartTs = performance.now() - _routePlaybackElapsedAtPause;
+_routePlaybackPlaying = true;
+if (btn) { btn.textContent = '⏸ PAUSE'; btn.classList.add('playing'); }
+const step = (now) => {
+if (!_routePlaybackPlaying) return;
+const elapsed = now - _routePlaybackStartTs;
+let frac = duration > 0 ? (elapsed / duration) : 1;
+if (frac >= 1) {
+frac = 1;
+this._setRoutePlaybackPosition(path, _routePlaybackCum, frac);
+this.stopRoutePlayback();
+return;
+}
+this._setRoutePlaybackPosition(path, _routePlaybackCum, frac);
+_routePlaybackElapsedAtPause = elapsed;
+_routePlaybackRAF = requestAnimationFrame(step);
+};
+_routePlaybackRAF = requestAnimationFrame(step);
+};
+UIManager.prototype._setRoutePlaybackPosition = function(path, cum, frac) {
+if (!_routePlaybackMarker) return;
+const targetDist = _routePlaybackTotal * frac;
+let i = 0;
+while (i < cum.length - 1 && cum[i + 1] < targetDist) i++;
+if (i >= path.length - 1) { _routePlaybackMarker.setLatLng(path[path.length - 1]); return; }
+const segStart = cum[i], segEnd = cum[i + 1];
+const segFrac = segEnd > segStart ? (targetDist - segStart) / (segEnd - segStart) : 0;
+const p1 = path[i], p2 = path[i + 1];
+const lat = p1[0] + (p2[0] - p1[0]) * segFrac;
+const lng = p1[1] + (p2[1] - p1[1]) * segFrac;
+_routePlaybackMarker.setLatLng([lat, lng]);
+};
+UIManager.prototype.pauseRoutePlayback = function() {
+_routePlaybackPlaying = false;
+if (_routePlaybackRAF) { cancelAnimationFrame(_routePlaybackRAF); _routePlaybackRAF = null; }
+const btn = document.getElementById('btn-detail-route-play');
+if (btn) { btn.textContent = '▶ PLAY'; btn.classList.remove('playing'); }
+};
+UIManager.prototype.stopRoutePlayback = function() {
+_routePlaybackPlaying = false;
+if (_routePlaybackRAF) { cancelAnimationFrame(_routePlaybackRAF); _routePlaybackRAF = null; }
+_routePlaybackElapsedAtPause = 0;
+_routePlaybackCum = null;
+_routePlaybackTotal = 0;
+if (_routePlaybackMarker) { _routePlaybackMarker.remove(); _routePlaybackMarker = null; }
+const btn = document.getElementById('btn-detail-route-play');
+if (btn) { btn.textContent = '▶ PLAY'; btn.classList.remove('playing'); }
 };
 // ========== 뒤로가기 종료 확인 다이얼로그 ==========
 (function() {
