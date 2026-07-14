@@ -5222,13 +5222,24 @@ const calculatedKcal = ui.calculateWalkCalories(weightKg, this.state.totalDist, 
 const avgSpm = (this.state.walkSpmSamples && this.state.walkSpmSamples.length > 0)
 ? Math.round(this.state.walkSpmSamples.reduce((a,b)=>a+b,0) / this.state.walkSpmSamples.length)
 : (this.state.seconds > 0 ? Math.round((this.state.walkSteps / this.state.seconds) * 60) : 0);
+// [수정] 러닝(onFinish)과 동일하게 통일: 총거리÷총걸음수를 기본으로 사용.
+// 기존엔 걷기만 속도+케이던스+키보정 공식(calcStride)에 의존해서, 같은 앱 안에서
+// 러닝/걷기의 보폭 정확도 기준이 서로 달랐음(러닝은 실측, 걷기는 모델 추정).
 const _snapshotStride = (() => {
-if (avgSpm > 0 && avgPaceSec > 0) {
-const spd = 3600 / avgPaceSec;
-const hcm = p.hu === 'inch' ? Math.round(p.h * 2.54) : p.h;
-return parseFloat(calcStride(spd, avgSpm, hcm, 1.0).toFixed(2));
-}
-return null;
+  const stepCount = this.state.walkSteps || 0;
+  const totalDistM = (this.state.totalDist || 0) * 1000;
+  if (stepCount > 0 && totalDistM > 0) {
+    const measured = totalDistM / stepCount;
+    const clamped = Math.max(0.3, Math.min(2.2, measured));
+    return parseFloat(clamped.toFixed(2));
+  }
+  // 걸음 카운트가 없는 예외 상황에 한해서만 기존 모델 추정 방식으로 폴백
+  if (avgSpm > 0 && avgPaceSec > 0) {
+    const spd = 3600 / avgPaceSec;
+    const hcm = p.hu === 'inch' ? Math.round(p.h * 2.54) : p.h;
+    return parseFloat(calcStride(spd, avgSpm, hcm, 1.0).toFixed(2));
+  }
+  return null;
 })();
 if (this.state.totalDist > this.state.lastKmCheckpoint + 0.01 && this.state.seconds > this.state.lastKmSeconds) {
 let splitDuration = this.state.seconds - this.state.lastKmSeconds;
@@ -6291,7 +6302,7 @@ async uploadRecord(record, photoFile, shareOptions, message) {
     try {
       const { data, error } = await _sb
         .from('records')
-        .select('id, nickname, avatar_url, location_name, title, activity_mode, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, lean_deg, created_at, user_id, path, photo_url, message, avg_hr, hr_zone, steps, walk_spm, stride_m')
+        .select('id, nickname, avatar_url, location_name, title, activity_mode, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, lean_deg, created_at, user_id, path, photo_url, message, avg_hr, hr_zone, steps, walk_spm, stride_m, kcal')
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) throw error;
@@ -6565,8 +6576,9 @@ async uploadRecord(record, photoFile, shareOptions, message) {
         </div>
 
         <!-- 세부 지표 (상단 스탯과 동일한 스타일로 크게 표시) -->
-        <div style="display:flex; border-bottom:1px solid #f5f5f5; padding:8px 0; margin-bottom:14px;">
+        <div style="border-bottom:1px solid #f5f5f5; padding:8px 0; margin-bottom:14px;">
           ${activityMode === 'walk' ? `
+          <div style="display:flex;">
           <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
             <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.stepsLabel||'STEPS'}</div>
             <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${r.steps || '--'}</div>
@@ -6587,7 +6599,9 @@ async uploadRecord(record, photoFile, shareOptions, message) {
             <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${(r.alt !== undefined && r.alt !== null) ? r.alt : '--'}</div>
             <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">M</div>
           </div>
+          </div>
           ` : `
+          <div style="display:flex; border-bottom:1px solid #f5f5f5; padding-bottom:8px; margin-bottom:8px;">
           <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
             <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.cadence||'CADENCE'}</div>
             <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${r.cadence || '--'}</div>
@@ -6598,9 +6612,16 @@ async uploadRecord(record, photoFile, shareOptions, message) {
             <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${r.gct_ms || '--'}</div>
             <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">MS</div>
           </div>
+          <div style="flex:1; text-align:center;">
+            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.flight||'FLIGHT'}</div>
+            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${(r.flight_pct !== undefined && r.flight_pct !== null) ? r.flight_pct : '--'}</div>
+            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">%</div>
+          </div>
+          </div>
+          <div style="display:flex;">
           <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
             <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.stride||'STRIDE'}</div>
-            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${(r.cadence && r.pace_sec_per_km) ? (((3600/r.pace_sec_per_km)/3.6)/(r.cadence/60)).toFixed(2) : '--'}</div>
+            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${(r.stride_m !== undefined && r.stride_m !== null) ? r.stride_m : '--'}</div>
             <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">M</div>
           </div>
           <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
@@ -6613,7 +6634,20 @@ async uploadRecord(record, photoFile, shareOptions, message) {
             <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${(r.lean_deg !== undefined && r.lean_deg !== null) ? r.lean_deg : '--'}</div>
             <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">°</div>
           </div>
+          </div>
           `}
+          <div style="display:flex; border-top:1px solid #f5f5f5; padding-top:8px; margin-top:8px;">
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
+            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.hrAvgMax||'HR'}</div>
+            <div style="font-size:18px; font-weight:900; color:#e53935; line-height:1;">${(r.avg_hr !== undefined && r.avg_hr !== null) ? r.avg_hr : '--'}</div>
+            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">${(r.hr_zone !== undefined && r.hr_zone !== null) ? r.hr_zone : 'BPM'}</div>
+          </div>
+          <div style="flex:1; text-align:center;">
+            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.cal||'KCAL'}</div>
+            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${(r.kcal !== undefined && r.kcal !== null) ? r.kcal : '--'}</div>
+            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">KCAL</div>
+          </div>
+          </div>
         </div>
 
         <!-- 이미지/지도 -->
