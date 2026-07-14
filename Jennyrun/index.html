@@ -3737,6 +3737,8 @@ this.calibForceSamples = [];
 // hand 착용(vertEnabled=false)은 팔 흔들림이 섞여 의미 없으므로 계산 자체를 건너뜀.
 this.leanBaseline = null;
 this._leanCalibSamples = [];
+this._leanGyroBiasSamples = []; // [추가] 캘리브레이션 구간 동안의 gyroBeta 샘플 - 정지 바이어스 산출용
+this.leanGyroBiasDps = 0; // [추가] 자이로 beta 축 바이어스(deg/s) - 적분 전에 빼줘서 drift 억제
 this._leanLastTime = null;
 this.leanAngleDeg = 0;
 this.leanSumForAvg = 0;
@@ -3856,6 +3858,8 @@ this.calibForceSamples = [];
 // (기준 자세가 러닝마다, 착용 상태마다 다를 수 있으므로 매번 새로 캘리브레이션)
 this.leanBaseline = null;
 this._leanCalibSamples = [];
+this._leanGyroBiasSamples = []; // [추가] 러닝마다 바이어스도 새로 캘리브레이션
+this.leanGyroBiasDps = 0;
 this._leanLastTime = null;
 this.leanAngleDeg = 0;
 this.leanSumForAvg = 0;
@@ -3906,9 +3910,12 @@ this.gyroCycleMagSum += rotMag;
 // 얼마나 앞으로 기울었는지를 가속도계(절대,저주파)+자이로 beta 적분(순간,고주파) 상보필터로 추정.
 // hand 착용은 팔 흔들림이 섞여 의미 없으므로 vertEnabled(=몸통 고정 여부) 플래그를 재사용해 건너뜀.
 if (this.vertEnabled) {
+const gyroBetaDpsRaw = e.rotationRate ? (e.rotationRate.beta || 0) : 0; // [수정] 캘리브레이션 단계에서도 필요해서 위로 끌어올림
 if (!this.leanBaseline) {
   // 캘리브레이션 구간(첫 6초) 동안 "정자세" 기준 중력벡터 수집, finishCalibration()과 같은 타이밍에 확정
   this._leanCalibSamples.push({ x: acc.x, y: acc.y, z: acc.z });
+  // [추가] 같은 구간 동안 자이로 beta 값도 수집 — 정지 상태여도 남는 바이어스(drift 원인)를 미리 측정해둔다.
+  this._leanGyroBiasSamples.push(gyroBetaDpsRaw);
   if (this.calibDone) {
     const n = this._leanCalibSamples.length;
     if (n > 0) {
@@ -3917,7 +3924,12 @@ if (!this.leanBaseline) {
       const mag = Math.sqrt(avg.x * avg.x + avg.y * avg.y + avg.z * avg.z) || 1;
       this.leanBaseline = { x: avg.x / mag, y: avg.y / mag, z: avg.z / mag };
     }
+    const gn = this._leanGyroBiasSamples.length;
+    if (gn > 0) {
+      this.leanGyroBiasDps = this._leanGyroBiasSamples.reduce((s, v) => s + v, 0) / gn;
+    }
     this._leanCalibSamples = [];
+    this._leanGyroBiasSamples = [];
   }
 } else {
   // 1) 가속도계: 현재 중력벡터와 기준벡터 사이 각도(드리프트 없는 절대값, 노이즈엔 취약)
@@ -3926,21 +3938,27 @@ if (!this.leanBaseline) {
   const dot = Math.max(-1, Math.min(1, cx * this.leanBaseline.x + cy * this.leanBaseline.y + cz * this.leanBaseline.z));
   const accelLeanDeg = Math.acos(dot) * 180 / Math.PI;
   // 2) 자이로: beta(phone 로컬 X축 회전 = 전후 기울임) 각속도를 적분(반응 빠름, drift 누적됨)
-  const gyroBetaDps = e.rotationRate ? (e.rotationRate.beta || 0) : 0;
+  //    [추가] 캘리브레이션 때 측정한 정지 바이어스(leanGyroBiasDps)를 먼저 빼서, 애초에 쌓이는 drift 자체를 줄인다.
+  const gyroBetaDps = gyroBetaDpsRaw - this.leanGyroBiasDps;
   const dt = (this._leanLastTime != null) ? (now - this._leanLastTime) / 1000 : 0;
   this._leanLastTime = now;
-  // [수정] 상보필터 두 가지 문제를 함께 손봄:
+  // [수정] 상보필터 문제를 함께 손봄:
   // (a) 기존 0.98/0.02 고정비율은 샘플 하나당 적용되는 값이라 호출 빈도에 따라
   //     시간당 보정 강도가 달라짐 — 프레임레이트에 무관하게 동작하도록 시간상수(TAU) 기반으로 교체.
-  // (b) [핵심 원인] accelLeanDeg는 "가속도계가 지금 중력 방향을 가리킨다"는 전제인데,
+  // (b) accelLeanDeg는 "가속도계가 지금 중력 방향을 가리킨다"는 전제인데,
   //     착지 충격(impact) 순간엔 acc가 중력이 아니라 충격 방향의 큰 선가속도를 포함하게 됨
   //     (force가 groundThreshold를 크게 넘는 구간). 이 오염된 순간값이 매 스텝마다
   //     기준값 보정에 계속 섞여 들어간 게 러닝 중 60~90도대 비현실적 값의 실제 원인으로 보임
   //     (2026-07-13 정밀 로그 실측: lean_deg가 착지 임계값 근처 프레임부터 급등하는 패턴 확인).
   //     → force가 "조용한 구간"(quiet phase, 착지 충격 없음)일 때의 샘플만 가속도계 기준으로 채택.
+  // (c) [수정 2026-07-14] (b) 수정만으로는 부족했음: 조용한 구간에서도 TAU=1.5초(alpha≈0.987)라
+  //     가속도계 보정이 샘플당 1.3%밖에 안 먹혀서, 사실상 거의 순수 자이로 적분이나 마찬가지였음.
+  //     짧은 러닝(수십 초)에서도 남은 바이어스가 그대로 쌓여 35도 안팎까지 튀는 걸 실측으로 확인.
+  //     → TAU를 0.4초로 줄여 조용한 구간마다 가속도계 쪽으로 훨씬 빠르게 수렴하도록 강화.
+  //     → 위의 (leanGyroBiasDps 차감)과 함께 적용하면 이중으로 drift를 억제하는 효과.
   const isQuietPhase = force < this.groundThreshold * 1.05;
   if (dt > 0 && dt < 1) {
-    const TAU = 1.5; // 자이로 적분을 신뢰하는 시간상수(초). 값이 클수록 반응은 빠르지만 drift 억제는 약해짐
+    const TAU = 0.4; // [수정] 1.5 → 0.4: drift 억제를 훨씬 강하게, 반응성은 여전히 충분히 빠름
     const alpha = TAU / (TAU + dt);
     const gyroEstimate = this.leanAngleDeg + gyroBetaDps * dt;
     this.leanAngleDeg = isQuietPhase
