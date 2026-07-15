@@ -5494,24 +5494,6 @@ class CommunityManager {
     this._editorInteractionsBound = false;
   }
 
-  // [가독성 개선] 크루 피드 스탯 셀 공통 렌더러 (크루 탭에만 사용)
-  // - 라벨: 대비를 높이고(#777) 자간을 살짝 줘서 값과 명확히 분리
-  // - 값: 실측치가 없는 '--'는 연한 회색으로 낮춰서 실제 데이터가 먼저 눈에 띄게 함
-  // - 단위: 값보다 항상 흐리게 유지해 숫자 자체의 시인성을 지킴
-  feedCell(label, val, unit, opts) {
-    opts = opts || {};
-    const isEmpty = (val === undefined || val === null || val === '--' || val === '');
-    const displayVal = isEmpty ? '--' : val;
-    const valColor = opts.color || (isEmpty ? '#c9c9c9' : '#111');
-    const unitColor = isEmpty ? '#d8d8d8' : '#999';
-    const borderStyle = opts.last ? '' : 'border-right:1px solid #f0f0f0;';
-    return `
-          <div style="flex:1; text-align:center; ${borderStyle} padding:3px 2px; min-width:0;">
-            <div style="font-size:9px; color:#777; font-weight:800; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:3px;">${label}</div>
-            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:${valColor}; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${displayVal}${unit ? `<span style="font-size:8px; color:${unitColor}; font-weight:700;"> ${unit}</span>` : ''}</div>
-          </div>`;
-  }
-
   getNickname() {
     return localStorage.getItem(this.NICKNAME_KEY) || '';
   }
@@ -6635,41 +6617,95 @@ async uploadRecord(record, photoFile, shareOptions, message) {
         </div>
         ${r.message ? `<div style="font-size:13px; color:#555; margin-bottom:12px;">${escapeHtml(r.message)}</div>` : ''}
 
-        <!-- 스탯 (가독성 개선: feedCell 공통 렌더러 사용) -->
-        <div style="display:flex; border-top:1px solid #f5f5f5; border-bottom:1px solid #f5f5f5; padding:7px 0;">
-          ${this.feedCell(t.crewDist, parseFloat(r.distance_km||0).toFixed(2), 'km')}
-          ${this.feedCell(t.crewTime, this.formatDuration(r.duration_sec), '')}
-          ${this.feedCell(t.crewPace, this.formatPaceSec(r.pace_sec_per_km), '/km')}
-          ${this.feedCell(t.speed||'SPEED', (r.pace_sec_per_km && r.pace_sec_per_km > 0) ? (3600 / r.pace_sec_per_km).toFixed(1) : '--', 'km/h', {last:true})}
+        <!-- 스탯 (B-fix 컴팩트: 값+단위 한 줄, clamp 폰트로 자동 축소) -->
+        <div style="display:flex; border-top:1px solid #f5f5f5; border-bottom:1px solid #f5f5f5; padding:6px 0;">
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.crewDist}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${parseFloat(r.distance_km||0).toFixed(2)}<span style="font-size:8px; color:#999; font-weight:700;"> km</span></div>
+          </div>
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.crewTime}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.formatDuration(r.duration_sec)}</div>
+          </div>
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.crewPace}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.formatPaceSec(r.pace_sec_per_km)}<span style="font-size:8px; color:#999; font-weight:700;"> /km</span></div>
+          </div>
+          <div style="flex:1; text-align:center; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.speed||'SPEED'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.pace_sec_per_km && r.pace_sec_per_km > 0 ? (3600 / r.pace_sec_per_km).toFixed(1) : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> km/h</span></div>
+          </div>
         </div>
 
-        <!-- 세부 지표 (가독성 개선: feedCell 공통 렌더러 사용) -->
-        <div style="border-bottom:1px solid #f5f5f5; padding:7px 0; margin-bottom:14px;">
+        <!-- 세부 지표 (B-fix 컴팩트: 4열 x 2줄) -->
+        <div style="border-bottom:1px solid #f5f5f5; padding:6px 0; margin-bottom:14px;">
           ${activityMode === 'walk' ? `
-          <div style="display:flex; border-bottom:1px solid #f5f5f5; padding-bottom:7px; margin-bottom:7px;">
-          ${this.feedCell(t.stepsLabel||'STEPS', r.steps || '--', '')}
-          ${this.feedCell(t.spmLabel||'SPM', r.walk_spm || '--', '')}
-          ${this.feedCell(t.stride||'STRIDE', r.stride_m || '--', 'm')}
-          ${this.feedCell(t.alt||'ALT', (r.alt !== undefined && r.alt !== null) ? r.alt : '--', 'm', {last:true})}
+          <div style="display:flex; border-bottom:1px solid #f5f5f5; padding-bottom:6px; margin-bottom:6px;">
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.stepsLabel||'STEPS'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.steps || '--'}</div>
+          </div>
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.spmLabel||'SPM'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.walk_spm || '--'}</div>
+          </div>
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.stride||'STRIDE'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.stride_m || '--'}<span style="font-size:8px; color:#999; font-weight:700;"> m</span></div>
+          </div>
+          <div style="flex:1; text-align:center; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.alt||'ALT'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.alt !== undefined && r.alt !== null) ? r.alt : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> m</span></div>
+          </div>
           </div>
           ` : `
-          <div style="display:flex; border-bottom:1px solid #f5f5f5; padding-bottom:7px; margin-bottom:7px;">
-          ${this.feedCell(t.cadence||'CADENCE', r.cadence || '--', 'spm')}
-          ${this.feedCell(t.gct||'GCT', r.gct_ms || '--', 'ms')}
-          ${this.feedCell(t.flight||'FLIGHT', (r.flight_pct !== undefined && r.flight_pct !== null) ? r.flight_pct : '--', '%')}
-          ${this.feedCell(t.stride||'STRIDE', (r.stride_m !== undefined && r.stride_m !== null) ? r.stride_m : '--', 'm', {last:true})}
+          <div style="display:flex; border-bottom:1px solid #f5f5f5; padding-bottom:6px; margin-bottom:6px;">
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.cadence||'CADENCE'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.cadence || '--'}<span style="font-size:8px; color:#999; font-weight:700;"> spm</span></div>
+          </div>
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.gct||'GCT'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.gct_ms || '--'}<span style="font-size:8px; color:#999; font-weight:700;"> ms</span></div>
+          </div>
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.flight||'FLIGHT'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.flight_pct !== undefined && r.flight_pct !== null) ? r.flight_pct : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> %</span></div>
+          </div>
+          <div style="flex:1; text-align:center; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.stride||'STRIDE'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.stride_m !== undefined && r.stride_m !== null) ? r.stride_m : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> m</span></div>
+          </div>
           </div>
           <div style="display:flex;">
-          ${this.feedCell(t.alt||'ALT', (r.alt !== undefined && r.alt !== null) ? r.alt : '--', 'm')}
-          ${this.feedCell(t.lean||'LEAN', (r.lean_deg !== undefined && r.lean_deg !== null) ? r.lean_deg : '--', '°')}
-          ${this.feedCell(t.hrAvgMax||'HR', (r.avg_hr !== undefined && r.avg_hr !== null) ? r.avg_hr : '--', (r.hr_zone !== undefined && r.hr_zone !== null) ? r.hr_zone : 'bpm', {color: (r.avg_hr !== undefined && r.avg_hr !== null) ? '#e53935' : undefined})}
-          ${this.feedCell(t.cal||'KCAL', (r.kcal !== undefined && r.kcal !== null) ? r.kcal : '--', 'kcal', {last:true})}
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.alt||'ALT'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.alt !== undefined && r.alt !== null) ? r.alt : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> m</span></div>
+          </div>
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.lean||'LEAN'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.lean_deg !== undefined && r.lean_deg !== null) ? r.lean_deg : '--'}<span style="font-size:8px; color:#999; font-weight:700;">°</span></div>
+          </div>
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.hrAvgMax||'HR'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#e53935; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.avg_hr !== undefined && r.avg_hr !== null) ? r.avg_hr : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> ${(r.hr_zone !== undefined && r.hr_zone !== null) ? r.hr_zone : 'bpm'}</span></div>
+          </div>
+          <div style="flex:1; text-align:center; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.cal||'KCAL'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.kcal !== undefined && r.kcal !== null) ? r.kcal : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> kcal</span></div>
+          </div>
           </div>
           `}
           ${activityMode === 'walk' ? `
-          <div style="display:flex; border-top:1px solid #f5f5f5; padding-top:7px; margin-top:7px;">
-          ${this.feedCell(t.hrAvgMax||'HR', (r.avg_hr !== undefined && r.avg_hr !== null) ? r.avg_hr : '--', (r.hr_zone !== undefined && r.hr_zone !== null) ? r.hr_zone : 'bpm', {color: (r.avg_hr !== undefined && r.avg_hr !== null) ? '#e53935' : undefined})}
-          ${this.feedCell(t.cal||'KCAL', (r.kcal !== undefined && r.kcal !== null) ? r.kcal : '--', 'kcal', {last:true})}
+          <div style="display:flex; border-top:1px solid #f5f5f5; padding-top:6px; margin-top:6px;">
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.hrAvgMax||'HR'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#e53935; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.avg_hr !== undefined && r.avg_hr !== null) ? r.avg_hr : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> ${(r.hr_zone !== undefined && r.hr_zone !== null) ? r.hr_zone : 'bpm'}</span></div>
+          </div>
+          <div style="flex:1; text-align:center; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.cal||'KCAL'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.kcal !== undefined && r.kcal !== null) ? r.kcal : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> kcal</span></div>
+          </div>
           </div>
           ` : ``}
         </div>
@@ -6910,6 +6946,9 @@ const hrManager = {
 const garmin = (function () {
   const STORAGE_KEY = 'oppaRunGarminImports';
   const FIT_EPOCH_OFFSET = 631065600; // 1989-12-31 00:00:00 UTC -> Unix epoch 초 차이
+  // [추가] 정밀 로그(savePrecisionLog)와 동일하게 최근 3개까지만 보관.
+  // 그 이상은 오래돼서 비교 의미가 떨어지고 localStorage 용량도 아낄 수 있음.
+  const MAX_GARMIN_IMPORTS = 3;
 
   const BASE_TYPES = {
     0x00: { size: 1, invalid: 0xFF, read: (v,o,le) => v.getUint8(o) },
@@ -7169,6 +7208,9 @@ const garmin = (function () {
     const list = loadImports();
     const isKo = isKoLang();
     applyStaticLabels(isKo);
+    // [추가] 최대 보관 개수(3개) 대비 현재 몇 개 가져와 있는지 라벨 옆에 표시
+    const labelEl = document.getElementById('label-garmin-import');
+    if (labelEl) labelEl.textContent = (isKo ? '가져온 기록' : 'IMPORTED RECORDS') + ' (' + list.length + '/' + MAX_GARMIN_IMPORTS + ')';
     // [추가] 현재 적용된 보정값 상태도 가민 가져오기 목록 유무와 무관하게 항상 갱신.
     renderCalibStatus(isKo);
     renderPendingCalibList(isKo); // [추가] 저장해둔 비교 결과 대기목록도 항상 갱신
@@ -7268,7 +7310,8 @@ const garmin = (function () {
         summary.importedAt = new Date().toISOString();
         const list = loadImports();
         list.unshift(summary);
-        saveImports(list);
+        // [수정] 정밀 로그와 동일하게 최근 3개까지만 보관 (그 이상은 자동으로 밀려남)
+        saveImports(list.slice(0, MAX_GARMIN_IMPORTS));
         selectedId = summary.id;
         render();
         alert(isKo ? '가민 데이터를 가져왔습니다.' : 'Garmin data imported.');
@@ -7497,26 +7540,32 @@ const garmin = (function () {
     const hasSuggestion = suggestedRot != null || suggestedGct != null || suggestedVertScale != null || suggestedStrideFactor != null || suggestedGpsDistFactor != null;
 
     if (hasSuggestion) {
-      html += '<div style="margin-top:12px; font-size:11px; color:#ccc; line-height:1.7;">'
-        + '<div style="color:var(--primary); font-weight:900; margin-bottom:4px;">' + (isKo ? '권장 보정수치' : 'RECOMMENDED CALIBRATION') + '</div>';
+      // [수정] 예전엔 아래 5개 값이 있으면 무조건 전부 한꺼번에 적용됐음.
+      // 각 항목 앞에 체크박스를 둬서, 원하는 값만 선택해서 적용/대기목록 저장할 수 있게 함.
+      // 기본은 전부 체크(기존 동작과 동일)라 아무것도 안 건드리면 이전과 똑같이 동작함.
+      const checkRow = (id, line) => '<label style="display:flex; align-items:flex-start; gap:8px; padding:4px 0; cursor:pointer;">'
+        + '<input type="checkbox" id="' + id + '" checked style="width:15px; height:15px; margin-top:1px; accent-color: var(--primary); flex-shrink:0;">'
+        + '<span>' + line + '</span></label>';
+      html += '<div style="margin-top:12px; font-size:11px; color:#ccc; line-height:1.5;">'
+        + '<div style="color:var(--primary); font-weight:900; margin-bottom:4px;">' + (isKo ? '권장 보정수치 (적용할 항목 선택)' : 'RECOMMENDED CALIBRATION (select items to apply)') + '</div>';
       if (suggestedRot != null) {
-        html += 'rotRejectThreshold: ' + curRot + ' → <b>' + suggestedRot + '</b> (deg/s)<br>';
+        html += checkRow('calib-sel-rot', 'rotRejectThreshold: ' + curRot + ' → <b>' + suggestedRot + '</b> (deg/s)');
       }
       if (suggestedGct != null) {
-        html += 'gctFallbackRatio: ' + curGct + ' → <b>' + suggestedGct + '</b><br>';
+        html += checkRow('calib-sel-gct', 'gctFallbackRatio: ' + curGct + ' → <b>' + suggestedGct + '</b>');
       }
       if (suggestedVertScale != null) {
-        html += 'vertScale: ' + curVertScale + ' → <b>' + suggestedVertScale + '</b><br>';
+        html += checkRow('calib-sel-vert', 'vertScale: ' + curVertScale + ' → <b>' + suggestedVertScale + '</b>');
       }
       if (suggestedStrideFactor != null) {
-        html += (isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ': ' + curStrideFactor.toFixed(3) + ' → <b>' + suggestedStrideFactor.toFixed(3) + '</b><br>';
+        html += checkRow('calib-sel-stride', (isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ': ' + curStrideFactor.toFixed(3) + ' → <b>' + suggestedStrideFactor.toFixed(3) + '</b>');
       }
       if (suggestedGpsDistFactor != null) {
-        html += (isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + curGpsDistFactor.toFixed(3) + ' → <b>' + suggestedGpsDistFactor.toFixed(3) + '</b> ' + (isKo ? '(실제 거리·페이스에 직접 반영됨)' : '(directly affects real distance/pace)') + '<br>';
+        html += checkRow('calib-sel-gps', (isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + curGpsDistFactor.toFixed(3) + ' → <b>' + suggestedGpsDistFactor.toFixed(3) + '</b> ' + (isKo ? '(실제 거리·페이스에 직접 반영됨)' : '(directly affects real distance/pace)'));
       }
-      html += '<div style="color:#888; margin-top:6px; margin-bottom:10px;">' + (isKo
-        ? '아래 버튼을 누르면 이 값들이 즉시 적용되고 저장됩니다. 적용 후 러닝을 한 번 더 진행해서 오차가 줄었는지 다시 비교해보세요.'
-        : 'Tapping the button below applies and saves these values immediately. Run again afterward and re-compare to confirm the error shrank.') + '</div>'
+      html += '<div style="color:#888; margin-top:8px; margin-bottom:10px;">' + (isKo
+        ? '체크된 항목만 아래 버튼으로 즉시 적용/저장됩니다. 적용 후 러닝을 한 번 더 진행해서 오차가 줄었는지 다시 비교해보세요.'
+        : 'Only the checked items are applied and saved when you tap the button below. Run again afterward and re-compare to confirm the error shrank.') + '</div>'
         + '<button id="btn-apply-calib" style="background:var(--primary); color:#000; border:none; padding:12px; border-radius:10px; width:100%; font-weight:900; font-size:12px; cursor:pointer;" onclick="garmin.applyCalibration()">' + (isKo ? '✓ 이 값으로 자동 반영' : '✓ APPLY THESE VALUES') + '</button>'
         + '<button id="btn-save-pending-calib" style="margin-top:8px; background:transparent; color:var(--primary); border:1.5px solid #2a3a2f; padding:12px; border-radius:10px; width:100%; font-weight:900; font-size:12px; cursor:pointer;" onclick="garmin.addPendingCalib()">' + (isKo ? '＋ 대기목록에 저장 (나중에 평균으로 적용)' : '＋ SAVE TO LIST (apply averaged later)') + '</button>'
         + '</div>';
@@ -7565,10 +7614,36 @@ const garmin = (function () {
     return vals.reduce((a, b) => a + b, 0) / vals.length;
   }
 
-  // [추가] 방금 계산된 lastSuggestion을 대기목록에 추가.
+  // [추가] runCalibrationCompare()가 그려놓은 체크박스(calib-sel-*) 상태를 읽어서
+  // lastSuggestion 중 체크 해제된 필드는 null로 걸러낸 복사본을 반환.
+  // 체크박스가 아직 화면에 없는 필드(해당 값이 원래 없던 필드)는 그대로 null 유지.
+  function getCheckedSuggestion() {
+    if (!lastSuggestion) return null;
+    const isChecked = (id) => { const el = document.getElementById(id); return el ? el.checked : true; };
+    return {
+      devicePos: lastSuggestion.devicePos,
+      gct: (lastSuggestion.gct != null && isChecked('calib-sel-gct')) ? lastSuggestion.gct : null,
+      rot: (lastSuggestion.rot != null && isChecked('calib-sel-rot')) ? lastSuggestion.rot : null,
+      vertScale: (lastSuggestion.vertScale != null && isChecked('calib-sel-vert')) ? lastSuggestion.vertScale : null,
+      strideFactor: (lastSuggestion.strideFactor != null && isChecked('calib-sel-stride')) ? lastSuggestion.strideFactor : null,
+      gpsDistFactor: (lastSuggestion.gpsDistFactor != null && isChecked('calib-sel-gps')) ? lastSuggestion.gpsDistFactor : null
+    };
+  }
+
+  // [추가] 아무 필드도 선택되지 않은 상태로 적용/저장을 누르면 알려주기 위한 체크.
+  function hasAnySelectedField(sel) {
+    return !!sel && (sel.gct != null || sel.rot != null || sel.vertScale != null || sel.strideFactor != null || sel.gpsDistFactor != null);
+  }
+
+  // [수정] 체크된 항목만 대기목록에 추가.
   function addPendingCalib() {
     const isKo = isKoLang();
     if (!lastSuggestion) return;
+    const sel = getCheckedSuggestion();
+    if (!hasAnySelectedField(sel)) {
+      alert(isKo ? '선택된 항목이 없습니다. 저장할 값을 하나 이상 체크해주세요.' : 'Nothing selected — check at least one item to save.');
+      return;
+    }
     const list = loadPendingCalib();
     if (list.length >= MAX_PENDING_CALIB) {
       alert(isKo ? '대기목록은 최대 ' + MAX_PENDING_CALIB + '개까지 저장할 수 있습니다. 먼저 평균 적용하거나 항목을 삭제하세요.' : 'You can save up to ' + MAX_PENDING_CALIB + ' results. Apply the average or delete an item first.');
@@ -7577,12 +7652,12 @@ const garmin = (function () {
     list.push({
       id: 'pc_' + Date.now(),
       savedAt: new Date().toISOString(),
-      devicePos: lastSuggestion.devicePos,
-      gct: lastSuggestion.gct,
-      rot: lastSuggestion.rot,
-      vertScale: lastSuggestion.vertScale,
-      strideFactor: lastSuggestion.strideFactor,
-      gpsDistFactor: lastSuggestion.gpsDistFactor
+      devicePos: sel.devicePos,
+      gct: sel.gct,
+      rot: sel.rot,
+      vertScale: sel.vertScale,
+      strideFactor: sel.strideFactor,
+      gpsDistFactor: sel.gpsDistFactor
     });
     savePendingCalibList(list);
     renderPendingCalibList(isKo);
@@ -7720,19 +7795,25 @@ const garmin = (function () {
   function applyCalibration() {
     const isKo = isKoLang();
     if (!lastSuggestion) return;
+    // [수정] 체크박스로 선택한 항목만 반영 (기존엔 lastSuggestion 전체를 무조건 다 적용했음)
+    const sel = getCheckedSuggestion();
+    if (!hasAnySelectedField(sel)) {
+      alert(isKo ? '선택된 항목이 없습니다. 적용할 값을 하나 이상 체크해주세요.' : 'Nothing selected — check at least one item to apply.');
+      return;
+    }
     try {
       const prof = storage.loadProfile();
-      const override = { devicePos: lastSuggestion.devicePos, appliedAt: new Date().toISOString() };
-      if (lastSuggestion.gct != null) override.gctFallbackRatio = lastSuggestion.gct;
-      if (lastSuggestion.rot != null) override.rotRejectThreshold = lastSuggestion.rot;
-      if (lastSuggestion.vertScale != null) override.vertScale = lastSuggestion.vertScale;
+      const override = { devicePos: sel.devicePos, appliedAt: new Date().toISOString() };
+      if (sel.gct != null) override.gctFallbackRatio = sel.gct;
+      if (sel.rot != null) override.rotRejectThreshold = sel.rot;
+      if (sel.vertScale != null) override.vertScale = sel.vertScale;
       // [추가] 초기화(RESET) 시 정확히 원래 값으로 되돌릴 수 있도록, 보폭 보정계수를
       // 덮어쓰기 직전의 값을 함께 저장해둔다(다른 기능인 실측거리 캘리브레이션이
       // 이미 설정해둔 값일 수도 있으므로 무조건 1.0으로 되돌리면 안 됨).
-      if (lastSuggestion.strideFactor != null) {
+      if (sel.strideFactor != null) {
         override.prevStrideCorrectionFactor = (typeof prof.strideCorrectionFactor === 'number' && prof.strideCorrectionFactor > 0) ? prof.strideCorrectionFactor : 1.0;
       }
-      if (lastSuggestion.gpsDistFactor != null) {
+      if (sel.gpsDistFactor != null) {
         override.prevGpsDistCorrectionFactor = (typeof prof.gpsDistCorrectionFactor === 'number' && prof.gpsDistCorrectionFactor > 0) ? prof.gpsDistCorrectionFactor : 1.0;
       }
       // [추가] 덮어쓰기 직전 상태를 스냅샷으로 저장 → 나중에 '되돌리기'로 정확히 복원 가능.
@@ -7744,8 +7825,8 @@ const garmin = (function () {
         savedAt: new Date().toISOString()
       };
       prof.motionCalibOverride = override;
-      if (lastSuggestion.strideFactor != null) prof.strideCorrectionFactor = lastSuggestion.strideFactor;
-      if (lastSuggestion.gpsDistFactor != null) prof.gpsDistCorrectionFactor = lastSuggestion.gpsDistFactor;
+      if (sel.strideFactor != null) prof.strideCorrectionFactor = sel.strideFactor;
+      if (sel.gpsDistFactor != null) prof.gpsDistCorrectionFactor = sel.gpsDistFactor;
       storage.saveProfile(prof);
 
       if (typeof app !== 'undefined' && app && app.motion) {
