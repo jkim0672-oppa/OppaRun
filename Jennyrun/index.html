@@ -1394,6 +1394,7 @@ crewNoComments: "No comments yet", crewConfirmDelete: "Delete this record from c
 crewMorning: "Morning Run", crewAfternoon: "Afternoon Run", crewEvening: "Evening Run", crewNight: "Night Run",
 crewTab: "CREW",
 crewDist: "Distance", crewTime: "Time", crewPace: "Pace", crewEff: "Efficiency", crewMe: "Me", editTitle: "EDIT TITLE",
+crewFollow: "Follow", crewFollowing: "Following",
 blockedUsersLabel: "BLOCKED USERS", noBlockedUsers: "No blocked users.", unblock: "Unblock",
 blockConfirm: "Block this user? You will no longer see their posts and comments.", reportSubmitted: "Report submitted. Thank you.",
 crewSharePrompt: "Save and share", crewIncludeRoute: "Route map", crewIncludeHr: "Heart rate", crewIncludeLean: "Forward lean", crewIncludeCadence: "Cadence", crewIncludeGct: "Ground contact time", crewIncludeFlight: "Flight ratio", crewIncludeStride: "Stride", crewIncludeKcal: "Calories", crewIncludeSteps: "Steps", crewShareItemsToggle: "Share items", crewAddPhoto: "Add a photo (optional)",
@@ -1487,6 +1488,7 @@ crewNoComments: "아직 댓글이 없어요", crewConfirmDelete: "이 커뮤니�
 crewMorning: "아침 러닝", crewAfternoon: "오후 러닝", crewEvening: "저녁 러닝", crewNight: "야간 러닝",
 crewTab: "크루",
 crewDist: "거리", crewTime: "시간", crewPace: "페이스", crewEff: "효율", crewMe: "나", editTitle: "제목 수정",
+crewFollow: "팔로우", crewFollowing: "팔로잉",
 blockedUsersLabel: "차단 목록", noBlockedUsers: "차단한 사용자가 없습니다.", unblock: "차단 해제",
 blockConfirm: "이 사용자를 차단할까요? 앞으로 이 사용자의 게시글과 댓글이 보이지 않습니다.", reportSubmitted: "신고가 접수되었습니다. 감사합니다.",
 crewSharePrompt: "저장하고 공유하기", crewIncludeRoute: "경로 지도", crewIncludeHr: "심박수", crewIncludeLean: "전방 기울기", crewIncludeCadence: "케이던스", crewIncludeGct: "지면접촉시간", crewIncludeFlight: "체공비율", crewIncludeStride: "보폭", crewIncludeKcal: "칼로리", crewIncludeSteps: "걸음수", crewShareItemsToggle: "크루쉐어 아이템", crewAddPhoto: "사진 추가 (선택)",
@@ -6021,6 +6023,32 @@ class CommunityManager {
     await this.renderFeed();
   }
 
+  // ===== [신규] 팔로우 기능 =====
+  async loadFollowing() {
+    try {
+      const uid = await this.ensureUserId();
+      const { data } = await _sb.from('follows').select('following_id').eq('follower_id', uid);
+      this.followingIds = new Set((data || []).map(f => f.following_id));
+    } catch(e) {
+      console.warn('loadFollowing failed', e);
+      this.followingIds = new Set();
+    }
+    return this.followingIds;
+  }
+
+  async toggleFollow(userId, nickname) {
+    try {
+      const uid = await this.ensureUserId();
+      if (userId === uid) return;
+      if (this.followingIds && this.followingIds.has(userId)) {
+        await _sb.from('follows').delete().eq('follower_id', uid).eq('following_id', userId);
+      } else {
+        await _sb.from('follows').insert({ follower_id: uid, following_id: userId, following_nickname: nickname || '' });
+      }
+    } catch(e) { console.warn('toggleFollow failed', e); }
+    await this.renderFeed();
+  }
+
   async renderBlockedList() {
     const t = this._t();
     const labelEl = document.getElementById('label-blocked-users');
@@ -6488,6 +6516,7 @@ async uploadRecord(record, photoFile, shareOptions, message) {
     if (loading) { loading.style.display = 'block'; loading.textContent = t.crewLoading; }
     const uid = await this.ensureUserId();
     await this.loadBlockedUsers();
+    await this.loadFollowing();
     let records = await this.loadFeed();
     records = records.filter(r => !this.blockedIds.has(r.user_id));
     if (records.length === 0) {
@@ -6504,6 +6533,7 @@ async uploadRecord(record, photoFile, shareOptions, message) {
 
     container.innerHTML = records.map(r => {
       const isMine = r.user_id === uid;
+      const isFollowing = this.followingIds && this.followingIds.has(r.user_id);
       const recordLikes = allLikes.filter(l => l.record_id === r.id);
       const likeCount = recordLikes.length;
       const iLiked = recordLikes.some(l => l.user_id === uid);
@@ -6540,7 +6570,10 @@ async uploadRecord(record, photoFile, shareOptions, message) {
           <div style="display:flex; align-items:center; gap:10px;">
             <div style="width:40px; height:40px; border-radius:50%; background:${r.avatar_url ? '#eee' : (isMine ? 'linear-gradient(135deg,#00c853,#00ff88)' : this.getAvatarColor(r.user_id))}; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:900; color:#fff; flex-shrink:0; overflow:hidden;">${r.avatar_url ? `<img src="${r.avatar_url}" style="width:100%; height:100%; object-fit:cover; display:block;">` : initial}</div>
             <div>
-              <div style="font-size:14px; font-weight:900; color:${isMine ? '#00aa55' : '#111'};">${escapeHtml(r.nickname) || 'Runner'}${isMine ? ' <span style="font-size:10px; color:#00aa55; font-weight:700;">' + t.crewMe + '</span>' : ''}</div>
+              <div style="font-size:14px; font-weight:900; color:${isMine ? '#00aa55' : '#111'}; display:flex; align-items:center; gap:6px;">
+                <span>${escapeHtml(r.nickname) || 'Runner'}</span>
+                ${isMine ? `<span style="font-size:10px; color:#00aa55; font-weight:700;">${t.crewMe}</span>` : `<button onclick="community.toggleFollow('${r.user_id}', '${escapeHtml(r.nickname).replace(/'/g, "\\'")}')" style="background:${isFollowing ? '#f0f0f0' : '#00aa55'}; color:${isFollowing ? '#666' : '#fff'}; border:none; border-radius:12px; padding:3px 10px; font-size:10px; font-weight:800; cursor:pointer;">${isFollowing ? t.crewFollowing : t.crewFollow}</button>`}
+              </div>
               <div style="font-size:11px; color:#666; margin-top:1px;">${this.timeAgo(r.created_at)} · ${new Date(r.created_at).toLocaleString(storage.getLang()==='ko'?'ko-KR':'en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
               ${r.location_name ? `<div style="font-size:11px; color:#888; margin-top:2px;">📍 ${escapeHtml(r.location_name)}</div>` : ''}
             </div>
@@ -6555,103 +6588,97 @@ async uploadRecord(record, photoFile, shareOptions, message) {
         </div>
         ${r.message ? `<div style="font-size:13px; color:#555; margin-bottom:12px;">${escapeHtml(r.message)}</div>` : ''}
 
-        <!-- 스탯 -->
-        <div style="display:flex; border-top:1px solid #f5f5f5; border-bottom:1px solid #f5f5f5; padding:12px 0;">
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
-            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.crewDist}</div>
-            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${parseFloat(r.distance_km||0).toFixed(2)}</div>
-            <div style="font-size:10px; color:#00aa55; font-weight:800; margin-top:2px;">KM</div>
+        <!-- 스탯 (B-fix 컴팩트: 값+단위 한 줄, clamp 폰트로 자동 축소) -->
+        <div style="display:flex; border-top:1px solid #f5f5f5; border-bottom:1px solid #f5f5f5; padding:6px 0;">
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.crewDist}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${parseFloat(r.distance_km||0).toFixed(2)}<span style="font-size:8px; color:#999; font-weight:700;"> km</span></div>
           </div>
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
-            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.crewTime}</div>
-            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${this.formatDuration(r.duration_sec)}</div>
-            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">MM:SS</div>
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.crewTime}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.formatDuration(r.duration_sec)}</div>
           </div>
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
-            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.crewPace}</div>
-            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${this.formatPaceSec(r.pace_sec_per_km)}</div>
-            <div style="font-size:10px; color:#00aa55; font-weight:800; margin-top:2px;">/KM</div>
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.crewPace}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.formatPaceSec(r.pace_sec_per_km)}<span style="font-size:8px; color:#999; font-weight:700;"> /km</span></div>
           </div>
-          <div style="flex:1; text-align:center;">
-            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.speed||'SPEED'}</div>
-            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${r.pace_sec_per_km && r.pace_sec_per_km > 0 ? (3600 / r.pace_sec_per_km).toFixed(1) : '--'}</div>
-            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">KM/H</div>
+          <div style="flex:1; text-align:center; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.speed||'SPEED'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.pace_sec_per_km && r.pace_sec_per_km > 0 ? (3600 / r.pace_sec_per_km).toFixed(1) : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> km/h</span></div>
           </div>
         </div>
 
-        <!-- 세부 지표 (상단 스탯과 동일한 스타일로 크게 표시) -->
-        <div style="border-bottom:1px solid #f5f5f5; padding:8px 0; margin-bottom:14px;">
+        <!-- 세부 지표 (B-fix 컴팩트: 4열 x 2줄) -->
+        <div style="border-bottom:1px solid #f5f5f5; padding:6px 0; margin-bottom:14px;">
           ${activityMode === 'walk' ? `
-          <div style="display:flex;">
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
-            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.stepsLabel||'STEPS'}</div>
-            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${r.steps || '--'}</div>
-            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">&nbsp;</div>
+          <div style="display:flex; border-bottom:1px solid #f5f5f5; padding-bottom:6px; margin-bottom:6px;">
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.stepsLabel||'STEPS'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.steps || '--'}</div>
           </div>
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
-            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.spmLabel||'SPM'}</div>
-            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${r.walk_spm || '--'}</div>
-            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">&nbsp;</div>
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.spmLabel||'SPM'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.walk_spm || '--'}</div>
           </div>
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
-            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.stride||'STRIDE'}</div>
-            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${r.stride_m || '--'}</div>
-            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">M</div>
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.stride||'STRIDE'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.stride_m || '--'}<span style="font-size:8px; color:#999; font-weight:700;"> m</span></div>
           </div>
-          <div style="flex:1; text-align:center;">
-            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.alt||'ALT'}</div>
-            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${(r.alt !== undefined && r.alt !== null) ? r.alt : '--'}</div>
-            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">M</div>
+          <div style="flex:1; text-align:center; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.alt||'ALT'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.alt !== undefined && r.alt !== null) ? r.alt : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> m</span></div>
           </div>
           </div>
           ` : `
-          <div style="display:flex; border-bottom:1px solid #f5f5f5; padding-bottom:8px; margin-bottom:8px;">
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
-            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.cadence||'CADENCE'}</div>
-            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${r.cadence || '--'}</div>
-            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">SPM</div>
+          <div style="display:flex; border-bottom:1px solid #f5f5f5; padding-bottom:6px; margin-bottom:6px;">
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.cadence||'CADENCE'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.cadence || '--'}<span style="font-size:8px; color:#999; font-weight:700;"> spm</span></div>
           </div>
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
-            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.gct||'GCT'}</div>
-            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${r.gct_ms || '--'}</div>
-            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">MS</div>
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.gct||'GCT'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.gct_ms || '--'}<span style="font-size:8px; color:#999; font-weight:700;"> ms</span></div>
           </div>
-          <div style="flex:1; text-align:center;">
-            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.flight||'FLIGHT'}</div>
-            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${(r.flight_pct !== undefined && r.flight_pct !== null) ? r.flight_pct : '--'}</div>
-            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">%</div>
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.flight||'FLIGHT'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.flight_pct !== undefined && r.flight_pct !== null) ? r.flight_pct : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> %</span></div>
+          </div>
+          <div style="flex:1; text-align:center; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.stride||'STRIDE'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.stride_m !== undefined && r.stride_m !== null) ? r.stride_m : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> m</span></div>
           </div>
           </div>
           <div style="display:flex;">
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
-            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.stride||'STRIDE'}</div>
-            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${(r.stride_m !== undefined && r.stride_m !== null) ? r.stride_m : '--'}</div>
-            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">M</div>
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.alt||'ALT'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.alt !== undefined && r.alt !== null) ? r.alt : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> m</span></div>
           </div>
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
-            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.alt||'ALT'}</div>
-            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${(r.alt !== undefined && r.alt !== null) ? r.alt : '--'}</div>
-            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">M</div>
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.lean||'LEAN'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.lean_deg !== undefined && r.lean_deg !== null) ? r.lean_deg : '--'}<span style="font-size:8px; color:#999; font-weight:700;">°</span></div>
           </div>
-          <div style="flex:1; text-align:center;">
-            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.lean||'LEAN'}</div>
-            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${(r.lean_deg !== undefined && r.lean_deg !== null) ? r.lean_deg : '--'}</div>
-            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">°</div>
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.hrAvgMax||'HR'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#e53935; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.avg_hr !== undefined && r.avg_hr !== null) ? r.avg_hr : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> ${(r.hr_zone !== undefined && r.hr_zone !== null) ? r.hr_zone : 'bpm'}</span></div>
+          </div>
+          <div style="flex:1; text-align:center; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.cal||'KCAL'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.kcal !== undefined && r.kcal !== null) ? r.kcal : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> kcal</span></div>
           </div>
           </div>
           `}
-          <div style="display:flex; border-top:1px solid #f5f5f5; padding-top:8px; margin-top:8px;">
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0;">
-            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.hrAvgMax||'HR'}</div>
-            <div style="font-size:18px; font-weight:900; color:#e53935; line-height:1;">${(r.avg_hr !== undefined && r.avg_hr !== null) ? r.avg_hr : '--'}</div>
-            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">${(r.hr_zone !== undefined && r.hr_zone !== null) ? r.hr_zone : 'BPM'}</div>
+          ${activityMode === 'walk' ? `
+          <div style="display:flex; border-top:1px solid #f5f5f5; padding-top:6px; margin-top:6px;">
+          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.hrAvgMax||'HR'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#e53935; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.avg_hr !== undefined && r.avg_hr !== null) ? r.avg_hr : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> ${(r.hr_zone !== undefined && r.hr_zone !== null) ? r.hr_zone : 'bpm'}</span></div>
           </div>
-          <div style="flex:1; text-align:center;">
-            <div style="font-size:9px; color:#555; font-weight:800; text-transform:uppercase; margin-bottom:4px;">${t.cal||'KCAL'}</div>
-            <div style="font-size:18px; font-weight:900; color:#111; line-height:1;">${(r.kcal !== undefined && r.kcal !== null) ? r.kcal : '--'}</div>
-            <div style="font-size:10px; color:#666; font-weight:800; margin-top:2px;">KCAL</div>
+          <div style="flex:1; text-align:center; padding:2px; min-width:0;">
+            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.cal||'KCAL'}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.kcal !== undefined && r.kcal !== null) ? r.kcal : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> kcal</span></div>
           </div>
           </div>
+          ` : ``}
         </div>
 
         <!-- 이미지/지도 -->
