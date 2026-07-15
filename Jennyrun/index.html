@@ -711,8 +711,12 @@ alt="runner"/>
 <div style="margin-top:14px;">
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
     <div class="settings-label" id="label-precision-log" style="margin-bottom:0;">PRECISION LOGS</div>
-    <div id="precision-log-clear-all-btn" class="garmin-import-item-del" style="display:none;" onclick="storage.clearAllPrecisionLogs()">CLEAR ALL</div>
+    <div style="display:flex; gap:6px;">
+      <div id="precision-log-import-btn" class="garmin-import-item-del" style="color:var(--primary); border-color:#2a3a2f;" onclick="document.getElementById('precision-log-csv-input').click()">IMPORT</div>
+      <div id="precision-log-clear-all-btn" class="garmin-import-item-del" style="display:none;" onclick="storage.clearAllPrecisionLogs()">CLEAR ALL</div>
+    </div>
   </div>
+  <input type="file" id="precision-log-csv-input" accept=".csv" style="display:none" onchange="storage.importPrecisionLogCsv(event)">
   <div id="precision-log-list" style="max-height:210px; overflow-y:auto; padding-right:2px;"></div>
 </div>
 <button id="btn-clear-history" style="background:#2a2a2a; color:var(--danger); border:1.5px solid #444; padding:18px; border-radius:12px; width:100%; font-weight:900; font-size:14px; margin-top:20px;" onclick="storage.clearHistory()">CLEAR ALL HISTORY</button>
@@ -1645,6 +1649,79 @@ const timeStr = d.toTimeString().slice(0,8).replace(/:/g,'');
 const fileName = 'precision-log-' + dateStr + '-' + timeStr + '.csv';
 this.downloadCsvFile(csvStr, fileName);
 }
+// [추가] buildPrecisionCsv가 만든 CSV(헤더: t_sec,timestamp,lat,...,lean_deg)를
+// 다시 log 배열(r.t, r.timestamp, ... r.leanDeg 형태)로 되돌린다. export 포맷과
+// 반드시 1:1로 맞아야 하므로 헤더 이름을 그대로 키로 써서 컬럼 순서가 바뀌어도 안전하게 파싱.
+parsePrecisionCsv(text) {
+const lines = text.split(/\r?\n/).filter(l => l.trim().length);
+if (lines.length < 2) return null;
+const headers = lines[0].split(',').map(h => h.trim());
+const idx = {};
+headers.forEach((h, i) => { idx[h] = i; });
+const num = (v) => (v === undefined || v === '') ? null : parseFloat(v);
+const log = [];
+for (let i = 1; i < lines.length; i++) {
+const cols = lines[i].split(',');
+if (cols.length < 2) continue;
+log.push({
+t: num(cols[idx['t_sec']]),
+timestamp: cols[idx['timestamp']] || '',
+lat: num(cols[idx['lat']]),
+lng: num(cols[idx['lng']]),
+gpsAcc: num(cols[idx['gps_accuracy_m']]),
+distKm: num(cols[idx['dist_km']]),
+speedKmh: num(cols[idx['speed_kmh']]),
+cadence: num(cols[idx['cadence_spm']]),
+gctMs: num(cols[idx['gct_ms']]),
+flightPct: num(cols[idx['flight_pct']]),
+stepLengthM: num(cols[idx['step_length_m']]),
+stepLengthWindowM: num(cols[idx['step_length_window_m']]),
+stepLengthInstantM: num(cols[idx['step_length_instant_m']]),
+vertOscMm: num(cols[idx['vert_osc_mm']]),
+hrBpm: num(cols[idx['hr_bpm']]),
+hrZone: cols[idx['hr_zone']] || '',
+rotPeakDps: num(cols[idx['rot_peak_dps']]),
+gyroAlpha: num(cols[idx['gyro_alpha_dps']]),
+gyroBeta: num(cols[idx['gyro_beta_dps']]),
+gyroGamma: num(cols[idx['gyro_gamma_dps']]),
+leanDeg: num(cols[idx['lean_deg']])
+});
+}
+return log;
+}
+// [추가] 폰에 저장해둔 정밀 로그 CSV 파일을 다시 불러와서 저장 목록(최대 3개)에 추가.
+// 자동 저장분과 동일한 슬롯(최근 3개)을 공유하므로, 오래된 파일을 불러오면 그만큼
+// 최근 자동 기록이 밀려날 수 있음 — 가민 FIT 가져오기와 동일한 정책.
+importPrecisionLogCsv(event) {
+const isKo = this.getLang() === 'ko';
+const file = event.target.files && event.target.files[0];
+event.target.value = '';
+if (!file) return;
+if (!file.name.toLowerCase().endsWith('.csv')) {
+alert(isKo ? '.csv 파일만 지원됩니다.' : 'Only .csv files are supported.');
+return;
+}
+const reader = new FileReader();
+reader.onload = (e) => {
+try {
+const log = this.parsePrecisionCsv(e.target.result);
+if (!log || !log.length) {
+alert(isKo ? '로그 데이터를 찾지 못했어요. 파일을 확인해주세요.' : 'No log data found in this file.');
+return;
+}
+const list = this.loadPrecisionLogs();
+list.unshift({ id: 'plog_' + Date.now(), savedAt: new Date().toISOString(), log: log, imported: true });
+this.savePrecisionLogsList(list.slice(0, 3));
+if (typeof ui !== 'undefined') ui.renderPrecisionLogList();
+alert(isKo ? '정밀 로그를 불러왔습니다.' : 'Precision log imported.');
+} catch (err) {
+console.error('Precision log CSV import error:', err);
+alert((isKo ? '파싱 중 오류: ' : 'Parsing error: ') + err.message);
+}
+};
+reader.onerror = () => alert(isKo ? '파일을 읽을 수 없어요.' : 'Could not read the file.');
+reader.readAsText(file);
+}
 // [추가] 데이터 가져오기: JSON 파일을 읽어 localStorage에 복원
 importData(event) {
 const lang = this.getLang();
@@ -2035,12 +2112,14 @@ community.renderBlockedList();
 renderPrecisionLogList() {
 const wrap = document.getElementById('precision-log-list');
 const clearBtn = document.getElementById('precision-log-clear-all-btn');
+const importBtn = document.getElementById('precision-log-import-btn');
 const labelEl = document.getElementById('label-precision-log');
 if (!wrap) return;
 const list = storage.loadPrecisionLogs();
 const isKo = storage.getLang() === 'ko';
 if (labelEl) labelEl.textContent = isKo ? '정밀 로그' : 'PRECISION LOGS';
 if (clearBtn) clearBtn.textContent = isKo ? '전체삭제' : 'CLEAR ALL';
+if (importBtn) importBtn.textContent = isKo ? '불러오기' : 'IMPORT';
 if (!list.length) {
 wrap.innerHTML = '<div class="garmin-import-empty">' + (isKo ? '저장된 정밀 로그가 없습니다. 러닝을 먼저 진행해주세요.' : 'No saved precision logs yet. Record a run first.') + '</div>';
 if (clearBtn) clearBtn.style.display = 'none';
@@ -2051,9 +2130,11 @@ wrap.innerHTML = list.map(item => {
 const d = new Date(item.savedAt);
 const label = d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0') + ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
 const count = item.log ? item.log.length : 0;
+// [추가] CSV로 불러온 로그는 방금 기록한 러닝과 구분되도록 작은 배지를 붙인다.
+const badge = item.imported ? ' <span style="color:#888; font-weight:700;">· ' + (isKo ? '가져옴' : 'IMPORTED') + '</span>' : '';
 return '<div class="garmin-import-item">'
 + '<div class="garmin-import-item-head">'
-+ '<div class="garmin-import-item-title">' + label + ' · ' + count + (isKo ? '개' : ' rows') + '</div>'
++ '<div class="garmin-import-item-title">' + label + ' · ' + count + (isKo ? '개' : ' rows') + badge + '</div>'
 + '<div style="display:flex; gap:6px;">'
 + '<div class="garmin-import-item-del" style="color:var(--primary); border-color:#2a3a2f;" onclick="storage.exportPrecisionLogById(\'' + item.id + '\')">' + (isKo ? '내보내기' : 'EXPORT') + '</div>'
 + '<div class="garmin-import-item-del" onclick="storage.deletePrecisionLog(\'' + item.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</div>'
@@ -7147,7 +7228,9 @@ const garmin = (function () {
   let selectedPrecLogId = null; // [추가] 캘리브레이션 비교용으로 선택된 정밀 로그 id
   let lastSuggestion = null; // [추가] 마지막 비교에서 계산된 제안값 (APPLY 버튼이 참조)
 
-  function renderBox(item, isKo) {
+  // [수정] 저장된 가민 기록(최대 3개)을 전부 카드로 보여주도록 isSelected 인자 추가.
+  // isSelected면 캘리브레이션 비교 기준으로 쓰이는 카드라는 표시(테두리 강조 + 라벨)를 해준다.
+  function renderBox(item, isKo, isSelected) {
     if (!item) {
       return '<div class="garmin-import-empty">' + (isKo ? '가져온 가민 데이터가 없습니다.' : 'No imported Garmin data yet.') + '</div>';
     }
@@ -7164,11 +7247,17 @@ const garmin = (function () {
       [isKo ? '상승고도' : 'ELEV GAIN', item.elevationGain + ' m'],
       [isKo ? '레코드 수' : 'RECORDS', item.recordCount]
     ];
-    return '<div class="garmin-import-item">'
+    const escapedLabel = fmtDate(item.startMs).replace(/'/g, "&#39;");
+    const selectBtn = isSelected
+      ? '<div class="garmin-import-item-del" style="color:var(--primary); border-color:#2a3a2f;">' + (isKo ? '비교 기준' : 'COMPARE BASIS') + '</div>'
+      : '<div class="garmin-import-item-del" onclick="garmin.selectImport(\'' + item.id + '\', \'' + escapedLabel + '\')">' + (isKo ? '비교 기준으로' : 'USE FOR COMPARE') + '</div>';
+    return '<div class="garmin-import-item"' + (isSelected ? ' style="border-color:var(--primary);"' : '') + '>'
       + '<div class="garmin-import-item-head">'
       + '<div class="garmin-import-item-title">' + fmtDate(item.startMs) + '</div>'
+      + '<div style="display:flex; gap:6px;">'
+      + selectBtn
       + '<div class="garmin-import-item-del" onclick="garmin.deleteImport(\'' + item.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</div>'
-      + '</div>'
+      + '</div></div>'
       + '<div class="garmin-import-grid">'
       + boxes.map(b => '<div class="garmin-import-box"><div class="garmin-import-box-label">' + b[0] + '</div><div class="garmin-import-box-val">' + b[1] + '</div></div>').join('')
       + '</div></div>';
@@ -7241,7 +7330,10 @@ const garmin = (function () {
 
     const selected = list.find(i => i.id === selectedId);
     currentText.textContent = fmtDate(selected.startMs);
-    wrap.innerHTML = renderBox(selected, isKo);
+    // [수정] 기존엔 선택된 기록 1개만 renderBox()로 그렸는데, 저장은 3개까지 되니까
+    // 정밀 로그 리스트(renderPrecisionLogList)와 동일하게 전부 카드로 이어붙여서 보여준다.
+    // 어느 카드가 캘리브레이션 비교 기준인지는 renderBox의 isSelected 인자로 강조 표시.
+    wrap.innerHTML = list.map(item => renderBox(item, isKo, item.id === selectedId)).join('');
     if (clearAllBtn) clearAllBtn.style.display = 'block';
   }
 
