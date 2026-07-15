@@ -1394,7 +1394,7 @@ crewNoComments: "No comments yet", crewConfirmDelete: "Delete this record from c
 crewMorning: "Morning Run", crewAfternoon: "Afternoon Run", crewEvening: "Evening Run", crewNight: "Night Run",
 crewTab: "CREW",
 crewDist: "Distance", crewTime: "Time", crewPace: "Pace", crewEff: "Efficiency", crewMe: "Me", editTitle: "EDIT TITLE",
-crewFollow: "Follow", crewFollowing: "Following",
+crewFollow: "Follow", crewFollowing: "Following", crewUnfollow: "Unfollow",
 blockedUsersLabel: "BLOCKED USERS", noBlockedUsers: "No blocked users.", unblock: "Unblock",
 blockConfirm: "Block this user? You will no longer see their posts and comments.", reportSubmitted: "Report submitted. Thank you.",
 crewSharePrompt: "Save and share", crewIncludeRoute: "Route map", crewIncludeHr: "Heart rate", crewIncludeLean: "Forward lean", crewIncludeCadence: "Cadence", crewIncludeGct: "Ground contact time", crewIncludeFlight: "Flight ratio", crewIncludeStride: "Stride", crewIncludeKcal: "Calories", crewIncludeSteps: "Steps", crewShareItemsToggle: "Share items", crewAddPhoto: "Add a photo (optional)",
@@ -1488,7 +1488,7 @@ crewNoComments: "아직 댓글이 없어요", crewConfirmDelete: "이 커뮤니�
 crewMorning: "아침 러닝", crewAfternoon: "오후 러닝", crewEvening: "저녁 러닝", crewNight: "야간 러닝",
 crewTab: "크루",
 crewDist: "거리", crewTime: "시간", crewPace: "페이스", crewEff: "효율", crewMe: "나", editTitle: "제목 수정",
-crewFollow: "팔로우", crewFollowing: "팔로잉",
+crewFollow: "팔로우", crewFollowing: "팔로잉", crewUnfollow: "언팔로우",
 blockedUsersLabel: "차단 목록", noBlockedUsers: "차단한 사용자가 없습니다.", unblock: "차단 해제",
 blockConfirm: "이 사용자를 차단할까요? 앞으로 이 사용자의 게시글과 댓글이 보이지 않습니다.", reportSubmitted: "신고가 접수되었습니다. 감사합니다.",
 crewSharePrompt: "저장하고 공유하기", crewIncludeRoute: "경로 지도", crewIncludeHr: "심박수", crewIncludeLean: "전방 기울기", crewIncludeCadence: "케이던스", crewIncludeGct: "지면접촉시간", crewIncludeFlight: "체공비율", crewIncludeStride: "보폭", crewIncludeKcal: "칼로리", crewIncludeSteps: "걸음수", crewShareItemsToggle: "크루쉐어 아이템", crewAddPhoto: "사진 추가 (선택)",
@@ -6036,16 +6036,23 @@ class CommunityManager {
     return this.followingIds;
   }
 
-  async toggleFollow(userId, nickname) {
+  async followUser(userId, nickname) {
     try {
       const uid = await this.ensureUserId();
       if (userId === uid) return;
-      if (this.followingIds && this.followingIds.has(userId)) {
-        await _sb.from('follows').delete().eq('follower_id', uid).eq('following_id', userId);
-      } else {
+      if (!(this.followingIds && this.followingIds.has(userId))) {
         await _sb.from('follows').insert({ follower_id: uid, following_id: userId, following_nickname: nickname || '' });
       }
-    } catch(e) { console.warn('toggleFollow failed', e); }
+    } catch(e) { console.warn('followUser failed', e); }
+    await this.renderFeed();
+  }
+
+  async unfollowUser(userId) {
+    try {
+      const uid = await this.ensureUserId();
+      if (userId === uid) return;
+      await _sb.from('follows').delete().eq('follower_id', uid).eq('following_id', userId);
+    } catch(e) { console.warn('unfollowUser failed', e); }
     await this.renderFeed();
   }
 
@@ -6572,7 +6579,10 @@ async uploadRecord(record, photoFile, shareOptions, message) {
             <div>
               <div style="font-size:14px; font-weight:900; color:${isMine ? '#00aa55' : '#111'}; display:flex; align-items:center; gap:6px;">
                 <span>${escapeHtml(r.nickname) || 'Runner'}</span>
-                ${isMine ? `<span style="font-size:10px; color:#00aa55; font-weight:700;">${t.crewMe}</span>` : `<button onclick="community.toggleFollow('${r.user_id}', '${escapeHtml(r.nickname).replace(/'/g, "\\'")}')" style="background:${isFollowing ? '#f0f0f0' : '#00aa55'}; color:${isFollowing ? '#666' : '#fff'}; border:none; border-radius:12px; padding:3px 10px; font-size:10px; font-weight:800; cursor:pointer;">${isFollowing ? t.crewFollowing : t.crewFollow}</button>`}
+                ${isMine ? `<span style="font-size:10px; color:#00aa55; font-weight:700;">${t.crewMe}</span>` : `<div style="display:flex; align-items:center; gap:6px;">
+                  <button ${isFollowing ? 'disabled' : `onclick="community.followUser('${r.user_id}', '${escapeHtml(r.nickname).replace(/'/g, "\\'")}')"`} style="background:${isFollowing ? '#f0f0f0' : '#00aa55'}; color:${isFollowing ? '#999' : '#fff'}; border:none; border-radius:12px; padding:3px 10px; font-size:10px; font-weight:800; cursor:${isFollowing ? 'default' : 'pointer'};">${isFollowing ? t.crewFollowing : t.crewFollow}</button>
+                  ${isFollowing ? `<button onclick="community.unfollowUser('${r.user_id}')" style="background:#fff; color:#666; border:1px solid #ddd; border-radius:12px; padding:3px 10px; font-size:10px; font-weight:800; cursor:pointer;">${t.crewUnfollow}</button>` : ''}
+                </div>`}
               </div>
               <div style="font-size:11px; color:#666; margin-top:1px;">${this.timeAgo(r.created_at)} · ${new Date(r.created_at).toLocaleString(storage.getLang()==='ko'?'ko-KR':'en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
               ${r.location_name ? `<div style="font-size:11px; color:#888; margin-top:2px;">📍 ${escapeHtml(r.location_name)}</div>` : ''}
