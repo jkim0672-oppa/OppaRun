@@ -5494,6 +5494,24 @@ class CommunityManager {
     this._editorInteractionsBound = false;
   }
 
+  // [가독성 개선] 크루 피드 스탯 셀 공통 렌더러 (크루 탭에만 사용)
+  // - 라벨: 대비를 높이고(#777) 자간을 살짝 줘서 값과 명확히 분리
+  // - 값: 실측치가 없는 '--'는 연한 회색으로 낮춰서 실제 데이터가 먼저 눈에 띄게 함
+  // - 단위: 값보다 항상 흐리게 유지해 숫자 자체의 시인성을 지킴
+  feedCell(label, val, unit, opts) {
+    opts = opts || {};
+    const isEmpty = (val === undefined || val === null || val === '--' || val === '');
+    const displayVal = isEmpty ? '--' : val;
+    const valColor = opts.color || (isEmpty ? '#c9c9c9' : '#111');
+    const unitColor = isEmpty ? '#d8d8d8' : '#999';
+    const borderStyle = opts.last ? '' : 'border-right:1px solid #f0f0f0;';
+    return `
+          <div style="flex:1; text-align:center; ${borderStyle} padding:3px 2px; min-width:0;">
+            <div style="font-size:9px; color:#777; font-weight:800; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:3px;">${label}</div>
+            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:${valColor}; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${displayVal}${unit ? `<span style="font-size:8px; color:${unitColor}; font-weight:700;"> ${unit}</span>` : ''}</div>
+          </div>`;
+  }
+
   getNickname() {
     return localStorage.getItem(this.NICKNAME_KEY) || '';
   }
@@ -6617,95 +6635,41 @@ async uploadRecord(record, photoFile, shareOptions, message) {
         </div>
         ${r.message ? `<div style="font-size:13px; color:#555; margin-bottom:12px;">${escapeHtml(r.message)}</div>` : ''}
 
-        <!-- 스탯 (B-fix 컴팩트: 값+단위 한 줄, clamp 폰트로 자동 축소) -->
-        <div style="display:flex; border-top:1px solid #f5f5f5; border-bottom:1px solid #f5f5f5; padding:6px 0;">
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
-            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.crewDist}</div>
-            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${parseFloat(r.distance_km||0).toFixed(2)}<span style="font-size:8px; color:#999; font-weight:700;"> km</span></div>
-          </div>
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
-            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.crewTime}</div>
-            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.formatDuration(r.duration_sec)}</div>
-          </div>
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
-            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.crewPace}</div>
-            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.formatPaceSec(r.pace_sec_per_km)}<span style="font-size:8px; color:#999; font-weight:700;"> /km</span></div>
-          </div>
-          <div style="flex:1; text-align:center; padding:2px; min-width:0;">
-            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.speed||'SPEED'}</div>
-            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.pace_sec_per_km && r.pace_sec_per_km > 0 ? (3600 / r.pace_sec_per_km).toFixed(1) : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> km/h</span></div>
-          </div>
+        <!-- 스탯 (가독성 개선: feedCell 공통 렌더러 사용) -->
+        <div style="display:flex; border-top:1px solid #f5f5f5; border-bottom:1px solid #f5f5f5; padding:7px 0;">
+          ${this.feedCell(t.crewDist, parseFloat(r.distance_km||0).toFixed(2), 'km')}
+          ${this.feedCell(t.crewTime, this.formatDuration(r.duration_sec), '')}
+          ${this.feedCell(t.crewPace, this.formatPaceSec(r.pace_sec_per_km), '/km')}
+          ${this.feedCell(t.speed||'SPEED', (r.pace_sec_per_km && r.pace_sec_per_km > 0) ? (3600 / r.pace_sec_per_km).toFixed(1) : '--', 'km/h', {last:true})}
         </div>
 
-        <!-- 세부 지표 (B-fix 컴팩트: 4열 x 2줄) -->
-        <div style="border-bottom:1px solid #f5f5f5; padding:6px 0; margin-bottom:14px;">
+        <!-- 세부 지표 (가독성 개선: feedCell 공통 렌더러 사용) -->
+        <div style="border-bottom:1px solid #f5f5f5; padding:7px 0; margin-bottom:14px;">
           ${activityMode === 'walk' ? `
-          <div style="display:flex; border-bottom:1px solid #f5f5f5; padding-bottom:6px; margin-bottom:6px;">
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
-            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.stepsLabel||'STEPS'}</div>
-            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.steps || '--'}</div>
-          </div>
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
-            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.spmLabel||'SPM'}</div>
-            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.walk_spm || '--'}</div>
-          </div>
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
-            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.stride||'STRIDE'}</div>
-            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.stride_m || '--'}<span style="font-size:8px; color:#999; font-weight:700;"> m</span></div>
-          </div>
-          <div style="flex:1; text-align:center; padding:2px; min-width:0;">
-            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.alt||'ALT'}</div>
-            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.alt !== undefined && r.alt !== null) ? r.alt : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> m</span></div>
-          </div>
+          <div style="display:flex; border-bottom:1px solid #f5f5f5; padding-bottom:7px; margin-bottom:7px;">
+          ${this.feedCell(t.stepsLabel||'STEPS', r.steps || '--', '')}
+          ${this.feedCell(t.spmLabel||'SPM', r.walk_spm || '--', '')}
+          ${this.feedCell(t.stride||'STRIDE', r.stride_m || '--', 'm')}
+          ${this.feedCell(t.alt||'ALT', (r.alt !== undefined && r.alt !== null) ? r.alt : '--', 'm', {last:true})}
           </div>
           ` : `
-          <div style="display:flex; border-bottom:1px solid #f5f5f5; padding-bottom:6px; margin-bottom:6px;">
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
-            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.cadence||'CADENCE'}</div>
-            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.cadence || '--'}<span style="font-size:8px; color:#999; font-weight:700;"> spm</span></div>
-          </div>
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
-            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.gct||'GCT'}</div>
-            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.gct_ms || '--'}<span style="font-size:8px; color:#999; font-weight:700;"> ms</span></div>
-          </div>
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
-            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.flight||'FLIGHT'}</div>
-            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.flight_pct !== undefined && r.flight_pct !== null) ? r.flight_pct : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> %</span></div>
-          </div>
-          <div style="flex:1; text-align:center; padding:2px; min-width:0;">
-            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.stride||'STRIDE'}</div>
-            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.stride_m !== undefined && r.stride_m !== null) ? r.stride_m : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> m</span></div>
-          </div>
+          <div style="display:flex; border-bottom:1px solid #f5f5f5; padding-bottom:7px; margin-bottom:7px;">
+          ${this.feedCell(t.cadence||'CADENCE', r.cadence || '--', 'spm')}
+          ${this.feedCell(t.gct||'GCT', r.gct_ms || '--', 'ms')}
+          ${this.feedCell(t.flight||'FLIGHT', (r.flight_pct !== undefined && r.flight_pct !== null) ? r.flight_pct : '--', '%')}
+          ${this.feedCell(t.stride||'STRIDE', (r.stride_m !== undefined && r.stride_m !== null) ? r.stride_m : '--', 'm', {last:true})}
           </div>
           <div style="display:flex;">
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
-            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.alt||'ALT'}</div>
-            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.alt !== undefined && r.alt !== null) ? r.alt : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> m</span></div>
-          </div>
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
-            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.lean||'LEAN'}</div>
-            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.lean_deg !== undefined && r.lean_deg !== null) ? r.lean_deg : '--'}<span style="font-size:8px; color:#999; font-weight:700;">°</span></div>
-          </div>
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
-            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.hrAvgMax||'HR'}</div>
-            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#e53935; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.avg_hr !== undefined && r.avg_hr !== null) ? r.avg_hr : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> ${(r.hr_zone !== undefined && r.hr_zone !== null) ? r.hr_zone : 'bpm'}</span></div>
-          </div>
-          <div style="flex:1; text-align:center; padding:2px; min-width:0;">
-            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.cal||'KCAL'}</div>
-            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.kcal !== undefined && r.kcal !== null) ? r.kcal : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> kcal</span></div>
-          </div>
+          ${this.feedCell(t.alt||'ALT', (r.alt !== undefined && r.alt !== null) ? r.alt : '--', 'm')}
+          ${this.feedCell(t.lean||'LEAN', (r.lean_deg !== undefined && r.lean_deg !== null) ? r.lean_deg : '--', '°')}
+          ${this.feedCell(t.hrAvgMax||'HR', (r.avg_hr !== undefined && r.avg_hr !== null) ? r.avg_hr : '--', (r.hr_zone !== undefined && r.hr_zone !== null) ? r.hr_zone : 'bpm', {color: (r.avg_hr !== undefined && r.avg_hr !== null) ? '#e53935' : undefined})}
+          ${this.feedCell(t.cal||'KCAL', (r.kcal !== undefined && r.kcal !== null) ? r.kcal : '--', 'kcal', {last:true})}
           </div>
           `}
           ${activityMode === 'walk' ? `
-          <div style="display:flex; border-top:1px solid #f5f5f5; padding-top:6px; margin-top:6px;">
-          <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
-            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.hrAvgMax||'HR'}</div>
-            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#e53935; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.avg_hr !== undefined && r.avg_hr !== null) ? r.avg_hr : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> ${(r.hr_zone !== undefined && r.hr_zone !== null) ? r.hr_zone : 'bpm'}</span></div>
-          </div>
-          <div style="flex:1; text-align:center; padding:2px; min-width:0;">
-            <div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.cal||'KCAL'}</div>
-            <div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.kcal !== undefined && r.kcal !== null) ? r.kcal : '--'}<span style="font-size:8px; color:#999; font-weight:700;"> kcal</span></div>
-          </div>
+          <div style="display:flex; border-top:1px solid #f5f5f5; padding-top:7px; margin-top:7px;">
+          ${this.feedCell(t.hrAvgMax||'HR', (r.avg_hr !== undefined && r.avg_hr !== null) ? r.avg_hr : '--', (r.hr_zone !== undefined && r.hr_zone !== null) ? r.hr_zone : 'bpm', {color: (r.avg_hr !== undefined && r.avg_hr !== null) ? '#e53935' : undefined})}
+          ${this.feedCell(t.cal||'KCAL', (r.kcal !== undefined && r.kcal !== null) ? r.kcal : '--', 'kcal', {last:true})}
           </div>
           ` : ``}
         </div>
