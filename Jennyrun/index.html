@@ -621,7 +621,7 @@ alt="runner"/>
   <div id="label-preclog-import" style="font-size:11px; color:#888; font-weight:800;">IMPORTED PAST LOGS (0/3)</div>
   <div id="preclog-import-clear-all-btn" class="garmin-import-item-del" style="display:none;" onclick="garmin.clearPrecLogImports()">CLEAR ALL</div>
 </div>
-<button id="btn-import-preclog-csv" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:12px; margin-bottom:10px;" onclick="document.getElementById('calib-preclog-csv-input').click()">IMPORT PAST LOG (.CSV)</button>
+<button id="btn-import-preclog-csv" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:12px; margin-bottom:10px;" onclick="document.getElementById('calib-preclog-csv-input').click()">IMPORT PAST LOG (.CSV/.JSON)</button>
 <input type="file" id="calib-preclog-csv-input" accept=".csv,text/csv,text/comma-separated-values,text/plain,application/json,*/*" style="display:none" onchange="garmin.importPrecLogCsv(event)">
 <div style="position:relative;">
   <div id="calib-preclog-select-btn" onclick="ui.toggleDropdown('calib-preclog-dropdown-options')" class="dropdown-select" style="padding:12px 14px; font-size:13px;">
@@ -1706,42 +1706,51 @@ leanDeg: num(cols[idx['lean_deg']])
 }
 return log;
 }
-// [추가] CSV와 JSON 로그 파일을 모두 지원하기 위한 공용 파서.
-// 텍스트가 '[' 또는 '{'로 시작하면 JSON으로 우선 시도하고(배열 그대로거나 {log:[...]} 형태 모두 허용),
-// 실패하거나 JSON 형태가 아니면 기존 CSV 파서(parsePrecisionCsv)로 폴백한다.
-parsePrecLogFile(text) {
-const trimmed = (text || '').trim();
-if (trimmed.charAt(0) === '[' || trimmed.charAt(0) === '{') {
-try {
-const parsed = JSON.parse(trimmed);
-const arr = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.log) ? parsed.log : null);
-if (arr && arr.length) {
-const pick = (r, ...keys) => { for (const k of keys) { if (r[k] !== undefined && r[k] !== null && r[k] !== '') return r[k]; } return null; };
-return arr.map(r => ({
-t: pick(r, 't', 't_sec'),
+// [추가] .csv 파일뿐 아니라 .json 파일도 그대로 불러올 수 있도록 포맷을 자동 감지하는 통합 파서.
+// - JSON: 배열([{...}, ...]) 또는 { log:[...] } / { rows:[...] } 형태를 지원.
+//   각 row는 camelCase 키(t, distKm, gpsAcc...)와 CSV 헤더 키(t_sec, dist_km, gps_accuracy_m...) 둘 다 인식.
+// - JSON 파싱에 실패하거나 JSON 형태가 아니면 기존 parsePrecisionCsv(콤마 구분)로 폴백.
+normalizePrecisionRows(rows) {
+const num = (v) => (v === undefined || v === null || v === '') ? null : parseFloat(v);
+const pick = (r, camel, snake) => (r[camel] !== undefined ? r[camel] : r[snake]);
+return rows.map(r => ({
+t: num(pick(r, 't', 't_sec')),
 timestamp: r.timestamp || '',
-lat: pick(r, 'lat'),
-lng: pick(r, 'lng'),
-gpsAcc: pick(r, 'gpsAcc', 'gps_accuracy_m'),
-distKm: pick(r, 'distKm', 'dist_km'),
-speedKmh: pick(r, 'speedKmh', 'speed_kmh'),
-cadence: pick(r, 'cadence', 'cadence_spm'),
-gctMs: pick(r, 'gctMs', 'gct_ms'),
-flightPct: pick(r, 'flightPct', 'flight_pct'),
-stepLengthM: pick(r, 'stepLengthM', 'step_length_m'),
-stepLengthWindowM: pick(r, 'stepLengthWindowM', 'step_length_window_m'),
-stepLengthInstantM: pick(r, 'stepLengthInstantM', 'step_length_instant_m'),
-vertOscMm: pick(r, 'vertOscMm', 'vert_osc_mm'),
-hrBpm: pick(r, 'hrBpm', 'hr_bpm'),
+lat: num(r.lat),
+lng: num(r.lng),
+gpsAcc: num(pick(r, 'gpsAcc', 'gps_accuracy_m')),
+distKm: num(pick(r, 'distKm', 'dist_km')),
+speedKmh: num(pick(r, 'speedKmh', 'speed_kmh')),
+cadence: num(pick(r, 'cadence', 'cadence_spm')),
+gctMs: num(pick(r, 'gctMs', 'gct_ms')),
+flightPct: num(pick(r, 'flightPct', 'flight_pct')),
+stepLengthM: num(pick(r, 'stepLengthM', 'step_length_m')),
+stepLengthWindowM: num(pick(r, 'stepLengthWindowM', 'step_length_window_m')),
+stepLengthInstantM: num(pick(r, 'stepLengthInstantM', 'step_length_instant_m')),
+vertOscMm: num(pick(r, 'vertOscMm', 'vert_osc_mm')),
+hrBpm: num(pick(r, 'hrBpm', 'hr_bpm')),
 hrZone: r.hrZone || r.hr_zone || '',
-rotPeakDps: pick(r, 'rotPeakDps', 'rot_peak_dps'),
-gyroAlpha: pick(r, 'gyroAlpha', 'gyro_alpha_dps'),
-gyroBeta: pick(r, 'gyroBeta', 'gyro_beta_dps'),
-gyroGamma: pick(r, 'gyroGamma', 'gyro_gamma_dps'),
-leanDeg: pick(r, 'leanDeg', 'lean_deg')
-}));
+rotPeakDps: num(pick(r, 'rotPeakDps', 'rot_peak_dps')),
+gyroAlpha: num(pick(r, 'gyroAlpha', 'gyro_alpha_dps')),
+gyroBeta: num(pick(r, 'gyroBeta', 'gyro_beta_dps')),
+gyroGamma: num(pick(r, 'gyroGamma', 'gyro_gamma_dps')),
+leanDeg: num(pick(r, 'leanDeg', 'lean_deg'))
+})).filter(r => r.t !== null || r.distKm !== null);
 }
-} catch (e) { /* JSON이 아니면 아래 CSV 파서로 폴백 */ }
+parsePrecisionLogFile(text) {
+const trimmed = (text || '').trim();
+if (!trimmed) return null;
+if (trimmed[0] === '[' || trimmed[0] === '{') {
+try {
+const data = JSON.parse(trimmed);
+const rows = Array.isArray(data) ? data
+: (data && Array.isArray(data.log)) ? data.log
+: (data && Array.isArray(data.rows)) ? data.rows
+: null;
+if (rows) return this.normalizePrecisionRows(rows);
+} catch (e) {
+// JSON이 아니거나 손상됨 -> 아래 CSV 파싱으로 폴백
+}
 }
 return this.parsePrecisionCsv(text);
 }
@@ -1758,7 +1767,7 @@ if (!file) return;
 const reader = new FileReader();
 reader.onload = (e) => {
 try {
-const log = this.parsePrecLogFile(e.target.result);
+const log = this.parsePrecisionLogFile(e.target.result);
 if (!log || !log.length) {
 alert(isKo ? '로그 데이터를 찾지 못했어요. 파일을 확인해주세요.' : 'No log data found in this file.');
 return;
@@ -7349,7 +7358,7 @@ const garmin = (function () {
       : 'Compare this Garmin record with a saved precision log from the same run to see how far cadence/GCT are off, and get a suggested starting point for retuning.');
     setText('btn-run-calib-compare', isKo ? '선택한 임포트 로그 비교' : 'COMPARE SELECTED IMPORTED LOG');
     // [추가] 지난 로그 불러오기 버튼/전체삭제 버튼 다국어 처리 (개수는 renderPrecLogDropdown에서 갱신)
-    setText('btn-import-preclog-csv', isKo ? '지난 로그 불러오기 (.CSV)' : 'IMPORT PAST LOG (.CSV)');
+    setText('btn-import-preclog-csv', isKo ? '지난 로그 불러오기 (.CSV/.JSON)' : 'IMPORT PAST LOG (.CSV/.JSON)');
     setText('preclog-import-clear-all-btn', isKo ? '전체삭제' : 'CLEAR ALL');
   }
 
@@ -7433,11 +7442,11 @@ const garmin = (function () {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        if (typeof storage === 'undefined' || typeof storage.parsePrecLogFile !== 'function') {
+        if (typeof storage === 'undefined' || typeof storage.parsePrecisionLogFile !== 'function') {
           alert(isKo ? '가져오기를 사용할 수 없습니다.' : 'Import is unavailable.');
           return;
         }
-        const log = storage.parsePrecLogFile(e.target.result);
+        const log = storage.parsePrecisionLogFile(e.target.result);
         if (!log || !log.length) {
           alert(isKo ? '로그 데이터를 찾지 못했어요. 파일을 확인해주세요.' : 'No log data found in this file.');
           return;
