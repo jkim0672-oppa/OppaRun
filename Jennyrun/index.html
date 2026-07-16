@@ -609,6 +609,11 @@ alt="runner"/>
 <div class="diag-card" style="margin: 0 0 10px 0;">
 <div id="garmin-calib-title" style="color:var(--primary); font-weight:900; font-size:14px; margin-bottom:8px;">CALIBRATION CHECK</div>
 <div id="garmin-calib-desc" style="font-size:11px; color:#888; margin-bottom:10px; line-height:1.6;">Compare this Garmin record with a saved precision log from the same run to see how far cadence/GCT are off, and get a suggested starting point for retuning.</div>
+<!-- [추가] 자동저장된 최근 로그(최대 3개)를 임포트 로그와 분리해서 보여주고,
+     각 항목마다 COMPARE 버튼으로 바로 1개씩 비교할 수 있게 한다.
+     (기존엔 자동저장 로그와 임포트 로그가 드롭다운 하나에 섞여 있어서 구분이 어려웠음) -->
+<div id="label-preclog-auto" style="font-size:11px; color:#888; font-weight:800; margin-bottom:8px;">AUTO-SAVED LOGS (0/3)</div>
+<div id="calib-autolog-list" style="margin-bottom:14px;"></div>
 <!-- [추가] 캘리브레이션 비교 전용 "지난 로그 불러오기". 가민 가져오기와 동일하게
      별도의 localStorage 키(oppaRunPrecLogImports, 최대 3개)를 사용하므로
      러닝할 때마다 자동 저장되는 정밀 로그(oppaRunPrecisionLogs)의 슬롯을 밀어내지 않는다. -->
@@ -620,11 +625,11 @@ alt="runner"/>
 <input type="file" id="calib-preclog-csv-input" accept=".csv,text/csv,text/comma-separated-values,text/plain,application/json,*/*" style="display:none" onchange="garmin.importPrecLogCsv(event)">
 <div style="position:relative;">
   <div id="calib-preclog-select-btn" onclick="ui.toggleDropdown('calib-preclog-dropdown-options')" class="dropdown-select" style="padding:12px 14px; font-size:13px;">
-    <span id="current-calib-preclog-text">SELECT PRECISION LOG</span><span style="font-size:10px; color:var(--primary);">▼</span>
+    <span id="current-calib-preclog-text">SELECT IMPORTED LOG</span><span style="font-size:10px; color:var(--primary);">▼</span>
   </div>
   <div id="calib-preclog-dropdown-options" class="precision-dropdown-options" style="width:100%; position:static;"></div>
 </div>
-<button id="btn-run-calib-compare" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:12px; margin-top:10px;" onclick="garmin.runCalibrationCompare()">COMPARE</button>
+<button id="btn-run-calib-compare" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:12px; margin-top:10px;" onclick="garmin.runCalibrationCompare()">COMPARE SELECTED IMPORTED LOG</button>
 <div id="garmin-calib-result" style="margin-top:12px;"></div>
 <!-- [추가] 여러 번(다른 페이스로) 비교한 결과를 바로 적용하지 않고 모아뒀다가,
      평균값으로 한 번만 적용할 수 있게 하는 대기목록. runCalibrationCompare()가
@@ -7303,7 +7308,7 @@ const garmin = (function () {
     setText('garmin-calib-desc', isKo
       ? '이 가민 기록과 같은 러닝의 저장된 정밀 로그를 비교해서 케이던스/GCT가 얼마나 차이 나는지 확인하고, 값 조정을 위한 제안값을 받아보세요.'
       : 'Compare this Garmin record with a saved precision log from the same run to see how far cadence/GCT are off, and get a suggested starting point for retuning.');
-    setText('btn-run-calib-compare', isKo ? '비교하기' : 'COMPARE');
+    setText('btn-run-calib-compare', isKo ? '선택한 임포트 로그 비교' : 'COMPARE SELECTED IMPORTED LOG');
     // [추가] 지난 로그 불러오기 버튼/전체삭제 버튼 다국어 처리 (개수는 renderPrecLogDropdown에서 갱신)
     setText('btn-import-preclog-csv', isKo ? '지난 로그 불러오기 (.CSV)' : 'IMPORT PAST LOG (.CSV)');
     setText('preclog-import-clear-all-btn', isKo ? '전체삭제' : 'CLEAR ALL');
@@ -7329,6 +7334,7 @@ const garmin = (function () {
     // 빠져나가서 renderPrecLogDropdown()이 아예 호출되지 않았고, 그 결과 러닝 후
     // 자동으로 쌓인 정밀 로그가 있어도 드롭다운에는 절대 반영되지 않는 버그가 있었음.
     renderPrecLogDropdown(isKo);
+    renderAutoLogList(isKo); // [추가] 자동저장 로그 개별 리스트도 항상 갱신
 
     if (!list.length) {
       selectedId = null;
@@ -7423,8 +7429,10 @@ const garmin = (function () {
     }
   }
 
-  // [추가] 캘리브레이션 비교용 정밀 로그 드롭다운 채우기.
-  // storage.loadPrecisionLogs()를 재사용하므로 정밀 로그 저장 구조를 새로 만들지 않는다.
+  // [수정] 캘리브레이션 비교용 정밀 로그 드롭다운 채우기.
+  // 기존엔 자동저장 로그 + 임포트 로그를 합쳐서 보여줬지만, 구분이 안 돼서
+  // 헷갈린다는 피드백에 따라 "임포트한 지난 로그"만 이 드롭다운에 보여주고,
+  // 자동저장 로그는 renderAutoLogList()가 별도 목록(항목별 COMPARE 버튼)으로 보여준다.
   function renderPrecLogDropdown(isKo) {
     const dropdown = document.getElementById('calib-preclog-dropdown-options');
     const currentText = document.getElementById('current-calib-preclog-text');
@@ -7436,26 +7444,59 @@ const garmin = (function () {
     const importClearBtn = document.getElementById('preclog-import-clear-all-btn');
     if (importClearBtn) importClearBtn.style.display = importedList.length ? 'block' : 'none';
 
-    const logs = getCombinedPrecLogs();
+    const logs = importedList;
     if (!logs.length) {
-      selectedPrecLogId = null;
-      currentText.textContent = isKo ? '저장된 정밀 로그 없음' : 'NO PRECISION LOGS';
-      dropdown.innerHTML = '<div class="dropdown-option precision-option" style="color:#666; text-align:center;">' + (isKo ? '정밀 로그가 없습니다' : 'No precision logs') + '</div>';
+      if (selectedPrecLogId && String(selectedPrecLogId).indexOf('pcmp_') === 0) selectedPrecLogId = null;
+      currentText.textContent = isKo ? '불러온 로그 없음' : 'NO IMPORTED LOGS';
+      dropdown.innerHTML = '<div class="dropdown-option precision-option" style="color:#666; text-align:center;">' + (isKo ? '불러온 로그가 없습니다' : 'No imported logs') + '</div>';
       return;
     }
     if (!selectedPrecLogId || !logs.find(l => l.id === selectedPrecLogId)) {
       selectedPrecLogId = logs[0].id;
     }
     dropdown.innerHTML = logs.map(l => {
-      const badge = l.imported ? (isKo ? ' · 가져옴' : ' · IMPORTED') : '';
-      const label = fmtDate(new Date(l.savedAt).getTime()) + ' · ' + l.log.length + (isKo ? '개' : ' rows') + badge;
+      const label = fmtDate(new Date(l.savedAt).getTime()) + ' · ' + l.log.length + (isKo ? '개' : ' rows');
       const escapedLabel = label.replace(/'/g, "&#39;");
       return '<div class="dropdown-option precision-option" onclick="garmin.selectPrecLog(\'' + l.id + '\', \'' + escapedLabel + '\')">' + label + '</div>';
     }).join('');
     const cur = logs.find(l => l.id === selectedPrecLogId);
-    const curBadge = cur.imported ? (isKo ? ' · 가져옴' : ' · IMPORTED') : '';
-    currentText.textContent = fmtDate(new Date(cur.savedAt).getTime()) + ' · ' + cur.log.length + (isKo ? '개' : ' rows') + curBadge;
+    if (cur) currentText.textContent = fmtDate(new Date(cur.savedAt).getTime()) + ' · ' + cur.log.length + (isKo ? '개' : ' rows');
   }
+
+  // [추가] 자동저장 로그(최대 3개)를 개별 카드로 렌더링. 각 카드의 COMPARE 버튼을 누르면
+  // 그 로그를 바로 selectedPrecLogId로 지정하고 즉시 runCalibrationCompare()를 실행해서
+  // 드롭다운을 거치지 않고 "1개씩 골라서 바로 비교"할 수 있게 한다.
+  function renderAutoLogList(isKo) {
+    const wrap = document.getElementById('calib-autolog-list');
+    const labelEl = document.getElementById('label-preclog-auto');
+    if (!wrap) return;
+    let autoLogs = [];
+    try { autoLogs = (typeof storage !== 'undefined') ? storage.loadPrecisionLogs() : []; } catch (e) { autoLogs = []; }
+    if (labelEl) labelEl.textContent = (isKo ? '자동저장 로그' : 'AUTO-SAVED LOGS') + ' (' + autoLogs.length + '/3)';
+    if (!autoLogs.length) {
+      wrap.innerHTML = '<div class="garmin-import-empty">' + (isKo ? '자동저장된 정밀 로그가 없습니다.' : 'No auto-saved precision logs yet.') + '</div>';
+      return;
+    }
+    wrap.innerHTML = autoLogs.map(l => {
+      const isSelected = selectedPrecLogId === l.id;
+      const label = fmtDate(new Date(l.savedAt).getTime()) + ' · ' + l.log.length + (isKo ? '개' : ' rows');
+      return '<div style="display:flex; justify-content:space-between; align-items:center; background:#1a1a1a; border:1.5px solid ' + (isSelected ? 'var(--primary)' : '#333') + '; border-radius:10px; padding:12px; margin-bottom:8px;">'
+        + '<span style="font-size:12px; color:#ccc;">' + label + '</span>'
+        + '<button style="background:' + (isSelected ? 'var(--primary)' : '#2a2a2a') + '; color:' + (isSelected ? '#000' : 'var(--primary)') + '; border:1.5px solid #444; padding:8px 14px; border-radius:8px; font-weight:900; font-size:11px;" onclick="garmin.compareAutoLog(\'' + l.id + '\')">' + (isSelected ? (isKo ? '✓ 비교됨' : '✓ COMPARED') : (isKo ? '비교' : 'COMPARE')) + '</button>'
+        + '</div>';
+    }).join('');
+  }
+
+  // [추가] 자동저장 로그 목록에서 COMPARE 버튼을 눌렀을 때: 해당 로그를 선택 상태로
+  // 지정하고 바로 비교를 실행한다 (임포트 로그 드롭다운/COMPARE 버튼과는 무관하게 동작).
+  function compareAutoLog(id) {
+    selectedPrecLogId = id;
+    runCalibrationCompare();
+    renderAutoLogList(isKoLang());
+    const resultBox = document.getElementById('garmin-calib-result');
+    if (resultBox && resultBox.scrollIntoView) resultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
 
   function selectPrecLog(id, labelText) {
     selectedPrecLogId = id;
@@ -8188,7 +8229,7 @@ const garmin = (function () {
     }
   }
 
-  return { importFitFile, deleteImport, clearAll, selectImport, selectPrecLog, importPrecLogCsv, clearPrecLogImports, runCalibrationCompare, applyCalibration, resetCalibration, undoLastCalibration, copySnippet, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, render };
+  return { importFitFile, deleteImport, clearAll, selectImport, selectPrecLog, compareAutoLog, importPrecLogCsv, clearPrecLogImports, runCalibrationCompare, applyCalibration, resetCalibration, undoLastCalibration, copySnippet, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, render };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
