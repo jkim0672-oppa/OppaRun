@@ -3879,6 +3879,9 @@ this._leanLastTime = null;
 this.leanAngleDeg = 0;
 this.leanSumForAvg = 0;
 this.leanCountForAvg = 0;
+this.leanQuietTimeSec = 0; // [추가] quiet-phase(가속도계 보정 가능한 구간)에 실제로 머문 누적 시간(초).
+// 짧은 러닝은 이 시간이 부족해 필터가 수렴하지 못하고 드리프트한 값(예: 40도대)이 그대로 나갈 수 있어서,
+// 아래 getAvgLean()/getCurrentLean()에서 이 값이 충분히 쌓였을 때만 결과를 노출한다.
 const savedPos = (() => { try { return storage.loadProfile().devicePos || 'chest'; } catch(e) { return 'chest'; } })();
 this.applyDevicePos(savedPos);
 }
@@ -4000,6 +4003,7 @@ this._leanLastTime = null;
 this.leanAngleDeg = 0;
 this.leanSumForAvg = 0;
 this.leanCountForAvg = 0;
+this.leanQuietTimeSec = 0;
 }
 handleMotion(e) {
 let acc = e.accelerationIncludingGravity;
@@ -4100,6 +4104,10 @@ if (!this.leanBaseline) {
     this.leanAngleDeg = isQuietPhase
       ? (alpha * gyroEstimate + (1 - alpha) * accelLeanDeg)
       : gyroEstimate; // 충격 구간엔 가속도계 보정을 건너뛰고 자이로 적분만 반영
+    // [추가] quiet phase(가속도계로 실제 보정된 구간)에 머문 시간을 누적.
+    // 이게 충분히 쌓이지 않은 짧은 러닝은 필터가 수렴할 시간이 없어서
+    // 40도대 같은 드리프트값이 그대로 나갈 수 있어, getAvgLean()/getCurrentLean()에서 이 값으로 걸러낸다.
+    if (isQuietPhase) this.leanQuietTimeSec += dt;
   } else {
     // 첫 샘플이거나 dt가 비정상(백그라운드 복귀 등)이면 자이로 적분을 건너뛰고
     // 가속도계 절대값으로 즉시 스냅 — 단, 이때도 충격 구간 오염값은 배제
@@ -4390,14 +4398,16 @@ ratio = Math.max(2, Math.min(15, ratio));
 return ratio.toFixed(1);
 }
 // [추가] 러닝 전체 평균 전방 기울기(deg) 반환. 캘리브레이션 전(6초 이내 종료된 러닝)이거나
-// hand 착용이면 null.
+// hand 착용이거나, quiet-phase 누적시간이 부족해(필터가 수렴 못 한 상태) 신뢰할 수 없으면 null.
+// (2026-07-16: 67초짜리 짧은 런에서 40도대 드리프트값이 그대로 노출되던 문제 — 시간 대신
+// "가속도계로 실제 보정된 시간"을 기준으로 삼아야 정확히 걸러진다는 걸 확인해서 추가.)
 getAvgLean() {
-if (!this.vertEnabled || this.leanCountForAvg === 0) return null;
+if (!this.vertEnabled || this.leanCountForAvg === 0 || this.leanQuietTimeSec < 3) return null;
 return +(this.leanSumForAvg / this.leanCountForAvg).toFixed(1);
 }
 // [추가] 정밀 로그(초당)용 현재 순간 기울기값
 getCurrentLean() {
-if (!this.vertEnabled || !this.leanBaseline) return null;
+if (!this.vertEnabled || !this.leanBaseline || this.leanQuietTimeSec < 3) return null;
 return +this.leanAngleDeg.toFixed(1);
 }
 }
