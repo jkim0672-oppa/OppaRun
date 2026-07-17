@@ -6531,7 +6531,7 @@ async uploadRecord(record, photoFile, shareOptions, message) {
 
   async loadLikes(recordIds) {
     try {
-      const { data } = await _sb.from('likes').select('record_id, user_id, nickname').in('record_id', recordIds);
+      const { data } = await _sb.from('likes').select('record_id, user_id, nickname, avatar_url').in('record_id', recordIds);
       return data || [];
     } catch(e) { return []; }
   }
@@ -6575,13 +6575,34 @@ async uploadRecord(record, photoFile, shareOptions, message) {
   async toggleLike(recordId) {
     const uid = await this.ensureUserId();
     const { data } = await _sb.from('likes').select('id').eq('record_id', recordId).eq('user_id', uid);
-    if (data && data.length > 0) {
+    const alreadyLiked = data && data.length > 0;
+    if (!this.likesByRecord) this.likesByRecord = {};
+    if (!this.likesByRecord[recordId]) this.likesByRecord[recordId] = [];
+    if (alreadyLiked) {
       await _sb.from('likes').delete().eq('record_id', recordId).eq('user_id', uid);
+      this.likesByRecord[recordId] = this.likesByRecord[recordId].filter(l => l.user_id !== uid);
     } else {
       const nickname = this.getNickname() || 'Runner';
-      await _sb.from('likes').insert({ record_id: recordId, user_id: uid, nickname: nickname });
+      const avatar_url = this.getAvatarUrl() || null;
+      await _sb.from('likes').insert({ record_id: recordId, user_id: uid, nickname: nickname, avatar_url: avatar_url });
+      this.likesByRecord[recordId].push({ record_id: recordId, user_id: uid, nickname: nickname, avatar_url: avatar_url });
     }
-    await this.renderFeed();
+    // [수정] 좋아요 하나 누를 때마다 피드 전체를 다시 그리면(renderFeed 전체 재호출)
+    // 스크롤 위치가 초기화돼서 화면이 위로 튀는 문제가 있었음. 이제 이 버튼만 그 자리에서 갱신.
+    this.updateLikeButtonUI(recordId, uid);
+  }
+  // [추가] 좋아요 버튼 하나만 색상/카운트를 갱신 (피드 전체 재렌더 없이).
+  updateLikeButtonUI(recordId, uid) {
+    const t = this._t();
+    const likes = this.likesByRecord[recordId] || [];
+    const likeCount = likes.length;
+    const iLiked = likes.some(l => l.user_id === uid);
+    const btn = document.getElementById('like-btn-' + recordId);
+    if (!btn) return;
+    btn.style.color = iLiked ? '#e53935' : '#999';
+    btn.innerHTML = likeCount > 0
+      ? `<span onclick="event.stopPropagation(); community.showLikers('${recordId}')" style="text-decoration:underline; text-underline-offset:2px;">${likeCount}</span> ${t.crewLike}`
+      : t.crewLike;
   }
   // [추가] "N명이 좋아합니다" 탭했을 때 누가 좋아요 눌렀는지 닉네임 목록을 모달로 보여줌.
   showLikers(recordId) {
@@ -6590,11 +6611,20 @@ async uploadRecord(record, photoFile, shareOptions, message) {
     const listEl = document.getElementById('likers-list');
     if (listEl) {
       listEl.innerHTML = likes.length
-        ? likes.map(l => `<div style="padding:10px 4px; font-size:13px; font-weight:700; color:#fff; border-bottom:1px solid #333;">${escapeHtml(l.nickname || 'Runner')}</div>`).join('')
-        : `<div style="padding:10px 4px; font-size:12px; color:#888; font-weight:700;">${t.crewNoLikes}</div>`;
+        ? likes.map((l, idx) => {
+            const initial = escapeHtml(this.getInitial(l.nickname));
+            const avatarBg = l.avatar_url ? '#333' : this.getAvatarColor(l.user_id);
+            const avatarInner = l.avatar_url ? `<img src="${l.avatar_url}" style="width:100%; height:100%; object-fit:cover; display:block;">` : initial;
+            const isLast = idx === likes.length - 1;
+            return `<div style="display:flex; align-items:center; gap:11px; padding:10px 0; ${isLast ? '' : 'border-bottom:1px solid #242424;'}">
+              <div style="width:34px; height:34px; border-radius:50%; background:${avatarBg}; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:900; color:#fff; flex-shrink:0; overflow:hidden;">${avatarInner}</div>
+              <span style="font-size:13.5px; font-weight:800; color:#eee;">${escapeHtml(l.nickname || 'Runner')}</span>
+            </div>`;
+          }).join('')
+        : `<div style="padding:20px 4px; font-size:12px; color:#777; font-weight:700; text-align:center;">${t.crewNoLikes}</div>`;
     }
     const titleEl = document.getElementById('likers-modal-title');
-    if (titleEl) titleEl.textContent = t.crewLikersTitle;
+    if (titleEl) titleEl.textContent = likes.length + ' ' + t.crewLikersTitle;
     const modal = document.getElementById('likers-modal');
     if (modal) modal.style.display = 'flex';
   }
@@ -6899,11 +6929,10 @@ async uploadRecord(record, photoFile, shareOptions, message) {
         ${r.photo_url ? `<div style="margin-bottom:12px; border-radius:10px; overflow:hidden;"><img src="${r.photo_url}" loading="lazy" style="width:100%; max-height:280px; object-fit:cover; display:block;"></div>` : ''}
         ${(r.path && r.path.length > 1) ? `<div id="feed-map-${r.id}" style="margin-bottom:12px; border-radius:10px; overflow:hidden; height:180px; background:#eee; position:relative; left:0; width:100%;"></div>` : ''}
 
-        ${likeCount > 0 ? `<div onclick="community.showLikers('${r.id}')" style="font-size:11.5px; color:#666; font-weight:700; padding:0 2px 8px 2px; cursor:pointer;">❤️ ${likeCount}${t.crewLikesSuffix || (storage.getLang() === 'ko' ? '명이 좋아합니다' : ' likes')}</div>` : ''}
         <!-- 액션 버튼 -->
         <div style="display:flex; border-top:1px solid #f0f0f0; padding-top:12px;">
-          <button onclick="community.toggleLike('${r.id}')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:none; border:none; color:${iLiked ? '#e53935' : '#999'}; font-size:13px; font-weight:700; padding:6px 0; cursor:pointer;">
-            ${t.crewLike}
+          <button id="like-btn-${r.id}" onclick="community.toggleLike('${r.id}')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:none; border:none; color:${iLiked ? '#e53935' : '#999'}; font-size:13px; font-weight:700; padding:6px 0; cursor:pointer;">
+            ${likeCount > 0 ? `<span onclick="event.stopPropagation(); community.showLikers('${r.id}')" style="text-decoration:underline; text-underline-offset:2px;">${likeCount}</span> ` : ''}${t.crewLike}
           </button>
           <button onclick="community.toggleComments('${r.id}')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:none; border:none; border-left:1px solid #f0f0f0; color:#666; font-size:13px; font-weight:800; padding:6px 0; cursor:pointer;">
             ${commentCount > 0 ? commentCount + ' ' : ''}${t.crewComment}
@@ -8949,10 +8978,12 @@ if (btn) { btn.textContent = '▶ PLAY'; btn.classList.remove('playing'); }
 </div>
 <!-- 좋아요 누른 사람 목록 -->
 <div id="likers-modal" class="custom-confirm-overlay" onclick="if(event.target.id==='likers-modal') community.closeLikers()">
-  <div class="custom-confirm-box" style="max-width:320px; max-height:min(70vh, calc(100dvh - 40px)); display:flex; flex-direction:column; text-align:left; overflow:hidden;">
-    <div id="likers-modal-title" style="font-size:14px; font-weight:900; color:#fff; margin-bottom:10px; text-align:center; flex:0 0 auto;">Likes</div>
-    <div id="likers-list" style="overflow-y:auto; flex:1 1 auto; min-height:0;"></div>
-    <button onclick="community.closeLikers()" style="flex:0 0 auto; margin-top:10px; background:none; color:#888; border:none; padding:12px; font-weight:700; font-size:13px; cursor:pointer;">✕</button>
+  <div style="background:#1a1a1a; border:1.5px solid #2c2c2c; border-radius:18px; width:100%; max-width:320px; max-height:min(64vh, calc(100dvh - 40px)); display:flex; flex-direction:column; overflow:hidden; box-shadow:0 12px 44px rgba(0,0,0,0.55); position:relative;">
+    <div style="flex:0 0 auto; padding:18px 18px 12px 18px; border-bottom:1px solid #262626; display:flex; align-items:center; justify-content:center; position:relative;">
+      <div id="likers-modal-title" style="font-size:13.5px; font-weight:900; color:#fff; letter-spacing:0.2px;">Likes</div>
+      <button onclick="community.closeLikers()" style="position:absolute; right:12px; top:50%; transform:translateY(-50%); width:26px; height:26px; border-radius:50%; background:#2a2a2a; border:none; color:#999; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; line-height:1;">✕</button>
+    </div>
+    <div id="likers-list" style="overflow-y:auto; flex:1 1 auto; min-height:0; padding:6px 18px 14px 18px;"></div>
   </div>
 </div>
 <div id="user-action-modal" class="custom-confirm-overlay">
