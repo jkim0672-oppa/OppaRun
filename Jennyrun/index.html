@@ -1391,6 +1391,7 @@ crewLoading: "Loading...", crewEmpty: "No runs yet", crewEmptySub: "Be the first
 crewLike: "Like", crewComment: "Comment", crewDelete: "Delete",
 crewCommentPlaceholder: "Leave a comment...", crewSend: "Send",
 crewNoComments: "No comments yet", crewConfirmDelete: "Delete this record from community?",
+crewLikersTitle: "Likes", crewNoLikes: "No likes yet",
 crewMorning: "Morning Run", crewAfternoon: "Afternoon Run", crewEvening: "Evening Run", crewNight: "Night Run",
 crewTab: "CREW",
 crewDist: "Distance", crewTime: "Time", crewPace: "Pace", crewEff: "Efficiency", crewMe: "Me", editTitle: "EDIT TITLE",
@@ -1485,6 +1486,7 @@ crewLoading: "불러오는 중...", crewEmpty: "아직 기록이 없어요", cre
 crewLike: "좋아요", crewComment: "댓글", crewDelete: "삭제",
 crewCommentPlaceholder: "댓글 남기기...", crewSend: "전송",
 crewNoComments: "아직 댓글이 없어요", crewConfirmDelete: "이 커뮤니티 기록을 삭제할까요?",
+crewLikersTitle: "좋아요", crewNoLikes: "아직 좋아요가 없어요",
 crewMorning: "아침 러닝", crewAfternoon: "오후 러닝", crewEvening: "저녁 러닝", crewNight: "야간 러닝",
 crewTab: "크루",
 crewDist: "거리", crewTime: "시간", crewPace: "페이스", crewEff: "효율", crewMe: "나", editTitle: "제목 수정",
@@ -6529,7 +6531,7 @@ async uploadRecord(record, photoFile, shareOptions, message) {
 
   async loadLikes(recordIds) {
     try {
-      const { data } = await _sb.from('likes').select('record_id, user_id').in('record_id', recordIds);
+      const { data } = await _sb.from('likes').select('record_id, user_id, nickname').in('record_id', recordIds);
       return data || [];
     } catch(e) { return []; }
   }
@@ -6576,9 +6578,29 @@ async uploadRecord(record, photoFile, shareOptions, message) {
     if (data && data.length > 0) {
       await _sb.from('likes').delete().eq('record_id', recordId).eq('user_id', uid);
     } else {
-      await _sb.from('likes').insert({ record_id: recordId, user_id: uid });
+      const nickname = this.getNickname() || 'Runner';
+      await _sb.from('likes').insert({ record_id: recordId, user_id: uid, nickname: nickname });
     }
     await this.renderFeed();
+  }
+  // [추가] "N명이 좋아합니다" 탭했을 때 누가 좋아요 눌렀는지 닉네임 목록을 모달로 보여줌.
+  showLikers(recordId) {
+    const t = this._t();
+    const likes = (this.likesByRecord && this.likesByRecord[recordId]) || [];
+    const listEl = document.getElementById('likers-list');
+    if (listEl) {
+      listEl.innerHTML = likes.length
+        ? likes.map(l => `<div style="padding:10px 4px; font-size:13px; font-weight:700; color:#fff; border-bottom:1px solid #333;">${escapeHtml(l.nickname || 'Runner')}</div>`).join('')
+        : `<div style="padding:10px 4px; font-size:12px; color:#888; font-weight:700;">${t.crewNoLikes}</div>`;
+    }
+    const titleEl = document.getElementById('likers-modal-title');
+    if (titleEl) titleEl.textContent = t.crewLikersTitle;
+    const modal = document.getElementById('likers-modal');
+    if (modal) modal.style.display = 'flex';
+  }
+  closeLikers() {
+    const modal = document.getElementById('likers-modal');
+    if (modal) modal.style.display = 'none';
   }
 
   async submitComment(recordId) {
@@ -6722,6 +6744,8 @@ async uploadRecord(record, photoFile, shareOptions, message) {
       const recordLikes = allLikes.filter(l => l.record_id === r.id);
       const likeCount = recordLikes.length;
       const iLiked = recordLikes.some(l => l.user_id === uid);
+      if (!this.likesByRecord) this.likesByRecord = {};
+      this.likesByRecord[r.id] = recordLikes;
       const recordComments = allComments.filter(c => c.record_id === r.id);
       const commentCount = recordComments.length;
       const initial = escapeHtml(this.getInitial(r.nickname));
@@ -6875,10 +6899,11 @@ async uploadRecord(record, photoFile, shareOptions, message) {
         ${r.photo_url ? `<div style="margin-bottom:12px; border-radius:10px; overflow:hidden;"><img src="${r.photo_url}" loading="lazy" style="width:100%; max-height:280px; object-fit:cover; display:block;"></div>` : ''}
         ${(r.path && r.path.length > 1) ? `<div id="feed-map-${r.id}" style="margin-bottom:12px; border-radius:10px; overflow:hidden; height:180px; background:#eee; position:relative; left:0; width:100%;"></div>` : ''}
 
+        ${likeCount > 0 ? `<div onclick="community.showLikers('${r.id}')" style="font-size:11.5px; color:#666; font-weight:700; padding:0 2px 8px 2px; cursor:pointer;">❤️ ${likeCount}${t.crewLikesSuffix || (storage.getLang() === 'ko' ? '명이 좋아합니다' : ' likes')}</div>` : ''}
         <!-- 액션 버튼 -->
         <div style="display:flex; border-top:1px solid #f0f0f0; padding-top:12px;">
           <button onclick="community.toggleLike('${r.id}')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:none; border:none; color:${iLiked ? '#e53935' : '#999'}; font-size:13px; font-weight:700; padding:6px 0; cursor:pointer;">
-            ${likeCount > 0 ? likeCount + ' ' : ''}${t.crewLike}
+            ${t.crewLike}
           </button>
           <button onclick="community.toggleComments('${r.id}')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:none; border:none; border-left:1px solid #f0f0f0; color:#666; font-size:13px; font-weight:800; padding:6px 0; cursor:pointer;">
             ${commentCount > 0 ? commentCount + ' ' : ''}${t.crewComment}
@@ -8921,6 +8946,14 @@ if (btn) { btn.textContent = '▶ PLAY'; btn.classList.remove('playing'); }
 <div id="photo-viewer-modal" onclick="community.closePhotoViewer()" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:999999; align-items:center; justify-content:center; padding:20px; box-sizing:border-box;">
   <img id="photo-viewer-img" src="" style="max-width:100%; max-height:100%; object-fit:contain; border-radius:8px;">
   <button onclick="event.stopPropagation(); community.closePhotoViewer()" style="position:absolute; top:20px; right:20px; background:rgba(255,255,255,0.15); border:none; color:#fff; width:36px; height:36px; border-radius:50%; font-size:20px; cursor:pointer; line-height:1;">✕</button>
+</div>
+<!-- 좋아요 누른 사람 목록 -->
+<div id="likers-modal" class="custom-confirm-overlay" onclick="if(event.target.id==='likers-modal') community.closeLikers()">
+  <div class="custom-confirm-box" style="max-width:320px; max-height:min(70vh, calc(100dvh - 40px)); display:flex; flex-direction:column; text-align:left; overflow:hidden;">
+    <div id="likers-modal-title" style="font-size:14px; font-weight:900; color:#fff; margin-bottom:10px; text-align:center; flex:0 0 auto;">Likes</div>
+    <div id="likers-list" style="overflow-y:auto; flex:1 1 auto; min-height:0;"></div>
+    <button onclick="community.closeLikers()" style="flex:0 0 auto; margin-top:10px; background:none; color:#888; border:none; padding:12px; font-weight:700; font-size:13px; cursor:pointer;">✕</button>
+  </div>
 </div>
 <div id="user-action-modal" class="custom-confirm-overlay">
   <div class="custom-confirm-box" style="max-width:340px; text-align:left;">
