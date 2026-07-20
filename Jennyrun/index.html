@@ -3963,6 +3963,7 @@ try {
     if (typeof _calibOv.gctFallbackRatio === 'number') this.gctFallbackRatio = _calibOv.gctFallbackRatio;
     if (typeof _calibOv.rotRejectThreshold === 'number') this.rotRejectThreshold = _calibOv.rotRejectThreshold;
     if (typeof _calibOv.vertScale === 'number') this.vertScale = _calibOv.vertScale;
+    if (typeof _calibOv.minStepInterval === 'number') this.minStepInterval = _calibOv.minStepInterval;
   }
 } catch (e) {}
 // [추가] 적응형 보정의 기준(중심)이 되는 위치별 기본값을 별도 보관.
@@ -7866,13 +7867,14 @@ const garmin = (function () {
 
     // 현재 MotionManager 설정값 (실행 중이 아니어도 OppaRunApp 생성 시 저장된
     // 착용 위치 프로파일이 이미 적용돼 있음)
-    let curGround = null, curGct = null, curRot = null, curVertScale = null;
+    let curGround = null, curGct = null, curRot = null, curVertScale = null, curMinStep = null;
     try {
       if (typeof app !== 'undefined' && app && app.motion) {
         curGround = app.motion.groundThreshold;
         curGct = app.motion.gctFallbackRatio;
         curRot = app.motion.rotRejectThreshold;
         curVertScale = app.motion.vertScale;
+        curMinStep = app.motion.minStepInterval;
       }
     } catch (e) {}
     // [추가] 보폭 보정은 MotionManager가 아니라 storage 프로필의 strideCorrectionFactor가
@@ -7885,11 +7887,38 @@ const garmin = (function () {
       curGpsDistFactor = (typeof _p.gpsDistCorrectionFactor === 'number' && _p.gpsDistCorrectionFactor > 0) ? _p.gpsDistCorrectionFactor : 1.0; // [추가]
     } catch (e) {}
 
-    // [제안] 케이던스가 garmin보다 X% 높으면, 회전 노이즈 거부 임계값을 대략
-    // 그 비율만큼 낮춰서 다음 테스트에 시도해볼 것을 제안 (선형 근사 — 정밀한
-    // 역산이 아니라 "다음 실험값" 정도의 출발점).
-    const suggestedRot = (curRot != null && phoneAvgCadence && cadDiffPct != null && cadDiffPct > 3)
+    // [수정 2026-07-20] 예전엔 케이던스 오차 비율을 그대로 rotRejectThreshold에
+    // 선형으로 곱해서 제안했는데, 실측 rot_peak_dps 분포를 까보면 chest/hand 모두
+    // 노이즈-실제걸음 경계가 깔끔하게 갈리지 않아서 이 방식은 근거가 약했음.
+    // 실측(가슴 착용, 2026-07-20 3세그먼트 로그) 분석 결과, 케이던스 과다검출의
+    // 실제 원인은 회전 노이즈가 아니라 minStepInterval이 실제 필요한 값보다 낮아서
+    // 2차 충격(더블 카운트)이 그대로 통과하는 것이었음 — 관측된 최소 스텝 간격이
+    // minStepInterval 바닥값에 정확히 붙어있는 게 그 증거. 그래서 rotRejectThreshold
+    // 제안은 과다검출이 아주 클 때(10% 초과)만 참고용으로 보수적으로 남겨두고,
+    // 주력 제안은 아래의 데이터 기반 suggestedMinStepInterval로 옮김.
+    const suggestedRot = (curRot != null && phoneAvgCadence && cadDiffPct != null && cadDiffPct > 10)
       ? Math.max(60, Math.round(curRot * (garminAvgCadence / phoneAvgCadence))) : null;
+
+    // [추가 2026-07-20] cycleTime(=60000/케이던스) 분포 기반 minStepInterval 제안.
+    // 케이던스가 garmin보다 X% 높다면, 그 초과분(excessFrac)만큼의 "가장 짧은 간격"
+    // 스텝들이 사실 2차 충격(가짜 걸음)일 가능성이 높다고 보고, 그 경계에 해당하는
+    // cycleTime 값을 다음 minStepInterval 후보로 제안한다. 평균값끼리 비율로 미는
+    // 것보다, 실제 로그에 남은 스텝 간격 분포를 직접 쓰는 쪽이 원인에 더 가깝다.
+    const suggestedMinStepInterval = (curMinStep != null && phoneAvgCadence && cadDiffPct != null && cadDiffPct > 3)
+      ? (() => {
+          const cycleTimes = precItem.log
+            .map(r => { const c = parseFloat(r.cadence); return (c > 0) ? 60000 / c : null; })
+            .filter(v => v != null)
+            .sort((a, b) => a - b);
+          if (cycleTimes.length < 20) return null; // 표본이 너무 적으면 제안하지 않음
+          const excessFrac = Math.max(0, Math.min(0.4, 1 - (garminAvgCadence / phoneAvgCadence)));
+          if (excessFrac <= 0) return null;
+          const idx = Math.min(cycleTimes.length - 1, Math.floor(cycleTimes.length * excessFrac));
+          const cutoff = cycleTimes[idx];
+          // 과보정 방지: 한 번에 기존값의 ±40% 이내로만 이동
+          return Math.round(Math.max(curMinStep * 0.6, Math.min(curMinStep * 1.4, cutoff)));
+        })()
+      : null;
     const suggestedGct = (curGct != null && phoneAvgGct && garminAvgGct && gctDiffPct != null && Math.abs(gctDiffPct) > 3)
       ? Math.round(curGct * (garminAvgGct / phoneAvgGct) * 1000) / 1000 : null;
     // [추가] 수직진동(vertScale)과 보폭(strideCorrectionFactor) 제안값.
@@ -7922,8 +7951,8 @@ const garmin = (function () {
         pace: { phone: phoneAvgPaceSec, garmin: garminAvgPaceSec, diffPct: paceDiffPct, unit: 'sec/km' },
         hr: { phone: phoneAvgHr, garmin: garminAvgHr, diffPct: hrDiffPct, unit: 'bpm' }
       },
-      current: { gct: curGct, rot: curRot, vertScale: curVertScale, strideFactor: curStrideFactor, gpsDistFactor: curGpsDistFactor },
-      suggested: { gct: suggestedGct, rot: suggestedRot, vertScale: suggestedVertScale, strideFactor: suggestedStrideFactor, gpsDistFactor: suggestedGpsDistFactor },
+      current: { gct: curGct, rot: curRot, vertScale: curVertScale, strideFactor: curStrideFactor, gpsDistFactor: curGpsDistFactor, minStepInterval: curMinStep },
+      suggested: { gct: suggestedGct, rot: suggestedRot, vertScale: suggestedVertScale, strideFactor: suggestedStrideFactor, gpsDistFactor: suggestedGpsDistFactor, minStepInterval: suggestedMinStepInterval },
       appliedFields: null, // applyCalibration()/applyAveragedCalibration() 실행 시 채워짐
       appliedAt: null
     };
@@ -7973,7 +8002,7 @@ const garmin = (function () {
       { label: isKo ? '심박수' : 'AVG HR', phone: phoneAvgHr, garmin: garminAvgHr }
     ]);
 
-    const hasSuggestion = suggestedRot != null || suggestedGct != null || suggestedVertScale != null || suggestedStrideFactor != null || suggestedGpsDistFactor != null;
+    const hasSuggestion = suggestedRot != null || suggestedGct != null || suggestedVertScale != null || suggestedStrideFactor != null || suggestedGpsDistFactor != null || suggestedMinStepInterval != null;
 
     if (hasSuggestion) {
       // [수정] 예전엔 아래 5개 값이 있으면 무조건 전부 한꺼번에 적용됐음.
@@ -7989,6 +8018,9 @@ const garmin = (function () {
       }
       if (suggestedGct != null) {
         html += checkRow('calib-sel-gct', 'gctFallbackRatio: ' + curGct + ' → <b>' + suggestedGct + '</b>');
+      }
+      if (suggestedMinStepInterval != null) {
+        html += checkRow('calib-sel-minstep', 'minStepInterval: ' + curMinStep + ' → <b>' + suggestedMinStepInterval + '</b> (ms) ' + (isKo ? '· 걸음 간격 분포 기반, 이중감지 방지' : '· from step-interval distribution, prevents double-counting'));
       }
       if (suggestedVertScale != null) {
         html += checkRow('calib-sel-vert', 'vertScale: ' + curVertScale + ' → <b>' + suggestedVertScale + '</b>');
@@ -8012,7 +8044,8 @@ const garmin = (function () {
         rot: suggestedRot,
         vertScale: suggestedVertScale,
         strideFactor: suggestedStrideFactor,
-        gpsDistFactor: suggestedGpsDistFactor
+        gpsDistFactor: suggestedGpsDistFactor,
+        minStepInterval: suggestedMinStepInterval
       };
     } else {
       html += '<div style="margin-top:12px; font-size:11px; color:#888;">' + (isKo
@@ -8063,13 +8096,14 @@ const garmin = (function () {
       rot: (lastSuggestion.rot != null && isChecked('calib-sel-rot')) ? lastSuggestion.rot : null,
       vertScale: (lastSuggestion.vertScale != null && isChecked('calib-sel-vert')) ? lastSuggestion.vertScale : null,
       strideFactor: (lastSuggestion.strideFactor != null && isChecked('calib-sel-stride')) ? lastSuggestion.strideFactor : null,
-      gpsDistFactor: (lastSuggestion.gpsDistFactor != null && isChecked('calib-sel-gps')) ? lastSuggestion.gpsDistFactor : null
+      gpsDistFactor: (lastSuggestion.gpsDistFactor != null && isChecked('calib-sel-gps')) ? lastSuggestion.gpsDistFactor : null,
+      minStepInterval: (lastSuggestion.minStepInterval != null && isChecked('calib-sel-minstep')) ? lastSuggestion.minStepInterval : null
     };
   }
 
   // [추가] 아무 필드도 선택되지 않은 상태로 적용/저장을 누르면 알려주기 위한 체크.
   function hasAnySelectedField(sel) {
-    return !!sel && (sel.gct != null || sel.rot != null || sel.vertScale != null || sel.strideFactor != null || sel.gpsDistFactor != null);
+    return !!sel && (sel.gct != null || sel.rot != null || sel.vertScale != null || sel.strideFactor != null || sel.gpsDistFactor != null || sel.minStepInterval != null);
   }
 
   // [수정] 체크된 항목만 대기목록에 추가.
@@ -8094,7 +8128,8 @@ const garmin = (function () {
       rot: sel.rot,
       vertScale: sel.vertScale,
       strideFactor: sel.strideFactor,
-      gpsDistFactor: sel.gpsDistFactor
+      gpsDistFactor: sel.gpsDistFactor,
+      minStepInterval: sel.minStepInterval
     });
     savePendingCalibList(list);
     renderPendingCalibList(isKo);
@@ -8127,6 +8162,7 @@ const garmin = (function () {
     const avgVertScale = avgPendingField(list, 'vertScale') != null ? Math.round(avgPendingField(list, 'vertScale') * 1000) / 1000 : null;
     const avgStrideFactor = avgPendingField(list, 'strideFactor') != null ? Math.round(avgPendingField(list, 'strideFactor') * 1000) / 1000 : null;
     const avgGpsDistFactor = avgPendingField(list, 'gpsDistFactor') != null ? Math.round(avgPendingField(list, 'gpsDistFactor') * 1000) / 1000 : null;
+    const avgMinStepInterval = avgPendingField(list, 'minStepInterval') != null ? Math.round(avgPendingField(list, 'minStepInterval')) : null;
 
     const rows = list.map((item, idx) => {
       const parts = [];
@@ -8135,6 +8171,7 @@ const garmin = (function () {
       if (item.vertScale != null) parts.push('vert ' + item.vertScale);
       if (item.strideFactor != null) parts.push((isKo ? '보폭' : 'stride') + ' ' + item.strideFactor.toFixed(3));
       if (item.gpsDistFactor != null) parts.push((isKo ? '거리' : 'dist') + ' ' + item.gpsDistFactor.toFixed(3));
+      if (item.minStepInterval != null) parts.push('minStep ' + item.minStepInterval);
       return '<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid #2a2a2a; font-size:11px; gap:6px;">'
         + '<div style="color:#999; flex-shrink:0;">#' + (idx + 1) + ' · ' + fmtDate(new Date(item.savedAt).getTime()) + '</div>'
         + '<div style="color:#ccc; text-align:right;">' + (parts.join(' / ') || '--') + '</div>'
@@ -8154,6 +8191,7 @@ const garmin = (function () {
     if (avgVertScale != null) html += 'vertScale → <b>' + avgVertScale + '</b><br>';
     if (avgStrideFactor != null) html += (isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ' → <b>' + avgStrideFactor.toFixed(3) + '</b><br>';
     if (avgGpsDistFactor != null) html += (isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ' → <b>' + avgGpsDistFactor.toFixed(3) + '</b><br>';
+    if (avgMinStepInterval != null) html += 'minStepInterval → <b>' + avgMinStepInterval + '</b> (ms)<br>';
     html += '</div>';
 
     if (list.length < MAX_PENDING_CALIB) {
@@ -8181,7 +8219,8 @@ const garmin = (function () {
       gct: avgPendingField(list, 'gct') != null ? Math.round(avgPendingField(list, 'gct') * 1000) / 1000 : null,
       vertScale: avgPendingField(list, 'vertScale') != null ? Math.round(avgPendingField(list, 'vertScale') * 1000) / 1000 : null,
       strideFactor: avgPendingField(list, 'strideFactor') != null ? Math.round(avgPendingField(list, 'strideFactor') * 1000) / 1000 : null,
-      gpsDistFactor: avgPendingField(list, 'gpsDistFactor') != null ? Math.round(avgPendingField(list, 'gpsDistFactor') * 1000) / 1000 : null
+      gpsDistFactor: avgPendingField(list, 'gpsDistFactor') != null ? Math.round(avgPendingField(list, 'gpsDistFactor') * 1000) / 1000 : null,
+      minStepInterval: avgPendingField(list, 'minStepInterval') != null ? Math.round(avgPendingField(list, 'minStepInterval')) : null
     };
     try {
       const prof = storage.loadProfile();
@@ -8189,6 +8228,7 @@ const garmin = (function () {
       if (avgSuggestion.gct != null) override.gctFallbackRatio = avgSuggestion.gct;
       if (avgSuggestion.rot != null) override.rotRejectThreshold = avgSuggestion.rot;
       if (avgSuggestion.vertScale != null) override.vertScale = avgSuggestion.vertScale;
+      if (avgSuggestion.minStepInterval != null) override.minStepInterval = avgSuggestion.minStepInterval;
       if (avgSuggestion.strideFactor != null) {
         override.prevStrideCorrectionFactor = (typeof prof.strideCorrectionFactor === 'number' && prof.strideCorrectionFactor > 0) ? prof.strideCorrectionFactor : 1.0;
       }
@@ -8211,6 +8251,7 @@ const garmin = (function () {
         if (override.gctFallbackRatio != null) app.motion.gctFallbackRatio = override.gctFallbackRatio;
         if (override.rotRejectThreshold != null) app.motion.rotRejectThreshold = override.rotRejectThreshold;
         if (override.vertScale != null) app.motion.vertScale = override.vertScale;
+        if (override.minStepInterval != null) app.motion.minStepInterval = override.minStepInterval;
       }
 
       const appliedCount = list.length;
@@ -8250,6 +8291,7 @@ const garmin = (function () {
       if (sel.gct != null) override.gctFallbackRatio = sel.gct;
       if (sel.rot != null) override.rotRejectThreshold = sel.rot;
       if (sel.vertScale != null) override.vertScale = sel.vertScale;
+      if (sel.minStepInterval != null) override.minStepInterval = sel.minStepInterval;
       // [추가] 초기화(RESET) 시 정확히 원래 값으로 되돌릴 수 있도록, 보폭 보정계수를
       // 덮어쓰기 직전의 값을 함께 저장해둔다(다른 기능인 실측거리 캘리브레이션이
       // 이미 설정해둔 값일 수도 있으므로 무조건 1.0으로 되돌리면 안 됨).
@@ -8276,6 +8318,7 @@ const garmin = (function () {
         if (override.gctFallbackRatio != null) app.motion.gctFallbackRatio = override.gctFallbackRatio;
         if (override.rotRejectThreshold != null) app.motion.rotRejectThreshold = override.rotRejectThreshold;
         if (override.vertScale != null) app.motion.vertScale = override.vertScale;
+        if (override.minStepInterval != null) app.motion.minStepInterval = override.minStepInterval;
       }
 
       const btn = document.getElementById('btn-apply-calib');
@@ -8334,6 +8377,7 @@ const garmin = (function () {
     if (ov.gctFallbackRatio != null) parts.push('gctFallbackRatio: ' + ov.gctFallbackRatio);
     if (ov.rotRejectThreshold != null) parts.push('rotRejectThreshold: ' + ov.rotRejectThreshold);
     if (ov.vertScale != null) parts.push('vertScale: ' + ov.vertScale);
+    if (ov.minStepInterval != null) parts.push('minStepInterval: ' + ov.minStepInterval);
     if (ov.prevStrideCorrectionFactor != null) parts.push((isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ' ' + (isKo ? '변경됨' : 'changed'));
     if (ov.prevGpsDistCorrectionFactor != null) {
       let curGpsVal = null;
@@ -8411,6 +8455,7 @@ const garmin = (function () {
           if (prof.motionCalibOverride.gctFallbackRatio != null) app.motion.gctFallbackRatio = prof.motionCalibOverride.gctFallbackRatio;
           if (prof.motionCalibOverride.rotRejectThreshold != null) app.motion.rotRejectThreshold = prof.motionCalibOverride.rotRejectThreshold;
           if (prof.motionCalibOverride.vertScale != null) app.motion.vertScale = prof.motionCalibOverride.vertScale;
+          if (prof.motionCalibOverride.minStepInterval != null) app.motion.minStepInterval = prof.motionCalibOverride.minStepInterval;
         }
       }
 
@@ -8490,9 +8535,10 @@ const garmin = (function () {
      suggLine('gctFallbackRatio', 'gctFallbackRatio', d.current.gct, d.suggested.gct, 3),
      suggLine('vertScale', 'vertScale', d.current.vertScale, d.suggested.vertScale, 3),
      suggLine(isKo ? '보폭 보정계수' : 'strideCorrectionFactor', 'strideCorrectionFactor', d.current.strideFactor, d.suggested.strideFactor, 3),
-     suggLine(isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor', 'gpsDistCorrectionFactor', d.current.gpsDistFactor, d.suggested.gpsDistFactor, 3)]
+     suggLine(isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor', 'gpsDistCorrectionFactor', d.current.gpsDistFactor, d.suggested.gpsDistFactor, 3),
+     suggLine('minStepInterval', 'minStepInterval', d.current.minStepInterval, d.suggested.minStepInterval, 0)]
       .filter(Boolean).forEach(l => lines.push(l));
-    if (![d.suggested.rot, d.suggested.gct, d.suggested.vertScale, d.suggested.strideFactor, d.suggested.gpsDistFactor].some(v => v != null)) {
+    if (![d.suggested.rot, d.suggested.gct, d.suggested.vertScale, d.suggested.strideFactor, d.suggested.gpsDistFactor, d.suggested.minStepInterval].some(v => v != null)) {
       lines.push(isKo ? '(제안할 보정값 없음 — 오차가 이미 3% 이내)' : '(nothing suggested — differences already within 3%)');
     }
     lines.push('');
