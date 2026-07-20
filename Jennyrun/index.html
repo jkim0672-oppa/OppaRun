@@ -4723,12 +4723,41 @@ const cadValid = (cadVal >= CADENCE_MIN_SPM && cadVal <= CADENCE_MAX_SPM);
 // 튀는 값)이 CSV에 그대로 남는 걸 줄인다. 평균이 아닌 중앙값을 쓰는 이유는
 // 극단치 하나가 스무딩값 자체를 끌고 가지 않게 하기 위함.
 if (!this.state.cadValHistory) this.state.cadValHistory = [];
+// [수정] median-of-3 → median-of-5로 강화: 연속 2번의 잡음 창으로는 중앙값 자체가
+// 튀지 않도록 윈도우를 넓힘 (기존엔 잡음 2연속만으로도 중앙값이 끌려갔음).
 if (cadValid) {
-this.state.cadValHistory.push(cadVal);
-if (this.state.cadValHistory.length > 3) this.state.cadValHistory.shift();
+// [추가] cadVal 변화폭 제한(rate limit): 직전 안정값(lastValidCadenceDisplay) 대비
+// ±15spm 넘는 순간값은 노이즈일 가능성이 높으므로 곧바로 반영하지 않고,
+// 이전 후보값과 ±5spm 이내로 비슷한 값이 2회 연속 나올 때만 실제 변화로 인정해
+// 히스토리에 반영한다. (정확히 같은 정수값을 요구하면 매 스텝 재계산되는 cadVal 특성상
+// 거의 매칭되지 않아 사실상 rate limit이 항상 막아버리는 문제가 있어 허용범위로 완화)
+// (lastValidCadenceDisplay가 아직 없는 초반 구간은 베이스라인이 없으므로 제한 미적용)
+const PENDING_TOLERANCE_SPM = 5;
+const lastStable = this.state.lastValidCadenceDisplay || 0;
+const diff = lastStable > 0 ? Math.abs(cadVal - lastStable) : 0;
+if (diff > 15) {
+if (this.state.pendingCadVal != null && Math.abs(cadVal - this.state.pendingCadVal) <= PENDING_TOLERANCE_SPM) {
+this.state.pendingCadCount = (this.state.pendingCadCount || 0) + 1;
+this.state.pendingCadVal = cadVal;
+} else {
+this.state.pendingCadVal = cadVal;
+this.state.pendingCadCount = 1;
 }
-const cadSmoothed = this.state.cadValHistory.length >= 3
-? [...this.state.cadValHistory].sort((a, b) => a - b)[1]
+if (this.state.pendingCadCount >= 2) {
+this.state.cadValHistory.push(cadVal);
+if (this.state.cadValHistory.length > 5) this.state.cadValHistory.shift();
+this.state.pendingCadVal = null;
+this.state.pendingCadCount = 0;
+}
+} else {
+this.state.cadValHistory.push(cadVal);
+if (this.state.cadValHistory.length > 5) this.state.cadValHistory.shift();
+this.state.pendingCadVal = null;
+this.state.pendingCadCount = 0;
+}
+}
+const cadSmoothed = this.state.cadValHistory.length >= 5
+? [...this.state.cadValHistory].sort((a, b) => a - b)[2]
 : cadVal;
 if (cadValid) this.state.lastValidCadenceDisplay = cadSmoothed;
 const cadDisplay = cadValid ? cadSmoothed : (this.state.lastValidCadenceDisplay || 0);
