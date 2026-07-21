@@ -1421,7 +1421,7 @@ blockedUsersLabel: "BLOCKED USERS", noBlockedUsers: "No blocked users.", unblock
 blockConfirm: "Block this user? You will no longer see their posts and comments.", reportSubmitted: "Report submitted. Thank you.",
 crewSharePrompt: "Are you sharing with the crew?", crewSavedConfirm: "✓ Saved to your history", crewIncludeRoute: "Route map", crewIncludeHr: "Heart rate", crewIncludeCadence: "Cadence", crewIncludeGct: "Ground contact time", crewIncludeFlight: "Flight ratio", crewIncludeStride: "Stride", crewIncludeKcal: "Calories", crewIncludeSteps: "Steps", crewShareItemsToggle: "Share items", crewAddPhoto: "Add a photo (optional)",
 crewShareBtn: "SHARE", crewChangePhoto: "Change photo",
-crewCancelBtn: "CANCEL", crewExitBtn: "APP CLOSE", crewCancelConfirm: "Discard this run without saving it to history?",
+crewCancelBtn: "SKIP", crewExitBtn: "APP CLOSE", crewCancelConfirm: "Discard this run without saving it to history?",
 crewNicknameLabel: "CREW NICKNAME", nicknamePlaceholder: "Nickname (max 12 chars)", nicknameHint: "Your records will be shared publicly under this name",
 profilePhotoLabel: "PROFILE PHOTO", profilePhotoUpload: "UPLOAD PHOTO", profilePhotoHint: "This photo will be shown on your community posts", profilePhotoRemove: "REMOVE",
 profilePhotoPosition: "PHOTO POSITION", profilePhotoPositionHint: "Pinch or use the slider to zoom, drag to reposition",
@@ -1515,7 +1515,7 @@ blockedUsersLabel: "차단 목록", noBlockedUsers: "차단한 사용자가 없�
 blockConfirm: "이 사용자를 차단할까요? 앞으로 이 사용자의 게시글과 댓글이 보이지 않습니다.", reportSubmitted: "신고가 접수되었습니다. 감사합니다.",
 crewSharePrompt: "크루와 공유하시겠어요?", crewSavedConfirm: "✓ 기록에 저장 완료", crewIncludeRoute: "경로 지도", crewIncludeHr: "심박수", crewIncludeCadence: "케이던스", crewIncludeGct: "지면접촉시간", crewIncludeFlight: "체공비율", crewIncludeStride: "보폭", crewIncludeKcal: "칼로리", crewIncludeSteps: "걸음수", crewShareItemsToggle: "크루쉐어 아이템", crewAddPhoto: "사진 추가 (선택)",
 crewShareBtn: "공유하기", crewChangePhoto: "사진 변경",
-crewCancelBtn: "취소", crewExitBtn: "앱 종료", crewCancelConfirm: "이 러닝 기록을 저장하지 않고 취소할까요?",
+crewCancelBtn: "닫기", crewExitBtn: "앱 종료", crewCancelConfirm: "이 러닝 기록을 저장하지 않고 취소할까요?",
 crewNicknameLabel: "크루 닉네임", nicknamePlaceholder: "닉네임 (최대 12자)", nicknameHint: "커뮤니티에 기록이 이 이름으로 공개됩니다",
 profilePhotoLabel: "프로필 사진", profilePhotoUpload: "사진 업로드", profilePhotoHint: "이 사진이 커뮤니티 게시물에 표시됩니다", profilePhotoRemove: "삭제",
 profilePhotoPosition: "사진 위치 조절", profilePhotoPositionHint: "손가락으로 확대/축소하거나 슬라이더로 조절하고, 드래그해서 위치를 옮기세요",
@@ -1637,12 +1637,36 @@ return data ? JSON.parse(data) : [];
 } catch (e) { return []; }
 }
 savePrecisionLogsList(list) {
-try { localStorage.setItem(this.getPrecisionLogsKey(), JSON.stringify(list)); } catch (e) { console.error('정밀 로그 저장 실패:', e); }
+try {
+localStorage.setItem(this.getPrecisionLogsKey(), JSON.stringify(list));
+return true;
+} catch (e) {
+console.error('정밀 로그 저장 실패:', e);
+// [추가] 예전엔 콘솔에만 찍고 조용히 실패해서 사용자가 알 방법이 없었음.
+// 저장공간 초과 등으로 정밀 로그 저장이 실패해도 최소한 알림은 뜨게 하고,
+// 러닝 기록(히스토리 리스트) 자체는 별개로 이미 저장 완료된 상태임을 명확히 알려준다.
+const isKo = this.getLang() === 'ko';
+alert(isKo
+  ? '정밀 로그 저장에 실패했어요 (저장공간 부족). 러닝 기록 자체는 정상적으로 저장되었습니다.'
+  : 'Failed to save the precision log (storage full). Your run record itself was saved normally.');
+return false;
+}
 }
 savePrecisionLog(log) {
 if (!log || !log.length) return;
+// [추가] 초장거리(예: 마라톤/울트라, 3시간+) 러닝은 초당 샘플이 수만 개까지 쌓여
+// localStorage 용량 한도를 넘길 수 있음. 5000개(초당 기록 기준 약 1시간 23분 분량)를
+// 넘으면 균등한 간격으로 솎아내서, 정밀도는 약간 낮아지더라도 저장 자체는 항상 성공하게 함.
+const MAX_SAMPLES = 5000;
+let finalLog = log;
+let downsampled = false;
+if (log.length > MAX_SAMPLES) {
+const step = Math.ceil(log.length / MAX_SAMPLES);
+finalLog = log.filter((_, i) => i % step === 0);
+downsampled = true;
+}
 const list = this.loadPrecisionLogs();
-list.unshift({ id: 'plog_' + Date.now(), savedAt: new Date().toISOString(), log: log });
+list.unshift({ id: 'plog_' + Date.now(), savedAt: new Date().toISOString(), log: finalLog, downsampled: downsampled });
 // [수정] localStorage 용량 보호 + "지난 로그가 쌓여봐야 소용없다"는 사용 패턴 반영.
 // 기존 30개 → 최근 3개까지만 보관 (그 이상은 오래돼서 비교 의미가 떨어짐).
 this.savePrecisionLogsList(list.slice(0, 3));
@@ -2239,9 +2263,11 @@ const label = d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '
 const count = item.log ? item.log.length : 0;
 // [추가] CSV로 불러온 로그는 방금 기록한 러닝과 구분되도록 작은 배지를 붙인다.
 const badge = item.imported ? ' <span style="color:#888; font-weight:700;">· ' + (isKo ? '가져옴' : 'IMPORTED') + '</span>' : '';
+// [추가] 초장거리 러닝이라 용량 보호를 위해 샘플을 솎아낸 로그는 구분 배지 표시
+const downsampledBadge = item.downsampled ? ' <span style="color:#e0a030; font-weight:700;">· ' + (isKo ? '축약됨' : 'DOWNSAMPLED') + '</span>' : '';
 return '<div class="garmin-import-item">'
 + '<div class="garmin-import-item-head">'
-+ '<div class="garmin-import-item-title">' + label + ' · ' + count + (isKo ? '개' : ' rows') + badge + '</div>'
++ '<div class="garmin-import-item-title">' + label + ' · ' + count + (isKo ? '개' : ' rows') + badge + downsampledBadge + '</div>'
 + '<div style="display:flex; gap:6px;">'
 + '<div class="garmin-import-item-del" style="color:var(--primary); border-color:#2a3a2f;" onclick="storage.exportPrecisionLogById(\'' + item.id + '\')">' + (isKo ? '내보내기' : 'EXPORT') + '</div>'
 + '<div class="garmin-import-item-del" onclick="storage.deletePrecisionLog(\'' + item.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</div>'
@@ -3160,14 +3186,12 @@ window.location.reload();
 this.pendingShareRecord = null;
 this.pendingSharePhotoFile = null;
 }
-// [추가] "CANCEL" 버튼: 방금 저장된 러닝 기록을 저장소에서 삭제하고 메인 화면으로 복귀.
-// 이미 storage.saveRecord()가 finish 시점에 먼저 실행된 뒤 이 모달이 뜨는 구조라,
-// 단순히 모달만 닫으면 기록이 남아있게 되므로 storage.deleteRecord()로 되돌린다.
+// [수정] "TO RUN" 버튼(구 CANCEL): 러닝 기록은 finish 시점에 이미 storage.saveRecord()로
+// 저장 완료된 상태이므로, 여기서는 기록을 지우지 않고 크루 공유만 취소한 채
+// 메인 러닝 화면으로 돌아간다. (예전엔 실수로 storage.deleteRecord()를 호출해서
+// 저장된 기록까지 함께 삭제되던 버그가 있었음 — 삭제 로직 제거)
 cancelFinishAndDiscard() {
 if (this._sharing) return;
-const record = this.pendingShareRecord;
-if (!record) { window.location.reload(); return; }
-storage.deleteRecord(record.id);
 this.pendingShareRecord = null;
 this.pendingSharePhotoFile = null;
 const modal = document.getElementById('share-crew-modal');
@@ -6925,6 +6949,11 @@ async uploadRecord(record, photoFile, shareOptions, message) {
 
 // ========== 전역 인스턴스 ==========
 const storage = new RunningStorage();
+// [수정] 정밀 로그 기록: 껐다 켜다 하다가 깜빡하고 꺼진 채로 다음 러닝을 놓치는 사고를 막기 위해,
+// 앱을 열 때마다(스크립트 재실행 시마다) 항상 ON으로 강제 초기화한다.
+// 러닝 도중에 설정에서 수동으로 끄면 그 세션 동안은 꺼진 채로 유지되지만,
+// 앱을 완전히 종료했다가 다시 열면 다시 ON으로 리셋된다.
+storage.setPrecisionLogEnabled(true);
 const ui = new UIManager();
 const metro = new MetroEngine();
 
@@ -9025,7 +9054,7 @@ if (btn) { btn.textContent = '▶ PLAY'; btn.classList.remove('playing'); }
 <div style="flex:0 0 auto; padding:12px 0 22px 0; background:#1a1a1a;">
 <div class="custom-confirm-actions">
 <button id="btn-share-crew-share" class="btn-confirm-act btn-confirm-save" onclick="ui.closeShareCrewModal(true)">SHARE</button>
-<button id="btn-share-crew-cancel-run" class="btn-confirm-act btn-confirm-delete" onclick="ui.cancelFinishAndDiscard()">CANCEL</button>
+<button id="btn-share-crew-cancel-run" class="btn-confirm-act btn-confirm-cancel" onclick="ui.cancelFinishAndDiscard()">SKIP</button>
 </div>
 <div class="custom-confirm-actions" style="margin-top:10px; justify-content:center;">
 <button id="btn-share-crew-exit-app" class="btn-confirm-act btn-confirm-cancel" onclick="ui.exitAppFromShareModal()" style="flex:0 0 auto; width:70%;">APP CLOSE</button>
