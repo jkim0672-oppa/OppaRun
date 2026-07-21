@@ -5199,12 +5199,18 @@ totalAltGain = this.state.splits.reduce((sum, split) => sum + Math.max(0, split.
 }
 const avgPaceSec = ui.parsePaceToSeconds(ui.dom.avgPace.textContent);
 const calculatedKcal = ui.calculateCalories(weightKg, this.state.totalDist, avgPaceSec, totalAltGain, ui.currentGender, p.age, this.state.activityMode === 'trail');
-// [수정] steps/전체시간 대신, 러닝 중 누적된 10초 윈도우 케이던스 샘플들의
-// 트림 평균을 사용해 순간적 오감지/워밍업 구간으로 인한 값 튐을 완화.
-// 샘플이 없는 경우(예: 매우 짧은 러닝)에는 기존 방식으로 폴백.
-const avgCadence = (this.state.cadenceSamples && this.state.cadenceSamples.length > 0)
-  ? trimmedMeanCadence(this.state.cadenceSamples)
-  : (this.state.seconds > 0 ? Math.round((this.state.steps / this.state.seconds) * 60) : 0);
+// [수정] 기존엔 10초 윈도우 트림 평균을 우선 사용했으나, 이러면 같은 기록 안에서
+// STRIDE(총거리÷총걸음수, 실측값)와 CADENCE(윈도우 평균, 추정치)가 서로 다른 계산
+// 방식을 쓰게 되어 둘이 미세하게 어긋나는 문제가 있었음(예: 175spm인데 stride로
+// 역산하면 실제론 ~170spm에 더 가까움 — 가민 실측치와도 그쪽이 더 잘 맞았음).
+// STRIDE에 이미 적용한 "모델 추정치보다 실측값 우선" 원칙을 CADENCE에도 동일하게
+// 적용: 총 걸음수÷총시간(실측)을 우선 사용하고, 걸음 데이터가 부족한 예외 상황에서만
+// 트림 평균으로 폴백.
+const avgCadence = (this.state.seconds > 0 && this.state.steps > 0)
+  ? Math.round((this.state.steps / this.state.seconds) * 60)
+  : (this.state.cadenceSamples && this.state.cadenceSamples.length > 0)
+    ? trimmedMeanCadence(this.state.cadenceSamples)
+    : 0;
 const avgGct = this.state.stepCount > 0 ? Math.round(this.state.totalGct / this.state.stepCount) : 0;
 const avgFlight = this.state.stepCount > 0 ? Math.round(this.state.totalFlight / this.state.stepCount) : 0;
 // [추가] 좌/우 케이던스 밸런스 및 GCT 밸런스 (실측값, 더미 50:50 제거)
@@ -5319,9 +5325,15 @@ totalAltGain = this.state.splits.reduce((sum, split) => sum + Math.max(0, split.
 }
 const avgPaceSec = ui.parsePaceToSeconds(ui.dom.avgPace.textContent);
 const calculatedKcal = ui.calculateWalkCalories(weightKg, this.state.totalDist, avgPaceSec, totalAltGain, ui.currentGender, p.age);
-const avgSpm = (this.state.walkSpmSamples && this.state.walkSpmSamples.length > 0)
-? Math.round(this.state.walkSpmSamples.reduce((a,b)=>a+b,0) / this.state.walkSpmSamples.length)
-: (this.state.seconds > 0 ? Math.round((this.state.walkSteps / this.state.seconds) * 60) : 0);
+// [수정] 러닝(onFinish)과 동일한 원칙 적용: 샘플 평균(추정치)보다 총 걸음수÷총시간
+// (실측값)을 우선 사용해서, 같은 기록 안에서 SPM과 STRIDE(총거리÷총걸음수)가
+// 서로 다른 기준으로 계산되어 어긋나는 문제를 방지. 걸음 데이터가 부족한 예외
+// 상황에서만 샘플 평균으로 폴백.
+const avgSpm = (this.state.seconds > 0 && this.state.walkSteps > 0)
+? Math.round((this.state.walkSteps / this.state.seconds) * 60)
+: (this.state.walkSpmSamples && this.state.walkSpmSamples.length > 0)
+  ? Math.round(this.state.walkSpmSamples.reduce((a,b)=>a+b,0) / this.state.walkSpmSamples.length)
+  : 0;
 // [수정] 러닝(onFinish)과 동일하게 통일: 총거리÷총걸음수를 기본으로 사용.
 // 기존엔 걷기만 속도+케이던스+키보정 공식(calcStride)에 의존해서, 같은 앱 안에서
 // 러닝/걷기의 보폭 정확도 기준이 서로 달랐음(러닝은 실측, 걷기는 모델 추정).
