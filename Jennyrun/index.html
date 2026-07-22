@@ -4330,7 +4330,7 @@ this.leanQuietTimeSec = 0;
 this.leanTrackedTimeSec = 0;
 this._leanForceBuf = [];
 }
-handleMotion(e) {
+handleMotion(e, isAutoPaused) {
 let acc = e.accelerationIncludingGravity;
 if (!acc || acc.z === null) return;
 let force = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
@@ -4450,8 +4450,14 @@ if (!this.leanBaseline) {
   // 말이 되는 값만 나가도록 최종 클램프.
   this.leanAngleDeg = Math.max(-45, Math.min(45, this.leanAngleDeg));
   // 러닝 전체 평균용 누적 (부호 유지 — 앞으로 숙이면 +, 뒤로 젖히면 -로 방향까지 구분)
-  this.leanSumForAvg += this.leanAngleDeg;
-  this.leanCountForAvg++;
+  // [수정] 자동멈춤 중엔 제외 — 서 있는 동안의 (거의 0도에 가까운) 기울기가 평균에 섞여
+  // 실제 러닝 중 LEAN 평균을 왜곡하는 걸 방지. 케이던스/GCT(updateMetrics)는 이미 같은 방식으로
+  // isAutoPaused를 체크하고 있어, 여기서도 동일하게 맞춤. 순간값(leanAngleDeg)/필터 상태는
+  // 자동멈춤 중에도 계속 갱신해서, 다시 뛰기 시작했을 때 끊김 없이 이어지게 둔다.
+  if (!isAutoPaused) {
+    this.leanSumForAvg += this.leanAngleDeg;
+    this.leanCountForAvg++;
+  }
 }
 }
 
@@ -5447,7 +5453,7 @@ if (permissionState === 'granted') {
 if (!this.motionListenerAttached) {
 window.addEventListener('devicemotion', (e) => {
 if ((this.state.isRunning || this.state.isLeanCalibrating) && !this.state.isPaused) {
-if (this.state.activityMode === "walk") { this.walkMotion.handleMotion(e); } else { this.motion.handleMotion(e); }
+if (this.state.activityMode === "walk") { this.walkMotion.handleMotion(e); } else { this.motion.handleMotion(e, this.state.isAutoPaused); }
 if (this.state.isRunning && !this.state.isAutoPaused && typeof this.maybeLogPrecisionSample === 'function') { this.maybeLogPrecisionSample(); }
 }
 });
@@ -5459,7 +5465,7 @@ this.motionListenerAttached = true;
 if (!this.motionListenerAttached) {
 window.addEventListener('devicemotion', (e) => {
 if ((this.state.isRunning || this.state.isLeanCalibrating) && !this.state.isPaused) {
-if (this.state.activityMode === "walk") { this.walkMotion.handleMotion(e); } else { this.motion.handleMotion(e); }
+if (this.state.activityMode === "walk") { this.walkMotion.handleMotion(e); } else { this.motion.handleMotion(e, this.state.isAutoPaused); }
 if (this.state.isRunning && !this.state.isAutoPaused && typeof this.maybeLogPrecisionSample === 'function') { this.maybeLogPrecisionSample(); }
 }
 });
@@ -6069,8 +6075,15 @@ app.maybeLogPrecisionSample();
 // 안전하게 0 처리된다.
 window.onNativeMotionUpdate = function (x, y, z, timestamp, gx, gy, gz) {
 try {
+// [수정] 자동멈춤(isAutoPaused) 중에도 모션 처리 자체(걸음 감지)는 계속 돌려야 함.
+// 이전엔 여기서 !isAutoPaused까지 걸러버려서, 자동멈춤 중 걸음 감지(lastStepTime)가
+// 그대로 얼어붙어 버렸음 — 자동멈춤 해제 판정(updatePosition의 stepsHaltedRecently)이
+// 바로 이 lastStepTime 최신 여부로 "다시 걷기/뛰기 시작했는지"를 판단하기 때문에,
+// 얼어붙은 채로는 다시 뛰기 시작해도 자동멈춤이 영영 안 풀리는 문제가 있었음.
+// 실제 통계(케이던스/GCT/LEAN 평균) 반영은 각자 내부에서 isAutoPaused를 개별 체크해서
+// 막는다 (updateMetrics, handleMotion의 leanSumForAvg 누적부).
 if (typeof app !== 'undefined' && app &&
-    app.state && (app.state.isRunning || app.state.isLeanCalibrating) && !app.state.isPaused && !app.state.isAutoPaused) {
+    app.state && (app.state.isRunning || app.state.isLeanCalibrating) && !app.state.isPaused) {
 const evt = { accelerationIncludingGravity: { x: x, y: y, z: z } };
 if (gx !== undefined && gy !== undefined && gz !== undefined) {
 evt.rotationRate = { alpha: gx, beta: gy, gamma: gz };
@@ -6082,13 +6095,14 @@ evt.rotationRate = { alpha: gx, beta: gy, gamma: gz };
 if (app.state.activityMode === 'walk') {
 if (app.walkMotion) app.walkMotion.handleMotion(evt);
 } else {
-if (app.motion) app.motion.handleMotion(evt);
+if (app.motion) app.motion.handleMotion(evt, app.state.isAutoPaused);
 }
 // [신규] 화면 꺼짐 대응: setInterval 대신 여기서 정밀 로그 트리거
 // (가속도계는 보통 GPS보다 훨씬 자주 들어오므로 이쪽이 주 경로)
 // [수정] LEAN 캘리브레이션 카운트다운 중(isLeanCalibrating)엔 아직 실제 러닝이 아니므로
 // 정밀 로그는 기록하지 않고, 모션 데이터만 캘리브레이션용으로 흘려보낸다.
-if (app.state.isRunning && typeof app.maybeLogPrecisionSample === 'function') {
+// 자동멈춤 중에도 정밀 로그는 기존과 동일하게 기록하지 않는다(별도로 isAutoPaused 체크).
+if (app.state.isRunning && !app.state.isAutoPaused && typeof app.maybeLogPrecisionSample === 'function') {
 app.maybeLogPrecisionSample();
 }
 }
