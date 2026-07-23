@@ -4065,6 +4065,19 @@ this.recentCycleTimes = [];
 // 아래 rotationRate 처리부의 `|| 0` 폴백 덕분에 그 경우엔 안전하게 0으로 처리됨.
 this.rotPeakSinceLastStep = 0;
 this.rotRejectThreshold = 220;
+// [추가] 네이티브 걸음 센서(TYPE_STEP_DETECTOR) 하이브리드용 상태.
+// 안드로이드 하드웨어 걸음 센서는 팔 스윙 등 폰 자체 흔들림에 강해서,
+// 이게 살아있는 기기/상황에서는 자이로 노이즈 필터(rotRejectThreshold)가
+// 자체적으로 "노이즈"라고 오판한 진짜 걸음도, 네이티브 센서가 같은 순간
+// "걸음이다"라고 확정해주면 그대로 걸음으로 인정한다(구체적 게이팅 로직은
+// handleMotion 안 rotRejectThreshold 체크부 참고). GCT/좌우밸런스/수직진동은
+// 지금처럼 자체 가속도·자이로 파형 분석으로 계속 계산한다 — 네이티브 센서는
+// "걸음 있었는지"만 확정해줄 뿐 그 걸음의 모양(GCT 등)은 안 주기 때문.
+this.nativeStepTimestamps = [];
+this.nativeBridgeLastSeenAt = 0;
+// [추가] 정밀 로그/진단용: 이번 러닝 동안 네이티브 센서가 "걸음"이라고 확정해줬는데
+// 자체 알고리즘은 자이로 노이즈로 오판해 버릴 뻔한 걸음을 몇 번 구제했는지 카운트.
+this.nativeRescueCount = 0;
 // [추가] 정밀 로그(초당)용: 가장 최근 완료된 스텝 1회의 축별 부호 있는 자이로 평균(deg/s)
 this.lastStepGyroA = null;
 this.lastStepGyroB = null;
@@ -4188,6 +4201,10 @@ this.vertAmplitudeCount = 0;
 this.lastStepVertOscCm = null; // [추가] 정밀 로그용 순간 수직진동값도 매 러닝 시작 시 초기화
 this.recentCycleTimes = [];
 this.rotPeakSinceLastStep = 0;
+// [추가] 네이티브 걸음 센서 하이브리드 상태도 매 러닝 시작 시 초기화
+this.nativeStepTimestamps = [];
+this.nativeBridgeLastSeenAt = 0;
+this.nativeRescueCount = 0;
 // [추가] 좌우 판별 진단용 변수도 매 러닝 시작 시 초기화
 this.gyroCycleSum = { a: 0, b: 0, g: 0 };
 this.gyroCycleCount = 0;
@@ -4214,6 +4231,31 @@ this.impactThreshold = this.baseImpactThreshold;
 this.calibDone = false;
 this.calibStartTime = null;
 this.calibForceSamples = [];
+}
+// [추가] 네이티브 걸음 센서(TYPE_STEP_DETECTOR) 이벤트 수신용.
+// window.onNativeStepDetected(전역 브릿지 함수)에서 호출된다.
+onNativeStep(tsMs) {
+const now = (typeof tsMs === 'number') ? tsMs : Date.now();
+this.nativeStepTimestamps.push(now);
+// 최근 4초치만 보관 (오래된 건 케이던스 판단에 의미 없음)
+const cutoff = now - 4000;
+while (this.nativeStepTimestamps.length && this.nativeStepTimestamps[0] < cutoff) {
+this.nativeStepTimestamps.shift();
+}
+this.nativeBridgeLastSeenAt = now;
+}
+// 네이티브 걸음 이벤트가 최근에도 계속 들어오고 있는지(=이 기기/OS에서
+// 브릿지가 실제로 살아있는지). 이벤트가 3초 넘게 끊기면 기기 미지원/오류로 보고
+// 자동으로 기존 자체 알고리즘 단독 모드로 폴백한다.
+isNativeBridgeLive() {
+return (Date.now() - this.nativeBridgeLastSeenAt) < 3000;
+}
+// 지금(now) 이 순간 근처(±180ms)에 네이티브 센서가 확정한 걸음이 있었는지.
+hasNearbyNativeStep(now) {
+for (let i = this.nativeStepTimestamps.length - 1; i >= 0; i--) {
+if (Math.abs(this.nativeStepTimestamps[i] - now) <= 180) return true;
+}
+return false;
 }
 handleMotion(e) {
 let acc = e.accelerationIncludingGravity;
@@ -4312,9 +4354,19 @@ missedStepsToResync = probableSteps - 1;
 // [추가] 자이로스코프 기반 노이즈 필터: 이번 스텝 사이클 동안 회전각속도
 // 최댓값이 임계값(rotRejectThreshold)을 넘었다면, 착지 충격이 아니라
 // 폰이 회전/덜렁거린 흔들림으로 보고 걸음으로 세지 않는다.
+// [추가] 단, 네이티브 걸음 센서(TYPE_STEP_DETECTOR)가 살아있고 바로 이 순간
+// "걸음이다"라고 이미 확정해줬다면, 자체 자이로 필터의 오판(팔 스윙을 노이즈로
+// 착각)일 가능성이 높으므로 걸음으로 인정하고 계속 진행한다. GCT/좌우밸런스/
+// 수직진동 등은 그대로 이 사이클의 자체 파형 분석값을 사용 — 네이티브 센서는
+// "걸음 있었는지"만 확정해줄 뿐 그 모양까지 알려주진 않기 때문.
 if (this.rotPeakSinceLastStep > this.rotRejectThreshold) {
+if (this.isNativeBridgeLive() && this.hasNearbyNativeStep(now)) {
+this.nativeRescueCount++;
+// 걸음으로 인정 — return하지 않고 아래로 계속 진행
+} else {
 this.rotPeakSinceLastStep = 0; // 이번 흔들림은 소모됨, 다음 사이클을 위해 리셋
 return;
+}
 }
 
 if (this.lastStepTime !== 0) {
@@ -5507,6 +5559,7 @@ vertRatio: measuredVertRatio,
 kcal: calculatedKcal,
 stride: _snapshotStride,           // [추가] 보폭 스냅샷 저장
 sensorDiag: _strideSensorFlag,     // [추가] 개발자 전용 진단 플래그. 클램프가 발동한 기록에만 값이 있음(UI 비노출, export로만 확인)
+nativeStepRescueCount: this.motion.nativeRescueCount, // [추가] 네이티브 걸음센서가 자이로 노이즈 필터의 오판을 구제해준 횟수(개발자 전용, UI 비노출)
 weightKgSnapshot: weightKg,        // [추가] 당시 체중(kg) 스냅샷 저장
 alt: this.state.currentAlt,
 path: this.state.pathCoords,
@@ -5817,6 +5870,25 @@ app.maybeLogPrecisionSample();
 }
 }
 } catch (e) { console.error('onNativeMotionUpdate error', e); }
+};
+
+// [신규] 네이티브 안드로이드 걸음 센서(TYPE_STEP_DETECTOR) 브릿지 수신부.
+// 네이티브(Kotlin) 쪽에서 안드로이드 하드웨어 걸음 감지 이벤트가 발생할 때마다
+// window.onNativeStepDetected(timestamp)를 호출해주는 걸 전제로 함
+// (해당 네이티브 브릿지는 아직 구현 전 — 추가되면 바로 이 함수와 연결됨).
+// 하드웨어 걸음 센서는 팔 스윙 등 폰 자체 흔들림에 강하기 때문에, 손에 들고
+// 뛸 때 자체 자이로 노이즈 필터(rotRejectThreshold)가 걸음을 놓치는 경우를
+// 구제하는 용도로 쓰인다 (자세한 동작은 MotionManager.hasNearbyNativeStep 참고).
+// GCT/좌우밸런스/수직진동 계산 자체는 그대로 자체 가속도·자이로 분석이 담당하고,
+// 이 브릿지는 "걸음이 있었는지" 판정만 보강한다.
+window.onNativeStepDetected = function (timestamp) {
+try {
+if (typeof app !== 'undefined' && app &&
+    app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused &&
+    app.state.activityMode !== 'walk' && app.motion) {
+app.motion.onNativeStep(typeof timestamp === 'number' ? timestamp : Date.now());
+}
+} catch (e) { console.error('onNativeStepDetected error', e); }
 };
 
 const SUPABASE_URL = 'https://ujodpspxsisoycniswwl.supabase.co';
