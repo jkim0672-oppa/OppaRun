@@ -4110,10 +4110,15 @@ const profiles = {
   // [수정] 2026.07.11 fit 파일 + 정밀 로그 원본을 초 단위로 정렬해 재검증(232개 지점).
   // 폰/가민 GCT 비율 평균 0.499(표준편차 0.025)로 거의 정확히 2배 구조적 오차 확인.
   // 기존 추정치(0.681, 평균값만 비교)보다 정밀한 값(0.701)으로 갱신.
-  chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.701, vertScale: 0.454, minStepInterval: 230, vertEnabled: true  }, // [수정] Garmin FIT 실측 대비 보정 (2026-07-12 런 데이터 기준, 기존 6.0은 약 13.2배 과다측정)
-  waist:   { groundThreshold: 10.5, impactThreshold: 10.0, gctFallbackRatio: 0.38, vertScale: 5.5, minStepInterval: 230, vertEnabled: true  },
-  armband: { groundThreshold: 12.0, impactThreshold: 12.5, gctFallbackRatio: 0.33, vertScale: 4.5, minStepInterval: 240, vertEnabled: true  },
-  hand:    { groundThreshold: 13.5, impactThreshold: 14.0, gctFallbackRatio: 0.35, vertScale: 0,   minStepInterval: 250, vertEnabled: false },
+  chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.701, vertScale: 0.454, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220 }, // [수정] Garmin FIT 실측 대비 보정 (2026-07-12 런 데이터 기준, 기존 6.0은 약 13.2배 과다측정)
+  waist:   { groundThreshold: 10.5, impactThreshold: 10.0, gctFallbackRatio: 0.38, vertScale: 5.5, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220 },
+  armband: { groundThreshold: 12.0, impactThreshold: 12.5, gctFallbackRatio: 0.33, vertScale: 4.5, minStepInterval: 240, vertEnabled: true,  rotRejectThreshold: 220 },
+  // [추가] 손에 들고 뛰면 팔 스윙 자체가 220deg/s를 훌쩍 넘는 회전을 만들어 내서,
+  // 기존 고정값(220)으로는 진짜 걸음까지 "폰이 흔들린 노이즈"로 오판해 버려지는 바람에
+  // 케이던스가 절반 가까이 언더카운트되는 문제가 있었음(실측: 171 → 81).
+  // 팔 스윙 회전은 훨씬 크므로 임계값을 크게 높여서 정상 걸음을 노이즈로 오판하지 않게 함.
+  // 정밀로그 rot_peak_dps 실측값으로 추후 더 정밀하게 조정 가능.
+  hand:    { groundThreshold: 13.5, impactThreshold: 14.0, gctFallbackRatio: 0.35, vertScale: 0,   minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600 },
 };
 const p = profiles[pos] || profiles.chest;
 this.groundThreshold  = p.groundThreshold;
@@ -4122,6 +4127,7 @@ this.gctFallbackRatio = p.gctFallbackRatio;
 this.vertScale        = p.vertScale;
 this.minStepInterval  = p.minStepInterval;
 this.vertEnabled      = p.vertEnabled;
+this.rotRejectThreshold = p.rotRejectThreshold;
 // [추가] 가민 캘리브레이션 비교(garmin.applyCalibration)에서 저장한 보정값이 있으면
 // 위치별 기본값 위에 덮어쓴다. 착용 위치가 바뀌면(override.devicePos 불일치) 적용하지 않음 —
 // 위치가 바뀌면 새로 비교/적용해야 함.
@@ -4564,7 +4570,7 @@ splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
 // [추가] 실시간 상승고도 누적 상태 (트레일 모드 실시간 칼로리의 경사 보너스 계산용)
 totalAscent: 0, lastAscentAlt: null,
 lastPosTimestamp: Date.now(),
-speedBuffer: [], lastValidSpeed: 0, cadenceSamples: [], cadValHistory: [],
+speedBuffer: [], lastValidSpeed: 0, emaSpeedKmh: 0, cadenceSamples: [], cadValHistory: [],
 isCalibrationRun: false, calibrationKnownDistanceM: 0,
 // [추가] GPS 고도 보정용 - Open-Elevation API 지형고도값 기반 offset 보정
 elevOffset: 0, elevOffsetReady: false, lastElevFetchTime: 0, lastElevFetchPos: null, elevFetchInFlight: false,
@@ -4824,6 +4830,10 @@ let timeDelta = (fixTime - (this.state.lastPosTimestamp || fixTime)) / 1000;
 // maxJump: 순간 최대 이동 거리 (칼만 스무딩으로 이상치 많이 걸러짐)
 let maxJump = 0.18;
 if (d > 0.002 && d < maxJump) {
+// [추가] 속도 블렌딩용: 이번 GPS 갱신에서의 이동거리/경과시간을 저장
+// (아래 페이스 계산 블록에서 coords.speed와 블렌딩할 때 사용)
+this._lastDeltaDist = d;
+this._lastDeltaTime = timeDelta;
 this.state.totalDist += d;
 // [추가] 실시간 상승고도 누적 (기존엔 totalAscent가 어디서도 갱신되지 않아
 // 실시간 칼로리 계산의 경사 보너스가 항상 0으로 처리되던 버그를 함께 수정.
@@ -4869,38 +4879,42 @@ this.state.lastKmAlt = this.state.currentAlt;
 }
 }
 
-// ── 3. 페이스: GPS speed 가중 이동평균 (최신값 더 높은 가중치) ──
-// [수정] GPS 정확도(accuracy)가 나쁜 샘플은 애초에 speedBuffer에 넣지 않음.
-// 위치 좌표는 이미 칼만필터로 accuracy 가중 보정을 받지만, coords.speed는
-// 그 보정을 거치지 않은 원시값이라 accuracy가 나쁠 때(도심 빌딩 사이, 실내 등)
-// 튀는 속도가 그대로 페이스/보폭 계산에 들어갈 수 있었음.
+// ── 3. 페이스: coords.speed + 거리기반 속도 블렌딩 후 EMA 스무딩 ──
+// [수정] 기존 8샘플 선형 가중평균은 급가속 구간에서 반응이 느리고(가민 대비 지연),
+// coords.speed 원시값 자체가 가민 GPS 워치보다 정속 구간에서도 낮게 나오는
+// 편향이 있었음(실측 비교 결과 평균 -1km/h, -5~10%). 아래 두 가지로 개선:
+//   1) coords.speed와 실제 GPS 이동거리/시간 기반 속도(distSpeedKmh)를 블렌딩해
+//      원시값 자체의 편향을 완화
+//   2) 8샘플 선형 가중평균 → EMA(지수이동평균)로 교체해 반응 속도 개선
+// [유지] GPS 정확도(accuracy)가 나쁜 샘플은 그대로 배제.
 // [추가] TRAIL 모드는 나무/계곡 때문에 GPS 정확도가 도로보다 나쁜 경우가 흔해
 // 페이스 계산에 반영할 속도 샘플의 정확도 허용치도 함께 완화(20m → 30m).
 const SPEED_ACCURACY_LIMIT_M = (ui.currentActivityMode === 'trail') ? 30 : 20; // 이보다 정확도가 나쁜(숫자가 큰) 샘플은 신뢰 안 함
+const EMA_ALPHA = 0.45; // 클수록 반응 빠름(대신 튐도 커짐). 필요시 0.3~0.6 범위로 튜닝
 let rawSpeedKmh = p.coords.speed != null ? p.coords.speed * 3.6 : -1;
+// 거리기반 속도: 방금 위 "2. 거리 계산" 블록에서 저장한 이번 GPS 갱신분 이동거리/시간
+let distSpeedKmh = (typeof this._lastDeltaDist === 'number' && typeof this._lastDeltaTime === 'number' && this._lastDeltaTime > 0.3)
+  ? (this._lastDeltaDist / this._lastDeltaTime) * 3600
+  : -1;
 if (rawSpeedKmh > 0.5 && accuracy <= SPEED_ACCURACY_LIMIT_M) {
-// 이상치 필터: 버퍼 가중평균의 2배 초과 시 클램핑
-if (this.state.speedBuffer.length >= 2) {
-const n = this.state.speedBuffer.length;
-const wSum = this.state.speedBuffer.reduce((acc, v, i) => acc + v * (i + 1), 0);
-const wDiv = (n * (n + 1)) / 2;
-const wAvg = wSum / wDiv;
-if (rawSpeedKmh > wAvg * 2.0) rawSpeedKmh = wAvg;
+// 이상치 필터: 현재 EMA값의 2배 초과 시 클램핑 (기존엔 버퍼 가중평균 기준이었음)
+if (this.state.emaSpeedKmh > 0 && rawSpeedKmh > this.state.emaSpeedKmh * 2.0) {
+rawSpeedKmh = this.state.emaSpeedKmh;
 }
-this.state.speedBuffer.push(rawSpeedKmh);
-if (this.state.speedBuffer.length > 8) this.state.speedBuffer.shift(); // 최근 8개
-this.state.lastValidSpeed = rawSpeedKmh;
+// coords.speed와 거리기반 속도를 블렌딩 (거리기반 값을 60% 반영해 원시값 편향 완화).
+// 거리기반 값도 GPS 좌표 튐의 영향을 받을 수 있어, coords.speed와 3배 이상
+// 벌어지면 신뢰하지 않고 coords.speed만 사용.
+let blendedKmh = rawSpeedKmh;
+if (distSpeedKmh > 0.3 && distSpeedKmh < rawSpeedKmh * 3) {
+blendedKmh = rawSpeedKmh * 0.4 + distSpeedKmh * 0.6;
 }
-// 가중 이동평균: 최신 포인트에 더 높은 가중치
-let smoothedKmh = 0;
-if (this.state.speedBuffer.length > 0) {
-const n = this.state.speedBuffer.length;
-const wSum = this.state.speedBuffer.reduce((acc, v, i) => acc + v * (i + 1), 0);
-const wDiv = (n * (n + 1)) / 2;
-smoothedKmh = wSum / wDiv;
-} else if (this.state.lastValidSpeed > 0) {
-smoothedKmh = this.state.lastValidSpeed;
+// EMA 업데이트
+this.state.emaSpeedKmh = (this.state.emaSpeedKmh > 0)
+? (EMA_ALPHA * blendedKmh + (1 - EMA_ALPHA) * this.state.emaSpeedKmh)
+: blendedKmh;
+this.state.lastValidSpeed = this.state.emaSpeedKmh;
 }
+let smoothedKmh = this.state.emaSpeedKmh > 0 ? this.state.emaSpeedKmh : (this.state.lastValidSpeed || 0);
 // 백업: GPS speed 없는 기기 대응 (전체 평균 속도)
 if (smoothedKmh < 0.5 && this.state.seconds > 10) {
 const backupKmh = this.state.totalDist / (this.state.seconds / 3600);
@@ -5268,6 +5282,9 @@ this.state.lowSpeedStartTime = null;
 this.state.lastPosTimestamp = Date.now();
 this.state.speedBuffer = [];
 this.state.lastValidSpeed = 0;
+this.state.emaSpeedKmh = 0;
+this._lastDeltaDist = null;
+this._lastDeltaTime = null;
 this._kalman = null; // 칼만 필터 리셋 (새 러닝 시작 시 첫 GPS 포인트로 재초기화)
 if (typeof hrManager !== 'undefined') hrManager.reset(); // [추가] 새 러닝 시작 시 심박 샘플 초기화
 if(this.motion) this.motion.reset();
@@ -5436,6 +5453,7 @@ const _autoTitle = _isKo
 // 총거리와 총걸음수는 런 전체에 걸쳐 이미 정확히 측정된 값이므로, 나눗셈 한 번으로
 // 모델 없이 "진짜 평균 보폭"을 직접 구할 수 있음 — 이쪽이 더 정확하고 근거도 명확함.
 // (키 보정/personalFactor는 "측정값이 없을 때"의 추정 모델용 보정이라 실측값엔 적용하지 않음)
+let _strideSensorFlag = null;
 const _snapshotStride = (() => {
   const stepCount = this.state.stepCount || 0;
   const totalDistM = (this.state.totalDist || 0) * 1000;
@@ -5443,6 +5461,20 @@ const _snapshotStride = (() => {
     const measured = totalDistM / stepCount;
     // 안전장치: GPS 튐/걸음 오감지 등으로 비현실적인 값이 나오면 물리적 범위로 클램프
     const clamped = Math.max(0.3, Math.min(2.2, measured));
+    // [추가] 개발자 진단용 플래그: 클램프가 실제로 발동했다는 건(=측정값이 물리적
+    // 범위를 벗어났다는 건) 센서 쪽에 문제가 있었다는 신호(예: 자이로 필터가 걸음을
+    // 오판해서 stepCount가 틀어짐). 사용자에게 경고를 띄우진 않되, 기록에 조용히
+    // 남겨서 나중에 export해서 검토·수정할 수 있게 한다.
+    if (measured !== clamped) {
+      _strideSensorFlag = {
+        type: 'stride_clamped',
+        measuredM: parseFloat(measured.toFixed(3)),
+        clampedToM: parseFloat(clamped.toFixed(2)),
+        stepCount,
+        totalDistM: parseFloat(totalDistM.toFixed(1)),
+        devicePos: (() => { try { return storage.loadProfile().devicePos || 'chest'; } catch(e) { return null; } })()
+      };
+    }
     return parseFloat(clamped.toFixed(2));
   }
   // 걸음 카운트가 없는 예외 상황(센서 미지원 등)에 한해서만 기존 모델 추정 방식으로 폴백
@@ -5474,6 +5506,7 @@ gyroDiag: gyroDiag, // [추가] 좌우 판별 진단용(임시) — 자이로 �
 vertRatio: measuredVertRatio,
 kcal: calculatedKcal,
 stride: _snapshotStride,           // [추가] 보폭 스냅샷 저장
+sensorDiag: _strideSensorFlag,     // [추가] 개발자 전용 진단 플래그. 클램프가 발동한 기록에만 값이 있음(UI 비노출, export로만 확인)
 weightKgSnapshot: weightKg,        // [추가] 당시 체중(kg) 스냅샷 저장
 alt: this.state.currentAlt,
 path: this.state.pathCoords,
@@ -5522,12 +5555,24 @@ const avgSpm = (this.state.seconds > 0 && this.state.walkSteps > 0)
 // [수정] 러닝(onFinish)과 동일하게 통일: 총거리÷총걸음수를 기본으로 사용.
 // 기존엔 걷기만 속도+케이던스+키보정 공식(calcStride)에 의존해서, 같은 앱 안에서
 // 러닝/걷기의 보폭 정확도 기준이 서로 달랐음(러닝은 실측, 걷기는 모델 추정).
+let _strideSensorFlag = null;
 const _snapshotStride = (() => {
   const stepCount = this.state.walkSteps || 0;
   const totalDistM = (this.state.totalDist || 0) * 1000;
   if (stepCount > 0 && totalDistM > 0) {
     const measured = totalDistM / stepCount;
     const clamped = Math.max(0.3, Math.min(2.2, measured));
+    // [추가] 개발자 진단용 플래그 (러닝 쪽과 동일한 원칙) — 사용자에게는 노출 안 함
+    if (measured !== clamped) {
+      _strideSensorFlag = {
+        type: 'stride_clamped',
+        measuredM: parseFloat(measured.toFixed(3)),
+        clampedToM: parseFloat(clamped.toFixed(2)),
+        stepCount,
+        totalDistM: parseFloat(totalDistM.toFixed(1)),
+        devicePos: (() => { try { return storage.loadProfile().devicePos || 'chest'; } catch(e) { return null; } })()
+      };
+    }
     return parseFloat(clamped.toFixed(2));
   }
   // 걸음 카운트가 없는 예외 상황에 한해서만 기존 모델 추정 방식으로 폴백
@@ -5563,6 +5608,7 @@ avgPace: ui.dom.avgPace ? ui.dom.avgPace.textContent : INVALID_PACE,
 cadence: null, gct: null, flight: null, cadenceBal: null, gctBal: null, vertRatio: null,
 kcal: calculatedKcal,
 stride: _snapshotStride,
+sensorDiag: _strideSensorFlag,   // [추가] 개발자 전용 진단 플래그 (러닝 기록과 동일한 원칙)
 steps: this.state.walkSteps,     // [신규] 걷기 누적 걸음수
 walkSpm: avgSpm,                 // [신규] 평균 분당 걸음수
 weightKgSnapshot: weightKg,
@@ -5691,7 +5737,7 @@ maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
 splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
 totalAscent: 0, lastAscentAlt: null,
 lastPosTimestamp: Date.now(),
-speedBuffer: [], lastValidSpeed: 0, cadenceSamples: [], cadValHistory: [],
+speedBuffer: [], lastValidSpeed: 0, emaSpeedKmh: 0, cadenceSamples: [], cadValHistory: [],
 isCalibrationRun: false, calibrationKnownDistanceM: 0,
 elevOffset: 0, elevOffsetReady: false, lastElevFetchTime: 0, lastElevFetchPos: null, elevFetchInFlight: false
 };
@@ -8365,10 +8411,10 @@ const garmin = (function () {
   // [추가] applyDevicePos()의 위치별 기본값과 동일한 표(코드와 반드시 값이 같아야
   // 정확한 스니펫이 나오므로, 코드 기본값을 고치면 이 표도 같이 고쳐야 함).
   const DEVICE_PROFILE_DEFAULTS = {
-    chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.701, vertScale: 0.454, minStepInterval: 230, vertEnabled: true  },
-    waist:   { groundThreshold: 10.5, impactThreshold: 10.0, gctFallbackRatio: 0.38,  vertScale: 5.5,   minStepInterval: 230, vertEnabled: true  },
-    armband: { groundThreshold: 12.0, impactThreshold: 12.5, gctFallbackRatio: 0.33,  vertScale: 4.5,   minStepInterval: 240, vertEnabled: true  },
-    hand:    { groundThreshold: 13.5, impactThreshold: 14.0, gctFallbackRatio: 0.35,  vertScale: 0,     minStepInterval: 250, vertEnabled: false },
+    chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.701, vertScale: 0.454, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220 },
+    waist:   { groundThreshold: 10.5, impactThreshold: 10.0, gctFallbackRatio: 0.38,  vertScale: 5.5,   minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220 },
+    armband: { groundThreshold: 12.0, impactThreshold: 12.5, gctFallbackRatio: 0.33,  vertScale: 4.5,   minStepInterval: 240, vertEnabled: true,  rotRejectThreshold: 220 },
+    hand:    { groundThreshold: 13.5, impactThreshold: 14.0, gctFallbackRatio: 0.35,  vertScale: 0,     minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600 },
   };
   const DEFAULT_ROT_REJECT_THRESHOLD = 220;
 
@@ -8409,11 +8455,11 @@ const garmin = (function () {
     const base = DEVICE_PROFILE_DEFAULTS[ov.devicePos] || DEVICE_PROFILE_DEFAULTS.chest;
     const finalGct = ov.gctFallbackRatio != null ? ov.gctFallbackRatio : base.gctFallbackRatio;
     const finalVert = ov.vertScale != null ? ov.vertScale : base.vertScale;
+    const finalRot = ov.rotRejectThreshold != null ? ov.rotRejectThreshold : base.rotRejectThreshold;
     const snippetLine = ov.devicePos + ':   { groundThreshold: ' + base.groundThreshold + ', impactThreshold: ' + base.impactThreshold
       + ', gctFallbackRatio: ' + finalGct + ', vertScale: ' + finalVert + ', minStepInterval: ' + base.minStepInterval
-      + ', vertEnabled: ' + base.vertEnabled + ' },';
-    const rotLine = ov.rotRejectThreshold != null ? ('this.rotRejectThreshold = ' + ov.rotRejectThreshold + ';') : null;
-    const snippet = snippetLine + (rotLine ? ('\n' + rotLine) : '');
+      + ', vertEnabled: ' + base.vertEnabled + ', rotRejectThreshold: ' + finalRot + ' },';
+    const snippet = snippetLine;
     const escapedSnippet = snippet.replace(/'/g, "\\'").replace(/\n/g, '\\n');
 
     box.innerHTML = '<div class="garmin-import-item" style="border-color:#3a3a2a;">'
