@@ -4615,12 +4615,19 @@ this.belowSince = null;
 this.lastStepTime = 0;
 this.stepCount = 0;
 this.armed = true; // [추가] true일 때만 새 걸음을 인정 (히스테리시스)
+// [추가] 가다서다(start-stop) 시 오버카운트 방지용: 최근 진짜 스텝들의 충격 세기 이력.
+// 정지 직전 감속/팔스윙 잔진동은 실제 착지보다 진폭이 작은 경우가 많아,
+// 최근 평균 대비 뚜렷이 약한 스파이크는 걸음으로 인정하지 않는다.
+this.recentPeaks = [];
+this.maxRecentPeaks = 6;
+this.peakGateRatio = 0.62; // 최근 평균 충격의 62% 미만이면 걸음으로 불인정
 }
 reset() {
 this.lastStepTime = 0;
 this.stepCount = 0;
 this.armed = true;
 this.belowSince = null;
+this.recentPeaks = [];
 }
 handleMotion(e) {
 const acc = e.accelerationIncludingGravity;
@@ -4644,10 +4651,25 @@ this.belowSince = null;
 const timeoutFallback = (now - this.lastStepTime) > this.minStepInterval * 3;
 if (force > this.threshold && (now - this.lastStepTime) > this.minStepInterval &&
     (this.armed || this.lastStepTime === 0 || timeoutFallback)) {
+// [추가] 정지 직전 감속/잔진동 필터: 최근 스텝이 3개 이상 쌓였고,
+// 이번 간격이 timeoutFallback 범위가 아닌(=정상 보행 리듬) 상황에서,
+// 이번 충격 세기가 최근 평균의 peakGateRatio보다 뚜렷이 약하면, 정지 관성 흔들림으로
+// 보고 걸음으로 인정하지 않는다 (카운트는 안 하되 재무장 상태는 갱신해 다음 진짜
+// 걸음을 놓치지 않게 함).
+if (this.recentPeaks.length >= 3 && !timeoutFallback) {
+const avgPeak = this.recentPeaks.reduce((a,b)=>a+b,0) / this.recentPeaks.length;
+if (force < avgPeak * this.peakGateRatio) {
+this.armed = false;
+this.belowSince = null;
+return;
+}
+}
 this.lastStepTime = now;
 this.stepCount++;
 this.armed = false;
 this.belowSince = null;
+this.recentPeaks.push(force);
+if (this.recentPeaks.length > this.maxRecentPeaks) this.recentPeaks.shift();
 this.onStep({ stepCount: this.stepCount, time: now });
 }
 }
