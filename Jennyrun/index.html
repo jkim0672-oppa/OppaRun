@@ -4609,6 +4609,9 @@ this.resetThreshold = 8.8; // [수정] 재무장 임계값 - 착지 직후 잔�
 // 재무장되어 같은 착지가 2걸음으로 잡히는 문제가 있어, 중력 기준선(약 9.8)에서
 // 확실히 더 깊게 떨어졌을 때만 재무장되도록 폭을 넓힘
 this.minStepInterval = 320; // [수정] 최소 걸음 간격(ms) 280→320, 분당 약 187보 상한 (여전히 빠른 걷기는 커버)
+this.reArmQuietMs = 45; // [추가] resetThreshold 아래로 순간적으로만 찍히는 잔진동 딥을 걸러내기 위해,
+// 그 아래로 최소 이 시간(ms) 이상 "머물러야" 재무장 인정 (한 번이라도 다시 넘으면 타이머 리셋)
+this.belowSince = null;
 this.lastStepTime = 0;
 this.stepCount = 0;
 this.armed = true; // [추가] true일 때만 새 걸음을 인정 (히스테리시스)
@@ -4617,24 +4620,34 @@ reset() {
 this.lastStepTime = 0;
 this.stepCount = 0;
 this.armed = true;
+this.belowSince = null;
 }
 handleMotion(e) {
 const acc = e.accelerationIncludingGravity;
 if (!acc || acc.z === null || acc.z === undefined) return;
 const force = Math.sqrt((acc.x||0)*(acc.x||0) + (acc.y||0)*(acc.y||0) + (acc.z||0)*(acc.z||0));
 const now = Date.now();
-// [추가] 착지 충격 직후 잔진동이 minStepInterval을 넘겨서도 threshold를 다시
-// 넘나들며 같은 착지를 2걸음으로 잡는 문제 방지: force가 resetThreshold
-// 아래로 한 번 떨어져 재무장(armed)되기 전까지는 새 걸음을 인정하지 않음.
+// [수정] 착지 충격 직후 잔진동이 minStepInterval을 넘겨서도 threshold를 다시
+// 넘나들며 같은 착지를 2걸음으로 잡는 문제 방지: force가 resetThreshold 아래로
+// 떨어진 뒤 "그 상태를 reArmQuietMs 이상 유지"해야만 재무장(armed)됨.
+// (기존엔 한 번이라도 아래로 찍히면 바로 재무장돼서, 착지 직후 짧게 튀는
+// 잔진동 딥 하나만으로도 재무장 → 곧바로 다음 잔진동이 threshold를 넘어
+// 같은 걸음이 2번 카운트되는 문제가 있었음)
 // 단, 노이즈 등으로 재무장이 안 되는 예외 상황에서 언더카운트되는 걸 막기 위해
 // 마지막 걸음 후 시간이 충분히(minStepInterval의 3배) 지났으면 예외적으로 인정.
-if (force < this.resetThreshold) this.armed = true;
+if (force < this.resetThreshold) {
+if (this.belowSince === null) this.belowSince = now;
+if (!this.armed && (now - this.belowSince) >= this.reArmQuietMs) this.armed = true;
+} else {
+this.belowSince = null;
+}
 const timeoutFallback = (now - this.lastStepTime) > this.minStepInterval * 3;
 if (force > this.threshold && (now - this.lastStepTime) > this.minStepInterval &&
     (this.armed || this.lastStepTime === 0 || timeoutFallback)) {
 this.lastStepTime = now;
 this.stepCount++;
 this.armed = false;
+this.belowSince = null;
 this.onStep({ stepCount: this.stepCount, time: now });
 }
 }
