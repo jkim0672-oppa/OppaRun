@@ -4590,22 +4590,34 @@ class WalkStepDetector {
 constructor(onStep) {
 this.onStep = onStep;
 this.threshold = 10.8; // 걷기 착지 임계값 (러닝의 MotionManager 임계값보다 낮게 설정)
+this.resetThreshold = 9.5; // [추가] 재무장 임계값 - force가 이 아래로 떨어져야 다음 걸음을 인정
 this.minStepInterval = 280; // 최소 걸음 간격(ms), 분당 약 214보 상한
 this.lastStepTime = 0;
 this.stepCount = 0;
+this.armed = true; // [추가] true일 때만 새 걸음을 인정 (히스테리시스)
 }
 reset() {
 this.lastStepTime = 0;
 this.stepCount = 0;
+this.armed = true;
 }
 handleMotion(e) {
 const acc = e.accelerationIncludingGravity;
 if (!acc || acc.z === null || acc.z === undefined) return;
 const force = Math.sqrt((acc.x||0)*(acc.x||0) + (acc.y||0)*(acc.y||0) + (acc.z||0)*(acc.z||0));
 const now = Date.now();
-if (force > this.threshold && (now - this.lastStepTime) > this.minStepInterval) {
+// [추가] 착지 충격 직후 잔진동이 minStepInterval을 넘겨서도 threshold를 다시
+// 넘나들며 같은 착지를 2걸음으로 잡는 문제 방지: force가 resetThreshold
+// 아래로 한 번 떨어져 재무장(armed)되기 전까지는 새 걸음을 인정하지 않음.
+// 단, 노이즈 등으로 재무장이 안 되는 예외 상황에서 언더카운트되는 걸 막기 위해
+// 마지막 걸음 후 시간이 충분히(minStepInterval의 3배) 지났으면 예외적으로 인정.
+if (force < this.resetThreshold) this.armed = true;
+const timeoutFallback = (now - this.lastStepTime) > this.minStepInterval * 3;
+if (force > this.threshold && (now - this.lastStepTime) > this.minStepInterval &&
+    (this.armed || this.lastStepTime === 0 || timeoutFallback)) {
 this.lastStepTime = now;
 this.stepCount++;
+this.armed = false;
 this.onStep({ stepCount: this.stepCount, time: now });
 }
 }
