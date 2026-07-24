@@ -8065,17 +8065,21 @@ const garmin = (function () {
       curGpsDistFactor = (typeof _p.gpsDistCorrectionFactor === 'number' && _p.gpsDistCorrectionFactor > 0) ? _p.gpsDistCorrectionFactor : 1.0; // [추가]
     } catch (e) {}
 
-    // [제안] 케이던스가 garmin보다 X% 높으면, 회전 노이즈 거부 임계값을 대략
-    // 그 비율만큼 낮춰서 다음 테스트에 시도해볼 것을 제안 (선형 근사 — 정밀한
-    // 역산이 아니라 "다음 실험값" 정도의 출발점).
-    const suggestedRot = (curRot != null && phoneAvgCadence && cadDiffPct != null && cadDiffPct > 3)
-      ? Math.max(60, Math.round(curRot * (garminAvgCadence / phoneAvgCadence))) : null;
+    // [수정] 케이던스가 가민보다 높을 때(과다카운트)만 제안하던 걸, 낮을 때(언더카운트)도
+    // 제안하도록 수정. 방향은 원래 공식(garmin/phone 비율)이 이미 양쪽 다 맞게 계산해주고
+    // 있었음 — phone이 낮으면 비율이 1보다 커져서 임계값을 올리라고 제안하고, phone이
+    // 높으면 비율이 1보다 작아져서 임계값을 내리라고 제안함. 문제는 게이팅 조건
+    // (cadDiffPct > 3)이 한쪽 방향만 보고 있었던 것 — 손모드처럼 언더카운트되는
+    // 상황(cadDiffPct < -3)에서는 아무 제안도 안 해주는 사각지대가 있었음.
+    // 다른 제안값들과 일관되게 ±30% 클램프(clampRatio, 아래에서 정의)도 함께 적용.
+    const clampRatio = (r) => Math.max(0.7, Math.min(1.3, r));
+    const suggestedRot = (curRot != null && phoneAvgCadence && cadDiffPct != null && Math.abs(cadDiffPct) > 3)
+      ? Math.max(60, Math.round(curRot * clampRatio(garminAvgCadence / phoneAvgCadence))) : null;
     const suggestedGct = (curGct != null && phoneAvgGct && garminAvgGct && gctDiffPct != null && Math.abs(gctDiffPct) > 3)
       ? Math.round(curGct * (garminAvgGct / phoneAvgGct) * 1000) / 1000 : null;
     // [추가] 수직진동(vertScale)과 보폭(strideCorrectionFactor) 제안값.
     // 오차가 3% 이내면 노이즈로 보고 제안하지 않음. 과보정 방지를 위해 한 번에
     // ±30% 이상 바뀌지 않도록 clamp.
-    const clampRatio = (r) => Math.max(0.7, Math.min(1.3, r));
     const suggestedVertScale = (curVertScale != null && curVertScale > 0 && phoneAvgVertMm && garminAvgVertMm && vertDiffPct != null && Math.abs(vertDiffPct) > 3)
       ? Math.round(curVertScale * clampRatio(garminAvgVertMm / phoneAvgVertMm) * 1000) / 1000 : null;
     const suggestedStrideFactor = (phoneAvgStepMm && garminAvgStepMm && stepDiffPct != null && Math.abs(stepDiffPct) > 3)
