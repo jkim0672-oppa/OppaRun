@@ -1898,6 +1898,7 @@ reader.readAsText(file);
 }
 saveProfile(profile) { localStorage.setItem(this.PROFILE_KEY, JSON.stringify(profile)); }
 loadProfile() {
+// [CALIB_ANCHOR:DEFAULT_PROFILE] 캘리브레이션 스니펫(코드 반영용)을 여기 strideCorrectionFactor/gpsDistCorrectionFactor에 반영하세요.
 const defaultProfile = { h: 175, hu: "cm", w: 70, wu: "kg", age: 30, devicePos: "chest", strideCorrectionFactor: 1.0, gpsDistCorrectionFactor: 1.0 };
 const data = localStorage.getItem(this.PROFILE_KEY);
 // [수정] 기존 저장 데이터에 새 필드(age, devicePos)가 없을 경우 기본값으로 보완
@@ -4134,6 +4135,7 @@ this.applyDevicePos(savedPos);
 // armband: 팔 스윙 노이즈 포함 → threshold 높여 오감지 억제
 // hand   : 팔 스윙 크게 섞임 → 케이던스만 참고, vert 비활성화
 applyDevicePos(pos) {
+// [CALIB_ANCHOR:DEVICE_PROFILES] 캘리브레이션 스니펫(코드 반영용)을 여기 표에 붙여넣으세요.
 const profiles = {
   // [수정] 2026.07.11 fit 파일 + 정밀 로그 원본을 초 단위로 정렬해 재검증(232개 지점).
   // 폰/가민 GCT 비율 평균 0.499(표준편차 0.025)로 거의 정확히 2배 구조적 오차 확인.
@@ -8596,17 +8598,35 @@ const garmin = (function () {
     const finalGct = ov.gctFallbackRatio != null ? ov.gctFallbackRatio : base.gctFallbackRatio;
     const finalVert = ov.vertScale != null ? ov.vertScale : base.vertScale;
     const finalRot = ov.rotRejectThreshold != null ? ov.rotRejectThreshold : base.rotRejectThreshold;
-    const snippetLine = ov.devicePos + ':   { groundThreshold: ' + base.groundThreshold + ', impactThreshold: ' + base.impactThreshold
+    const snippetLine = '// 찾기: CALIB_ANCHOR:DEVICE_PROFILES\n'
+      + ov.devicePos + ':   { groundThreshold: ' + base.groundThreshold + ', impactThreshold: ' + base.impactThreshold
       + ', gctFallbackRatio: ' + finalGct + ', vertScale: ' + finalVert + ', minStepInterval: ' + base.minStepInterval
       + ', vertEnabled: ' + base.vertEnabled + ', rotRejectThreshold: ' + finalRot + ' },';
-    const snippet = snippetLine;
+    // [추가] gpsDistCorrectionFactor / strideCorrectionFactor는 applyDevicePos 표가 아니라
+    // defaultProfile 쪽 값이라 별도 줄로 생성한다. 실제 저장된 현재값을 읽어서 보여줌
+    // (ov.prevXxx는 "이전값"이라 여기선 안 쓰고, localStorage의 현재 프로필에서 가져온다).
+    let profileFactorsLine = '';
+    try {
+      const curProf = storage.loadProfile();
+      const factorParts = [];
+      if (ov.prevStrideCorrectionFactor != null && typeof curProf.strideCorrectionFactor === 'number') {
+        factorParts.push('strideCorrectionFactor: ' + curProf.strideCorrectionFactor.toFixed(3));
+      }
+      if (ov.prevGpsDistCorrectionFactor != null && typeof curProf.gpsDistCorrectionFactor === 'number') {
+        factorParts.push('gpsDistCorrectionFactor: ' + curProf.gpsDistCorrectionFactor.toFixed(3));
+      }
+      if (factorParts.length) {
+        profileFactorsLine = '\n\n// 찾기: CALIB_ANCHOR:DEFAULT_PROFILE\n' + factorParts.join(', ');
+      }
+    } catch (e) {}
+    const snippet = snippetLine + profileFactorsLine;
     const escapedSnippet = snippet.replace(/'/g, "\\'").replace(/\n/g, '\\n');
 
     box.innerHTML = '<div class="garmin-import-item" style="border-color:#3a3a2a;">'
       + '<div style="font-size:10px; color:var(--primary); font-weight:900; margin-bottom:6px;">' + (isKo ? '적용된 보정값' : 'CUSTOM CALIBRATION APPLIED') + '</div>'
       + '<div style="font-size:11px; color:#ccc; line-height:1.6;">' + parts.join('<br>') + '</div>'
       + (dateTxt ? '<div style="font-size:10px; color:#666; margin-top:6px;">' + (isKo ? '적용일: ' : 'Applied: ') + dateTxt + '</div>' : '')
-      + '<div style="font-size:9px; color:#888; font-weight:800; margin-top:12px; margin-bottom:4px;">' + (isKo ? '코드 반영용 스니펫 (applyDevicePos)' : 'CODE SNIPPET (applyDevicePos)') + '</div>'
+      + '<div style="font-size:9px; color:#888; font-weight:800; margin-top:12px; margin-bottom:4px;">' + (isKo ? '코드 반영용 스니펫 (applyDevicePos / defaultProfile)' : 'CODE SNIPPET (applyDevicePos / defaultProfile)') + '</div>'
       + '<pre style="background:#000; border:1px solid #2a2a2a; border-radius:8px; padding:10px; font-size:10px; color:#0f0; white-space:pre-wrap; word-break:break-all; margin:0;">' + snippet.replace(/</g,'&lt;') + '</pre>'
       + '<button id="btn-copy-calib-snippet" style="margin-top:8px; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.copySnippet(\'' + escapedSnippet + '\')">' + (isKo ? '스니펫 복사' : 'COPY SNIPPET') + '</button>'
       + (hasUndo ? '<button id="btn-undo-calib" style="margin-top:8px; background:transparent; color:var(--primary); border:1.5px solid #2a3a2f; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.undoLastCalibration()">' + (isKo ? '직전 적용 이전으로 되돌리기' : 'UNDO LAST APPLY') + '</button>' : '')
