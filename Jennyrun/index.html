@@ -1686,7 +1686,7 @@ alert(isKo
 return false;
 }
 }
-savePrecisionLog(log) {
+savePrecisionLog(log, devicePos) { // [수정] 착용 위치를 로그와 함께 저장해 나중에 export해도 어느 위치 기록인지 확인 가능하게 함
 if (!log || !log.length) return;
 // [추가] 초장거리(예: 마라톤/울트라, 3시간+) 러닝은 초당 샘플이 수만 개까지 쌓여
 // localStorage 용량 한도를 넘길 수 있음. 5000개(초당 기록 기준 약 1시간 23분 분량)를
@@ -1700,7 +1700,7 @@ finalLog = log.filter((_, i) => i % step === 0);
 downsampled = true;
 }
 const list = this.loadPrecisionLogs();
-list.unshift({ id: 'plog_' + Date.now(), savedAt: new Date().toISOString(), log: finalLog, downsampled: downsampled });
+list.unshift({ id: 'plog_' + Date.now(), savedAt: new Date().toISOString(), log: finalLog, downsampled: downsampled, devicePos: devicePos || null });
 // [수정] localStorage 용량 보호 + "지난 로그가 쌓여봐야 소용없다"는 사용 패턴 반영.
 // 기존 30개 → 최근 3개까지만 보관 (그 이상은 오래돼서 비교 의미가 떨어짐).
 this.savePrecisionLogsList(list.slice(0, 3));
@@ -1718,9 +1718,13 @@ this.savePrecisionLogsList([]);
 if (typeof ui !== 'undefined') ui.renderPrecisionLogList();
 }
 }
-buildPrecisionCsv(log) {
-const headers = ['t_sec','timestamp','lat','lng','gps_accuracy_m','dist_km','speed_kmh','cadence_spm','gct_ms','flight_pct','step_length_m','step_length_window_m','step_length_instant_m','vert_osc_mm','hr_bpm','hr_zone','rot_peak_dps','gyro_alpha_dps','gyro_beta_dps','gyro_gamma_dps'];
-const rows = log.map(r => [r.t, r.timestamp || '', r.lat || '', r.lng || '', r.gpsAcc != null ? r.gpsAcc : '', r.distKm, r.speedKmh, r.cadence, r.gctMs, r.flightPct, r.stepLengthM != null ? r.stepLengthM : '', r.stepLengthWindowM != null ? r.stepLengthWindowM : '', r.stepLengthInstantM != null ? r.stepLengthInstantM : '', r.vertOscMm != null ? r.vertOscMm : '', r.hrBpm, r.hrZone, r.rotPeakDps != null ? r.rotPeakDps : '', r.gyroAlpha != null ? r.gyroAlpha : '', r.gyroBeta != null ? r.gyroBeta : '', r.gyroGamma != null ? r.gyroGamma : ''].join(','));
+buildPrecisionCsv(log, devicePos) {
+// [수정] device_pos 컬럼 추가: 이 로그 전체가 어느 착용 위치(chest/waist/armband/hand)로
+// 뛴 러닝인지 매 행에 동일한 값으로 남겨서, export한 CSV만 봐도 확인 가능하게 함.
+// 기존엔 이 정보가 CSV 어디에도 없어서, 같은 날 위치를 바꿔가며 여러 번 뛰면
+// 어느 로그가 어느 위치였는지 나중에 구분할 방법이 없었음.
+const headers = ['t_sec','timestamp','lat','lng','gps_accuracy_m','dist_km','speed_kmh','cadence_spm','gct_ms','flight_pct','step_length_m','step_length_window_m','step_length_instant_m','vert_osc_mm','hr_bpm','hr_zone','rot_peak_dps','gyro_alpha_dps','gyro_beta_dps','gyro_gamma_dps','device_pos'];
+const rows = log.map(r => [r.t, r.timestamp || '', r.lat || '', r.lng || '', r.gpsAcc != null ? r.gpsAcc : '', r.distKm, r.speedKmh, r.cadence, r.gctMs, r.flightPct, r.stepLengthM != null ? r.stepLengthM : '', r.stepLengthWindowM != null ? r.stepLengthWindowM : '', r.stepLengthInstantM != null ? r.stepLengthInstantM : '', r.vertOscMm != null ? r.vertOscMm : '', r.hrBpm, r.hrZone, r.rotPeakDps != null ? r.rotPeakDps : '', r.gyroAlpha != null ? r.gyroAlpha : '', r.gyroBeta != null ? r.gyroBeta : '', r.gyroGamma != null ? r.gyroGamma : '', devicePos || ''].join(','));
 return headers.join(',') + '\n' + rows.join('\n');
 }
 downloadCsvFile(csvStr, fileName) {
@@ -1747,7 +1751,7 @@ if (!entry || !entry.log || !entry.log.length) {
 alert(isKo ? '로그를 찾을 수 없습니다.' : 'Could not find this log.');
 return;
 }
-const csvStr = this.buildPrecisionCsv(entry.log);
+const csvStr = this.buildPrecisionCsv(entry.log, entry.devicePos);
 const d = new Date(entry.savedAt);
 const dateStr = d.toISOString().slice(0,10);
 const timeStr = d.toTimeString().slice(0,8).replace(/:/g,'');
@@ -2435,9 +2439,12 @@ const count = item.log ? item.log.length : 0;
 const badge = item.imported ? ' <span style="color:#888; font-weight:700;">· ' + (isKo ? '가져옴' : 'IMPORTED') + '</span>' : '';
 // [추가] 초장거리 러닝이라 용량 보호를 위해 샘플을 솎아낸 로그는 구분 배지 표시
 const downsampledBadge = item.downsampled ? ' <span style="color:#e0a030; font-weight:700;">· ' + (isKo ? '축약됨' : 'DOWNSAMPLED') + '</span>' : '';
+// [추가] 착용 위치 배지: 어느 위치로 뛴 로그인지 리스트에서 바로 구분 가능하게 표시
+const posLabelMap = isKo ? { chest:'가슴', waist:'허리', armband:'암밴드', hand:'손' } : { chest:'CHEST', waist:'WAIST', armband:'ARMBAND', hand:'HAND' };
+const posBadge = item.devicePos ? ' <span style="color:#7fd3ff; font-weight:700;">· ' + (posLabelMap[item.devicePos] || item.devicePos) + '</span>' : '';
 return '<div class="garmin-import-item">'
 + '<div class="garmin-import-item-head">'
-+ '<div class="garmin-import-item-title">' + label + ' · ' + count + (isKo ? '개' : ' rows') + badge + downsampledBadge + '</div>'
++ '<div class="garmin-import-item-title">' + label + ' · ' + count + (isKo ? '개' : ' rows') + posBadge + badge + downsampledBadge + '</div>'
 + '<div style="display:flex; gap:6px;">'
 + '<div class="garmin-import-item-del" style="color:var(--primary); border-color:#2a3a2f;" onclick="storage.exportPrecisionLogById(\'' + item.id + '\')">' + (isKo ? '내보내기' : 'EXPORT') + '</div>'
 + '<div class="garmin-import-item-del" onclick="storage.deletePrecisionLog(\'' + item.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</div>'
@@ -4147,15 +4154,15 @@ const profiles = {
   // [수정] 2026.07.11 fit 파일 + 정밀 로그 원본을 초 단위로 정렬해 재검증(232개 지점).
   // 폰/가민 GCT 비율 평균 0.499(표준편차 0.025)로 거의 정확히 2배 구조적 오차 확인.
   // 기존 추정치(0.681, 평균값만 비교)보다 정밀한 값(0.701)으로 갱신.
-  chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.701, vertScale: 0.454, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220 }, // [수정] Garmin FIT 실측 대비 보정 (2026-07-12 런 데이터 기준, 기존 6.0은 약 13.2배 과다측정)
-  waist:   { groundThreshold: 10.5, impactThreshold: 10.0, gctFallbackRatio: 0.38, vertScale: 5.5, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220 },
-  armband: { groundThreshold: 12.0, impactThreshold: 12.5, gctFallbackRatio: 0.33, vertScale: 4.5, minStepInterval: 240, vertEnabled: true,  rotRejectThreshold: 220 },
+  chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.701, vertScale: 0.454, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false }, // [수정] Garmin FIT 실측 대비 보정 (2026-07-12 런 데이터 기준, 기존 6.0은 약 13.2배 과다측정)
+  waist:   { groundThreshold: 10.5, impactThreshold: 10.0, gctFallbackRatio: 0.38, vertScale: 5.5, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false },
+  armband: { groundThreshold: 12.0, impactThreshold: 12.5, gctFallbackRatio: 0.33, vertScale: 4.5, minStepInterval: 240, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false },
   // [추가] 손에 들고 뛰면 팔 스윙 자체가 220deg/s를 훌쩍 넘는 회전을 만들어 내서,
   // 기존 고정값(220)으로는 진짜 걸음까지 "폰이 흔들린 노이즈"로 오판해 버려지는 바람에
   // 케이던스가 절반 가까이 언더카운트되는 문제가 있었음(실측: 171 → 81).
   // 팔 스윙 회전은 훨씬 크므로 임계값을 크게 높여서 정상 걸음을 노이즈로 오판하지 않게 함.
   // 정밀로그 rot_peak_dps 실측값으로 추후 더 정밀하게 조정 가능.
-  hand:    { groundThreshold: 13.5, impactThreshold: 14.0, gctFallbackRatio: 0.35, vertScale: 0,   minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600 },
+  hand:    { groundThreshold: 13.5, impactThreshold: 14.0, gctFallbackRatio: 0.35, vertScale: 0,   minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: true }, // [수정] 네이티브 구제는 손에서만 동작 (가슴/허리/암밴드는 v27 방식대로 무조건 거부 — 가민 실측 대비 정확도 더 높음)
 };
 const p = profiles[pos] || profiles.chest;
 this.groundThreshold  = p.groundThreshold;
@@ -4165,6 +4172,7 @@ this.vertScale        = p.vertScale;
 this.minStepInterval  = p.minStepInterval;
 this.vertEnabled      = p.vertEnabled;
 this.rotRejectThreshold = p.rotRejectThreshold;
+this.nativeRescueEnabled = !!p.nativeRescueEnabled; // [추가] 네이티브 걸음센서 구제는 이 위치에서만 허용할지 여부 (기본 손만 true)
 // [추가] 가민 캘리브레이션 비교(garmin.applyCalibration)에서 저장한 보정값이 있으면
 // 위치별 기본값 위에 덮어쓴다. 착용 위치가 바뀌면(override.devicePos 불일치) 적용하지 않음 —
 // 위치가 바뀌면 새로 비교/적용해야 함.
@@ -4383,8 +4391,13 @@ missedStepsToResync = probableSteps - 1;
 // 착각)일 가능성이 높으므로 걸음으로 인정하고 계속 진행한다. GCT/좌우밸런스/
 // 수직진동 등은 그대로 이 사이클의 자체 파형 분석값을 사용 — 네이티브 센서는
 // "걸음 있었는지"만 확정해줄 뿐 그 모양까지 알려주진 않기 때문.
+// [수정] 이 구제는 원래 "손" 착용 시 팔 스윙을 노이즈로 오판해 언더카운트되던
+// 문제를 고치려고 넣은 것인데, 위치 구분 없이 전부에 적용되면서 가슴/허리/암밴드
+// 에서는 오히려 원래 정확했던 거부 판정을 뒤집어 케이던스를 과다측정하는 부작용이
+// 있었음(가민 FIT 대비 검증 완료). nativeRescueEnabled가 켜진 위치(기본: 손)에서만
+// 동작하도록 제한 — 가슴/허리/암밴드는 v27과 동일하게 무조건 거부.
 if (this.rotPeakSinceLastStep > this.rotRejectThreshold) {
-if (this.isNativeBridgeLive() && this.hasNearbyNativeStep(now)) {
+if (this.nativeRescueEnabled && this.isNativeBridgeLive() && this.hasNearbyNativeStep(now)) {
 this.nativeRescueCount++;
 // 걸음으로 인정 — return하지 않고 아래로 계속 진행
 } else {
@@ -5412,6 +5425,11 @@ this._lastDeltaDist = null;
 this._lastDeltaTime = null;
 this._kalman = null; // 칼만 필터 리셋 (새 러닝 시작 시 첫 GPS 포인트로 재초기화)
 if (typeof hrManager !== 'undefined') hrManager.reset(); // [추가] 새 러닝 시작 시 심박 샘플 초기화
+// [추가] 러닝 시작 시점에 실제로 적용 중인 착용 위치를 세션 상태에 고정.
+// 기존엔 종료(finish) 시점에 storage.loadProfile().devicePos를 다시 읽어와서 기록했는데,
+// 이러면 "이번 러닝 도중/종료 후 다음 러닝 전에 설정을 바꾼 경우" 실제로 이번 러닝에
+// 적용된 위치가 아니라 나중에 바뀐 값이 로그에 저장되는 문제가 있었음.
+this.state.runDevicePos = (() => { try { return storage.loadProfile().devicePos || 'chest'; } catch(e) { return 'chest'; } })();
 if(this.motion) this.motion.reset();
 // [신규] 걷기 모드 상태 초기화 (러닝 상태 초기화와 완전 분리, 시작 시점의 설정값을 세션 내내 고정)
 this.state.activityMode = storage.getActivityMode();
@@ -5597,7 +5615,7 @@ const _snapshotStride = (() => {
         clampedToM: parseFloat(clamped.toFixed(2)),
         stepCount,
         totalDistM: parseFloat(totalDistM.toFixed(1)),
-        devicePos: (() => { try { return storage.loadProfile().devicePos || 'chest'; } catch(e) { return null; } })()
+        devicePos: this.state.runDevicePos || null // [수정] 종료 시점이 아닌 이번 러닝 시작 시점 값 사용
       };
     }
     return parseFloat(clamped.toFixed(2));
@@ -5632,6 +5650,7 @@ vertRatio: measuredVertRatio,
 kcal: calculatedKcal,
 stride: _snapshotStride,           // [추가] 보폭 스냅샷 저장
 sensorDiag: _strideSensorFlag,     // [추가] 개발자 전용 진단 플래그. 클램프가 발동한 기록에만 값이 있음(UI 비노출, export로만 확인)
+devicePos: this.state.runDevicePos || null, // [추가] 이번 러닝에 실제로 적용된 착용 위치(클램프 여부와 무관하게 항상 기록)
 nativeStepRescueCount: this.motion.nativeRescueCount, // [추가] 네이티브 걸음센서가 자이로 노이즈 필터의 오판을 구제해준 횟수(개발자 전용, UI 비노출)
 weightKgSnapshot: weightKg,        // [추가] 당시 체중(kg) 스냅샷 저장
 alt: this.state.currentAlt,
@@ -5642,7 +5661,7 @@ maxHr: (() => { const hm = hrManager.getAvgMax(); return hm.max !== null ? hm.ma
 hrZone: (() => { const hm = hrManager.getAvgMax(); const refHr = hm.avg !== null ? hm.avg : hrManager._hr; return refHr > 0 ? 'Z' + hrManager.getZone(refHr).z : null; })()
 };
 storage.saveRecord(record);
-storage.savePrecisionLog(this.state.precisionLog); // [수정] 정밀 로그 영구 저장 (앱 재시작/새 러닝 후에도 내보내기 가능)
+storage.savePrecisionLog(this.state.precisionLog, this.state.runDevicePos); // [수정] 정밀 로그 영구 저장 (앱 재시작/새 러닝 후에도 내보내기 가능) + 착용위치 동봉
 // 커뮤니티 업로드는 선택사항: 공유 모달을 띄워 사용자가 선택
 storage.clearTempSession();
 this.state.isRunning = false;
@@ -5696,7 +5715,7 @@ const _snapshotStride = (() => {
         clampedToM: parseFloat(clamped.toFixed(2)),
         stepCount,
         totalDistM: parseFloat(totalDistM.toFixed(1)),
-        devicePos: (() => { try { return storage.loadProfile().devicePos || 'chest'; } catch(e) { return null; } })()
+        devicePos: this.state.runDevicePos || null // [수정] 종료 시점이 아닌 이번 세션 시작 시점 값 사용
       };
     }
     return parseFloat(clamped.toFixed(2));
@@ -5735,6 +5754,7 @@ cadence: null, gct: null, flight: null, cadenceBal: null, gctBal: null, vertRati
 kcal: calculatedKcal,
 stride: _snapshotStride,
 sensorDiag: _strideSensorFlag,   // [추가] 개발자 전용 진단 플래그 (러닝 기록과 동일한 원칙)
+devicePos: this.state.runDevicePos || null, // [추가] 이번 세션에 실제로 적용된 착용 위치
 steps: this.state.walkSteps,     // [신규] 걷기 누적 걸음수
 walkSpm: avgSpm,                 // [신규] 평균 분당 걸음수
 weightKgSnapshot: weightKg,
@@ -5746,7 +5766,7 @@ maxHr: (() => { const hm = hrManager.getAvgMax(); return hm.max !== null ? hm.ma
 hrZone: (() => { const hm = hrManager.getAvgMax(); const refHr = hm.avg !== null ? hm.avg : hrManager._hr; return refHr > 0 ? 'Z' + hrManager.getZone(refHr).z : null; })()
 };
 storage.saveRecord(record);
-storage.savePrecisionLog(this.state.precisionLog);
+storage.savePrecisionLog(this.state.precisionLog, this.state.runDevicePos);
 storage.clearTempSession();
 this.state.isRunning = false;
 this.state.isPaused = false;
@@ -8560,10 +8580,10 @@ const garmin = (function () {
   // [추가] applyDevicePos()의 위치별 기본값과 동일한 표(코드와 반드시 값이 같아야
   // 정확한 스니펫이 나오므로, 코드 기본값을 고치면 이 표도 같이 고쳐야 함).
   const DEVICE_PROFILE_DEFAULTS = {
-    chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.701, vertScale: 0.454, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220 },
-    waist:   { groundThreshold: 10.5, impactThreshold: 10.0, gctFallbackRatio: 0.38,  vertScale: 5.5,   minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220 },
-    armband: { groundThreshold: 12.0, impactThreshold: 12.5, gctFallbackRatio: 0.33,  vertScale: 4.5,   minStepInterval: 240, vertEnabled: true,  rotRejectThreshold: 220 },
-    hand:    { groundThreshold: 13.5, impactThreshold: 14.0, gctFallbackRatio: 0.35,  vertScale: 0,     minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600 },
+    chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.701, vertScale: 0.454, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false },
+    waist:   { groundThreshold: 10.5, impactThreshold: 10.0, gctFallbackRatio: 0.38,  vertScale: 5.5,   minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false },
+    armband: { groundThreshold: 12.0, impactThreshold: 12.5, gctFallbackRatio: 0.33,  vertScale: 4.5,   minStepInterval: 240, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false },
+    hand:    { groundThreshold: 13.5, impactThreshold: 14.0, gctFallbackRatio: 0.35,  vertScale: 0,     minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: true },
   };
   const DEFAULT_ROT_REJECT_THRESHOLD = 220;
 
