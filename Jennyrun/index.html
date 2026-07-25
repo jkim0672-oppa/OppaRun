@@ -756,6 +756,9 @@ alt="runner"/>
 </div>
 <button id="btn-start-calib" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:16px; border-radius:12px; width:100%; font-weight:900; font-size:13px; margin-top:10px;" onclick="ui.startCalibrationRun()">START CALIBRATION RUN</button>
 <div id="calib-current-factor" style="font-size:11px; color:#888; margin-top:10px;">Current correction factor: 1.00 (default, not yet calibrated)</div>
+<!-- [추가] 트랙 캘리브레이션 전용 다운로드 버튼. 개발자 모드일 때만 노출(applyDevModeVisibility에서 display 토글) -
+     일반 사용자에게는 기본적으로 display:none으로 숨겨져 있어 원본 소스 노출 문제 없음. -->
+<button id="btn-download-stride-calib" style="display:none; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:12px; border-radius:10px; width:100%; font-weight:800; font-size:11px; margin-top:10px; cursor:pointer;" onclick="garmin.downloadPatchedHtml()">DOWNLOAD PATCHED HTML (STRIDE CALIB)</button>
 </div>
 <div class="section-title" id="section-title-data">DATA</div>
 <div style="margin-top:14px;">
@@ -2465,12 +2468,16 @@ alert(nowOn
   : (isKo ? '개발자 모드가 꺼졌습니다.' : 'Developer mode OFF.'));
 }
 }
-// [추가] 저장된 개발자 모드 값에 따라 GARMIN 탭 노출 여부를 반영. 앱 시작 시 1회,
-// 그리고 handleDevModeTap()에서 토글될 때마다 호출됨.
+// [추가] 저장된 개발자 모드 값에 따라 GARMIN 탭 및 STRIDE CALIBRATION 다운로드 버튼
+// 노출 여부를 반영. 앱 시작 시 1회, 그리고 handleDevModeTap()에서 토글될 때마다 호출됨.
 applyDevModeVisibility() {
+const on = storage.getDevMode();
+// [추가] 트랙 캘리브레이션 화면의 전용 다운로드 버튼 - 개발자 모드일 때만 노출.
+// 일반 사용자는 이 버튼 자체를 볼 수 없어 원본 소스 노출 문제가 없다.
+const strideDlBtn = document.getElementById('btn-download-stride-calib');
+if (strideDlBtn) strideDlBtn.style.display = on ? '' : 'none';
 const garminBtn = document.getElementById('info-sub-tab-garmin');
 if (!garminBtn) return;
-const on = storage.getDevMode();
 garminBtn.style.display = on ? '' : 'none';
 if (!on) {
 // 개발자 모드가 꺼진 상태에서 GARMIN 탭이 열려 있었다면 THEORY 탭으로 되돌림
@@ -8711,7 +8718,9 @@ const garmin = (function () {
       const rawHtml = await resp.text();
       const prof = storage.loadProfile();
       const ov = prof.motionCalibOverride;
-      if (!ov) {
+      const hasStrideFactor = typeof prof.strideCorrectionFactor === 'number' && prof.strideCorrectionFactor !== 1.0;
+      const hasGpsFactor = typeof prof.gpsDistCorrectionFactor === 'number' && prof.gpsDistCorrectionFactor !== 1.0;
+      if (!ov && !hasStrideFactor && !hasGpsFactor) {
         alert(isKo ? '적용된 캘리브레이션 값이 없습니다.' : 'No calibration override is currently applied.');
         return;
       }
