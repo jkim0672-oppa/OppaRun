@@ -8240,8 +8240,23 @@ const garmin = (function () {
     const clampRatio = (r) => Math.max(0.7, Math.min(1.3, r));
     const suggestedRot = (curRot != null && phoneAvgCadence && cadDiffPct != null && Math.abs(cadDiffPct) > 3)
       ? Math.max(60, Math.round(curRot * clampRatio(garminAvgCadence / phoneAvgCadence))) : null;
+    // [추가] OS 센서(걸음감지센서/걸음수센서) 기준의 대안 rotRejectThreshold 제안값.
+    // 위 suggestedRot은 가민을 기준(정답)으로 삼는데, 이건 같은 폰 안에서 자체 알고리즘과
+    // 안드로이드 자체 센서를 비교해서 나온 값 — 가민 없이도(혹은 가민과 별개로) 자체
+    // 알고리즘의 자이로 필터가 너무 엄격/느슨한지 교차검증하는 용도. 두 OS 센서 값이
+    // 둘 다 있으면 평균, 하나만 있으면 그 값을 기준으로 삼는다.
+    const osRefCadence = (stepDetectorCadence != null && stepCounterCadence != null)
+      ? (stepDetectorCadence + stepCounterCadence) / 2
+      : (stepDetectorCadence != null ? stepDetectorCadence : stepCounterCadence);
+    const osCadDiffPct = (osRefCadence != null && phoneAvgCadence) ? ((phoneAvgCadence - osRefCadence) / osRefCadence * 100) : null;
+    const suggestedRotOS = (curRot != null && phoneAvgCadence && osRefCadence && osCadDiffPct != null && Math.abs(osCadDiffPct) > 3)
+      ? Math.max(60, Math.round(curRot * clampRatio(osRefCadence / phoneAvgCadence))) : null;
+    // [수정] 다른 항목들(rot/vertScale/stride)과 다르게 이 항목만 clamp가 빠져있어서,
+    // 웜업 구간 노이즈나 GPS 튐 등으로 오차가 유난히 크게 나온 러닝 하나만 비교해도
+    // 제안값이 과도하게(2~3배 이상) 튈 수 있는 문제가 있었음. 다른 항목들과 동일하게
+    // ±30% clamp를 적용해 한 번에 너무 크게 바뀌지 않도록 안전장치 추가.
     const suggestedGct = (curGct != null && phoneAvgGct && garminAvgGct && gctDiffPct != null && Math.abs(gctDiffPct) > 3)
-      ? Math.round(curGct * (garminAvgGct / phoneAvgGct) * 1000) / 1000 : null;
+      ? Math.round(curGct * clampRatio(garminAvgGct / phoneAvgGct) * 1000) / 1000 : null;
     // [추가] 수직진동(vertScale)과 보폭(strideCorrectionFactor) 제안값.
     // 오차가 3% 이내면 노이즈로 보고 제안하지 않음. 과보정 방지를 위해 한 번에
     // ±30% 이상 바뀌지 않도록 clamp.
@@ -8342,19 +8357,23 @@ const garmin = (function () {
       { label: isKo ? '심박수' : 'AVG HR', phone: phoneAvgHr, garmin: garminAvgHr }
     ]);
 
-    const hasSuggestion = suggestedRot != null || suggestedGct != null || suggestedVertScale != null || suggestedStrideFactor != null || suggestedGpsDistFactor != null;
+    const hasSuggestion = suggestedRot != null || suggestedRotOS != null || suggestedGct != null || suggestedVertScale != null || suggestedStrideFactor != null || suggestedGpsDistFactor != null;
 
     if (hasSuggestion) {
       // [수정] 예전엔 아래 5개 값이 있으면 무조건 전부 한꺼번에 적용됐음.
       // 각 항목 앞에 체크박스를 둬서, 원하는 값만 선택해서 적용/대기목록 저장할 수 있게 함.
       // 기본은 전부 체크(기존 동작과 동일)라 아무것도 안 건드리면 이전과 똑같이 동작함.
-      const checkRow = (id, line) => '<label style="display:flex; align-items:flex-start; gap:8px; padding:4px 0; cursor:pointer;">'
-        + '<input type="checkbox" id="' + id + '" checked style="width:15px; height:15px; margin-top:1px; accent-color: var(--primary); flex-shrink:0;">'
+      const checkRow = (id, line, defaultChecked) => '<label style="display:flex; align-items:flex-start; gap:8px; padding:4px 0; cursor:pointer;">'
+        + '<input type="checkbox" id="' + id + '" ' + (defaultChecked !== false ? 'checked' : '') + ' style="width:15px; height:15px; margin-top:1px; accent-color: var(--primary); flex-shrink:0;">'
         + '<span>' + line + '</span></label>';
       html += '<div style="margin-top:12px; font-size:11px; color:#ccc; line-height:1.5;">'
         + '<div style="color:var(--primary); font-weight:900; margin-bottom:4px;">' + (isKo ? '권장 보정수치 (적용할 항목 선택)' : 'RECOMMENDED CALIBRATION (select items to apply)') + '</div>';
       if (suggestedRot != null) {
-        html += checkRow('calib-sel-rot', 'rotRejectThreshold: ' + curRot + ' → <b>' + suggestedRot + '</b> (deg/s)');
+        html += checkRow('calib-sel-rot', 'rotRejectThreshold: ' + curRot + ' → <b>' + suggestedRot + '</b> (deg/s) ' + (isKo ? '<span style="color:#666;">(가민 기준)</span>' : '<span style="color:#666;">(vs Garmin)</span>'));
+      }
+      if (suggestedRotOS != null) {
+        html += checkRow('calib-sel-rot-os', 'rotRejectThreshold: ' + curRot + ' → <b>' + suggestedRotOS + '</b> (deg/s) '
+          + (isKo ? '<span style="color:#7fd3ff;">(OS 센서 기준 대안 — 체크 시 위 값 대신 이 값이 적용됨)</span>' : '<span style="color:#7fd3ff;">(alt., based on OS sensor — overrides the row above if checked)</span>'), false);
       }
       if (suggestedGct != null) {
         html += checkRow('calib-sel-gct', 'gctFallbackRatio: ' + curGct + ' → <b>' + suggestedGct + '</b>');
@@ -8379,6 +8398,7 @@ const garmin = (function () {
         devicePos: (function () { try { return storage.loadProfile().devicePos || 'chest'; } catch (e) { return 'chest'; } })(),
         gct: suggestedGct,
         rot: suggestedRot,
+        rotOS: suggestedRotOS,
         vertScale: suggestedVertScale,
         strideFactor: suggestedStrideFactor,
         gpsDistFactor: suggestedGpsDistFactor
@@ -8426,10 +8446,16 @@ const garmin = (function () {
   function getCheckedSuggestion() {
     if (!lastSuggestion) return null;
     const isChecked = (id) => { const el = document.getElementById(id); return el ? el.checked : true; };
+    // [수정] rotRejectThreshold는 이제 두 개의 후보(가민 기준 / OS 센서 기준)가 있을 수 있음.
+    // OS 센서 기준 체크박스가 켜져 있으면 그 값이 우선(가민 기준 체크 여부와 무관하게 대체),
+    // 아니면 기존처럼 가민 기준 체크박스를 따른다.
+    const rotVal = (lastSuggestion.rotOS != null && isChecked('calib-sel-rot-os'))
+      ? lastSuggestion.rotOS
+      : ((lastSuggestion.rot != null && isChecked('calib-sel-rot')) ? lastSuggestion.rot : null);
     return {
       devicePos: lastSuggestion.devicePos,
       gct: (lastSuggestion.gct != null && isChecked('calib-sel-gct')) ? lastSuggestion.gct : null,
-      rot: (lastSuggestion.rot != null && isChecked('calib-sel-rot')) ? lastSuggestion.rot : null,
+      rot: rotVal,
       vertScale: (lastSuggestion.vertScale != null && isChecked('calib-sel-vert')) ? lastSuggestion.vertScale : null,
       strideFactor: (lastSuggestion.strideFactor != null && isChecked('calib-sel-stride')) ? lastSuggestion.strideFactor : null,
       gpsDistFactor: (lastSuggestion.gpsDistFactor != null && isChecked('calib-sel-gps')) ? lastSuggestion.gpsDistFactor : null
