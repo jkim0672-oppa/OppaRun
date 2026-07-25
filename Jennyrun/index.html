@@ -1723,8 +1723,11 @@ buildPrecisionCsv(log, devicePos) {
 // 뛴 러닝인지 매 행에 동일한 값으로 남겨서, export한 CSV만 봐도 확인 가능하게 함.
 // 기존엔 이 정보가 CSV 어디에도 없어서, 같은 날 위치를 바꿔가며 여러 번 뛰면
 // 어느 로그가 어느 위치였는지 나중에 구분할 방법이 없었음.
-const headers = ['t_sec','timestamp','lat','lng','gps_accuracy_m','dist_km','speed_kmh','cadence_spm','gct_ms','flight_pct','step_length_m','step_length_window_m','step_length_instant_m','vert_osc_mm','hr_bpm','hr_zone','rot_peak_dps','gyro_alpha_dps','gyro_beta_dps','gyro_gamma_dps','device_pos'];
-const rows = log.map(r => [r.t, r.timestamp || '', r.lat || '', r.lng || '', r.gpsAcc != null ? r.gpsAcc : '', r.distKm, r.speedKmh, r.cadence, r.gctMs, r.flightPct, r.stepLengthM != null ? r.stepLengthM : '', r.stepLengthWindowM != null ? r.stepLengthWindowM : '', r.stepLengthInstantM != null ? r.stepLengthInstantM : '', r.vertOscMm != null ? r.vertOscMm : '', r.hrBpm, r.hrZone, r.rotPeakDps != null ? r.rotPeakDps : '', r.gyroAlpha != null ? r.gyroAlpha : '', r.gyroBeta != null ? r.gyroBeta : '', r.gyroGamma != null ? r.gyroGamma : '', devicePos || ''].join(','));
+// [추가] step_detector_cnt / step_counter_steps 컬럼 추가: 안드로이드 네이티브 걸음
+// 센서(TYPE_STEP_DETECTOR 누적 이벤트 수, TYPE_STEP_COUNTER 기준 이번 러닝 걸음수)를
+// 자체 알고리즘 케이던스와 나란히 비교할 수 있게 남겨둔다 (가민 비교 화면 교차검증용).
+const headers = ['t_sec','timestamp','lat','lng','gps_accuracy_m','dist_km','speed_kmh','cadence_spm','gct_ms','flight_pct','step_length_m','step_length_window_m','step_length_instant_m','vert_osc_mm','hr_bpm','hr_zone','rot_peak_dps','gyro_alpha_dps','gyro_beta_dps','gyro_gamma_dps','device_pos','step_detector_cnt','step_counter_steps'];
+const rows = log.map(r => [r.t, r.timestamp || '', r.lat || '', r.lng || '', r.gpsAcc != null ? r.gpsAcc : '', r.distKm, r.speedKmh, r.cadence, r.gctMs, r.flightPct, r.stepLengthM != null ? r.stepLengthM : '', r.stepLengthWindowM != null ? r.stepLengthWindowM : '', r.stepLengthInstantM != null ? r.stepLengthInstantM : '', r.vertOscMm != null ? r.vertOscMm : '', r.hrBpm, r.hrZone, r.rotPeakDps != null ? r.rotPeakDps : '', r.gyroAlpha != null ? r.gyroAlpha : '', r.gyroBeta != null ? r.gyroBeta : '', r.gyroGamma != null ? r.gyroGamma : '', devicePos || '', r.stepDetectorCnt != null ? r.stepDetectorCnt : '', r.stepCounterSteps != null ? r.stepCounterSteps : ''].join(','));
 return headers.join(',') + '\n' + rows.join('\n');
 }
 downloadCsvFile(csvStr, fileName) {
@@ -4108,6 +4111,15 @@ this.nativeBridgeLastSeenAt = 0;
 // [추가] 정밀 로그/진단용: 이번 러닝 동안 네이티브 센서가 "걸음"이라고 확정해줬는데
 // 자체 알고리즘은 자이로 노이즈로 오판해 버릴 뻔한 걸음을 몇 번 구제했는지 카운트.
 this.nativeRescueCount = 0;
+// [추가] 가민 비교용 교차검증 진단: nativeStepTimestamps는 구제 판정용으로 최근 4초치만
+// 보관되어 러닝 전체 걸음수 집계에는 못 쓰므로, 별도로 러닝 시작부터 끝까지 안 지워지는
+// 누적 카운터를 둔다. TYPE_STEP_DETECTOR(이벤트별) 총 개수와, TYPE_STEP_COUNTER(누적값)
+// 기반 걸음수 둘 다 기록해서 정밀로그/가민비교 화면에서 "자체 알고리즘 vs 안드로이드
+// 센서" 케이던스를 서로 비교할 수 있게 한다. 두 안드로이드 센서는 서로 다른 하드웨어
+// 경로(코프로세서 배치 처리)라 값이 살짝 다를 수 있어 둘 다 남겨둠.
+this.nativeStepDetectorTotalCount = 0;
+this.stepCounterBaselineCum = null;
+this.stepCounterLastCum = null;
 // [추가] 정밀 로그(초당)용: 가장 최근 완료된 스텝 1회의 축별 부호 있는 자이로 평균(deg/s)
 this.lastStepGyroA = null;
 this.lastStepGyroB = null;
@@ -4237,6 +4249,9 @@ this.rotPeakSinceLastStep = 0;
 this.nativeStepTimestamps = [];
 this.nativeBridgeLastSeenAt = 0;
 this.nativeRescueCount = 0;
+this.nativeStepDetectorTotalCount = 0;
+this.stepCounterBaselineCum = null;
+this.stepCounterLastCum = null;
 // [추가] 좌우 판별 진단용 변수도 매 러닝 시작 시 초기화
 this.gyroCycleSum = { a: 0, b: 0, g: 0 };
 this.gyroCycleCount = 0;
@@ -4269,12 +4284,31 @@ this.calibForceSamples = [];
 onNativeStep(tsMs) {
 const now = (typeof tsMs === 'number') ? tsMs : Date.now();
 this.nativeStepTimestamps.push(now);
+// [추가] 구제 판정용 4초 윈도우와 별개로, 러닝 전체 총 개수는 계속 누적
+// (가민 비교 화면에서 "안드로이드 걸음감지센서 vs 자체알고리즘" 교차검증용)
+this.nativeStepDetectorTotalCount++;
 // 최근 4초치만 보관 (오래된 건 케이던스 판단에 의미 없음)
 const cutoff = now - 4000;
 while (this.nativeStepTimestamps.length && this.nativeStepTimestamps[0] < cutoff) {
 this.nativeStepTimestamps.shift();
 }
 this.nativeBridgeLastSeenAt = now;
+}
+// [추가] 네이티브 걸음수 센서(TYPE_STEP_COUNTER, 부팅 이후 누적값) 수신용.
+// window.onNativeStepCountUpdate(전역 브릿지 함수)에서 호출된다.
+// TYPE_STEP_DETECTOR와 별도 하드웨어 경로라, 둘을 같이 남겨두면 서로 교차검증할 수 있다.
+// 첫 이벤트를 이번 러닝의 기준(baseline)으로 저장해두고, 이후 값과의 차이로
+// "이번 러닝 동안 OS가 센 걸음수"를 구한다.
+onNativeStepCounterUpdate(cum) {
+if (typeof cum !== 'number') return;
+if (this.stepCounterBaselineCum === null) this.stepCounterBaselineCum = cum;
+this.stepCounterLastCum = cum;
+}
+// [추가] 이번 러닝 동안 TYPE_STEP_COUNTER 기준으로 OS가 센 걸음수(음수 방지 clamp).
+// 기준값이 아직 없으면(첫 이벤트 전) null.
+getStepCounterDelta() {
+if (this.stepCounterBaselineCum === null || this.stepCounterLastCum === null) return null;
+return Math.max(0, this.stepCounterLastCum - this.stepCounterBaselineCum);
 }
 // 네이티브 걸음 이벤트가 최근에도 계속 들어오고 있는지(=이 기기/OS에서
 // 브릿지가 실제로 살아있는지). 이벤트가 3초 넘게 끊기면 기기 미지원/오류로 보고
@@ -5317,6 +5351,13 @@ const vertOscMm = (this.motion && this.motion.lastStepVertOscCm != null)
 const gyroA = (this.motion && this.motion.lastStepGyroA != null) ? this.motion.lastStepGyroA : '';
 const gyroB = (this.motion && this.motion.lastStepGyroB != null) ? this.motion.lastStepGyroB : '';
 const gyroG = (this.motion && this.motion.lastStepGyroG != null) ? this.motion.lastStepGyroG : '';
+// [추가] 안드로이드 네이티브 걸음 센서 교차검증용 누적값 스냅샷.
+// stepDetectorCnt: TYPE_STEP_DETECTOR 누적 이벤트 수(러닝 시작부터 지금까지).
+// stepCounterSteps: TYPE_STEP_COUNTER 기준, 러닝 시작 이후 OS가 센 걸음수.
+// 둘 다 브릿지가 없거나(iOS, 구형 기기 등) 아직 값이 안 온 상태면 빈 값으로 남음.
+const stepDetectorCnt = (this.motion && this.motion.nativeStepDetectorTotalCount) ? this.motion.nativeStepDetectorTotalCount : '';
+const stepCounterDelta = (this.motion && typeof this.motion.getStepCounterDelta === 'function') ? this.motion.getStepCounterDelta() : null;
+const stepCounterSteps = (stepCounterDelta != null) ? stepCounterDelta : '';
 this.state.precisionLog.push({
 t: this.state.seconds,
 timestamp: nowIso,
@@ -5337,7 +5378,9 @@ hrZone: getTxt('hr-zone-val'),
 rotPeakDps: rotPeakDps,
 gyroAlpha: gyroA,
 gyroBeta: gyroB,
-gyroGamma: gyroG
+gyroGamma: gyroG,
+stepDetectorCnt: stepDetectorCnt,
+stepCounterSteps: stepCounterSteps
 });
 }
 // [신규] 화면 꺼짐 대응: setInterval 대신 네이티브 모션/위치 이벤트가 들어올 때마다
@@ -5982,6 +6025,21 @@ if (typeof app !== 'undefined' && app &&
 app.motion.onNativeStep(typeof timestamp === 'number' ? timestamp : Date.now());
 }
 } catch (e) { console.error('onNativeStepDetected error', e); }
+};
+
+// [신규] 네이티브 안드로이드 걸음수 센서(TYPE_STEP_COUNTER, 부팅 이후 누적값) 브릿지 수신부.
+// 기존엔 네이티브(LocationForegroundService.stepListener)가 이 값을 WebView로 보내주고
+// 있었는데도 JS 쪽엔 이걸 받는 핸들러가 아예 없어서 완전히 버려지고 있었음.
+// TYPE_STEP_DETECTOR(이벤트별)와 다른 하드웨어 경로라, 가민 비교 화면에서
+// "자체 알고리즘 vs 안드로이드 걸음수센서" 교차검증용으로 함께 활용한다.
+window.onNativeStepCountUpdate = function (count, timestamp) {
+try {
+if (typeof app !== 'undefined' && app &&
+    app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused &&
+    app.state.activityMode !== 'walk' && app.motion) {
+app.motion.onNativeStepCounterUpdate(count);
+}
+} catch (e) { console.error('onNativeStepCountUpdate error', e); }
 };
 
 const SUPABASE_URL = 'https://ujodpspxsisoycniswwl.supabase.co';
@@ -8101,6 +8159,20 @@ const garmin = (function () {
     const garminAvgCadence = garminItem.avgCadence;
     const garminAvgGct = garminItem.avgGctMs;
 
+    // [추가] 안드로이드 네이티브 걸음 센서 교차검증: 정밀로그 마지막 행에 남아있는
+    // 누적값(stepDetectorCnt/stepCounterSteps)과 로그 길이(초)로 "OS가 측정한 케이던스"를
+    // 역산해서, 자체 알고리즘·가민이랑 나란히 비교할 수 있게 한다. 둘 다 값이 없으면
+    // (구형 기기, 브릿지 미지원 등) 해당 행은 표에서 자동으로 생략됨.
+    const precFirstRow = precItem.log.length ? precItem.log[0] : null;
+    const precLastRow = precItem.log.length ? precItem.log[precItem.log.length - 1] : null;
+    const precDurationSec = (precFirstRow && precLastRow) ? Math.max(1, (parseFloat(precLastRow.t) - parseFloat(precFirstRow.t))) : null;
+    const stepDetectorCadence = (precDurationSec && precLastRow && precLastRow.stepDetectorCnt !== '' && precLastRow.stepDetectorCnt != null)
+      ? (parseFloat(precLastRow.stepDetectorCnt) / precDurationSec * 60) : null;
+    const stepCounterCadence = (precDurationSec && precLastRow && precLastRow.stepCounterSteps !== '' && precLastRow.stepCounterSteps != null)
+      ? (parseFloat(precLastRow.stepCounterSteps) / precDurationSec * 60) : null;
+    const stepDetectorDiffPct = (stepDetectorCadence != null && garminAvgCadence) ? ((stepDetectorCadence - garminAvgCadence) / garminAvgCadence * 100) : null;
+    const stepCounterDiffPct = (stepCounterCadence != null && garminAvgCadence) ? ((stepCounterCadence - garminAvgCadence) / garminAvgCadence * 100) : null;
+
     const cadDiffPct = phoneAvgCadence ? ((phoneAvgCadence - garminAvgCadence) / garminAvgCadence * 100) : null;
     const gctDiffPct = (phoneAvgGct && garminAvgGct) ? ((phoneAvgGct - garminAvgGct) / garminAvgGct * 100) : null;
 
@@ -8232,12 +8304,32 @@ const garmin = (function () {
       + '<span>' + (isKo ? '폰' : 'PHONE') + '</span><span>' + (isKo ? '가민' : 'GARMIN') + '</span><span>' + (isKo ? '오차' : 'DIFF') + '</span>'
       + '</div>'
       + row(isKo ? '케이던스 (spm)' : 'CADENCE (spm)', phoneAvgCadence, garminAvgCadence, cadDiffPct, '')
+      + (stepDetectorCadence != null ? row(isKo ? '↳ OS 걸음감지센서 (spm)' : '↳ OS STEP DETECTOR (spm)', stepDetectorCadence, garminAvgCadence, stepDetectorDiffPct, '') : '')
+      + (stepCounterCadence != null ? row(isKo ? '↳ OS 걸음수센서 (spm)' : '↳ OS STEP COUNTER (spm)', stepCounterCadence, garminAvgCadence, stepCounterDiffPct, '') : '')
       + row(isKo ? 'GCT (ms)' : 'GCT (ms)', phoneAvgGct, garminAvgGct, gctDiffPct, '')
       + row(isKo ? '보폭 (mm)' : 'STEP LEN (mm)', phoneAvgStepMm, garminAvgStepMm, stepDiffPct, '')
       + row(isKo ? '수직진동 (mm)' : 'VERT OSC (mm)', phoneAvgVertMm, garminAvgVertMm, vertDiffPct, '')
       + rowKm(isKo ? '실제 거리 (km)' : 'DISTANCE (km)', phoneDistanceKm, garminDistanceKm, distDiffPct)
       + rowFmt(isKo ? '페이스 (/km)' : 'PACE (/km)', phoneAvgPaceSec, garminAvgPaceSec, paceDiffPct, fmtPace)
       + row(isKo ? '평균 심박수 (bpm)' : 'AVG HR (bpm)', phoneAvgHr, garminAvgHr, hrDiffPct, '');
+
+    // [추가] 자체 알고리즘 vs OS 걸음감지센서 vs OS 걸음수센서 중 어느 쪽이 가민 케이던스에
+    // 가장 가까운지 짧게 안내. 값이 하나라도 있어야 의미가 있으므로 그때만 표시.
+    if (stepDetectorCadence != null || stepCounterCadence != null) {
+      const candidates = [
+        { name: isKo ? '자체 알고리즘' : 'Algorithm', diff: cadDiffPct },
+        { name: isKo ? 'OS 걸음감지센서' : 'OS Step Detector', diff: stepDetectorDiffPct },
+        { name: isKo ? 'OS 걸음수센서' : 'OS Step Counter', diff: stepCounterDiffPct }
+      ].filter(c => c.diff != null);
+      if (candidates.length > 1) {
+        const closest = candidates.reduce((a, b) => Math.abs(a.diff) < Math.abs(b.diff) ? a : b);
+        html += '<div style="margin-top:8px; font-size:10px; color:#7fd3ff; font-weight:700; line-height:1.5;">'
+          + (isKo
+            ? '💡 이번 러닝은 <b>' + closest.name + '</b>이(가) 가민과 가장 가까웠어요(오차 ' + closest.diff.toFixed(1) + '%). 계속 이런 경향이면 해당 방식 쪽으로 재조정을 고려해보세요.'
+            : '💡 <b>' + closest.name + '</b> was closest to Garmin this run (' + closest.diff.toFixed(1) + '% off). If this pattern repeats, consider tuning toward that source.')
+          + '</div>';
+      }
+    }
 
     // [추가] 오버롤 비교 그래프 (표 밑에)
     html += buildOverallChart(isKo, [
