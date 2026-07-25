@@ -8629,6 +8629,7 @@ const garmin = (function () {
       + '<div style="font-size:9px; color:#888; font-weight:800; margin-top:12px; margin-bottom:4px;">' + (isKo ? '코드 반영용 스니펫 (applyDevicePos / defaultProfile)' : 'CODE SNIPPET (applyDevicePos / defaultProfile)') + '</div>'
       + '<pre style="background:#000; border:1px solid #2a2a2a; border-radius:8px; padding:10px; font-size:10px; color:#0f0; white-space:pre-wrap; word-break:break-all; margin:0;">' + snippet.replace(/</g,'&lt;') + '</pre>'
       + '<button id="btn-copy-calib-snippet" style="margin-top:8px; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.copySnippet(\'' + escapedSnippet + '\')">' + (isKo ? '스니펫 복사' : 'COPY SNIPPET') + '</button>'
+      + '<button id="btn-download-patched-html" style="margin-top:8px; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.downloadPatchedHtml()">' + (isKo ? '수정된 HTML 다운로드' : 'DOWNLOAD PATCHED HTML') + '</button>'
       + (hasUndo ? '<button id="btn-undo-calib" style="margin-top:8px; background:transparent; color:var(--primary); border:1.5px solid #2a3a2f; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.undoLastCalibration()">' + (isKo ? '직전 적용 이전으로 되돌리기' : 'UNDO LAST APPLY') + '</button>' : '')
       + '<button id="btn-reset-calib" style="margin-top:8px; background:transparent; color:#e57373; border:1px solid #663333; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.resetCalibration()">' + (isKo ? '기본값으로 초기화' : 'RESET TO DEFAULT') + '</button>'
       + '</div>';
@@ -8645,6 +8646,98 @@ const garmin = (function () {
         .catch(() => alert(isKo ? '복사에 실패했습니다. 위 텍스트를 직접 선택해 복사해주세요.' : 'Copy failed — please select and copy the text above manually.'));
     } else {
       alert(isKo ? '이 환경에선 자동 복사가 지원되지 않아요. 위 텍스트를 직접 선택해 복사해주세요.' : 'Auto-copy isn\'t supported here — please select and copy the text above manually.');
+    }
+  }
+
+  // [추가] 현재 배포된(GitHub Pages) 페이지 자신의 원본 HTML을 fetch로 그대로 읽어와서,
+  // CALIB_ANCHOR:DEVICE_PROFILES / CALIB_ANCHOR:DEFAULT_PROFILE 앵커 근처의 값만
+  // 지금 적용된 캘리브레이션(motionCalibOverride, strideCorrectionFactor, gpsDistCorrectionFactor)
+  // 값으로 치환한 "완성된 HTML 파일 전체"를 만들어 반환한다.
+  // 주의: fetch(location.href)는 현재 서버(GitHub Pages)에 실제로 올라가 있는 버전을 가져오는
+  // 것이므로, 그 사이 소스가 로컬에서만 따로 수정돼있고 아직 배포 전이라면 그 로컬 수정은
+  // 반영되지 않는다 — 어디까지나 "지금 배포된 버전 + 이번 캘리브레이션 값"만 합쳐주는 기능.
+  function buildPatchedHtml(rawHtml, ov, curProf) {
+    let html = rawHtml;
+
+    // 1) DEVICE_PROFILES 표 안, 해당 착용위치 줄만 치환
+    const devAnchorTag = 'CALIB_ANCHOR:DEVICE_PROFILES';
+    const devAnchorIdx = html.indexOf(devAnchorTag);
+    if (devAnchorIdx !== -1 && ov && ov.devicePos) {
+      const base = DEVICE_PROFILE_DEFAULTS[ov.devicePos] || DEVICE_PROFILE_DEFAULTS.chest;
+      const finalGct = ov.gctFallbackRatio != null ? ov.gctFallbackRatio : base.gctFallbackRatio;
+      const finalVert = ov.vertScale != null ? ov.vertScale : base.vertScale;
+      const finalRot = ov.rotRejectThreshold != null ? ov.rotRejectThreshold : base.rotRejectThreshold;
+      const newObj = '{ groundThreshold: ' + base.groundThreshold + ', impactThreshold: ' + base.impactThreshold
+        + ', gctFallbackRatio: ' + finalGct + ', vertScale: ' + finalVert + ', minStepInterval: ' + base.minStepInterval
+        + ', vertEnabled: ' + base.vertEnabled + ', rotRejectThreshold: ' + finalRot + ' }';
+      const slice = html.slice(devAnchorIdx);
+      const re = new RegExp('(' + ov.devicePos + ':\\s*)\\{[^}]*\\}');
+      const m = slice.match(re);
+      if (m) {
+        const start = devAnchorIdx + m.index;
+        const end = start + m[0].length;
+        html = html.slice(0, start) + m[1] + newObj + html.slice(end);
+      }
+    }
+
+    // 2) defaultProfile 줄의 strideCorrectionFactor / gpsDistCorrectionFactor만 치환
+    // (앵커 주석 바로 다음 한 줄 범위로 한정 — 소스 안 다른 곳의 동일 키와 안 섞이게)
+    const defAnchorTag = 'CALIB_ANCHOR:DEFAULT_PROFILE';
+    const defAnchorIdx = html.indexOf(defAnchorTag);
+    if (defAnchorIdx !== -1 && curProf) {
+      const windowLen = 500; // 앵커 주석 + 다음 줄이 들어가기 충분한 여유
+      const win = html.slice(defAnchorIdx, defAnchorIdx + windowLen);
+      let patchedWin = win;
+      if (typeof curProf.strideCorrectionFactor === 'number' && curProf.strideCorrectionFactor > 0) {
+        patchedWin = patchedWin.replace(/strideCorrectionFactor:\s*[0-9.]+/, 'strideCorrectionFactor: ' + curProf.strideCorrectionFactor.toFixed(3));
+      }
+      if (typeof curProf.gpsDistCorrectionFactor === 'number' && curProf.gpsDistCorrectionFactor > 0) {
+        patchedWin = patchedWin.replace(/gpsDistCorrectionFactor:\s*[0-9.]+/, 'gpsDistCorrectionFactor: ' + curProf.gpsDistCorrectionFactor.toFixed(3));
+      }
+      html = html.slice(0, defAnchorIdx) + patchedWin + html.slice(defAnchorIdx + win.length);
+    }
+
+    return html;
+  }
+
+  // [추가] 위에서 만든 패치된 HTML 전체를 실제로 폰에 파일로 저장.
+  // 네이티브 다운로드 브릿지(AndroidDownload)가 있으면 그걸 우선 쓰고,
+  // 없으면 Blob + <a download>로 폴백.
+  async function downloadPatchedHtml() {
+    const isKo = isKoLang();
+    try {
+      const resp = await fetch(location.href, { cache: 'no-store' });
+      if (!resp.ok) throw new Error('fetch failed: ' + resp.status);
+      const rawHtml = await resp.text();
+      const prof = storage.loadProfile();
+      const ov = prof.motionCalibOverride;
+      if (!ov) {
+        alert(isKo ? '적용된 캘리브레이션 값이 없습니다.' : 'No calibration override is currently applied.');
+        return;
+      }
+      const patched = buildPatchedHtml(rawHtml, ov, prof);
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const fileName = 'jennyrun-patched-' + dateStr + '.html';
+      if (window.AndroidDownload && typeof window.AndroidDownload.saveFileAs === 'function') {
+        window.AndroidDownload.saveFileAs(patched, fileName);
+      } else if (window.AndroidDownload && typeof window.AndroidDownload.saveFile === 'function') {
+        window.AndroidDownload.saveFile(patched, fileName);
+        alert(isKo ? '다운로드 폴더에 저장되었습니다.' : 'Saved to Downloads folder.');
+      } else {
+        const blob = new Blob([patched], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      }
+    } catch (e) {
+      alert(isKo
+        ? 'HTML을 불러오지 못했습니다. 네트워크 상태를 확인하거나, 위 스니펫을 수동으로 복사해주세요.'
+        : 'Could not fetch the page HTML. Check your connection, or copy the snippet above manually.');
     }
   }
 
@@ -8798,7 +8891,7 @@ const garmin = (function () {
     }
   }
 
-  return { importFitFile, deleteImport, clearAll, selectImport, selectPrecLog, compareAutoLog, importPrecLogCsv, clearPrecLogImports, runCalibrationCompare, applyCalibration, resetCalibration, undoLastCalibration, copySnippet, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, render };
+  return { importFitFile, deleteImport, clearAll, selectImport, selectPrecLog, compareAutoLog, importPrecLogCsv, clearPrecLogImports, runCalibrationCompare, applyCalibration, resetCalibration, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, render };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
