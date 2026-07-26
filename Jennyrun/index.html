@@ -4200,15 +4200,52 @@ this.minStepInterval  = p.minStepInterval;
 this.vertEnabled      = p.vertEnabled;
 this.rotRejectThreshold = p.rotRejectThreshold;
 this.nativeRescueEnabled = !!p.nativeRescueEnabled; // [추가] 네이티브 걸음센서 구제는 이 위치에서만 허용할지 여부 (기본 손만 true)
-// [추가] 가민 캘리브레이션 비교(garmin.applyCalibration)에서 저장한 보정값이 있으면
-// 위치별 기본값 위에 덮어쓴다. 착용 위치가 바뀌면(override.devicePos 불일치) 적용하지 않음 —
-// 위치가 바뀌면 새로 비교/적용해야 함.
+// [수정] 보정값 저장 슬롯을 "1개"가 아니라 "착용위치별로 각각"으로 바꿈.
+// 기존엔 가슴에서 캘리브레이션한 뒤 손에서 또 캘리브레이션해서 적용하면 같은 슬롯을
+// 덮어써서 가슴 보정값이 사라지는 문제가 있었음 — 이제 devicePos를 키로 하는 맵에
+// 각자 따로 저장/조회한다.
 try {
-  const _calibOv = storage.loadProfile().motionCalibOverride;
-  if (_calibOv && _calibOv.devicePos === pos) {
+  const _prof = storage.loadProfile();
+  // [추가] 예전 방식(단일 motionCalibOverride / 단일 strideCorrectionFactor)으로 저장된
+  // 프로필이면, 그 값을 "저장 당시의 devicePos" 밑으로 한 번만 옮겨 담는다 (데이터 유실 방지).
+  let _migrated = false;
+  if (!_prof.motionCalibOverrides) {
+    _prof.motionCalibOverrides = {};
+    if (_prof.motionCalibOverride && _prof.motionCalibOverride.devicePos) {
+      _prof.motionCalibOverrides[_prof.motionCalibOverride.devicePos] = _prof.motionCalibOverride;
+      _migrated = true;
+    }
+  }
+  if (!_prof.strideCorrectionFactorByPos) {
+    _prof.strideCorrectionFactorByPos = {};
+    if (typeof _prof.strideCorrectionFactor === 'number' && _prof.strideCorrectionFactor !== 1.0) {
+      _prof.strideCorrectionFactorByPos[_prof.devicePos || 'chest'] = _prof.strideCorrectionFactor;
+      _migrated = true;
+    }
+  }
+  if (!_prof.gpsDistCorrectionFactorByPos) {
+    _prof.gpsDistCorrectionFactorByPos = {};
+    if (typeof _prof.gpsDistCorrectionFactor === 'number' && _prof.gpsDistCorrectionFactor !== 1.0) {
+      _prof.gpsDistCorrectionFactorByPos[_prof.devicePos || 'chest'] = _prof.gpsDistCorrectionFactor;
+      _migrated = true;
+    }
+  }
+
+  const _calibOv = _prof.motionCalibOverrides[pos];
+  if (_calibOv) {
     if (typeof _calibOv.gctFallbackRatio === 'number') this.gctFallbackRatio = _calibOv.gctFallbackRatio;
     if (typeof _calibOv.rotRejectThreshold === 'number') this.rotRejectThreshold = _calibOv.rotRejectThreshold;
     if (typeof _calibOv.vertScale === 'number') this.vertScale = _calibOv.vertScale;
+  }
+  // [추가] 보폭/GPS 거리 보정계수도 위치별 값으로 동기화. calcStride() 등 다른 곳에서는
+  // 여전히 prof.strideCorrectionFactor를 그냥 읽기만 하므로, 여기서 "지금 위치의 값"을
+  // 그 플랫 필드에 채워넣어 나머지 코드는 손대지 않아도 되게 한다.
+  const _syncedStride = (typeof _prof.strideCorrectionFactorByPos[pos] === 'number' && _prof.strideCorrectionFactorByPos[pos] > 0) ? _prof.strideCorrectionFactorByPos[pos] : 1.0;
+  const _syncedGps = (typeof _prof.gpsDistCorrectionFactorByPos[pos] === 'number' && _prof.gpsDistCorrectionFactorByPos[pos] > 0) ? _prof.gpsDistCorrectionFactorByPos[pos] : 1.0;
+  if (_migrated || _prof.strideCorrectionFactor !== _syncedStride || _prof.gpsDistCorrectionFactor !== _syncedGps) {
+    _prof.strideCorrectionFactor = _syncedStride;
+    _prof.gpsDistCorrectionFactor = _syncedGps;
+    storage.saveProfile(_prof);
   }
 } catch (e) {}
 // [추가] 적응형 보정의 기준(중심)이 되는 위치별 기본값을 별도 보관.
@@ -8634,29 +8671,36 @@ const garmin = (function () {
     };
     try {
       const prof = storage.loadProfile();
-      const override = { devicePos: avgSuggestion.devicePos, appliedAt: new Date().toISOString() };
+      const pos = avgSuggestion.devicePos;
+      if (!prof.motionCalibOverrides) prof.motionCalibOverrides = {};
+      if (!prof.strideCorrectionFactorByPos) prof.strideCorrectionFactorByPos = {};
+      if (!prof.gpsDistCorrectionFactorByPos) prof.gpsDistCorrectionFactorByPos = {};
+
+      const override = { devicePos: pos, appliedAt: new Date().toISOString() };
       if (avgSuggestion.gct != null) override.gctFallbackRatio = avgSuggestion.gct;
       if (avgSuggestion.rot != null) override.rotRejectThreshold = avgSuggestion.rot;
       if (avgSuggestion.vertScale != null) override.vertScale = avgSuggestion.vertScale;
-      if (avgSuggestion.strideFactor != null) {
-        override.prevStrideCorrectionFactor = (typeof prof.strideCorrectionFactor === 'number' && prof.strideCorrectionFactor > 0) ? prof.strideCorrectionFactor : 1.0;
-      }
-      if (avgSuggestion.gpsDistFactor != null) {
-        override.prevGpsDistCorrectionFactor = (typeof prof.gpsDistCorrectionFactor === 'number' && prof.gpsDistCorrectionFactor > 0) ? prof.gpsDistCorrectionFactor : 1.0;
-      }
-      // [추가] 평균값 적용 직전 상태도 동일하게 스냅샷 저장 (되돌리기용)
+
+      const curStride = (typeof prof.strideCorrectionFactorByPos[pos] === 'number' && prof.strideCorrectionFactorByPos[pos] > 0) ? prof.strideCorrectionFactorByPos[pos] : 1.0;
+      const curGps = (typeof prof.gpsDistCorrectionFactorByPos[pos] === 'number' && prof.gpsDistCorrectionFactorByPos[pos] > 0) ? prof.gpsDistCorrectionFactorByPos[pos] : 1.0;
+      // [추가] 평균값 적용 직전 상태도 동일하게 스냅샷 저장 (되돌리기용, 위치 포함)
       prof.motionCalibUndo = {
-        prevOverride: prof.motionCalibOverride ? JSON.parse(JSON.stringify(prof.motionCalibOverride)) : null,
-        prevStrideCorrectionFactor: (typeof prof.strideCorrectionFactor === 'number' && prof.strideCorrectionFactor > 0) ? prof.strideCorrectionFactor : 1.0,
-        prevGpsDistCorrectionFactor: (typeof prof.gpsDistCorrectionFactor === 'number' && prof.gpsDistCorrectionFactor > 0) ? prof.gpsDistCorrectionFactor : 1.0,
+        devicePos: pos,
+        prevOverride: prof.motionCalibOverrides[pos] ? JSON.parse(JSON.stringify(prof.motionCalibOverrides[pos])) : null,
+        prevStrideCorrectionFactor: curStride,
+        prevGpsDistCorrectionFactor: curGps,
         savedAt: new Date().toISOString()
       };
-      prof.motionCalibOverride = override;
-      if (avgSuggestion.strideFactor != null) prof.strideCorrectionFactor = avgSuggestion.strideFactor;
-      if (avgSuggestion.gpsDistFactor != null) prof.gpsDistCorrectionFactor = avgSuggestion.gpsDistFactor;
+      prof.motionCalibOverrides[pos] = override;
+      if (avgSuggestion.strideFactor != null) prof.strideCorrectionFactorByPos[pos] = avgSuggestion.strideFactor;
+      if (avgSuggestion.gpsDistFactor != null) prof.gpsDistCorrectionFactorByPos[pos] = avgSuggestion.gpsDistFactor;
+      if (prof.devicePos === pos) {
+        if (avgSuggestion.strideFactor != null) prof.strideCorrectionFactor = avgSuggestion.strideFactor;
+        if (avgSuggestion.gpsDistFactor != null) prof.gpsDistCorrectionFactor = avgSuggestion.gpsDistFactor;
+      }
       storage.saveProfile(prof);
 
-      if (typeof app !== 'undefined' && app && app.motion) {
+      if (typeof app !== 'undefined' && app && app.motion && prof.devicePos === pos) {
         if (override.gctFallbackRatio != null) app.motion.gctFallbackRatio = override.gctFallbackRatio;
         if (override.rotRejectThreshold != null) app.motion.rotRejectThreshold = override.rotRejectThreshold;
         if (override.vertScale != null) app.motion.vertScale = override.vertScale;
@@ -8695,33 +8739,40 @@ const garmin = (function () {
     }
     try {
       const prof = storage.loadProfile();
-      const override = { devicePos: sel.devicePos, appliedAt: new Date().toISOString() };
+      const pos = sel.devicePos; // 이번 비교/제안이 어느 착용위치 기준이었는지
+      if (!prof.motionCalibOverrides) prof.motionCalibOverrides = {};
+      if (!prof.strideCorrectionFactorByPos) prof.strideCorrectionFactorByPos = {};
+      if (!prof.gpsDistCorrectionFactorByPos) prof.gpsDistCorrectionFactorByPos = {};
+
+      const override = { devicePos: pos, appliedAt: new Date().toISOString() };
       if (sel.gct != null) override.gctFallbackRatio = sel.gct;
       if (sel.rot != null) override.rotRejectThreshold = sel.rot;
       if (sel.vertScale != null) override.vertScale = sel.vertScale;
-      // [추가] 초기화(RESET) 시 정확히 원래 값으로 되돌릴 수 있도록, 보폭 보정계수를
-      // 덮어쓰기 직전의 값을 함께 저장해둔다(다른 기능인 실측거리 캘리브레이션이
-      // 이미 설정해둔 값일 수도 있으므로 무조건 1.0으로 되돌리면 안 됨).
-      if (sel.strideFactor != null) {
-        override.prevStrideCorrectionFactor = (typeof prof.strideCorrectionFactor === 'number' && prof.strideCorrectionFactor > 0) ? prof.strideCorrectionFactor : 1.0;
-      }
-      if (sel.gpsDistFactor != null) {
-        override.prevGpsDistCorrectionFactor = (typeof prof.gpsDistCorrectionFactor === 'number' && prof.gpsDistCorrectionFactor > 0) ? prof.gpsDistCorrectionFactor : 1.0;
-      }
-      // [추가] 덮어쓰기 직전 상태를 스냅샷으로 저장 → 나중에 '되돌리기'로 정확히 복원 가능.
-      // (override가 없었으면 prevOverride는 null로 저장 → 되돌릴 때 override 자체를 삭제)
+
+      const curStride = (typeof prof.strideCorrectionFactorByPos[pos] === 'number' && prof.strideCorrectionFactorByPos[pos] > 0) ? prof.strideCorrectionFactorByPos[pos] : 1.0;
+      const curGps = (typeof prof.gpsDistCorrectionFactorByPos[pos] === 'number' && prof.gpsDistCorrectionFactorByPos[pos] > 0) ? prof.gpsDistCorrectionFactorByPos[pos] : 1.0;
+      // [추가] 되돌리기(UNDO)용 스냅샷 — 어느 위치를 적용했는지(devicePos)도 함께 저장해야
+      // undoLastCalibration()이 정확히 그 위치의 슬롯으로 복원할 수 있다.
       prof.motionCalibUndo = {
-        prevOverride: prof.motionCalibOverride ? JSON.parse(JSON.stringify(prof.motionCalibOverride)) : null,
-        prevStrideCorrectionFactor: (typeof prof.strideCorrectionFactor === 'number' && prof.strideCorrectionFactor > 0) ? prof.strideCorrectionFactor : 1.0,
-        prevGpsDistCorrectionFactor: (typeof prof.gpsDistCorrectionFactor === 'number' && prof.gpsDistCorrectionFactor > 0) ? prof.gpsDistCorrectionFactor : 1.0,
+        devicePos: pos,
+        prevOverride: prof.motionCalibOverrides[pos] ? JSON.parse(JSON.stringify(prof.motionCalibOverrides[pos])) : null,
+        prevStrideCorrectionFactor: curStride,
+        prevGpsDistCorrectionFactor: curGps,
         savedAt: new Date().toISOString()
       };
-      prof.motionCalibOverride = override;
-      if (sel.strideFactor != null) prof.strideCorrectionFactor = sel.strideFactor;
-      if (sel.gpsDistFactor != null) prof.gpsDistCorrectionFactor = sel.gpsDistFactor;
+      prof.motionCalibOverrides[pos] = override;
+      if (sel.strideFactor != null) prof.strideCorrectionFactorByPos[pos] = sel.strideFactor;
+      if (sel.gpsDistFactor != null) prof.gpsDistCorrectionFactorByPos[pos] = sel.gpsDistFactor;
+      // [수정] calcStride() 등이 읽는 플랫 필드는 "지금 실제로 착용 중인 위치"일 때만 갱신 —
+      // 예를 들어 지금 가슴을 차고 있는데 손 위치 보정값을 적용했다고 해서 지금 러닝에
+      // 손 보정계수가 끼어들면 안 되기 때문.
+      if (prof.devicePos === pos) {
+        if (sel.strideFactor != null) prof.strideCorrectionFactor = sel.strideFactor;
+        if (sel.gpsDistFactor != null) prof.gpsDistCorrectionFactor = sel.gpsDistFactor;
+      }
       storage.saveProfile(prof);
 
-      if (typeof app !== 'undefined' && app && app.motion) {
+      if (typeof app !== 'undefined' && app && app.motion && prof.devicePos === pos) {
         if (override.gctFallbackRatio != null) app.motion.gctFallbackRatio = override.gctFallbackRatio;
         if (override.rotRejectThreshold != null) app.motion.rotRejectThreshold = override.rotRejectThreshold;
         if (override.vertScale != null) app.motion.vertScale = override.vertScale;
@@ -8759,79 +8810,100 @@ const garmin = (function () {
   };
   const DEFAULT_ROT_REJECT_THRESHOLD = 220;
 
+  const POS_LABEL_KO = { chest: '가슴', waist: '허리', armband: '암밴드', hand: '손' };
+  const POS_LABEL_EN = { chest: 'CHEST', waist: 'WAIST', armband: 'ARMBAND', hand: 'HAND' };
+
   function renderCalibStatus(isKo) {
     const box = document.getElementById('garmin-calib-status');
     if (!box) return;
-    let ov = null, hasUndo = false;
+    let overridesMap = {}, hasUndo = false, undoPos = null;
     try {
       const p = storage.loadProfile();
-      ov = p.motionCalibOverride;
+      overridesMap = p.motionCalibOverrides || {};
       hasUndo = !!p.motionCalibUndo; // [추가] 직전 적용 이전 상태가 저장돼있는지
-    } catch (e) { ov = null; }
-    if (!ov) {
+      undoPos = p.motionCalibUndo ? p.motionCalibUndo.devicePos : null;
+    } catch (e) { overridesMap = {}; }
+
+    const undoBtnHtml = (pos) => hasUndo
+      ? '<button id="btn-undo-calib" style="margin-top:8px; background:transparent; color:var(--primary); border:1.5px solid #2a3a2f; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.undoLastCalibration()">'
+        + (isKo ? '직전 적용 이전으로 되돌리기' : 'UNDO LAST APPLY') + '</button>'
+      : '';
+
+    // [수정] 보정값 저장 슬롯이 위치별로 나뉘어서, 가슴/손 등 여러 위치에 동시에
+    // 보정값이 적용돼 있을 수 있다. 각 위치마다 카드를 따로 그리고, RESET/스니펫/다운로드
+    // 버튼도 그 위치(pos)를 명시해서 그 위치의 슬롯에만 영향을 준다.
+    const positions = ['chest', 'waist', 'armband', 'hand'];
+    const activePositions = positions.filter(p => overridesMap[p]);
+
+    if (!activePositions.length) {
       // [추가] 적용된 값은 없어졌어도(RESET 등으로) 되돌릴 스냅샷이 남아있을 수 있으니
-      // 그 경우엔 UNDO 버튼만이라도 보여준다.
+      // 그 경우엔 UNDO 버튼만이라도 보여준다. (undoPos 라벨을 붙여 어느 위치인지 표시)
       box.innerHTML = hasUndo
         ? '<div class="garmin-import-item" style="border-color:#3a3a2a;">'
-          + '<button id="btn-undo-calib" style="background:transparent; color:var(--primary); border:1.5px solid #2a3a2f; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.undoLastCalibration()">' + (isKo ? '직전 적용 이전으로 되돌리기' : 'UNDO LAST APPLY') + '</button>'
+          + '<div style="font-size:10px; color:#888; margin-bottom:6px;">' + (isKo ? (POS_LABEL_KO[undoPos] || '') : (POS_LABEL_EN[undoPos] || '')) + '</div>'
+          + undoBtnHtml(undoPos)
           + '</div>'
         : '';
       return;
     }
 
-    const parts = [];
-    if (ov.gctFallbackRatio != null) parts.push('gctFallbackRatio: ' + ov.gctFallbackRatio);
-    if (ov.rotRejectThreshold != null) parts.push('rotRejectThreshold: ' + ov.rotRejectThreshold);
-    if (ov.vertScale != null) parts.push('vertScale: ' + ov.vertScale);
-    if (ov.prevStrideCorrectionFactor != null) parts.push((isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ' ' + (isKo ? '변경됨' : 'changed'));
-    if (ov.prevGpsDistCorrectionFactor != null) {
-      let curGpsVal = null;
-      try { curGpsVal = storage.loadProfile().gpsDistCorrectionFactor; } catch (e) {}
-      parts.push((isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + (typeof curGpsVal === 'number' ? curGpsVal.toFixed(3) : '1.000'));
-    }
-    const dateTxt = ov.appliedAt ? fmtDate(new Date(ov.appliedAt).getTime()) : '';
+    let curProf = null;
+    try { curProf = storage.loadProfile(); } catch (e) {}
 
-    // [추가] 코드(applyDevicePos)에 그대로 붙여넣을 수 있는 스니펫 생성.
-    // 오버라이드로 바뀌지 않은 필드는 그 착용위치의 원래 기본값을 그대로 채운다.
-    const base = DEVICE_PROFILE_DEFAULTS[ov.devicePos] || DEVICE_PROFILE_DEFAULTS.chest;
-    const finalGct = ov.gctFallbackRatio != null ? ov.gctFallbackRatio : base.gctFallbackRatio;
-    const finalVert = ov.vertScale != null ? ov.vertScale : base.vertScale;
-    const finalRot = ov.rotRejectThreshold != null ? ov.rotRejectThreshold : base.rotRejectThreshold;
-    const snippetLine = '// 찾기: CALIB_ANCHOR:DEVICE_PROFILES\n'
-      + ov.devicePos + ':   { groundThreshold: ' + base.groundThreshold + ', impactThreshold: ' + base.impactThreshold
-      + ', gctFallbackRatio: ' + finalGct + ', vertScale: ' + finalVert + ', minStepInterval: ' + base.minStepInterval
-      + ', vertEnabled: ' + base.vertEnabled + ', rotRejectThreshold: ' + finalRot + ' },';
-    // [추가] gpsDistCorrectionFactor / strideCorrectionFactor는 applyDevicePos 표가 아니라
-    // defaultProfile 쪽 값이라 별도 줄로 생성한다. 실제 저장된 현재값을 읽어서 보여줌
-    // (ov.prevXxx는 "이전값"이라 여기선 안 쓰고, localStorage의 현재 프로필에서 가져온다).
-    let profileFactorsLine = '';
-    try {
-      const curProf = storage.loadProfile();
+    box.innerHTML = activePositions.map(pos => {
+      const ov = overridesMap[pos];
+      const posLabel = isKo ? (POS_LABEL_KO[pos] || pos) : (POS_LABEL_EN[pos] || pos.toUpperCase());
+      const strideVal = curProf && curProf.strideCorrectionFactorByPos ? curProf.strideCorrectionFactorByPos[pos] : null;
+      const gpsVal = curProf && curProf.gpsDistCorrectionFactorByPos ? curProf.gpsDistCorrectionFactorByPos[pos] : null;
+
+      const parts = [];
+      if (ov.gctFallbackRatio != null) parts.push('gctFallbackRatio: ' + ov.gctFallbackRatio);
+      if (ov.rotRejectThreshold != null) parts.push('rotRejectThreshold: ' + ov.rotRejectThreshold);
+      if (ov.vertScale != null) parts.push('vertScale: ' + ov.vertScale);
+      if (typeof strideVal === 'number' && strideVal !== 1.0) parts.push((isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ': ' + strideVal.toFixed(3));
+      if (typeof gpsVal === 'number' && gpsVal !== 1.0) parts.push((isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + gpsVal.toFixed(3));
+      const dateTxt = ov.appliedAt ? fmtDate(new Date(ov.appliedAt).getTime()) : '';
+
+      // [추가] 코드(applyDevicePos)에 그대로 붙여넣을 수 있는 스니펫 생성.
+      // 오버라이드로 바뀌지 않은 필드는 그 착용위치의 원래 기본값을 그대로 채운다.
+      const base = DEVICE_PROFILE_DEFAULTS[pos] || DEVICE_PROFILE_DEFAULTS.chest;
+      const finalGct = ov.gctFallbackRatio != null ? ov.gctFallbackRatio : base.gctFallbackRatio;
+      const finalVert = ov.vertScale != null ? ov.vertScale : base.vertScale;
+      const finalRot = ov.rotRejectThreshold != null ? ov.rotRejectThreshold : base.rotRejectThreshold;
+      const snippetLine = '// 찾기: CALIB_ANCHOR:DEVICE_PROFILES\n'
+        + pos + ':   { groundThreshold: ' + base.groundThreshold + ', impactThreshold: ' + base.impactThreshold
+        + ', gctFallbackRatio: ' + finalGct + ', vertScale: ' + finalVert + ', minStepInterval: ' + base.minStepInterval
+        + ', vertEnabled: ' + base.vertEnabled + ', rotRejectThreshold: ' + finalRot + ' },';
+      // [추가] gpsDistCorrectionFactor / strideCorrectionFactor는 위치별 스니펫 한 줄로 —
+      // 참고: 소스코드 쪽 defaultProfile은 위치 구분 없이 하나뿐이라, 이 스니펫은 그 위치를
+      // "기본 착용위치"로 삼아 배포할 때만 그대로 대입하면 되는 참고용 값이다.
+      let profileFactorsLine = '';
       const factorParts = [];
-      if (ov.prevStrideCorrectionFactor != null && typeof curProf.strideCorrectionFactor === 'number') {
-        factorParts.push('strideCorrectionFactor: ' + curProf.strideCorrectionFactor.toFixed(3));
-      }
-      if (ov.prevGpsDistCorrectionFactor != null && typeof curProf.gpsDistCorrectionFactor === 'number') {
-        factorParts.push('gpsDistCorrectionFactor: ' + curProf.gpsDistCorrectionFactor.toFixed(3));
-      }
+      if (typeof strideVal === 'number' && strideVal !== 1.0) factorParts.push('strideCorrectionFactor: ' + strideVal.toFixed(3));
+      if (typeof gpsVal === 'number' && gpsVal !== 1.0) factorParts.push('gpsDistCorrectionFactor: ' + gpsVal.toFixed(3));
       if (factorParts.length) {
-        profileFactorsLine = '\n\n// 찾기: CALIB_ANCHOR:DEFAULT_PROFILE\n' + factorParts.join(', ');
+        profileFactorsLine = '\n\n// 찾기: CALIB_ANCHOR:DEFAULT_PROFILE (' + pos + ')\n' + factorParts.join(', ');
       }
-    } catch (e) {}
-    const snippet = snippetLine + profileFactorsLine;
-    const escapedSnippet = snippet.replace(/'/g, "\\'").replace(/\n/g, '\\n');
+      const snippet = snippetLine + profileFactorsLine;
+      const escapedSnippet = snippet.replace(/'/g, "\\'").replace(/\n/g, '\\n');
 
-    box.innerHTML = '<div class="garmin-import-item" style="border-color:#3a3a2a;">'
-      + '<div style="font-size:10px; color:var(--primary); font-weight:900; margin-bottom:6px;">' + (isKo ? '적용된 보정값' : 'CUSTOM CALIBRATION APPLIED') + '</div>'
-      + '<div style="font-size:11px; color:#ccc; line-height:1.6;">' + parts.join('<br>') + '</div>'
-      + (dateTxt ? '<div style="font-size:10px; color:#666; margin-top:6px;">' + (isKo ? '적용일: ' : 'Applied: ') + dateTxt + '</div>' : '')
-      + '<div style="font-size:9px; color:#888; font-weight:800; margin-top:12px; margin-bottom:4px;">' + (isKo ? '코드 반영용 스니펫 (applyDevicePos / defaultProfile)' : 'CODE SNIPPET (applyDevicePos / defaultProfile)') + '</div>'
-      + '<pre style="background:#000; border:1px solid #2a2a2a; border-radius:8px; padding:10px; font-size:10px; color:#0f0; white-space:pre-wrap; word-break:break-all; margin:0;">' + snippet.replace(/</g,'&lt;') + '</pre>'
-      + '<button id="btn-copy-calib-snippet" style="margin-top:8px; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.copySnippet(\'' + escapedSnippet + '\')">' + (isKo ? '스니펫 복사' : 'COPY SNIPPET') + '</button>'
-      + '<button id="btn-download-patched-html" style="margin-top:8px; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.downloadPatchedHtml()">' + (isKo ? '수정된 HTML 다운로드' : 'DOWNLOAD PATCHED HTML') + '</button>'
-      + (hasUndo ? '<button id="btn-undo-calib" style="margin-top:8px; background:transparent; color:var(--primary); border:1.5px solid #2a3a2f; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.undoLastCalibration()">' + (isKo ? '직전 적용 이전으로 되돌리기' : 'UNDO LAST APPLY') + '</button>' : '')
-      + '<button id="btn-reset-calib" style="margin-top:8px; background:transparent; color:#e57373; border:1px solid #663333; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.resetCalibration()">' + (isKo ? '기본값으로 초기화' : 'RESET TO DEFAULT') + '</button>'
-      + '</div>';
+      return '<div class="garmin-import-item" style="border-color:#3a3a2a; margin-bottom:10px;">'
+        + '<div style="font-size:10px; color:var(--primary); font-weight:900; margin-bottom:6px;">' + posLabel + ' — ' + (isKo ? '적용된 보정값' : 'CUSTOM CALIBRATION APPLIED') + '</div>'
+        + '<div style="font-size:11px; color:#ccc; line-height:1.6;">' + parts.join('<br>') + '</div>'
+        + (dateTxt ? '<div style="font-size:10px; color:#666; margin-top:6px;">' + (isKo ? '적용일: ' : 'Applied: ') + dateTxt + '</div>' : '')
+        + '<div style="font-size:9px; color:#888; font-weight:800; margin-top:12px; margin-bottom:4px;">' + (isKo ? '코드 반영용 스니펫 (applyDevicePos / defaultProfile)' : 'CODE SNIPPET (applyDevicePos / defaultProfile)') + '</div>'
+        + '<pre style="background:#000; border:1px solid #2a2a2a; border-radius:8px; padding:10px; font-size:10px; color:#0f0; white-space:pre-wrap; word-break:break-all; margin:0;">' + snippet.replace(/</g,'&lt;') + '</pre>'
+        + '<button style="margin-top:8px; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.copySnippet(\'' + escapedSnippet + '\')">' + (isKo ? '스니펫 복사' : 'COPY SNIPPET') + '</button>'
+        + '<button style="margin-top:8px; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.downloadPatchedHtml(\'' + pos + '\')">' + (isKo ? '수정된 HTML 다운로드' : 'DOWNLOAD PATCHED HTML') + '</button>'
+        + (hasUndo && undoPos === pos ? undoBtnHtml(pos) : '')
+        + '<button style="margin-top:8px; background:transparent; color:#e57373; border:1px solid #663333; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.resetCalibration(\'' + pos + '\')">' + (isKo ? '기본값으로 초기화' : 'RESET TO DEFAULT') + '</button>'
+        + '</div>';
+    }).join('')
+      // [추가] undo 대상 위치에 지금 override 카드가 없는 경우(예: RESET으로 이미 지워짐)에도
+      // UNDO 버튼은 별도로 보여준다.
+      + (hasUndo && !overridesMap[undoPos] ? '<div class="garmin-import-item" style="border-color:#3a3a2a;">'
+        + '<div style="font-size:10px; color:#888; margin-bottom:6px;">' + (isKo ? (POS_LABEL_KO[undoPos] || '') : (POS_LABEL_EN[undoPos] || '')) + '</div>'
+        + undoBtnHtml(undoPos) + '</div>' : '');
   }
 
   // [추가] 스니펫을 클립보드로 복사(가능한 환경에서). 실패하면 조용히 무시 —
@@ -8902,23 +8974,28 @@ const garmin = (function () {
   // [추가] 위에서 만든 패치된 HTML 전체를 실제로 폰에 파일로 저장.
   // 네이티브 다운로드 브릿지(AndroidDownload)가 있으면 그걸 우선 쓰고,
   // 없으면 Blob + <a download>로 폴백.
-  async function downloadPatchedHtml() {
+  async function downloadPatchedHtml(pos) {
     const isKo = isKoLang();
     try {
       const resp = await fetch(location.href, { cache: 'no-store' });
       if (!resp.ok) throw new Error('fetch failed: ' + resp.status);
       const rawHtml = await resp.text();
       const prof = storage.loadProfile();
-      const ov = prof.motionCalibOverride;
-      const hasStrideFactor = typeof prof.strideCorrectionFactor === 'number' && prof.strideCorrectionFactor !== 1.0;
-      const hasGpsFactor = typeof prof.gpsDistCorrectionFactor === 'number' && prof.gpsDistCorrectionFactor !== 1.0;
+      const ov = (prof.motionCalibOverrides || {})[pos];
+      const strideVal = (prof.strideCorrectionFactorByPos || {})[pos];
+      const gpsVal = (prof.gpsDistCorrectionFactorByPos || {})[pos];
+      const hasStrideFactor = typeof strideVal === 'number' && strideVal !== 1.0;
+      const hasGpsFactor = typeof gpsVal === 'number' && gpsVal !== 1.0;
       if (!ov && !hasStrideFactor && !hasGpsFactor) {
         alert(isKo ? '적용된 캘리브레이션 값이 없습니다.' : 'No calibration override is currently applied.');
         return;
       }
-      const patched = buildPatchedHtml(rawHtml, ov, prof);
+      // [수정] buildPatchedHtml의 curProf는 이제 "지금 위치의 stride/gps 값"만 담아서 넘긴다
+      // (프로필 전체의 플랫 필드가 아니라, 리셋 대상 pos에 맞는 값이어야 하므로).
+      const posProf = { strideCorrectionFactor: hasStrideFactor ? strideVal : 1.0, gpsDistCorrectionFactor: hasGpsFactor ? gpsVal : 1.0 };
+      const patched = buildPatchedHtml(rawHtml, ov, posProf);
       const dateStr = new Date().toISOString().slice(0, 10);
-      const fileName = 'jennyrun-patched-' + dateStr + '.html';
+      const fileName = 'jennyrun-patched-' + pos + '-' + dateStr + '.html';
       if (window.AndroidDownload && typeof window.AndroidDownload.saveFileAs === 'function') {
         window.AndroidDownload.saveFileAs(patched, fileName);
       } else if (window.AndroidDownload && typeof window.AndroidDownload.saveFile === 'function') {
@@ -8956,24 +9033,30 @@ const garmin = (function () {
         alert(isKo ? '되돌릴 이전 상태가 없습니다.' : 'Nothing to undo.');
         return;
       }
+      const pos = undo.devicePos; // [수정] 이 되돌리기가 어느 착용위치 슬롯에 대한 것인지
+      if (!prof.motionCalibOverrides) prof.motionCalibOverrides = {};
+      if (!prof.strideCorrectionFactorByPos) prof.strideCorrectionFactorByPos = {};
+      if (!prof.gpsDistCorrectionFactorByPos) prof.gpsDistCorrectionFactorByPos = {};
       if (undo.prevOverride) {
-        prof.motionCalibOverride = undo.prevOverride;
+        prof.motionCalibOverrides[pos] = undo.prevOverride;
       } else {
-        delete prof.motionCalibOverride;
+        delete prof.motionCalibOverrides[pos];
       }
-      prof.strideCorrectionFactor = (typeof undo.prevStrideCorrectionFactor === 'number' && undo.prevStrideCorrectionFactor > 0) ? undo.prevStrideCorrectionFactor : 1.0;
-      prof.gpsDistCorrectionFactor = (typeof undo.prevGpsDistCorrectionFactor === 'number' && undo.prevGpsDistCorrectionFactor > 0) ? undo.prevGpsDistCorrectionFactor : 1.0;
+      prof.strideCorrectionFactorByPos[pos] = (typeof undo.prevStrideCorrectionFactor === 'number' && undo.prevStrideCorrectionFactor > 0) ? undo.prevStrideCorrectionFactor : 1.0;
+      prof.gpsDistCorrectionFactorByPos[pos] = (typeof undo.prevGpsDistCorrectionFactor === 'number' && undo.prevGpsDistCorrectionFactor > 0) ? undo.prevGpsDistCorrectionFactor : 1.0;
+      // [수정] 지금 실제로 착용 중인 위치에 대한 되돌리기일 때만 플랫 필드(현재 적용값)도 갱신
+      if (prof.devicePos === pos) {
+        prof.strideCorrectionFactor = prof.strideCorrectionFactorByPos[pos];
+        prof.gpsDistCorrectionFactor = prof.gpsDistCorrectionFactorByPos[pos];
+      }
       delete prof.motionCalibUndo;
       storage.saveProfile(prof);
 
       if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
         // 위치별 기본값을 먼저 다시 깔고, 복원된 override(있다면)를 그 위에 얹는다.
+        // applyDevicePos()가 내부적으로 motionCalibOverrides[현재위치]를 다시 읽어오므로
+        // "현재 착용 위치"를 대상으로 다시 호출해주기만 하면 정확히 반영된다.
         app.motion.applyDevicePos(prof.devicePos || 'chest');
-        if (prof.motionCalibOverride) {
-          if (prof.motionCalibOverride.gctFallbackRatio != null) app.motion.gctFallbackRatio = prof.motionCalibOverride.gctFallbackRatio;
-          if (prof.motionCalibOverride.rotRejectThreshold != null) app.motion.rotRejectThreshold = prof.motionCalibOverride.rotRejectThreshold;
-          if (prof.motionCalibOverride.vertScale != null) app.motion.vertScale = prof.motionCalibOverride.vertScale;
-        }
       }
 
       renderCalibStatus(isKo);
@@ -8987,19 +9070,25 @@ const garmin = (function () {
   // [추가] 적용된 보정값을 지우고 코드 기본값(위치별 프로파일)으로 되돌린다.
   // 보폭 보정계수는 override 적용 직전의 값으로 정확히 복원(다른 기능인 실측거리
   // 캘리브레이션 값을 실수로 지우지 않기 위함). 지금 살아있는 app.motion에도 바로 반영.
-  function resetCalibration() {
+  function resetCalibration(pos) {
     const isKo = isKoLang();
     try {
       const prof = storage.loadProfile();
-      const ov = prof.motionCalibOverride;
-      if (!ov) return;
-      // [수정] 직전 값(ov.prevStrideCorrectionFactor 등)으로 되돌리면 APPLY를 여러 번
-      // 반복했을 때 진짜 원본(1.0)까지 못 돌아가고 "마지막 직전값"까지만 되돌아가는
-      // 문제가 있었음. RESET은 "되돌리기(UNDO, 1단계 전)"와 다르게 항상 코드 기본값으로
-      // 가야 하므로, defaultProfile과 동일하게 무조건 1.0으로 고정한다.
-      prof.strideCorrectionFactor = 1.0;
-      prof.gpsDistCorrectionFactor = 1.0;
-      delete prof.motionCalibOverride;
+      if (!prof.motionCalibOverrides || !prof.motionCalibOverrides[pos]) return;
+      // [수정] 직전 값으로 되돌리면 APPLY를 여러 번 반복했을 때 진짜 원본(1.0)까지 못
+      // 돌아가고 "마지막 직전값"까지만 되돌아가는 문제가 있었음. RESET은 "되돌리기(UNDO,
+      // 1단계 전)"와 다르게 항상 코드 기본값으로 가야 하므로, defaultProfile과 동일하게
+      // 무조건 1.0으로 고정한다. 그리고 위치별 슬롯이므로 이 pos에 대해서만 초기화하고
+      // 다른 위치(예: 가슴을 리셋해도 손 보정값)는 그대로 둔다.
+      if (!prof.strideCorrectionFactorByPos) prof.strideCorrectionFactorByPos = {};
+      if (!prof.gpsDistCorrectionFactorByPos) prof.gpsDistCorrectionFactorByPos = {};
+      prof.strideCorrectionFactorByPos[pos] = 1.0;
+      prof.gpsDistCorrectionFactorByPos[pos] = 1.0;
+      if (prof.devicePos === pos) {
+        prof.strideCorrectionFactor = 1.0;
+        prof.gpsDistCorrectionFactor = 1.0;
+      }
+      delete prof.motionCalibOverrides[pos];
       storage.saveProfile(prof);
 
       if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
