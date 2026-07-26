@@ -8315,6 +8315,13 @@ const garmin = (function () {
           : 'The selected precision logs were recorded at different device positions (' + distinctPrecPos.map(posLabel).join(', ') + '). Please select logs from the same position only. The comparison below is calculated as ' + posLabel(resolvedDevicePos) + ' only.')
         + '</div>'
       : '';
+    // [추가] 착용위치가 섞여있으면 화면 하단 배너뿐 아니라 팝업(appAlert)으로도 즉시 경고.
+    // appAlert는 Promise를 반환하지만 이 함수는 버튼 클릭 핸들러라 await 없이 그냥 띄운다.
+    if (distinctPrecPos.length > 1) {
+      appAlert(isKo
+        ? '⚠ 선택한 정밀 로그들의 착용위치가 서로 다릅니다 (' + distinctPrecPos.map(posLabel).join(', ') + ').\n같은 위치로 기록된 로그끼리만 함께 선택해주세요.\n아래 비교/제안값은 ' + posLabel(resolvedDevicePos) + ' 기준으로만 계산됩니다.'
+        : '⚠ The selected precision logs were recorded at different device positions (' + distinctPrecPos.map(posLabel).join(', ') + ').\nPlease select logs from the same position only.\nThe comparison below is calculated as ' + posLabel(resolvedDevicePos) + ' only.');
+    }
     const posInfoHtml = '<div style="font-size:10.5px; color:#7fd3ff; font-weight:700; margin-bottom:10px;">'
       + (isKo ? '적용 위치: ' : 'Apply to position: ') + posLabel(resolvedDevicePos)
       + (distinctPrecPos.length === 0 ? (isKo ? ' (로그에 위치 기록이 없어 현재 설정값 사용)' : ' (no position saved in log — using current setting)') : '')
@@ -8808,7 +8815,11 @@ const garmin = (function () {
       }
       renderCalibStatus(isKo);
       renderPendingCalibList(isKo);
-      alert(isKo ? appliedCount + '개 결과의 평균값이 적용되어 저장되었습니다. 다음 러닝부터 반영돼요.' : 'The average of ' + appliedCount + ' results has been applied and saved. It will take effect from your next run.');
+      // [수정] 평균 적용도 어느 착용위치 슬롯에 저장됐는지 알림 문구에 명시.
+      const appliedPosLabelAvg = isKo ? (POS_LABEL_KO[pos] || pos) : (POS_LABEL_EN[pos] || pos.toUpperCase());
+      alert(isKo
+        ? '[' + appliedPosLabelAvg + '] 위치, ' + appliedCount + '개 결과의 평균값이 적용되어 저장되었습니다. 다음 러닝부터 반영돼요.'
+        : 'Calibration applied for [' + appliedPosLabelAvg + '] — average of ' + appliedCount + ' results saved. It will take effect from your next run.');
     } catch (err) {
       alert((isKo ? '적용 중 오류: ' : 'Apply error: ') + err.message);
     }
@@ -8883,7 +8894,12 @@ const garmin = (function () {
         lastCompareData.appliedAt = override.appliedAt;
       }
       renderCalibStatus(isKo);
-      alert(isKo ? '보정값이 적용되어 저장되었습니다. 다음 러닝부터 반영돼요.' : 'Calibration applied and saved. It will take effect from your next run.');
+      // [수정] 어느 착용위치 슬롯에 저장됐는지 알림 문구에 명시 (여러 위치를 오가며
+      // 비교하는 경우 사용자가 착각하지 않도록).
+      const appliedPosLabel = isKo ? (POS_LABEL_KO[pos] || pos) : (POS_LABEL_EN[pos] || pos.toUpperCase());
+      alert(isKo
+        ? '[' + appliedPosLabel + '] 위치 보정값이 적용되어 저장되었습니다. 다음 러닝부터 반영돼요.'
+        : 'Calibration applied and saved for [' + appliedPosLabel + ']. It will take effect from your next run.');
     } catch (err) {
       alert((isKo ? '적용 중 오류: ' : 'Apply error: ') + err.message);
     }
