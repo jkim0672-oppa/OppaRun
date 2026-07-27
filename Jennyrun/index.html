@@ -8785,8 +8785,9 @@ const garmin = (function () {
 
       const curStride = (typeof prof.strideCorrectionFactorByPos[pos] === 'number' && prof.strideCorrectionFactorByPos[pos] > 0) ? prof.strideCorrectionFactorByPos[pos] : 1.0;
       const curGps = (typeof prof.gpsDistCorrectionFactorByPos[pos] === 'number' && prof.gpsDistCorrectionFactorByPos[pos] > 0) ? prof.gpsDistCorrectionFactorByPos[pos] : 1.0;
-      // [추가] 평균값 적용 직전 상태도 동일하게 스냅샷 저장 (되돌리기용, 위치 포함)
-      prof.motionCalibUndo = {
+      // [수정] 평균값 적용 직전 상태도 위치별로 독립 저장 (되돌리기용)
+      if (!prof.motionCalibUndos) prof.motionCalibUndos = {};
+      prof.motionCalibUndos[pos] = {
         devicePos: pos,
         prevOverride: prof.motionCalibOverrides[pos] ? JSON.parse(JSON.stringify(prof.motionCalibOverrides[pos])) : null,
         prevStrideCorrectionFactor: curStride,
@@ -8857,9 +8858,11 @@ const garmin = (function () {
 
       const curStride = (typeof prof.strideCorrectionFactorByPos[pos] === 'number' && prof.strideCorrectionFactorByPos[pos] > 0) ? prof.strideCorrectionFactorByPos[pos] : 1.0;
       const curGps = (typeof prof.gpsDistCorrectionFactorByPos[pos] === 'number' && prof.gpsDistCorrectionFactorByPos[pos] > 0) ? prof.gpsDistCorrectionFactorByPos[pos] : 1.0;
-      // [추가] 되돌리기(UNDO)용 스냅샷 — 어느 위치를 적용했는지(devicePos)도 함께 저장해야
-      // undoLastCalibration()이 정확히 그 위치의 슬롯으로 복원할 수 있다.
-      prof.motionCalibUndo = {
+      // [수정] 되돌리기(UNDO)용 스냅샷을 위치별로 독립 저장 — 예전엔 motionCalibUndo 슬롯이
+      // 하나뿐이라 다른 위치를 나중에 적용하면 이전 위치의 되돌리기가 사라졌음.
+      // 이제 motionCalibUndos[pos]에 각자 따로 저장해서 위치별로 독립적으로 되돌릴 수 있다.
+      if (!prof.motionCalibUndos) prof.motionCalibUndos = {};
+      prof.motionCalibUndos[pos] = {
         devicePos: pos,
         prevOverride: prof.motionCalibOverrides[pos] ? JSON.parse(JSON.stringify(prof.motionCalibOverrides[pos])) : null,
         prevStrideCorrectionFactor: curStride,
@@ -8927,16 +8930,19 @@ const garmin = (function () {
   function renderCalibStatus(isKo) {
     const box = document.getElementById('garmin-calib-status');
     if (!box) return;
-    let overridesMap = {}, hasUndo = false, undoPos = null;
+    let overridesMap = {}, undosMap = {};
     try {
       const p = storage.loadProfile();
       overridesMap = p.motionCalibOverrides || {};
-      hasUndo = !!p.motionCalibUndo; // [추가] 직전 적용 이전 상태가 저장돼있는지
-      undoPos = p.motionCalibUndo ? p.motionCalibUndo.devicePos : null;
+      // [수정] 되돌리기 스냅샷이 위치별로 독립 저장되므로(motionCalibUndos), 위치마다
+      // 각자 되돌릴 수 있는지 개별적으로 판단한다. (기존엔 슬롯이 하나뿐이라 나중에
+      // 적용한 위치가 이전 위치의 되돌리기를 지워버렸음)
+      undosMap = p.motionCalibUndos || {};
     } catch (e) { overridesMap = {}; }
 
-    const undoBtnHtml = (pos) => hasUndo
-      ? '<button id="btn-undo-calib" style="margin-top:8px; background:transparent; color:var(--primary); border:1.5px solid #2a3a2f; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.undoLastCalibration()">'
+    const hasUndoFor = (pos) => !!undosMap[pos];
+    const undoBtnHtml = (pos) => hasUndoFor(pos)
+      ? '<button id="btn-undo-calib-' + pos + '" style="margin-top:8px; background:transparent; color:var(--primary); border:1.5px solid #2a3a2f; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.undoLastCalibration(\'' + pos + '\')">'
         + (isKo ? '직전 적용 이전으로 되돌리기' : 'UNDO LAST APPLY') + '</button>'
       : '';
 
@@ -8946,15 +8952,16 @@ const garmin = (function () {
     const positions = ['chest', 'waist', 'armband', 'hand'];
     const activePositions = positions.filter(p => overridesMap[p]);
 
+    const undoOnlyPositions = positions.filter(p => hasUndoFor(p)); // [수정] 위치별로 남아있는 되돌리기 스냅샷 전부 표시
     if (!activePositions.length) {
       // [추가] 적용된 값은 없어졌어도(RESET 등으로) 되돌릴 스냅샷이 남아있을 수 있으니
-      // 그 경우엔 UNDO 버튼만이라도 보여준다. (undoPos 라벨을 붙여 어느 위치인지 표시)
-      box.innerHTML = hasUndo
-        ? '<div class="garmin-import-item" style="border-color:#3a3a2a;">'
-          + '<div style="font-size:10px; color:#888; margin-bottom:6px;">' + (isKo ? (POS_LABEL_KO[undoPos] || '') : (POS_LABEL_EN[undoPos] || '')) + '</div>'
-          + undoBtnHtml(undoPos)
+      // 그 경우엔 UNDO 버튼만이라도 위치별로 각각 보여준다.
+      box.innerHTML = undoOnlyPositions.map(pos =>
+        '<div class="garmin-import-item" style="border-color:#3a3a2a;">'
+          + '<div style="font-size:10px; color:#888; margin-bottom:6px;">' + (isKo ? (POS_LABEL_KO[pos] || '') : (POS_LABEL_EN[pos] || '')) + '</div>'
+          + undoBtnHtml(pos)
           + '</div>'
-        : '';
+      ).join('');
       return;
     }
 
@@ -9006,15 +9013,17 @@ const garmin = (function () {
         + '<pre style="background:#000; border:1px solid #2a2a2a; border-radius:8px; padding:10px; font-size:10px; color:#0f0; white-space:pre-wrap; word-break:break-all; margin:0;">' + snippet.replace(/</g,'&lt;') + '</pre>'
         + '<button style="margin-top:8px; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.copySnippet(\'' + escapedSnippet + '\')">' + (isKo ? '스니펫 복사' : 'COPY SNIPPET') + '</button>'
         + '<button style="margin-top:8px; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.downloadPatchedHtml(\'' + pos + '\')">' + (isKo ? '수정된 HTML 다운로드' : 'DOWNLOAD PATCHED HTML') + '</button>'
-        + (hasUndo && undoPos === pos ? undoBtnHtml(pos) : '')
+        + undoBtnHtml(pos)
         + '<button style="margin-top:8px; background:transparent; color:#e57373; border:1px solid #663333; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.resetCalibration(\'' + pos + '\')">' + (isKo ? '기본값으로 초기화' : 'RESET TO DEFAULT') + '</button>'
         + '</div>';
     }).join('')
-      // [추가] undo 대상 위치에 지금 override 카드가 없는 경우(예: RESET으로 이미 지워짐)에도
-      // UNDO 버튼은 별도로 보여준다.
-      + (hasUndo && !overridesMap[undoPos] ? '<div class="garmin-import-item" style="border-color:#3a3a2a;">'
-        + '<div style="font-size:10px; color:#888; margin-bottom:6px;">' + (isKo ? (POS_LABEL_KO[undoPos] || '') : (POS_LABEL_EN[undoPos] || '')) + '</div>'
-        + undoBtnHtml(undoPos) + '</div>' : '');
+      // [수정] undo 스냅샷은 있는데 지금 override 카드가 없는 위치(예: RESET으로 이미 지워짐)들도
+      // 각각 별도 카드로 UNDO 버튼을 보여준다.
+      + undoOnlyPositions.filter(pos => !overridesMap[pos]).map(pos =>
+        '<div class="garmin-import-item" style="border-color:#3a3a2a;">'
+          + '<div style="font-size:10px; color:#888; margin-bottom:6px;">' + (isKo ? (POS_LABEL_KO[pos] || '') : (POS_LABEL_EN[pos] || '')) + '</div>'
+          + undoBtnHtml(pos) + '</div>'
+      ).join('');
   }
 
   // [추가] 스니펫을 클립보드로 복사(가능한 환경에서). 실패하면 조용히 무시 —
@@ -9136,16 +9145,16 @@ const garmin = (function () {
   // 프로파일)으로 가지만, UNDO는 "이번에 적용하기 직전 상태"로 돌아간다 — 만약 그 전에도
   // 커스텀 보정값이 적용돼 있었다면 코드 기본값이 아니라 그 이전 커스텀 값으로 복원됨.
   // 1단계(직전 1회)만 되돌릴 수 있고, 되돌린 뒤엔 스냅샷을 지운다.
-  function undoLastCalibration() {
+  function undoLastCalibration(pos) {
     const isKo = isKoLang();
     try {
       const prof = storage.loadProfile();
-      const undo = prof.motionCalibUndo;
+      const undos = prof.motionCalibUndos || {};
+      const undo = pos ? undos[pos] : null; // [수정] 위치별 스냅샷에서 해당 위치 것만 가져온다
       if (!undo) {
         alert(isKo ? '되돌릴 이전 상태가 없습니다.' : 'Nothing to undo.');
         return;
       }
-      const pos = undo.devicePos; // [수정] 이 되돌리기가 어느 착용위치 슬롯에 대한 것인지
       if (!prof.motionCalibOverrides) prof.motionCalibOverrides = {};
       if (!prof.strideCorrectionFactorByPos) prof.strideCorrectionFactorByPos = {};
       if (!prof.gpsDistCorrectionFactorByPos) prof.gpsDistCorrectionFactorByPos = {};
@@ -9161,7 +9170,8 @@ const garmin = (function () {
         prof.strideCorrectionFactor = prof.strideCorrectionFactorByPos[pos];
         prof.gpsDistCorrectionFactor = prof.gpsDistCorrectionFactorByPos[pos];
       }
-      delete prof.motionCalibUndo;
+      delete undos[pos]; // [수정] 이 위치의 되돌리기 스냅샷만 지운다 (다른 위치는 그대로 유지)
+      prof.motionCalibUndos = undos;
       storage.saveProfile(prof);
 
       if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
@@ -9173,7 +9183,8 @@ const garmin = (function () {
 
       renderCalibStatus(isKo);
       renderPendingCalibList(isKo);
-      alert(isKo ? '직전 적용 이전 상태로 되돌렸습니다.' : 'Reverted to the state before the last apply.');
+      const undoPosLabel = isKo ? (POS_LABEL_KO[pos] || pos) : (POS_LABEL_EN[pos] || pos.toUpperCase());
+      alert(isKo ? '[' + undoPosLabel + '] 위치를 직전 적용 이전 상태로 되돌렸습니다.' : '[' + undoPosLabel + '] reverted to the state before the last apply.');
     } catch (err) {
       alert((isKo ? '되돌리기 중 오류: ' : 'Undo error: ') + err.message);
     }
