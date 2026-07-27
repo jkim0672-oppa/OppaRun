@@ -700,6 +700,10 @@ alt="runner"/>
      평균값으로 한 번만 적용할 수 있게 하는 대기목록. runCalibrationCompare()가
      매번 여기에 결과를 쌓고, garmin.applyAveragedCalibration()이 평균 내서 적용한다. -->
 <div id="garmin-calib-pending" style="margin-top:12px;"></div>
+<!-- [추가] 전체 초기화: 가민 FIT/지난 로그/폰 정밀 로그 + 위치별 적용된 캘리브레이션
+     수정 기록(오버라이드/되돌리기 스냅샷)까지 한 번에 모두 지우고 빈 상태로 시작.
+     아래 위치별 RESET TO DEFAULT 버튼들보다 항상 위에 고정 노출된다. -->
+<button id="btn-reset-everything" style="background:#2a1414; color:var(--danger); border:1.5px solid #663333; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:12px; margin-top:14px;" onclick="garmin.resetEverything()">🗑️ <span id="btn-reset-everything-label">RESET ALL LOG</span></button>
 <!-- [추가] 현재 적용된 보정값 상태 표시 + 초기화 버튼. 비교를 다시 하지 않아도
      언제든 코드 기본값으로 되돌릴 수 있도록 항상 표시됨(적용된 값이 있을 때만 보임). -->
 <div id="garmin-calib-status" style="margin-top:10px;"></div>
@@ -8002,6 +8006,8 @@ const garmin = (function () {
     // [추가] 지난 로그 불러오기 버튼/전체삭제 버튼 다국어 처리 (개수는 renderPrecLogDropdown에서 갱신)
     setText('btn-import-preclog-csv', isKo ? '지난 로그 불러오기 (.CSV/.JSON)' : 'IMPORT PAST LOG (.CSV/.JSON)');
     setText('preclog-import-clear-all-btn', isKo ? '전체삭제' : 'CLEAR ALL');
+    // [추가] 전체 초기화 버튼 다국어 처리
+    setText('btn-reset-everything-label', isKo ? 'RESET ALL LOG' : 'RESET ALL LOG');
   }
 
   function render() {
@@ -9076,7 +9082,7 @@ const garmin = (function () {
         + '<button style="margin-top:8px; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.copySnippet(\'' + escapedSnippet + '\')">' + (isKo ? '스니펫 복사' : 'COPY SNIPPET') + '</button>'
         + '<button style="margin-top:8px; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.downloadPatchedHtml(\'' + pos + '\')">' + (isKo ? '수정된 HTML 다운로드' : 'DOWNLOAD PATCHED HTML') + '</button>'
         + undoBtnHtml(pos)
-        + '<button style="margin-top:8px; background:transparent; color:#e57373; border:1px solid #663333; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.resetCalibration(\'' + pos + '\')">' + (isKo ? '기본값으로 초기화' : 'RESET TO DEFAULT') + '</button>'
+        + '<button style="margin-top:8px; background:transparent; color:#e57373; border:1px solid #663333; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.resetCalibration(\'' + pos + '\')">' + (isKo ? posLabel + '만 기본값으로 초기화' : 'RESET ' + posLabel + ' ONLY TO DEFAULT') + '</button>'
         + '</div>';
     }).join('')
       // [수정] undo 스냅샷은 있는데 지금 override 카드가 없는 위치(예: RESET으로 이미 지워짐)들도
@@ -9284,9 +9290,58 @@ const garmin = (function () {
       const resultBox = document.getElementById('garmin-calib-result');
       if (resultBox) resultBox.innerHTML = '';
       lastSuggestion = null;
-      alert(isKo ? '기본값으로 초기화되었습니다.' : 'Reset to default values.');
+      const resetPosLabel = isKo ? (POS_LABEL_KO[pos] || pos) : (POS_LABEL_EN[pos] || pos.toUpperCase());
+      alert(isKo ? '[' + resetPosLabel + '] 위치만 기본값으로 초기화되었습니다. 다른 위치는 그대로예요.' : '[' + resetPosLabel + '] reset to default. Other positions are unchanged.');
     } catch (err) {
       alert((isKo ? '초기화 중 오류: ' : 'Reset error: ') + err.message);
+    }
+  }
+
+  // [수정] "전체 초기화" 버튼: 가민 분석실의 기록/로그성 데이터뿐 아니라, 모든 착용위치
+  // (chest/waist/armband/hand)에 지금 적용되어 있는 보정수치까지 전부 코드 기본값으로
+  // 되돌린다. 오래된 보정값이 계속 남아있지 않도록 하기 위함 (요청에 따라 변경됨 —
+  // 예전 버전은 적용값은 건드리지 않고 기록만 지웠으나, 이제는 완전 초기화).
+  async function resetEverything() {
+    const isKo = isKoLang();
+    const msg = isKo
+      ? '가민 분석실의 FIT/로그 기록과 모든 위치(가슴/허리/암밴드/손)에 적용된 보정수치를 전부 삭제하고 기본값으로 되돌릴까요?\n\n이 작업은 되돌릴 수 없습니다.'
+      : 'Delete all Garmin FIT/log records AND reset the applied calibration values for every position (chest/waist/armband/hand) back to default?\n\nThis cannot be undone.';
+    if (!(await appConfirm(msg))) return;
+    try {
+      // 1) 가민 FIT 가져오기 + 캘리브레이션용 지난 로그 불러오기 + 폰 자동저장 정밀 로그
+      saveImports([]);
+      savePrecLogImportsList([]);
+      savePendingCalibList([]);
+      selectedIds = [];
+      selectedPrecLogIds = [];
+      try { storage.savePrecisionLogsList([]); } catch (e) {}
+      if (typeof ui !== 'undefined' && ui.renderPrecisionLogList) ui.renderPrecisionLogList();
+
+      // 2) 모든 위치의 적용된 보정값 + 되돌리기(UNDO) 스냅샷까지 전부 삭제 → 코드 기본값 상태로.
+      const prof = storage.loadProfile();
+      prof.motionCalibOverrides = {};
+      prof.motionCalibUndos = {};
+      prof.strideCorrectionFactorByPos = {};
+      prof.gpsDistCorrectionFactorByPos = {};
+      prof.strideCorrectionFactor = 1.0;
+      prof.gpsDistCorrectionFactor = 1.0;
+      storage.saveProfile(prof);
+      if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
+        app.motion.applyDevicePos(prof.devicePos || 'chest');
+      }
+
+      // 3) 화면 상태(마지막 비교결과/제안값) 및 관련 UI 초기화
+      lastSuggestion = null;
+      lastCompareData = null;
+      const resultBox = document.getElementById('garmin-calib-result');
+      if (resultBox) resultBox.innerHTML = '';
+      render();
+      renderCalibStatus(isKo);
+      renderPendingCalibList(isKo);
+
+      alert(isKo ? '모두 초기화되었습니다. 모든 위치가 코드 기본값 상태로 돌아갔어요.' : 'Everything has been reset. Every position is back to code default values.');
+    } catch (err) {
+      alert((isKo ? '전체 초기화 중 오류: ' : 'Reset-everything error: ') + err.message);
     }
   }
 
@@ -9366,7 +9421,7 @@ const garmin = (function () {
     }
   }
 
-  return { importFitFile, deleteImport, clearAll, clearAllSilent, selectImport, selectPrecLog, toggleGarminSelect, togglePrecLogSelect, importPrecLogCsv, clearPrecLogImports, runCalibrationCompare, applyCalibration, resetCalibration, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, render };
+  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, selectImport, selectPrecLog, toggleGarminSelect, togglePrecLogSelect, importPrecLogCsv, clearPrecLogImports, runCalibrationCompare, applyCalibration, resetCalibration, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, render };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
