@@ -4236,12 +4236,14 @@ const profiles = {
   chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.701, vertScale: 0.454, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false }, // [수정] Garmin FIT 실측 대비 보정 (2026-07-12 런 데이터 기준, 기존 6.0은 약 13.2배 과다측정)
   waist:   { groundThreshold: 10.5, impactThreshold: 10.0, gctFallbackRatio: 0.38, vertScale: 5.5, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false },
   armband: { groundThreshold: 12.0, impactThreshold: 12.5, gctFallbackRatio: 0.33, vertScale: 4.5, minStepInterval: 240, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false },
-  // [추가] 손에 들고 뛰면 팔 스윙 자체가 220deg/s를 훌쩍 넘는 회전을 만들어 내서,
-  // 기존 고정값(220)으로는 진짜 걸음까지 "폰이 흔들린 노이즈"로 오판해 버려지는 바람에
-  // 케이던스가 절반 가까이 언더카운트되는 문제가 있었음(실측: 171 → 81).
-  // 팔 스윙 회전은 훨씬 크므로 임계값을 크게 높여서 정상 걸음을 노이즈로 오판하지 않게 함.
-  // 정밀로그 rot_peak_dps 실측값으로 추후 더 정밀하게 조정 가능.
-  hand:    { groundThreshold: 13.5, impactThreshold: 14.0, gctFallbackRatio: 0.35, vertScale: 0,   minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: true }, // [수정] 네이티브 구제는 손에서만 동작 (가슴/허리/암밴드는 v27 방식대로 무조건 거부 — 가민 실측 대비 정확도 더 높음)
+  // [수정] 손에 들고 뛸 때는 자체 가속도/자이로 임계값 알고리즘으로 걸음을 "직접 판정"하지 않고,
+  // 안드로이드 표준 방식(TYPE_STEP_DETECTOR 하드웨어 걸음 센서)을 걸음 판정의 주(主) 신호로 쓴다.
+  // 팔 스윙이 섞여 자체 알고리즘으로는 오감지/언더카운트가 심했던 문제의 근본 원인이 애초에
+  // "가속도/자이로로 걸음을 직접 세려던 것"이었으므로, 위치별 threshold를 조정하는 미봉책 대신
+  // 걸음 유무 판정 자체를 하드웨어 센서에 맡긴다. groundThreshold/impactThreshold/rotRejectThreshold는
+  // 이제 걸음을 세는 데는 쓰이지 않고, GCT 추정 등 보조 계산에만 남아있는 값이라 의미 없음(폴백용으로만 유지).
+  // stepTrigger: 'native'면 handleMotion()의 자체 판정 블록은 건너뛰고, onNativeStep()이 실제 트리거가 됨.
+  hand:    { groundThreshold: 13.5, impactThreshold: 14.0, gctFallbackRatio: 0.35, vertScale: 0,   minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: false, stepTrigger: 'native' },
 };
 const p = profiles[pos] || profiles.chest;
 this.groundThreshold  = p.groundThreshold;
@@ -4252,6 +4254,11 @@ this.minStepInterval  = p.minStepInterval;
 this.vertEnabled      = p.vertEnabled;
 this.rotRejectThreshold = p.rotRejectThreshold;
 this.nativeRescueEnabled = !!p.nativeRescueEnabled; // [추가] 네이티브 걸음센서 구제는 이 위치에서만 허용할지 여부 (기본 손만 true)
+// [추가] 이 위치에서는 자체 가속도/자이로 알고리즘 대신 안드로이드 표준(TYPE_STEP_DETECTOR)을
+// 걸음 판정의 주 트리거로 쓸지 여부. true면 handleMotion()의 자체 판정 블록은 건너뛰고
+// onNativeStep()이 실제 걸음 확정을 담당하며(주 신호), 가속도/자이로는 GCT·수직진동·좌우밸런스
+// 등 보조 지표 계산에만 쓰인다(보조 신호). 기본은 false(기존 방식: 자체 알고리즘이 주 신호).
+this.useNativeStepTrigger = (p.stepTrigger === 'native');
 // [수정] 보정값 저장 슬롯을 "1개"가 아니라 "착용위치별로 각각"으로 바꿈.
 // 기존엔 가슴에서 캘리브레이션한 뒤 손에서 또 캘리브레이션해서 적용하면 같은 슬롯을
 // 덮어써서 가슴 보정값이 사라지는 문제가 있었음 — 이제 devicePos를 키로 하는 맵에
@@ -4398,6 +4405,26 @@ while (this.nativeStepTimestamps.length && this.nativeStepTimestamps[0] < cutoff
 this.nativeStepTimestamps.shift();
 }
 this.nativeBridgeLastSeenAt = now;
+
+// [수정] 이 착용위치(기본: 손)가 안드로이드 표준 방식을 걸음 판정의 주 신호로 쓰는 경우,
+// 여기가 실제 걸음 확정 트리거다(더 이상 "구제" 용도가 아님). handleMotion()이 최소 간격
+// 미만이면 이미 거기서 return하지만, 네이티브 센서 이벤트는 handleMotion과 별도 타이밍으로
+// 들어오므로 여기서도 동일하게 minStepInterval로 방어한다(중복/이상 이벤트 방지).
+// GCT/수직진동/좌우밸런스 등은 handleMotion()이 계속 누적해 온 가속도·자이로 데이터를
+// commitStep()이 그대로 재사용해 계산한다 — 자이로/가속도는 이제 보조 신호일 뿐이다.
+if (this.useNativeStepTrigger) {
+if (this.lastStepTime !== 0 && (now - this.lastStepTime) < this.minStepInterval) return;
+let cycleTime = now - this.lastStepTime;
+let missedStepsToResync = 0;
+if (this.lastStepTime !== 0 && this.recentCycleTimes.length >= 3) {
+const rollingAvg = this.recentCycleTimes.reduce((a, b) => a + b, 0) / this.recentCycleTimes.length;
+if (cycleTime > rollingAvg * 1.6) {
+const probableSteps = Math.max(1, Math.round(cycleTime / rollingAvg));
+missedStepsToResync = probableSteps - 1;
+}
+}
+this.commitStep(now, cycleTime, missedStepsToResync);
+}
 }
 // [추가] 네이티브 걸음수 센서(TYPE_STEP_COUNTER, 부팅 이후 누적값) 수신용.
 // window.onNativeStepCountUpdate(전역 브릿지 함수)에서 호출된다.
@@ -4486,6 +4513,12 @@ this.quietPhaseSinceLastStep = true;
 this.belowThresholdSince = 0;
 }
 
+// [추가] 이 착용위치가 안드로이드 표준(TYPE_STEP_DETECTOR)을 걸음 판정의 주 신호로 쓰는 경우
+// (기본: 손에 들고 뛰기), 아래 가속도 임계값 기반 자체 판정은 건너뛴다. 위에서 계속 누적해 온
+// vertMin/vertMax, gyroCycleSum, belowThresholdSince 등은 그대로 유지되어, 실제 걸음 확정 시점인
+// onNativeStep() → commitStep()에서 GCT/수직진동/좌우밸런스 등 보조 지표 계산에 재사용된다.
+if (this.useNativeStepTrigger) return;
+
 // [수정] 걸음 이중 감지(더블 카운트) 방지:
 // 착지 충격 직후의 잔진동이 minStepInterval(예:230ms)보다 늦게 한 번 더
 // impactThreshold를 넘으면, 그동안은 그냥 새 걸음으로 잘못 세고 있었음.
@@ -4546,6 +4579,15 @@ return;
 }
 }
 
+this.commitStep(now, cycleTime, missedStepsToResync);
+}
+}
+// [추가] 걸음 1회를 실제로 확정하는 공통 로직 (자체 가속도 판정 경로와 네이티브 걸음센서
+// 트리거 경로가 공유). GCT/수직진동/좌우밸런스는 handleMotion()에서 계속 누적해 온
+// vertMin/vertMax, belowThresholdSince, gyroCycleSum 등을 그대로 재사용해 계산하므로,
+// 어느 쪽이 "걸음이 있었다"고 트리거했는지와 무관하게 항상 동일한 방식으로 산출된다.
+// ── 걸음 확정(공통) ──
+commitStep(now, cycleTime, missedStepsToResync) {
 if (this.lastStepTime !== 0) {
 this.recentCycleTimes.push(cycleTime);
 if (this.recentCycleTimes.length > 8) this.recentCycleTimes.shift();
@@ -4690,7 +4732,6 @@ this.stepSide = (this.stepSide + 1 + missedStepsToResync) % 2;
 }
 this.onStep(result);
 }
-}
 // [추가] 케이던스/GCT 좌우 밸런스(%) 계산
 // 반환값: { cadenceBal: "left:right", gctBal: "left:right" }
 // ── 좌우 밸런스 / 보조 지표 계산 ──
@@ -4764,6 +4805,10 @@ return ratio.toFixed(1);
 // ========== [신규] WalkStepDetector: 걷기 전용 걸음 감지기 (러닝용 MotionManager와 완전 분리) ==========
 // 걷기는 러닝보다 착지 충격 진폭이 작고 리듬이 느려서(분당 약 60~130보),
 // 러닝용 임계값/최소 간격을 그대로 쓰면 오감지/언더카운트가 심함. 걷기 전용 파라미터로 별도 구현.
+// [수정] 안드로이드 표준 방식(TYPE_STEP_DETECTOR 하드웨어 걸음 센서)을 걸음 판정의 주(主) 신호로 쓰고,
+// 자체 가속도 알고리즘은 네이티브 브릿지가 살아있지 않을 때만 쓰는 폴백으로 격하한다. 걷기는 GCT/수직진동/
+// 좌우밸런스 같은 보조 지표를 아예 안 내고 걸음수·케이던스만 필요하므로(러닝의 hand 모드와 달리 자이로/가속도를
+// 보조 지표 계산용으로 계속 돌릴 필요가 없음), 네이티브가 살아있는 동안은 자체 알고리즘을 아예 건너뛴다.
 class WalkStepDetector {
 constructor(onStep) {
 this.onStep = onStep;
@@ -4784,6 +4829,11 @@ this.armed = true; // [추가] true일 때만 새 걸음을 인정 (히스테리
 this.recentPeaks = [];
 this.maxRecentPeaks = 6;
 this.peakGateRatio = 0.72; // 최근 평균 충격의 72% 미만이면 걸음으로 불인정
+// [추가] 네이티브 걸음 센서(TYPE_STEP_DETECTOR) 하이브리드용 상태.
+// onNativeStep()이 최근에도 계속 호출되고 있으면(3초 이내) "네이티브가 살아있다"고 보고,
+// 그동안은 아래 accel 기반 자체 알고리즘(handleMotion)을 건너뛴다. 네이티브 이벤트가
+// 3초 넘게 끊기면(기기 미지원/브릿지 오류 등) 자동으로 자체 알고리즘 단독 모드로 폴백한다.
+this.nativeBridgeLastSeenAt = 0;
 }
 reset() {
 this.lastStepTime = 0;
@@ -4791,8 +4841,31 @@ this.stepCount = 0;
 this.armed = true;
 this.belowSince = null;
 this.recentPeaks = [];
+this.nativeBridgeLastSeenAt = 0; // [추가] 새 걷기 시작 시 초기화 — 첫 네이티브 이벤트가 올 때까지는 폴백(accel)으로 동작
+}
+// 네이티브 걸음 센서 브릿지가 지금 살아있는지(최근 3초 이내에 이벤트가 들어왔는지)
+isNativeBridgeLive() {
+return (Date.now() - this.nativeBridgeLastSeenAt) < 3000;
+}
+// [추가] 네이티브 걸음 센서(TYPE_STEP_DETECTOR) 이벤트 수신용 — 걷기 모드의 주 트리거.
+// window.onNativeStepDetected(전역 브릿지 함수)에서 activityMode==='walk'일 때 호출된다.
+// ── 안드로이드 네이티브 걸음 센서 연동(걷기, 주 신호) ──
+onNativeStep(tsMs) {
+const now = (typeof tsMs === 'number') ? tsMs : Date.now();
+this.nativeBridgeLastSeenAt = now;
+// 최소 간격만 방어적으로 확인(중복/이상 이벤트 방지). 걷기는 GCT 등 보조 지표가 없으므로
+// 러닝 hand 모드의 commitStep()처럼 무거운 후처리 없이 카운트만 올리면 된다.
+if (this.lastStepTime !== 0 && (now - this.lastStepTime) < this.minStepInterval) return;
+this.lastStepTime = now;
+this.stepCount++;
+this.armed = false;
+this.belowSince = null;
+this.onStep({ stepCount: this.stepCount, time: now });
 }
 handleMotion(e) {
+// [추가] 네이티브 걸음 센서가 살아있는 동안은 이게 주 신호이므로, 아래 accel 기반
+// 자체 판정(폴백)은 건너뛴다. 네이티브가 끊기면(기기 미지원 등) 자동으로 아래 로직이 다시 동작.
+if (this.isNativeBridgeLive()) return;
 const acc = e.accelerationIncludingGravity;
 if (!acc || acc.z === null || acc.z === undefined) return;
 const force = Math.sqrt((acc.x||0)*(acc.x||0) + (acc.y||0)*(acc.y||0) + (acc.z||0)*(acc.z||0));
@@ -6170,17 +6243,21 @@ app.maybeLogPrecisionSample();
 // 네이티브(Kotlin) 쪽에서 안드로이드 하드웨어 걸음 감지 이벤트가 발생할 때마다
 // window.onNativeStepDetected(timestamp)를 호출해주는 걸 전제로 함
 // (해당 네이티브 브릿지는 아직 구현 전 — 추가되면 바로 이 함수와 연결됨).
-// 하드웨어 걸음 센서는 팔 스윙 등 폰 자체 흔들림에 강하기 때문에, 손에 들고
-// 뛸 때 자체 자이로 노이즈 필터(rotRejectThreshold)가 걸음을 놓치는 경우를
-// 구제하는 용도로 쓰인다 (자세한 동작은 MotionManager.hasNearbyNativeStep 참고).
-// GCT/좌우밸런스/수직진동 계산 자체는 그대로 자체 가속도·자이로 분석이 담당하고,
-// 이 브릿지는 "걸음이 있었는지" 판정만 보강한다.
+// [수정] 걷기 모드에서는 이게 걸음 판정의 주(主) 신호다(WalkStepDetector.onNativeStep 참고) —
+// 네이티브가 살아있는 동안 accel 기반 자체 알고리즘은 완전히 쉼. 러닝 모드에서는 위치별로 다름:
+// hand는 마찬가지로 주 신호(MotionManager.useNativeStepTrigger), 가슴/허리/암밴드는 여전히
+// 자체 가속도·자이로 분석이 주 신호이고 이 브릿지는 자이로 노이즈 필터의 오판을 구제하는
+// 보조 용도로만 쓰인다(MotionManager.hasNearbyNativeStep 참고).
 window.onNativeStepDetected = function (timestamp) {
 try {
 if (typeof app !== 'undefined' && app &&
-    app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused &&
-    app.state.activityMode !== 'walk' && app.motion) {
-app.motion.onNativeStep(typeof timestamp === 'number' ? timestamp : Date.now());
+    app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
+const ts = typeof timestamp === 'number' ? timestamp : Date.now();
+if (app.state.activityMode === 'walk') {
+if (app.walkMotion) app.walkMotion.onNativeStep(ts);
+} else {
+if (app.motion) app.motion.onNativeStep(ts);
+}
 }
 } catch (e) { console.error('onNativeStepDetected error', e); }
 };
