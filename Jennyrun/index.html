@@ -1787,19 +1787,23 @@ document.body.removeChild(a);
 }
 exportPrecisionLogById(id) {
 const isKo = this.getLang() === 'ko';
-const entry = this.loadPrecisionLogs().find(item => item.id === id);
+const list = this.loadPrecisionLogs();
+const idx = list.findIndex(item => item.id === id);
+const entry = idx >= 0 ? list[idx] : null;
 if (!entry || !entry.log || !entry.log.length) {
 alert(isKo ? '로그를 찾을 수 없습니다.' : 'Could not find this log.');
 return;
 }
 const csvStr = this.buildPrecisionCsv(entry.log, entry.devicePos);
 const d = new Date(entry.savedAt);
-const dateStr = d.toISOString().slice(0,10);
+// [수정] 파일명이 'precision-log-2026-07-19-214457'처럼 너무 길어진다는 피드백에 따라
+// 화면에 표시되는 순서번호(#1, #2...)를 그대로 재사용해 짧게 축약. 연도는 생략(월일만).
+// [수정] 최근 10개까지만 보관되므로 5자리까지 채울 필요가 없음. 2자리로 축약.
+const numStr = String(idx + 1).padStart(2, '0');
+const dateStr = String(d.getMonth() + 1).padStart(2,'0') + String(d.getDate()).padStart(2,'0'); // MMDD, 연도 생략
 const timeStr = d.toTimeString().slice(0,8).replace(/:/g,'');
-// [수정] 파일명에도 착용 위치(devicePos)를 함께 남겨서, 여러 개 export한 CSV 파일들을
-// 파일 탐색기에서 열어보지 않고도 파일명만으로 어느 위치 기록인지 구분할 수 있게 함.
-const posSuffix = entry.devicePos ? ('-' + entry.devicePos) : '';
-const fileName = 'precision-log-' + dateStr + '-' + timeStr + posSuffix + '.csv';
+const posSuffix = entry.devicePos ? ('.' + entry.devicePos) : '';
+const fileName = 'log-' + numStr + '.' + dateStr + '.' + timeStr + posSuffix + '.csv';
 this.downloadCsvFile(csvStr, fileName);
 }
 // [추가] buildPrecisionCsv가 만든 CSV(헤더: t_sec,timestamp,lat,...,gyro_gamma_dps)를
@@ -2482,10 +2486,12 @@ if (clearBtn) clearBtn.style.display = 'none';
 return;
 }
 if (clearBtn) clearBtn.style.display = 'inline-block';
-wrap.innerHTML = list.map(item => {
+wrap.innerHTML = list.map((item, idx) => {
 const d = new Date(item.savedAt);
 const label = d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0') + ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
 const count = item.log ? item.log.length : 0;
+// [추가] 저장 순서를 한눈에 구분할 수 있도록 짧은 번호 배지(#1 = 최신) 추가
+const orderBadge = '<span style="color:#666; font-weight:700;">#' + (idx + 1) + '</span> ';
 // [추가] CSV로 불러온 로그는 방금 기록한 러닝과 구분되도록 작은 배지를 붙인다.
 const badge = item.imported ? ' <span style="color:#888; font-weight:700;">· ' + (isKo ? '가져옴' : 'IMPORTED') + '</span>' : '';
 // [추가] 초장거리 러닝이라 용량 보호를 위해 샘플을 솎아낸 로그는 구분 배지 표시
@@ -2495,7 +2501,7 @@ const posLabelMap = isKo ? { chest:'가슴', waist:'허리', armband:'암밴드'
 const posBadge = item.devicePos ? ' <span style="color:#7fd3ff; font-weight:700;">· ' + (posLabelMap[item.devicePos] || item.devicePos) + '</span>' : '';
 return '<div class="garmin-import-item">'
 + '<div class="garmin-import-item-head">'
-+ '<div class="garmin-import-item-title">' + label + ' · ' + count + (isKo ? '개' : ' rows') + posBadge + badge + downsampledBadge + '</div>'
++ '<div class="garmin-import-item-title">' + orderBadge + label + ' · ' + count + (isKo ? '개' : ' rows') + posBadge + badge + downsampledBadge + '</div>'
 + '<div style="display:flex; gap:6px;">'
 + '<div class="garmin-import-item-del" style="color:var(--primary); border-color:#2a3a2f;" onclick="storage.exportPrecisionLogById(\'' + item.id + '\')">' + (isKo ? '내보내기' : 'EXPORT') + '</div>'
 + '<div class="garmin-import-item-del" onclick="storage.deletePrecisionLog(\'' + item.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</div>'
@@ -7946,7 +7952,7 @@ const garmin = (function () {
 
   // [수정] 저장된 가민 기록(최대 3개)을 전부 카드로 보여주도록 isSelected 인자 추가.
   // isSelected면 캘리브레이션 비교 기준으로 쓰이는 카드라는 표시(테두리 강조 + 라벨)를 해준다.
-  function renderBox(item, isKo, isSelected) {
+  function renderBox(item, isKo, isSelected, orderIdx) {
     if (!item) {
       return '<div class="garmin-import-empty">' + (isKo ? '가져온 가민 데이터가 없습니다.' : 'No imported Garmin data yet.') + '</div>';
     }
@@ -7964,13 +7970,14 @@ const garmin = (function () {
       [isKo ? '레코드 수' : 'RECORDS', item.recordCount]
     ];
     const escapedLabel = fmtDate(item.startMs).replace(/'/g, "&#39;");
+    const orderBadge = (orderIdx != null) ? '<span style="color:#666; font-weight:700;">#' + orderIdx + '</span> ' : '';
     // [수정] 단일선택 버튼("비교 기준으로") 대신 체크박스로 다중선택 — 체크한 기록들의 평균으로 비교.
     const selectBtn = '<label style="display:flex; align-items:center; gap:5px; font-size:10px; color:var(--primary); font-weight:800; cursor:pointer;">'
       + '<input type="checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="garmin.toggleGarminSelect(\'' + item.id + '\')" style="width:16px; height:16px; accent-color: var(--primary);">'
       + (isKo ? '비교 선택' : 'COMPARE') + '</label>';
     return '<div class="garmin-import-item"' + (isSelected ? ' style="border-color:var(--primary);"' : '') + '>'
       + '<div class="garmin-import-item-head">'
-      + '<div class="garmin-import-item-title">' + fmtDate(item.startMs) + '</div>'
+      + '<div class="garmin-import-item-title">' + orderBadge + fmtDate(item.startMs) + '</div>'
       + '<div style="display:flex; gap:6px;">'
       + selectBtn
       + '<div class="garmin-import-item-del" onclick="garmin.deleteImport(\'' + item.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</div>'
@@ -8045,11 +8052,11 @@ const garmin = (function () {
 
     // [수정] 드롭다운은 이제 단일선택이 아니라 체크박스 목록과 동일한 다중선택을 토글하는
     // 보조 진입점 — 항목 클릭 시 garmin.selectImport()가 toggleGarminSelect()를 호출한다.
-    dropdownOptions.innerHTML = list.map(item => {
+    dropdownOptions.innerHTML = list.map((item, idx) => {
       const label = fmtDate(item.startMs);
       const escapedLabel = label.replace(/'/g, "&#39;");
       const mark = selectedIds.indexOf(item.id) >= 0 ? '✓ ' : '';
-      return '<div class="dropdown-option precision-option" onclick="garmin.selectImport(\'' + item.id + '\', \'' + escapedLabel + '\')">' + mark + label + '</div>';
+      return '<div class="dropdown-option precision-option" onclick="garmin.selectImport(\'' + item.id + '\', \'' + escapedLabel + '\')">' + mark + '#' + (idx + 1) + ' ' + label + '</div>';
     }).join('');
 
     currentText.textContent = selectedIds.length
@@ -8058,7 +8065,7 @@ const garmin = (function () {
     // [수정] 기존엔 선택된 기록 1개만 renderBox()로 그렸는데, 저장은 3개까지 되니까
     // 정밀 로그 리스트(renderPrecisionLogList)와 동일하게 전부 카드로 이어붙여서 보여준다.
     // 어느 카드가 체크됐는지는 renderBox의 isSelected 인자로 강조 표시.
-    wrap.innerHTML = list.map(item => renderBox(item, isKo, selectedIds.indexOf(item.id) >= 0)).join('');
+    wrap.innerHTML = list.map((item, idx) => renderBox(item, isKo, selectedIds.indexOf(item.id) >= 0, idx + 1)).join('');
     if (clearAllBtn) clearAllBtn.style.display = 'block';
   }
 
@@ -8152,10 +8159,10 @@ const garmin = (function () {
       return;
     }
     // [수정] 단일 자동선택 대신 체크된(✓) 항목을 표시만 하고, 클릭 시 선택을 토글한다.
-    dropdown.innerHTML = logs.map(l => {
+    dropdown.innerHTML = logs.map((l, idx) => {
       const label = fmtDate(new Date(l.savedAt).getTime()) + ' · ' + l.log.length + (isKo ? '개' : ' rows');
       const mark = selectedPrecLogIds.indexOf(l.id) >= 0 ? '✓ ' : '';
-      return '<div class="dropdown-option precision-option" onclick="garmin.selectPrecLog(\'' + l.id + '\')">' + mark + label + '</div>';
+      return '<div class="dropdown-option precision-option" onclick="garmin.selectPrecLog(\'' + l.id + '\')">' + mark + '#' + (idx + 1) + ' ' + label + '</div>';
     }).join('');
     const selCount = logs.filter(l => selectedPrecLogIds.indexOf(l.id) >= 0).length;
     currentText.textContent = selCount ? (selCount + (isKo ? '개 선택됨' : ' selected')) : (isKo ? '선택 안 함' : 'NONE SELECTED');
@@ -8178,12 +8185,13 @@ const garmin = (function () {
     // 여러 개 체크하면 하단 "COMPARE SELECTED IMPORTED LOG" 버튼으로 평균 비교.
     // [추가] 착용 위치 배지: 길면 첫글자(C/W/A/H)만 축약해서 표시
     const posShortMap = { chest:'C', waist:'W', armband:'A', hand:'H' };
-    wrap.innerHTML = autoLogs.map(l => {
+    wrap.innerHTML = autoLogs.map((l, idx) => {
       const isSelected = selectedPrecLogIds.indexOf(l.id) >= 0;
       const label = fmtDate(new Date(l.savedAt).getTime()) + ' · ' + l.log.length + (isKo ? '개' : ' rows');
       const posBadge = l.devicePos ? ' <span style="color:#7fd3ff; font-weight:700;">· ' + (posShortMap[l.devicePos] || l.devicePos) + '</span>' : '';
+      const orderBadge = '<span style="color:#666; font-weight:700;">#' + (idx + 1) + '</span> ';
       return '<div style="display:flex; justify-content:space-between; align-items:center; background:#1a1a1a; border:1.5px solid ' + (isSelected ? 'var(--primary)' : '#333') + '; border-radius:10px; padding:12px; margin-bottom:8px;">'
-        + '<span style="font-size:12px; color:#ccc;">' + label + posBadge + '</span>'
+        + '<span style="font-size:12px; color:#ccc;">' + orderBadge + label + posBadge + '</span>'
         + '<label style="display:flex; align-items:center; gap:5px; font-size:10px; color:var(--primary); font-weight:800; cursor:pointer;">'
         + '<input type="checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="garmin.togglePrecLogSelect(\'' + l.id + '\')" style="width:16px; height:16px; accent-color: var(--primary);">'
         + (isKo ? '비교 선택' : 'COMPARE') + '</label>'
