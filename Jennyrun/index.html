@@ -8472,7 +8472,14 @@ const garmin = (function () {
     const posInfoHtml = '<div style="font-size:10.5px; color:#7fd3ff; font-weight:700; margin-bottom:10px;">'
       + (isKo ? '적용 위치: ' : 'Apply to position: ') + posLabel(resolvedDevicePos)
       + (distinctPrecPos.length === 0 ? (isKo ? ' (로그에 위치 기록이 없어 현재 설정값 사용)' : ' (no position saved in log — using current setting)') : '')
-      + '</div>';
+      + '</div>'
+      + (resolvedDevicePos === 'hand'
+        ? '<div style="font-size:10px; color:#888; font-weight:600; margin-bottom:10px; line-height:1.5;">'
+          + (isKo
+            ? 'ℹ️ 손(hand) 모드는 네이티브 걸음센서가 걸음 판정을 직접 하므로, 아래 PHONE 케이던스와 OS 걸음감지센서 값이 사실상 같은 소스입니다(오차가 작게 나오는 게 정상).'
+            : 'ℹ️ In hand mode, the native step sensor drives step detection directly, so PHONE cadence and OS Step Detector below are effectively the same source (a small diff is expected/normal).')
+          + '</div>'
+        : '');
 
     if (!garminItems.length || !precItems.length) {
       lastSuggestion = null;
@@ -8717,12 +8724,21 @@ const garmin = (function () {
         + '<span>' + line + '</span></label>';
       html += '<div style="margin-top:12px; font-size:11px; color:#ccc; line-height:1.5;">'
         + '<div style="color:var(--primary); font-weight:900; margin-bottom:4px;">' + (isKo ? '권장 보정수치 (적용할 항목 선택)' : 'RECOMMENDED CALIBRATION (select items to apply)') + '</div>';
+      // [추가] hand는 이제 accel 기반 걸음판정 자체를 건너뛰므로(useNativeStepTrigger),
+      // rotRejectThreshold를 바꿔도 적용될 코드 경로가 없음(no-op). 헷갈리지 않게 경고를 붙이고
+      // 기본 체크도 꺼둔다 — 다른 항목(GCT/보폭/GPS거리)은 hand에서도 계속 유효하므로 그대로 둠.
+      const rotDeadForHand = (resolvedDevicePos === 'hand');
+      const rotDeadNote = rotDeadForHand
+        ? (isKo
+          ? ' <span style="color:var(--danger); font-weight:700;">⚠ 손(hand) 모드에서는 네이티브 걸음센서가 걸음 판정을 직접 하므로 이 값을 적용해도 효과 없음</span>'
+          : ' <span style="color:var(--danger); font-weight:700;">⚠ No effect in hand mode — native step sensor drives step detection directly</span>')
+        : '';
       if (suggestedRot != null) {
-        html += checkRow('calib-sel-rot', 'rotRejectThreshold: ' + curRot + ' → <b>' + suggestedRot + '</b> (deg/s) ' + (isKo ? '<span style="color:#666;">(가민 기준)</span>' : '<span style="color:#666;">(vs Garmin)</span>'));
+        html += checkRow('calib-sel-rot', 'rotRejectThreshold: ' + curRot + ' → <b>' + suggestedRot + '</b> (deg/s) ' + (isKo ? '<span style="color:#666;">(가민 기준)</span>' : '<span style="color:#666;">(vs Garmin)</span>') + rotDeadNote, rotDeadForHand ? false : undefined);
       }
       if (suggestedRotOS != null) {
         html += checkRow('calib-sel-rot-os', 'rotRejectThreshold: ' + curRot + ' → <b>' + suggestedRotOS + '</b> (deg/s) '
-          + (isKo ? '<span style="color:#7fd3ff;">(OS 센서 기준 대안 — 체크 시 위 값 대신 이 값이 적용됨)</span>' : '<span style="color:#7fd3ff;">(alt., based on OS sensor — overrides the row above if checked)</span>'), false);
+          + (isKo ? '<span style="color:#7fd3ff;">(OS 센서 기준 대안 — 체크 시 위 값 대신 이 값이 적용됨)</span>' : '<span style="color:#7fd3ff;">(alt., based on OS sensor — overrides the row above if checked)</span>') + rotDeadNote, false);
       }
       if (suggestedGct != null) {
         html += checkRow('calib-sel-gct', 'gctFallbackRatio: ' + curGct + ' → <b>' + suggestedGct + '</b>');
