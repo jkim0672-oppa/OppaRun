@@ -9297,38 +9297,37 @@ const garmin = (function () {
     }
   }
 
-  // [수정] "전체 초기화" 버튼: 가민 분석실의 기록/로그성 데이터뿐 아니라, 모든 착용위치
-  // (chest/waist/armband/hand)에 지금 적용되어 있는 보정수치까지 전부 코드 기본값으로
-  // 되돌린다. 오래된 보정값이 계속 남아있지 않도록 하기 위함 (요청에 따라 변경됨 —
-  // 예전 버전은 적용값은 건드리지 않고 기록만 지웠으나, 이제는 완전 초기화).
+  // [수정] "RESET ALL LOG" 버튼: 가민 분석실 안에 쌓이는 "기록/로그성" 데이터만 지운다.
+  // - 가민 FIT 가져오기 목록, 캘리브레이션용 지난 로그 불러오기, 폰 자동저장 정밀 로그
+  // - 되돌리기(UNDO) 스냅샷, 평균 적용 대기목록(pending), 마지막 비교결과 화면
+  // [중요] 폰(앱)이 실제로 지금 사용 중인 보정수치(motionCalibOverrides,
+  // strideCorrectionFactorByPos, gpsDistCorrectionFactorByPos 등)는 건드리지 않는다.
+  // 그 값을 초기화하는 건 위치별 RESET TO DEFAULT의 역할이고, 이 버튼은 화면에 쌓인
+  // "기록"만 청소하는 용도.
   async function resetEverything() {
     const isKo = isKoLang();
     const msg = isKo
-      ? '가민 분석실의 FIT/로그 기록과 모든 위치(가슴/허리/암밴드/손)에 적용된 보정수치를 전부 삭제하고 기본값으로 되돌릴까요?\n\n이 작업은 되돌릴 수 없습니다.'
-      : 'Delete all Garmin FIT/log records AND reset the applied calibration values for every position (chest/waist/armband/hand) back to default?\n\nThis cannot be undone.';
+      ? '가민 분석실의 FIT 가져오기 기록, 폰 정밀 로그, 되돌리기/대기목록 등 화면에 보이는 기록들을 모두 삭제할까요?\n\n(주의) 지금 폰에 적용되어 있는 보정수치 자체는 그대로 유지됩니다. 이 작업은 되돌릴 수 없습니다.'
+      : 'Delete all Garmin FIT imports, phone precision logs, and calibration history shown on screen (undo snapshots, pending list)?\n\nNote: the correction values currently applied on your phone will NOT be changed. This cannot be undone.';
     if (!(await appConfirm(msg))) return;
     try {
       // 1) 가민 FIT 가져오기 + 캘리브레이션용 지난 로그 불러오기 + 폰 자동저장 정밀 로그
       saveImports([]);
       savePrecLogImportsList([]);
-      savePendingCalibList([]);
       selectedIds = [];
       selectedPrecLogIds = [];
       try { storage.savePrecisionLogsList([]); } catch (e) {}
       if (typeof ui !== 'undefined' && ui.renderPrecisionLogList) ui.renderPrecisionLogList();
 
-      // 2) 모든 위치의 적용된 보정값 + 되돌리기(UNDO) 스냅샷까지 전부 삭제 → 코드 기본값 상태로.
-      const prof = storage.loadProfile();
-      prof.motionCalibOverrides = {};
-      prof.motionCalibUndos = {};
-      prof.strideCorrectionFactorByPos = {};
-      prof.gpsDistCorrectionFactorByPos = {};
-      prof.strideCorrectionFactor = 1.0;
-      prof.gpsDistCorrectionFactor = 1.0;
-      storage.saveProfile(prof);
-      if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
-        app.motion.applyDevicePos(prof.devicePos || 'chest');
-      }
+      // 2) 화면에 남는 "기록"만 삭제: 되돌리기 스냅샷 + 평균 적용 대기목록.
+      // [중요] motionCalibOverrides / strideCorrectionFactorByPos / gpsDistCorrectionFactorByPos는
+      // 지금 폰이 실제로 쓰고 있는 값이므로 여기서는 절대 초기화하지 않는다.
+      savePendingCalibList([]);
+      try {
+        const prof = storage.loadProfile();
+        prof.motionCalibUndos = {};
+        storage.saveProfile(prof);
+      } catch (e) {}
 
       // 3) 화면 상태(마지막 비교결과/제안값) 및 관련 UI 초기화
       lastSuggestion = null;
@@ -9339,7 +9338,7 @@ const garmin = (function () {
       renderCalibStatus(isKo);
       renderPendingCalibList(isKo);
 
-      alert(isKo ? '모두 초기화되었습니다. 모든 위치가 코드 기본값 상태로 돌아갔어요.' : 'Everything has been reset. Every position is back to code default values.');
+      alert(isKo ? '분석실 기록이 모두 삭제되었습니다. 현재 적용된 보정수치는 그대로 유지돼요.' : 'Lab records cleared. Your currently applied calibration values are unchanged.');
     } catch (err) {
       alert((isKo ? '전체 초기화 중 오류: ' : 'Reset-everything error: ') + err.message);
     }
