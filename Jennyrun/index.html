@@ -8592,8 +8592,9 @@ const garmin = (function () {
     // 높으면 비율이 1보다 작아져서 임계값을 내리라고 제안함. 문제는 게이팅 조건
     // (cadDiffPct > 3)이 한쪽 방향만 보고 있었던 것 — 손모드처럼 언더카운트되는
     // 상황(cadDiffPct < -3)에서는 아무 제안도 안 해주는 사각지대가 있었음.
-    // 다른 제안값들과 일관되게 ±30% 클램프(clampRatio, 아래에서 정의)도 함께 적용.
-    const clampRatio = (r) => Math.max(0.85, Math.min(1.15, r));
+    // 다른 제안값들과 일관되게 ±10% 클램프(clampRatio, 아래에서 정의)도 함께 적용.
+    // [수정] 과보정 방지를 위해 기존 ±30%에서 ±10%로 축소 (최소로 잡고 여러 번에 나눠 수정하는 방식).
+    const clampRatio = (r) => Math.max(0.9, Math.min(1.1, r));
     const suggestedRot = (curRot != null && phoneAvgCadence && cadDiffPct != null && Math.abs(cadDiffPct) > 3)
       ? Math.max(60, Math.round(curRot * clampRatio(garminAvgCadence / phoneAvgCadence))) : null;
     // [추가] OS 센서(걸음감지센서/걸음수센서) 기준의 대안 rotRejectThreshold 제안값.
@@ -8610,19 +8611,20 @@ const garmin = (function () {
     // [수정] 다른 항목들(rot/vertScale/stride)과 다르게 이 항목만 clamp가 빠져있어서,
     // 웜업 구간 노이즈나 GPS 튐 등으로 오차가 유난히 크게 나온 러닝 하나만 비교해도
     // 제안값이 과도하게(2~3배 이상) 튈 수 있는 문제가 있었음. 다른 항목들과 동일하게
-    // ±30% clamp를 적용해 한 번에 너무 크게 바뀌지 않도록 안전장치 추가.
+    // ±10% clamp를 적용해 한 번에 너무 크게 바뀌지 않도록 안전장치 추가.
     const suggestedGct = (curGct != null && phoneAvgGct && garminAvgGct && gctDiffPct != null && Math.abs(gctDiffPct) > 3)
       ? Math.round(curGct * clampRatio(garminAvgGct / phoneAvgGct) * 1000) / 1000 : null;
     // [추가] 수직진동(vertScale)과 보폭(strideCorrectionFactor) 제안값.
     // 오차가 3% 이내면 노이즈로 보고 제안하지 않음. 과보정 방지를 위해 한 번에
-    // ±30% 이상 바뀌지 않도록 clamp.
+    // ±10% 이상 바뀌지 않도록 clamp.
     const suggestedVertScale = (curVertScale != null && curVertScale > 0 && phoneAvgVertMm && garminAvgVertMm && vertDiffPct != null && Math.abs(vertDiffPct) > 3)
       ? Math.round(curVertScale * clampRatio(garminAvgVertMm / phoneAvgVertMm) * 1000) / 1000 : null;
     const suggestedStrideFactor = (phoneAvgStepMm && garminAvgStepMm && stepDiffPct != null && Math.abs(stepDiffPct) > 3)
       ? Math.round(curStrideFactor * clampRatio(garminAvgStepMm / phoneAvgStepMm) * 1000) / 1000 : null;
     // [추가] GPS 거리 보정계수 제안값. 실측 거리라 노이즈가 적으므로 1% 초과 오차부터
-    // 제안하되, 한 번에 과도하게 튀지 않도록 ±15%로 더 좁게 clamp.
-    const clampGpsRatio = (r) => Math.max(0.92, Math.min(1.08, r));
+    // 제안하되, 한 번에 과도하게 튀지 않도록 ±5%로 더 좁게 clamp.
+    // [수정] 과보정 방지를 위해 기존 ±15%에서 ±5%로 축소 (최소로 잡고 여러 번에 나눠 수정하는 방식).
+    const clampGpsRatio = (r) => Math.max(0.95, Math.min(1.05, r));
     const suggestedGpsDistFactor = (phoneDistanceKm && garminDistanceKm && distDiffPct != null && Math.abs(distDiffPct) > 1)
       ? Math.round(curGpsDistFactor * clampGpsRatio(garminDistanceKm / phoneDistanceKm) * 1000) / 1000 : null;
 
