@@ -4289,12 +4289,15 @@ this.applyDevicePos(savedPos);
 applyDevicePos(pos) {
 // [CALIB_ANCHOR:DEVICE_PROFILES] 캘리브레이션 스니펫(코드 반영용)을 여기 표에 붙여넣으세요.
 const profiles = {
-  // [수정] 2026.07.11 fit 파일 + 정밀 로그 원본을 초 단위로 정렬해 재검증(232개 지점).
-  // 폰/가민 GCT 비율 평균 0.499(표준편차 0.025)로 거의 정확히 2배 구조적 오차 확인.
-  // 기존 추정치(0.681, 평균값만 비교)보다 정밀한 값(0.701)으로 갱신.
-  chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.701, vertScale: 0.50, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false }, // [수정] Garmin FIT 실측 대비 보정 (2026-07-29 vertScale 0.454→0.50 상향)
-  waist:   { groundThreshold: 10.5, impactThreshold: 10.0, gctFallbackRatio: 0.38, vertScale: 5.5, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false },
-  armband: { groundThreshold: 12.0, impactThreshold: 12.5, gctFallbackRatio: 0.33, vertScale: 4.5, minStepInterval: 240, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false },
+// [수정 2026-07-31] 걸음판정(케이던스/페이스의 근간)을 위치 구분 없이 전부 안드로이드
+// 표준 걸음센서(TYPE_STEP_DETECTOR)로 통일. hand에서 먼저 검증했던 것과 같은 이유 —
+// 가속도/자이로로 걸음을 "직접 세려는" 시도 자체가 불안정의 근본 원인이었음. 이제 모든
+// 위치에서 groundThreshold/impactThreshold/rotRejectThreshold는 걸음을 세는 데는 쓰이지
+// 않고, GCT 추정·수직진동·좌우밸런스 등 보조 지표 계산에만 쓰인다(값 자체는 위치별
+// 신호 패턴이 달라 계속 따로 유지).
+chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.701, vertScale: 0.50, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정] Garmin FIT 실측 대비 보정 (2026-07-29 vertScale 0.454→0.50 상향)
+  waist:   { groundThreshold: 10.5, impactThreshold: 10.0, gctFallbackRatio: 0.38, vertScale: 5.5, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
+  armband: { groundThreshold: 12.0, impactThreshold: 12.5, gctFallbackRatio: 0.33, vertScale: 4.5, minStepInterval: 240, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
   // [수정] 손에 들고 뛸 때는 자체 가속도/자이로 임계값 알고리즘으로 걸음을 "직접 판정"하지 않고,
   // 안드로이드 표준 방식(TYPE_STEP_DETECTOR 하드웨어 걸음 센서)을 걸음 판정의 주(主) 신호로 쓴다.
   // 팔 스윙이 섞여 자체 알고리즘으로는 오감지/언더카운트가 심했던 문제의 근본 원인이 애초에
@@ -8594,13 +8597,11 @@ const garmin = (function () {
       + (isKo ? '적용 위치: ' : 'Apply to position: ') + posLabel(resolvedDevicePos)
       + (distinctPrecPos.length === 0 ? (isKo ? ' (로그에 위치 기록이 없어 현재 설정값 사용)' : ' (no position saved in log — using current setting)') : '')
       + '</div>'
-      + (resolvedDevicePos === 'hand'
-        ? '<div style="font-size:10px; color:#888; font-weight:600; margin-bottom:10px; line-height:1.5;">'
-          + (isKo
-            ? 'ℹ️ 손(hand) 모드는 네이티브 걸음센서가 걸음 판정을 직접 하므로, 아래 PHONE 케이던스와 OS 걸음감지센서 값이 사실상 같은 소스입니다(오차가 작게 나오는 게 정상).'
-            : 'ℹ️ In hand mode, the native step sensor drives step detection directly, so PHONE cadence and OS Step Detector below are effectively the same source (a small diff is expected/normal).')
-          + '</div>'
-        : '');
+      + '<div style="font-size:10px; color:#888; font-weight:600; margin-bottom:10px; line-height:1.5;">'
+        + (isKo
+          ? 'ℹ️ 모든 착용위치는 네이티브 걸음센서가 걸음 판정을 직접 하므로, 아래 PHONE 케이던스와 OS 걸음감지센서 값이 사실상 같은 소스입니다(오차가 작게 나오는 게 정상). GCT·수직진동·좌우밸런스는 이와 별개로 가속도/자이로 분석으로 계산됩니다.'
+          : 'ℹ️ All wear positions now use the native step sensor to drive step detection directly, so PHONE cadence and OS Step Detector below are effectively the same source (a small diff is expected/normal). GCT, vertical oscillation, and L/R balance are calculated separately from accel/gyro analysis.')
+        + '</div>';
 
     if (!garminItems.length || !precItems.length) {
       lastSuggestion = null;
@@ -8719,8 +8720,9 @@ const garmin = (function () {
     // [수정 2026-07-30] hand는 네이티브 걸음센서가 걸음판정을 직접 하므로
 // rotRejectThreshold가 이제 걸음 판정에 전혀 쓰이지 않는다(no-op). 회색으로
 // 보여주며 헷갈리게 하는 대신, hand에서는 이 제안 자체를 계산/표시하지 않는다.
-const suggestedRot = (resolvedDevicePos !== 'hand' && curRot != null && phoneAvgCadence && cadDiffPct != null && Math.abs(cadDiffPct) > 3)
-      ? Math.max(60, Math.round(curRot * clampRatio(garminAvgCadence / phoneAvgCadence))) : null;
+// [수정 2026-07-31] 이제 모든 착용위치가 네이티브 걸음판정이라 rotRejectThreshold가
+      // 어느 위치에서도 걸음 판정에 쓰이지 않는다(no-op) — 제안 자체를 항상 비활성화.
+      const suggestedRot = null;
     // [추가] OS 센서(걸음감지센서/걸음수센서) 기준의 대안 rotRejectThreshold 제안값.
     // 위 suggestedRot은 가민을 기준(정답)으로 삼는데, 이건 같은 폰 안에서 자체 알고리즘과
     // 안드로이드 자체 센서를 비교해서 나온 값 — 가민 없이도(혹은 가민과 별개로) 자체
@@ -8730,8 +8732,7 @@ const suggestedRot = (resolvedDevicePos !== 'hand' && curRot != null && phoneAvg
       ? (stepDetectorCadence + stepCounterCadence) / 2
       : (stepDetectorCadence != null ? stepDetectorCadence : stepCounterCadence);
     const osCadDiffPct = (osRefCadence != null && phoneAvgCadence) ? ((phoneAvgCadence - osRefCadence) / osRefCadence * 100) : null;
-    const suggestedRotOS = (resolvedDevicePos !== 'hand' && curRot != null && phoneAvgCadence && osRefCadence && osCadDiffPct != null && Math.abs(osCadDiffPct) > 3)
-      ? Math.max(60, Math.round(curRot * clampRatio(osRefCadence / phoneAvgCadence))) : null;
+    const suggestedRotOS = null;
     // [수정] 다른 항목들(rot/vertScale/stride)과 다르게 이 항목만 clamp가 빠져있어서,
     // 웜업 구간 노이즈나 GPS 튐 등으로 오차가 유난히 크게 나온 러닝 하나만 비교해도
     // 제안값이 과도하게(2~3배 이상) 튈 수 있는 문제가 있었음. 다른 항목들과 동일하게
@@ -9214,10 +9215,10 @@ const suggestedRot = (resolvedDevicePos !== 'hand' && curRot != null && phoneAvg
   // [추가] applyDevicePos()의 위치별 기본값과 동일한 표(코드와 반드시 값이 같아야
   // 정확한 스니펫이 나오므로, 코드 기본값을 고치면 이 표도 같이 고쳐야 함).
   const DEVICE_PROFILE_DEFAULTS = {
-    chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.701, vertScale: 0.50, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false },
-    waist:   { groundThreshold: 10.5, impactThreshold: 10.0, gctFallbackRatio: 0.38,  vertScale: 5.5,   minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false },
-    armband: { groundThreshold: 12.0, impactThreshold: 12.5, gctFallbackRatio: 0.33,  vertScale: 4.5,   minStepInterval: 240, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false },
-    hand:    { groundThreshold: 13.5, impactThreshold: 14.0, gctFallbackRatio: 0.35,  vertScale: 0,     minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: true },
+    chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.701, vertScale: 0.50, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
+    waist:   { groundThreshold: 10.5, impactThreshold: 10.0, gctFallbackRatio: 0.38,  vertScale: 5.5,   minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
+    armband: { groundThreshold: 12.0, impactThreshold: 12.5, gctFallbackRatio: 0.33,  vertScale: 4.5,   minStepInterval: 240, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
+    hand:    { groundThreshold: 13.5, impactThreshold: 14.0, gctFallbackRatio: 0.35,  vertScale: 0,     minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: false, stepTrigger: 'native' },
   };
   const DEFAULT_ROT_REJECT_THRESHOLD = 220;
 
