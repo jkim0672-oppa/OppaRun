@@ -4230,6 +4230,9 @@ this.rotRejectThreshold = 220;
 // "걸음 있었는지"만 확정해줄 뿐 그 걸음의 모양(GCT 등)은 안 주기 때문.
 this.nativeStepTimestamps = [];
 this.nativeBridgeLastSeenAt = 0;
+// [추가 2026-07-30] 네이티브 타임스탬프만으로 독립 산출하는 케이던스(spm). onNativeStep()에서
+// 갱신되며, commitStep 쪽 부가지표 파이프라인과 분리되어 있다. 값이 아직 없으면 null.
+this.nativeCadenceSpm = null;
 // [추가] 정밀 로그/진단용: 이번 러닝 동안 네이티브 센서가 "걸음"이라고 확정해줬는데
 // 자체 알고리즘은 자이로 노이즈로 오판해 버릴 뻔한 걸음을 몇 번 구제했는지 카운트.
 this.nativeRescueCount = 0;
@@ -4415,6 +4418,7 @@ this.rotPeakSinceLastStep = 0;
 // [추가] 네이티브 걸음 센서 하이브리드 상태도 매 러닝 시작 시 초기화
 this.nativeStepTimestamps = [];
 this.nativeBridgeLastSeenAt = 0;
+this.nativeCadenceSpm = null; // [추가 2026-07-30]
 this.nativeRescueCount = 0;
 this.nativeStepDetectorTotalCount = 0;
 this.stepCounterBaselineCum = null;
@@ -4462,14 +4466,33 @@ this.nativeStepTimestamps.shift();
 }
 this.nativeBridgeLastSeenAt = now;
 
+// [추가 2026-07-30] 케이던스처럼 "핵심 수치"는 GCT·수직진동·좌우밸런스 같은 부가지표
+// 계산 파이프라인(아래 commitStep의 cycleTime/게이트 로직)에 얹혀가지 않고, 여기 네이티브
+// 타임스탬프 윈도우에서 직접·독립적으로도 산출해둔다. 부가지표 쪽에 나중에 버그가 생겨도
+// 이 값(nativeCadenceSpm)은 영향받지 않는다. 최소 3개 샘플(간격 2개)부터 안정적으로 계산.
+if (this.nativeStepTimestamps.length >= 3) {
+const span = (now - this.nativeStepTimestamps[0]) / 1000;
+if (span > 0) this.nativeCadenceSpm = Math.round(((this.nativeStepTimestamps.length - 1) / span) * 60);
+}
+
 // [수정] 이 착용위치(기본: 손)가 안드로이드 표준 방식을 걸음 판정의 주 신호로 쓰는 경우,
-// 여기가 실제 걸음 확정 트리거다(더 이상 "구제" 용도가 아님). handleMotion()이 최소 간격
-// 미만이면 이미 거기서 return하지만, 네이티브 센서 이벤트는 handleMotion과 별도 타이밍으로
-// 들어오므로 여기서도 동일하게 minStepInterval로 방어한다(중복/이상 이벤트 방지).
-// GCT/수직진동/좌우밸런스 등은 handleMotion()이 계속 누적해 온 가속도·자이로 데이터를
-// commitStep()이 그대로 재사용해 계산한다 — 자이로/가속도는 이제 보조 신호일 뿐이다.
+// 여기가 실제 걸음 확정 트리거다(더 이상 "구제" 용도가 아니다). GCT/수직진동/좌우밸런스
+// 등 부가지표는 handleMotion()이 계속 누적해 온 가속도·자이로 데이터를 commitStep()이
+// 그대로 재사용해 계산한다 — 위 nativeCadenceSpm(핵심 수치)과는 완전히 분리돼 있어
+// 서로 영향을 주지 않는다.
 if (this.useNativeStepTrigger) {
-if (this.lastStepTime !== 0 && (now - this.lastStepTime) < this.minStepInterval) return;
+// [수정 2026-07-30] 기존엔 여기서도 가속도 이중감지 방지용 minStepInterval(위치별
+// 값, 손은 250ms)을 그대로 재사용했음. 문제: TYPE_STEP_DETECTOR는 이미 안드로이드가
+// 물리적 걸음 1회당 1번만 발생하도록 자체 검증된 신호라(실측 시 가민과 거의 일치,
+// step_detector_cnt 참고) 잔진동 방지용 게이트가 원래 불필요함. 그런데 네이티브
+// 브릿지가 걸음 이벤트를 배치(batch)로 묶어 전달할 때 두 걸음이 250ms 이내로
+// 거의 동시에 들어오면, 이 게이트가 매번 정확히 그 중 하나를 걸러내면서 실제
+// 케이던스의 정확히 절반만 커밋되는 문제가 있었음(2026-07-30 손 로그: OS
+// 걸음감지센서 ~170-180spm인데 자체 케이던스가 러닝 내내 정확히 90으로 고정
+// 확인). 진짜 중복 호출(같은 걸음이 브릿지에서 두 번 온 경우)만 걸러내면 되므로
+// 훨씬 작은 전용 게이트로 교체.
+const NATIVE_STEP_MIN_GAP_MS = 80;
+if (this.lastStepTime !== 0 && (now - this.lastStepTime) < NATIVE_STEP_MIN_GAP_MS) return;
 let cycleTime = now - this.lastStepTime;
 let missedStepsToResync = 0;
 if (this.lastStepTime !== 0 && this.recentCycleTimes.length >= 3) {
@@ -5404,7 +5427,13 @@ this.state.stepTimes.push(now);
 // 10초 이전 스텝 제거
 this.state.stepTimes = this.state.stepTimes.filter(t => now - t <= 10000);
 const windowSec = Math.min(10, this.state.seconds || 1);
-const cadVal = Math.round((this.state.stepTimes.length / windowSec) * 60);
+// [수정 2026-07-30] 네이티브 걸음센서가 걸음 판정의 주 신호인 위치(기본: 손)는
+// 케이던스도 stepTimes(=commitStep 커밋 성공 여부에 좌우됨) 대신, MotionManager가
+// 네이티브 타임스탬프만으로 독립 산출해둔 nativeCadenceSpm을 그대로 쓴다.
+// 이렇게 하면 commitStep 쪽 게이트/부가지표 로직에 어떤 문제가 생겨도
+// 케이던스(및 이걸로 계산하는 페이스·보폭)는 항상 네이티브 센서 실측값을 그대로 반영한다.
+const useNativeCad = this.motion && this.motion.useNativeStepTrigger && typeof this.motion.nativeCadenceSpm === 'number';
+const cadVal = useNativeCad ? this.motion.nativeCadenceSpm : Math.round((this.state.stepTimes.length / windowSec) * 60);
 // [수정] 사람이 걷거나 뛸 때 낼 수 있는 물리적 케이던스 범위(대략 60~280 SPM)를
 // 벗어난 순간값은 오감지/노이즈로 간주. 기존엔 이 클램프가 cadenceSamples(평균 계산용)에만
 // 적용되고 실시간 화면 표시 + precision log(getTxt('cadence')로 DOM값을 그대로 읽어감)에는
@@ -5639,6 +5668,14 @@ const gyroG = (this.motion && this.motion.lastStepGyroG != null) ? this.motion.l
 const stepDetectorCnt = (this.motion && this.motion.nativeStepDetectorTotalCount) ? this.motion.nativeStepDetectorTotalCount : '';
 const stepCounterDelta = (this.motion && typeof this.motion.getStepCounterDelta === 'function') ? this.motion.getStepCounterDelta() : null;
 const stepCounterSteps = (stepCounterDelta != null) ? stepCounterDelta : '';
+// [수정] 기존엔 화면표시용 curSpeed(GPS 순간속도 기반, coords.speed가 튀거나
+// 체스트 착용 등으로 신뢰도가 떨어질 때 오염됨)를 그대로 로그에 저장했음.
+// 바로 위에서 계산한 구간(4초) 거리/시간 기반 값이 순간 GPS 노이즈에 훨씬 강하므로
+// 우선 사용하고, 구간이 아직 형성 안 됐을 때만 화면표시용 값으로 폴백.
+const _winElapsedSec = this.state.seconds - _swOldest.t;
+const logSpeedKmh = (_windowDistM > 0 && _winElapsedSec > 0)
+  ? ((_windowDistM / 1000) / (_winElapsedSec / 3600)).toFixed(1)
+  : getTxt('curSpeed');
 this.state.precisionLog.push({
 t: this.state.seconds,
 timestamp: nowIso,
@@ -5646,7 +5683,7 @@ lat: lat,
 lng: lng,
 gpsAcc: gpsAcc,
 distKm: this.state.totalDist ? this.state.totalDist.toFixed(3) : '0.000',
-speedKmh: getTxt('curSpeed'),
+speedKmh: logSpeedKmh,
 cadence: getTxt('cadence'),
 gctMs: getTxt('gct'),
 flightPct: getTxt('flight'),
@@ -8679,7 +8716,10 @@ const garmin = (function () {
     // 다른 제안값들과 일관되게 ±10% 클램프(clampRatio, 아래에서 정의)도 함께 적용.
     // [수정] 과보정 방지를 위해 기존 ±30%에서 ±10%로 축소 (최소로 잡고 여러 번에 나눠 수정하는 방식).
     const clampRatio = (r) => Math.max(0.9, Math.min(1.1, r));
-    const suggestedRot = (curRot != null && phoneAvgCadence && cadDiffPct != null && Math.abs(cadDiffPct) > 3)
+    // [수정 2026-07-30] hand는 네이티브 걸음센서가 걸음판정을 직접 하므로
+// rotRejectThreshold가 이제 걸음 판정에 전혀 쓰이지 않는다(no-op). 회색으로
+// 보여주며 헷갈리게 하는 대신, hand에서는 이 제안 자체를 계산/표시하지 않는다.
+const suggestedRot = (resolvedDevicePos !== 'hand' && curRot != null && phoneAvgCadence && cadDiffPct != null && Math.abs(cadDiffPct) > 3)
       ? Math.max(60, Math.round(curRot * clampRatio(garminAvgCadence / phoneAvgCadence))) : null;
     // [추가] OS 센서(걸음감지센서/걸음수센서) 기준의 대안 rotRejectThreshold 제안값.
     // 위 suggestedRot은 가민을 기준(정답)으로 삼는데, 이건 같은 폰 안에서 자체 알고리즘과
@@ -8690,7 +8730,7 @@ const garmin = (function () {
       ? (stepDetectorCadence + stepCounterCadence) / 2
       : (stepDetectorCadence != null ? stepDetectorCadence : stepCounterCadence);
     const osCadDiffPct = (osRefCadence != null && phoneAvgCadence) ? ((phoneAvgCadence - osRefCadence) / osRefCadence * 100) : null;
-    const suggestedRotOS = (curRot != null && phoneAvgCadence && osRefCadence && osCadDiffPct != null && Math.abs(osCadDiffPct) > 3)
+    const suggestedRotOS = (resolvedDevicePos !== 'hand' && curRot != null && phoneAvgCadence && osRefCadence && osCadDiffPct != null && Math.abs(osCadDiffPct) > 3)
       ? Math.max(60, Math.round(curRot * clampRatio(osRefCadence / phoneAvgCadence))) : null;
     // [수정] 다른 항목들(rot/vertScale/stride)과 다르게 이 항목만 clamp가 빠져있어서,
     // 웜업 구간 노이즈나 GPS 튐 등으로 오차가 유난히 크게 나온 러닝 하나만 비교해도
@@ -8810,21 +8850,14 @@ const garmin = (function () {
         + '<span>' + line + '</span></label>';
       html += '<div style="margin-top:12px; font-size:11px; color:#ccc; line-height:1.5;">'
         + '<div style="color:var(--primary); font-weight:900; margin-bottom:4px;">' + (isKo ? '권장 보정수치 (적용할 항목 선택)' : 'RECOMMENDED CALIBRATION (select items to apply)') + '</div>';
-      // [추가] hand는 이제 accel 기반 걸음판정 자체를 건너뛰므로(useNativeStepTrigger),
-      // rotRejectThreshold를 바꿔도 적용될 코드 경로가 없음(no-op). 헷갈리지 않게 경고를 붙이고
-      // 기본 체크도 꺼둔다 — 다른 항목(GCT/보폭/GPS거리)은 hand에서도 계속 유효하므로 그대로 둠.
-      const rotDeadForHand = (resolvedDevicePos === 'hand');
-      const rotDeadNote = rotDeadForHand
-        ? (isKo
-          ? ' <span style="color:var(--danger); font-weight:700;">⚠ 손(hand) 모드에서는 네이티브 걸음센서가 걸음 판정을 직접 하므로 이 값을 적용해도 효과 없음</span>'
-          : ' <span style="color:var(--danger); font-weight:700;">⚠ No effect in hand mode — native step sensor drives step detection directly</span>')
-        : '';
+      // [수정 2026-07-30] hand는 이제 suggestedRot/suggestedRotOS 자체가 계산 단계에서
+      // null이므로(위 참고) 아래 두 항목이 hand에서는 자연히 표시되지 않는다 — 별도 경고문 불필요.
       if (suggestedRot != null) {
-        html += checkRow('calib-sel-rot', 'rotRejectThreshold: ' + curRot + ' → <b>' + suggestedRot + '</b> (deg/s) ' + (isKo ? '<span style="color:#666;">(가민 기준)</span>' : '<span style="color:#666;">(vs Garmin)</span>') + rotDeadNote, rotDeadForHand ? false : undefined);
+        html += checkRow('calib-sel-rot', 'rotRejectThreshold: ' + curRot + ' → <b>' + suggestedRot + '</b> (deg/s) ' + (isKo ? '<span style="color:#666;">(가민 기준)</span>' : '<span style="color:#666;">(vs Garmin)</span>'));
       }
       if (suggestedRotOS != null) {
         html += checkRow('calib-sel-rot-os', 'rotRejectThreshold: ' + curRot + ' → <b>' + suggestedRotOS + '</b> (deg/s) '
-          + (isKo ? '<span style="color:#7fd3ff;">(OS 센서 기준 대안 — 체크 시 위 값 대신 이 값이 적용됨)</span>' : '<span style="color:#7fd3ff;">(alt., based on OS sensor — overrides the row above if checked)</span>') + rotDeadNote, false);
+          + (isKo ? '<span style="color:#7fd3ff;">(OS 센서 기준 대안 — 체크 시 위 값 대신 이 값이 적용됨)</span>' : '<span style="color:#7fd3ff;">(alt., based on OS sensor — overrides the row above if checked)</span>'), false);
       }
       if (suggestedGct != null) {
         html += checkRow('calib-sel-gct', 'gctFallbackRatio: ' + curGct + ' → <b>' + suggestedGct + '</b>');
