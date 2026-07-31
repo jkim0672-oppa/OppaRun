@@ -9005,13 +9005,19 @@ const garmin = (function () {
 
     // [수정] 폰 쪽: 체크된 로그마다 avgFromPrecLog()로 평균을 낸 뒤, 그 결과들을 다시 평균한다.
     // (로그 원본 행을 이어붙이지 않음 — 서로 다른 러닝이 섞여 아래 stepDetector류 계산이 깨지는 것 방지)
-    const phoneAvgCadence = avgArr(precItems.map(p => avgFromPrecLog(p.log, 'cadence')));
-    const phoneAvgGct = avgArr(precItems.map(p => avgFromPrecLog(p.log, 'gctMs')));
-
-    // [추가] 안드로이드 네이티브 걸음 센서 교차검증: 로그별로 각각 역산한 뒤 평균.
+    // [수정 2026-07-31] 기존엔 avgFromPrecLog('cadence')로 매초 순간값을 단순평균했는데,
+    // 이는 onFinish()에 저장되는 실제 기록용 avgCadence(총걸음수÷총시간, 실측 우선 원칙)와
+    // 계산방식이 달라 같은 러닝인데도 서로 다른 숫자가 나오는 문제가 있었음. 모든 착용위치가
+    // 이제 stepTrigger:'native'라 폰의 실제 케이던스 소스 자체가 stepDetectorCnt와 동일하므로,
+    // 아래 computeOsCadence()가 이미 계산해두는 stepDetectorCadence(총 stepDetectorCnt÷총시간)를
+    // 그대로 재사용해 일관성을 맞춘다.
     const osVals = precItems.map(p => computeOsCadence(p.log));
     const stepDetectorCadence = avgArr(osVals.map(v => v.sd));
     const stepCounterCadence = avgArr(osVals.map(v => v.sc));
+    const phoneAvgCadence = stepDetectorCadence;
+    const phoneAvgGct = avgArr(precItems.map(p => avgFromPrecLog(p.log, 'gctMs')));
+
+    // [추가] 안드로이드 네이티브 걸음 센서 교차검증: 로그별로 각각 역산한 뒤 평균.
     const stepDetectorDiffPct = (stepDetectorCadence != null && garminAvgCadence) ? ((stepDetectorCadence - garminAvgCadence) / garminAvgCadence * 100) : null;
     const stepCounterDiffPct = (stepCounterCadence != null && garminAvgCadence) ? ((stepCounterCadence - garminAvgCadence) / garminAvgCadence * 100) : null;
 
