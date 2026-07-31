@@ -5063,11 +5063,29 @@ this.CALIB_MS = 4000; // 캘리브레이션 구간 자체의 길이: 4초간 자
 // 무관하게 START 즉시 정상 진행된다(린각도 계산만 지연됨).
 this.WEAR_DELAY_MS = 6000; // 착용 대기 6초 + 위 캘리브레이션 4초 = START 후 총 10초 뒤부터 린각도 값 표시 시작
 this.sessionStartTime = null;
-this.LPF_ALPHA = 0.02; // [수정 2026-07-30] 0.08→0.02로 강화. 로그 분석 결과 착지 충격 시점마다
-// lean_angle_deg가 vert_osc_mm/rot_peak_dps 스파이크와 동기화되어 튀는 게 확인됨(예: 121.9도
-// 같은 물리적으로 불가능한 값). 기존 계수가 스트라이드 주기 대비 필터링이 약해 충격을
-// 충분히 못 걸러냈던 것으로 판단, 저역통과 필터 계수: 작을수록 러닝 착지 충격 등 고주파 노이즈를 더 누른다
+this.LPF_ALPHA = 0.06; // [수정] 0.02(전) → 0.06. 0.02는 착지 충격 스파이크(예: 121.9도 같은
+// 물리적으로 불가능한 값)는 잘 걸렀지만, 시상수가 스트라이드 한 주기보다 길어져 실제
+// 자세 변화(가속 구간, 오르막 등)에도 최대 ~1초 가까운 지연이 생겼음. 아래 rawHistory
+// median-of-3 선필터가 순간 스파이크를 1차로 걸러주는 역할을 대신 맡게 되어, LPF 자체는
+// 이전만큼 세게 누르지 않아도 스파이크에 안전하면서 반응성은 개선됨.
+this.rawHistory = []; // [추가] LPF 이전 단계: 최근 원시 가속도 3개의 축별 중앙값으로 단발성 스파이크 제거
 this.currentLeanDeg = null; // 최신 스무딩된 린각도(표시/로그용 순간값)
+// [추가] 적응형 전방축 추정: 축 관례를 가정하지 않고, 세션 동안 편차 벡터의 아주 느린
+// 이동평균으로 "주 기울임 방향(대개 전방)"을 스스로 학습한다. 스트라이드마다 좌우로
+// 대칭 진동하는 성분은 평균 과정에서 상쇄되고, 꾸준히 한쪽으로 쌓이는 성분(전방 기울임)만
+// 방향으로 남는다는 가정에 기반 — 대부분의 러너에게는 유효하지만, 부상 등으로 인해
+// "지속적인 편측 기울임"이 있는 경우엔 그 편측 성분이 축에 섞여 들어갈 수 있다는 한계는 있음.
+this.meanDevVector = { x: 0, y: 0, z: 0 };
+this.forwardAxis = null; // 정규화된 "주 기울임 방향" 단위벡터
+this.AXIS_LEARN_ALPHA = 0.005; // 매우 느린 학습률 — 순간적 흔들림이 아니라 세션 전체 경향에 수렴시키기 위함
+this.AXIS_MIN_DEV_MAG = 0.15; // 이 값보다 작은 편차는 축 학습에서 제외(직립에 가까운 상태의 노이즈가 방향을 흔드는 것 방지)
+this.AXIS_READY_SAMPLES = 300; // 이 개수만큼 축 학습 샘플이 쌓이기 전엔 전/측방 분해값을 표시하지 않음(초기 불안정 방지)
+this.axisSampleCount = 0;
+this.currentLeanForwardDeg = null; // 부호 있음: 학습된 평균 기울임 방향 기준 +는 더 숙인 쪽, -는 반대쪽
+this.currentLeanLateralDeg = null; // 부호 없음: 그 축과 수직인 성분(주로 좌우 흔들림)의 크기
+this.sessionSumForward = 0;
+this.sessionSumLateral = 0;
+this.sessionCountForward = 0;
 this.sessionSum = 0;
 this.sessionCount = 0;
 this.onCalibDone = null; // [추가] 캘리브레이션이 성공적으로 끝난 순간 호출되는 콜백 (비프음 등 알림용)
@@ -5076,11 +5094,21 @@ this.onCalibDone = null; // [추가] 캘리브레이션이 성공적으로 끝�
 reset(enabled, onCalibDone) {
 this.enabled = !!enabled;
 this.filtered = null;
+this.rawHistory = []; // [추가] 누락되어 있었음 - 없으면 이전 러닝의 마지막 원시샘플이 다음 러닝
+// median-of-3 계산에 섞여 들어가 첫 몇 샘플이 왜곡될 수 있었음
 this.baseline = null;
 this.calibSamples = [];
 this.calibStartTime = null;
 this.calibDone = false;
 this.currentLeanDeg = null;
+this.meanDevVector = { x: 0, y: 0, z: 0 }; // [추가] 새 러닝마다 축 학습 완전 초기화
+this.forwardAxis = null;
+this.axisSampleCount = 0;
+this.currentLeanForwardDeg = null;
+this.currentLeanLateralDeg = null;
+this.sessionSumForward = 0;
+this.sessionSumLateral = 0;
+this.sessionCountForward = 0;
 this.sessionSum = 0;
 this.sessionCount = 0;
 this.sessionStartTime = Date.now(); // [추가] 착용 대기 구간 계산의 기준 시각
@@ -5092,14 +5120,26 @@ if (!this.enabled) return;
 if (this.sessionStartTime && (Date.now() - this.sessionStartTime) < this.WEAR_DELAY_MS) return;
 const acc = e.accelerationIncludingGravity;
 if (!acc || acc.x == null || acc.y == null || acc.z == null) return;
+// [추가] 0단계: median-of-3 선필터. 착지 순간처럼 한 샘플만 튀는 스파이크를 LPF보다
+// 먼저 제거한다. 세 샘플의 축별 중앙값을 쓰면 극단값 1개는 자동으로 버려지므로,
+// 이후 LPF는 스파이크 억제 부담을 덜고 반응성(LPF_ALPHA) 위주로 튜닝할 수 있다.
+this.rawHistory.push({ x: acc.x, y: acc.y, z: acc.z });
+if (this.rawHistory.length > 3) this.rawHistory.shift();
+const median3 = (arr, key) => {
+const vals = arr.map(v => v[key]).sort((p, q) => p - q);
+return vals[Math.floor(vals.length / 2)];
+};
+const accM = this.rawHistory.length === 3
+? { x: median3(this.rawHistory, 'x'), y: median3(this.rawHistory, 'y'), z: median3(this.rawHistory, 'z') }
+: acc; // 초기 2샘플까지는 중앙값을 낼 수 없으므로 원본 그대로 사용
 // 1) 저역통과 필터로 고주파 바운스 노이즈를 누르고 중력 방향(자세)만 남긴다
 if (!this.filtered) {
-this.filtered = { x: acc.x, y: acc.y, z: acc.z };
+this.filtered = { x: accM.x, y: accM.y, z: accM.z };
 } else {
 const a = this.LPF_ALPHA;
-this.filtered.x += a * (acc.x - this.filtered.x);
-this.filtered.y += a * (acc.y - this.filtered.y);
-this.filtered.z += a * (acc.z - this.filtered.z);
+this.filtered.x += a * (accM.x - this.filtered.x);
+this.filtered.y += a * (accM.y - this.filtered.y);
+this.filtered.z += a * (accM.z - this.filtered.z);
 }
 // 2) 캘리브레이션 구간: 필터링된 벡터를 모아 평균 = 이번 러닝의 "중립 자세" 기준
 if (!this.calibDone) {
@@ -5135,11 +5175,52 @@ if (angleDeg > 60) return;
 this.currentLeanDeg = (this.currentLeanDeg == null) ? angleDeg : (this.currentLeanDeg * 0.85 + angleDeg * 0.15);
 this.sessionSum += this.currentLeanDeg;
 this.sessionCount++;
+// [추가] 5) 적응형 전방축 학습 + 전방/측방 분해
+// dev = 기준자세 대비 편차 벡터. 이 벡터의 매우 느린 이동평균(meanDevVector)이 곧
+// "세션 동안 학습된 주 기울임 방향"이 된다 — 스트라이드마다 좌우로 대칭 진동하는
+// 성분은 평균 과정에서 상쇄되고, 꾸준히 한쪽으로 쌓이는 성분(대개 전방 기울임)만 남는다.
+const dev = { x: this.filtered.x - this.baseline.x, y: this.filtered.y - this.baseline.y, z: this.filtered.z - this.baseline.z };
+const devMag = Math.sqrt(dev.x * dev.x + dev.y * dev.y + dev.z * dev.z);
+if (devMag > this.AXIS_MIN_DEV_MAG) {
+const b = this.AXIS_LEARN_ALPHA;
+this.meanDevVector.x += b * (dev.x - this.meanDevVector.x);
+this.meanDevVector.y += b * (dev.y - this.meanDevVector.y);
+this.meanDevVector.z += b * (dev.z - this.meanDevVector.z);
+this.axisSampleCount++;
+const axisMag = Math.sqrt(this.meanDevVector.x ** 2 + this.meanDevVector.y ** 2 + this.meanDevVector.z ** 2);
+if (axisMag > 0.05) {
+this.forwardAxis = { x: this.meanDevVector.x / axisMag, y: this.meanDevVector.y / axisMag, z: this.meanDevVector.z / axisMag };
+}
+}
+// 축이 충분히(AXIS_READY_SAMPLES) 학습된 뒤에만 분해값을 신뢰해 표시한다.
+// 그 전까지는 currentLeanForwardDeg/currentLeanLateralDeg가 null로 유지됨(UI에서 total만 사용).
+if (this.forwardAxis && this.axisSampleCount >= this.AXIS_READY_SAMPLES && devMag > 0.0001) {
+const forwardMag = dev.x * this.forwardAxis.x + dev.y * this.forwardAxis.y + dev.z * this.forwardAxis.z; // 부호 있는 투영
+const ratio = Math.max(-1, Math.min(1, forwardMag / devMag)); // cos(전체편차와 전방축 사이각)
+const forwardAngle = angleDeg * ratio; // 전방축 방향 성분(부호 유지: +학습된 방향과 같은 쪽 / -반대쪽)
+const lateralRatio = Math.sqrt(Math.max(0, 1 - ratio * ratio));
+const lateralAngle = angleDeg * lateralRatio; // 전방축과 수직인 성분의 크기(부호 없음)
+this.currentLeanForwardDeg = (this.currentLeanForwardDeg == null) ? forwardAngle : (this.currentLeanForwardDeg * 0.85 + forwardAngle * 0.15);
+this.currentLeanLateralDeg = (this.currentLeanLateralDeg == null) ? lateralAngle : (this.currentLeanLateralDeg * 0.85 + lateralAngle * 0.15);
+this.sessionSumForward += this.currentLeanForwardDeg;
+this.sessionSumLateral += this.currentLeanLateralDeg;
+this.sessionCountForward++;
+}
 }
 // 러닝 종료 시 요약 카드/리스트/루트맵/가민 분석실/크루카드에 쓸 세션 평균 린각도(도)
 getSessionAvg() {
 if (this.sessionCount === 0) return null;
 return this.sessionSum / this.sessionCount;
+}
+// [추가] 전방/측방 분해값의 세션 평균. 축 학습이 덜 됐던 초반 구간은 애초에
+// sessionSumForward/Lateral에 누적되지 않으므로 별도 보정 없이 그대로 평균내면 됨.
+getSessionAvgForward() {
+if (this.sessionCountForward === 0) return null;
+return this.sessionSumForward / this.sessionCountForward;
+}
+getSessionAvgLateral() {
+if (this.sessionCountForward === 0) return null;
+return this.sessionSumLateral / this.sessionCountForward;
 }
 }
 // ========== [신규] LeanAngleUI: 린각도 "표시" 로직 전용 모듈 ==========
@@ -5156,21 +5237,47 @@ ENABLED: true,
 has(record) {
 return this.ENABLED && !!record && record.avgLeanAngleDeg != null;
 },
+// [추가] 전방/측방 분해값이 있는지 (짧은 러닝 등 축 학습이 덜 됐으면 없을 수 있음 → 이땐 total만 표시)
+hasDirection(fwd, lat) {
+return this.ENABLED && typeof fwd === 'number' && typeof lat === 'number';
+},
 fmt(deg) {
 return (typeof deg === 'number') ? deg.toFixed(1) + '°' : '--';
+},
+// [추가] 전방 성분은 부호가 의미있음(+숙임/−반대) → +기호를 명시적으로 붙여서 표시
+fmtSigned(deg) {
+if (typeof deg !== 'number') return '--';
+return (deg >= 0 ? '+' : '') + deg.toFixed(1) + '°';
 },
 label(lang) {
 return (lang === 'ko') ? '린각도' : 'LEAN ANGLE';
 },
+labelForward(lang) { return (lang === 'ko') ? '전방' : 'FWD'; },
+labelLateral(lang) { return (lang === 'ko') ? '측방' : 'LAT'; },
+// [추가] "전방 +X° · 측방 Y°" 형태의 작은 서브텍스트 — 값이 raw number로 오면 어디서든 재사용 가능
+directionSubHtml(fwd, lat, lang, fontSize) {
+if (!this.hasDirection(fwd, lat)) return '';
+const fs = fontSize || '9px';
+return '<div style="font-size:' + fs + '; color:#888; font-weight:700; margin-top:2px; white-space:nowrap;">'
++ this.labelForward(lang) + ' ' + this.fmtSigned(fwd) + ' · ' + this.labelLateral(lang) + ' ' + this.fmt(lat)
++ '</div>';
+},
 // [리스트] 히스토리 카드용 h-det-box 한 칸
 listDetBoxHtml(record, lang) {
 if (!this.has(record)) return '';
-return '<div class="h-det-box"><div class="h-det-label">' + this.label(lang) + '</div><div class="h-det-val" style="color:#ffb86b">' + this.fmt(record.avgLeanAngleDeg) + '</div></div>';
+return '<div class="h-det-box"><div class="h-det-label">' + this.label(lang) + '</div><div class="h-det-val" style="color:#ffb86b">' + this.fmt(record.avgLeanAngleDeg) + '</div>'
++ this.directionSubHtml(record.avgLeanForwardDeg, record.avgLeanLateralDeg, lang, '8px')
++ '</div>';
 },
-// [루트맵] 상세 페이지 DYNAMICS SUMMARY용 한 줄
+// [루트맵] 상세 페이지 DYNAMICS SUMMARY용 한 줄 (+ 값이 있으면 전방/측방 보조 줄 추가)
 routeDetailRowHtml(record, lang) {
 if (!this.has(record)) return '';
-return '<div class="detail-log-item"><span>' + this.label(lang) + '</span><span>' + this.fmt(record.avgLeanAngleDeg) + '</span></div>';
+let html = '<div class="detail-log-item"><span>' + this.label(lang) + '</span><span>' + this.fmt(record.avgLeanAngleDeg) + '</span></div>';
+if (this.hasDirection(record.avgLeanForwardDeg, record.avgLeanLateralDeg)) {
+html += '<div class="detail-log-item"><span style="color:#888; font-size:11px;">' + this.labelForward(lang) + ' / ' + this.labelLateral(lang) + '</span><span style="color:#888; font-size:11px;">'
++ this.fmtSigned(record.avgLeanForwardDeg) + ' / ' + this.fmt(record.avgLeanLateralDeg) + '</span></div>';
+}
+return html;
 },
 // [통계] LIFETIME STATS 페이지: 기간 내 기록들의 평균
 computeLifetimeAvg(records) {
@@ -5179,24 +5286,56 @@ const vals = records.filter(r => r.avgLeanAngleDeg != null).map(r => r.avgLeanAn
 if (!vals.length) return null;
 return vals.reduce((a, b) => a + b, 0) / vals.length;
 },
+// [추가] 통계 페이지용 전방/측방 평균도 동일 패턴으로 제공
+computeLifetimeAvgForward(records) {
+if (!this.ENABLED || !records || !records.length) return null;
+const vals = records.filter(r => r.avgLeanForwardDeg != null).map(r => r.avgLeanForwardDeg);
+if (!vals.length) return null;
+return vals.reduce((a, b) => a + b, 0) / vals.length;
+},
+computeLifetimeAvgLateral(records) {
+if (!this.ENABLED || !records || !records.length) return null;
+const vals = records.filter(r => r.avgLeanLateralDeg != null).map(r => r.avgLeanLateralDeg);
+if (!vals.length) return null;
+return vals.reduce((a, b) => a + b, 0) / vals.length;
+},
 lifetimeCardHtml(records, lang) {
 const avg = this.computeLifetimeAvg(records);
 if (avg == null) return '';
-return '<div class="card"><div class="label">' + this.label(lang) + '</div><div class="value" style="font-size:20px;">' + this.fmt(avg) + '</div></div>';
+const fwd = this.computeLifetimeAvgForward(records);
+const lat = this.computeLifetimeAvgLateral(records);
+return '<div class="card"><div class="label">' + this.label(lang) + '</div><div class="value" style="font-size:20px;">' + this.fmt(avg) + '</div>'
++ this.directionSubHtml(fwd, lat, lang, '10px')
++ '</div>';
 },
 // [가민 분석실] 가민 쪽엔 린각도 대응 지표가 없으므로 비교(vs)가 아닌 "폰 전용" 정보 행으로 표시
-garminPhoneOnlyRowHtml(phoneAvgDeg, lang) {
+garminPhoneOnlyRowHtml(phoneAvgDeg, lang, phoneAvgFwdDeg, phoneAvgLatDeg) {
 if (!this.ENABLED || phoneAvgDeg == null) return '';
 const isKo = lang === 'ko';
-return '<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #2a2a2a;">'
+let html = '<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #2a2a2a;">'
 + '<div style="font-size:11px; color:#999; font-weight:800;">' + (isKo ? '린각도 (°, 가민 대응 지표 없음)' : 'LEAN ANGLE (°, no Garmin counterpart)') + '</div>'
 + '<div style="font-size:12px; font-weight:900;">' + this.fmt(phoneAvgDeg) + ' <span style="color:#666;">(' + (isKo ? '폰 전용' : 'phone-only') + ')</span></div>'
 + '</div>';
+if (this.hasDirection(phoneAvgFwdDeg, phoneAvgLatDeg)) {
+html += '<div style="display:flex; justify-content:flex-end; padding:0 0 8px 0; border-bottom:1px solid #2a2a2a;">'
++ this.directionSubHtml(phoneAvgFwdDeg, phoneAvgLatDeg, lang, '10px')
++ '</div>';
+}
+return html;
 },
 // [크루카드] 업로드 payload용 값 — 공유 옵션에서 꺼져 있으면 null(비공개)
 sharePayloadValue(record, shareEnabled) {
 if (!this.has(record) || !shareEnabled) return null;
 return record.avgLeanAngleDeg;
+},
+// [추가] 크루카드 업로드용 전방/측방 값
+sharePayloadForwardValue(record, shareEnabled) {
+if (!this.has(record) || !shareEnabled || record.avgLeanForwardDeg == null) return null;
+return record.avgLeanForwardDeg;
+},
+sharePayloadLateralValue(record, shareEnabled) {
+if (!this.has(record) || !shareEnabled || record.avgLeanLateralDeg == null) return null;
+return record.avgLeanLateralDeg;
 },
 // [크루카드] 피드 카드 렌더링용 스탯박스 (원격 레코드의 avg_lean_angle_deg 기준)
 feedStatBoxHtml(r, lang) {
@@ -5204,6 +5343,7 @@ if (!this.ENABLED || r.avg_lean_angle_deg == null) return '';
 return '<div style="flex:1; text-align:center; padding:2px; min-width:0;">'
 + '<div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">' + this.label(lang) + '</div>'
 + '<div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + this.fmt(r.avg_lean_angle_deg) + '</div>'
++ this.directionSubHtml(r.avg_lean_forward_deg, r.avg_lean_lateral_deg, lang, '7px')
 + '</div>';
 }
 };
@@ -5681,13 +5821,31 @@ this.state.lastKmAlt = this.state.currentAlt;
 const SPEED_ACCURACY_LIMIT_M = (ui.currentActivityMode === 'trail') ? 30 : 20; // 이보다 정확도가 나쁜(숫자가 큰) 샘플은 신뢰 안 함
 let rawSpeedKmh = p.coords.speed != null ? p.coords.speed * 3.6 : -1;
 if (rawSpeedKmh > 0.5 && accuracy <= SPEED_ACCURACY_LIMIT_M) {
-// 이상치 필터: 버퍼 가중평균의 2배 초과 시 클램핑
+// [수정] 이상치 필터: 기존엔 평균의 2배 초과 시 "그 즉시" 평균으로 대체했는데,
+// (1) 상단(급증)만 클램핑하고 하단(급감속) 방향은 무방비였고,
+// (2) 진짜 스퍼트/급가속처럼 연속으로 빠른 값이 들어와도 매 샘플이 직전 평균과
+// 비교당해 계속 눌리는 바람에 실제 변화가 화면에 반영되기까지 지연이 컸음.
+// → "평균 대비 큰 편차가 2회 연속 비슷하게 나오면 진짜 변화로 인정"하는 방식으로
+// 교체: 상/하한 모두 같은 로직으로 처리하고, 진짜 변화는 최대 1샘플 지연으로 반영됨.
+const SPEED_OUTLIER_RATIO = 2.0;
 if (this.state.speedBuffer.length >= 2) {
 const n = this.state.speedBuffer.length;
 const wSum = this.state.speedBuffer.reduce((acc, v, i) => acc + v * (i + 1), 0);
 const wDiv = (n * (n + 1)) / 2;
 const wAvg = wSum / wDiv;
-if (rawSpeedKmh > wAvg * 2.0) rawSpeedKmh = wAvg;
+const isOutlier = (rawSpeedKmh > wAvg * SPEED_OUTLIER_RATIO) || (rawSpeedKmh < wAvg / SPEED_OUTLIER_RATIO);
+if (isOutlier) {
+if (this.state.pendingSpeedVal != null && Math.abs(rawSpeedKmh - this.state.pendingSpeedVal) <= (wAvg * 0.25)) {
+// 직전 이상치 후보와 이번 값이 비슷함 = 노이즈가 아니라 실제 속도 변화로 인정, 원본값 그대로 사용
+this.state.pendingSpeedVal = rawSpeedKmh;
+} else {
+// 처음 튀는 값: 아직 확정 전이므로 이번 샘플만 평균값으로 눌러 완충
+this.state.pendingSpeedVal = rawSpeedKmh;
+rawSpeedKmh = wAvg;
+}
+} else {
+this.state.pendingSpeedVal = null;
+}
 }
 this.state.speedBuffer.push(rawSpeedKmh);
 if (this.state.speedBuffer.length > 8) this.state.speedBuffer.shift(); // 최근 8개
@@ -5724,12 +5882,23 @@ const METRIC_SPEED_WINDOW = 8; // 지표계산용 버퍼 길이 (화면용과 �
 if (!this.state.metricSpeedBuffer) this.state.metricSpeedBuffer = [];
 if (rawSpeedKmh > 0.5 && accuracy <= SPEED_ACCURACY_LIMIT_M) {
 let metricRaw = rawSpeedKmh;
+// [수정] 화면표시용과 동일한 이유로 상/하한 대칭 처리 + 2회 연속 확인 후 확정하도록 교체
 if (this.state.metricSpeedBuffer.length >= 2) {
 const n = this.state.metricSpeedBuffer.length;
 const wSum = this.state.metricSpeedBuffer.reduce((acc, v, i) => acc + v * (i + 1), 0);
 const wDiv = (n * (n + 1)) / 2;
 const wAvg = wSum / wDiv;
-if (metricRaw > wAvg * METRIC_SPEED_OUTLIER_MULT) metricRaw = wAvg;
+const isOutlier = (metricRaw > wAvg * METRIC_SPEED_OUTLIER_MULT) || (metricRaw < wAvg / METRIC_SPEED_OUTLIER_MULT);
+if (isOutlier) {
+if (this.state.pendingMetricSpeedVal != null && Math.abs(metricRaw - this.state.pendingMetricSpeedVal) <= (wAvg * 0.25)) {
+this.state.pendingMetricSpeedVal = metricRaw;
+} else {
+this.state.pendingMetricSpeedVal = metricRaw;
+metricRaw = wAvg;
+}
+} else {
+this.state.pendingMetricSpeedVal = null;
+}
 }
 this.state.metricSpeedBuffer.push(metricRaw);
 if (this.state.metricSpeedBuffer.length > METRIC_SPEED_WINDOW) this.state.metricSpeedBuffer.shift();
@@ -5817,6 +5986,11 @@ if (cadValid) {
 // 거의 매칭되지 않아 사실상 rate limit이 항상 막아버리는 문제가 있어 허용범위로 완화)
 // (lastValidCadenceDisplay가 아직 없는 초반 구간은 베이스라인이 없으므로 제한 미적용)
 const PENDING_TOLERANCE_SPM = 5;
+// [수정] 값이 계속 큰 폭으로 튀어(예: 노이즈가 매번 다른 방향으로 튐) pendingCadVal이
+// 매번 새로 리셋되면 2연속 일치 조건을 영영 못 채워 화면이 오래 멈춰있을 수 있었음.
+// PENDING_MAX_MISSES 이상 시도했는데도 확정을 못 하면, 그 시점의 최신값을 강제로
+// 반영해 "최악의 경우에도 몇 스텝 안에는 갱신된다"는 상한을 보장한다.
+const PENDING_MAX_MISSES = 4;
 const lastStable = this.state.lastValidCadenceDisplay || 0;
 const diff = lastStable > 0 ? Math.abs(cadVal - lastStable) : 0;
 if (diff > 15) {
@@ -5827,7 +6001,7 @@ this.state.pendingCadVal = cadVal;
 this.state.pendingCadVal = cadVal;
 this.state.pendingCadCount = 1;
 }
-if (this.state.pendingCadCount >= 2) {
+if (this.state.pendingCadCount >= 2 || this.state.pendingCadCount >= PENDING_MAX_MISSES) {
 this.state.cadValHistory.push(cadVal);
 if (this.state.cadValHistory.length > 5) this.state.cadValHistory.shift();
 this.state.pendingCadVal = null;
@@ -6031,6 +6205,11 @@ const stepCounterSteps = (stepCounterDelta != null) ? stepCounterDelta : '';
 // 이 값이 없거나 잘못돼도 케이던스/GCT 등 기존 지표에는 영향이 없다.
 const leanAngleDeg = (this.leanTracker && this.leanTracker.currentLeanDeg != null)
   ? this.leanTracker.currentLeanDeg.toFixed(1) : '';
+// [추가] 전방/측방 분해값 — 축 학습이 아직 덜 됐으면(AXIS_READY_SAMPLES 미달) null이라 빈 값으로 남음
+const leanForwardDeg = (this.leanTracker && this.leanTracker.currentLeanForwardDeg != null)
+  ? this.leanTracker.currentLeanForwardDeg.toFixed(1) : '';
+const leanLateralDeg = (this.leanTracker && this.leanTracker.currentLeanLateralDeg != null)
+  ? this.leanTracker.currentLeanLateralDeg.toFixed(1) : '';
 // [수정] 기존엔 화면표시용 curSpeed(GPS 순간속도 기반, coords.speed가 튀거나
 // 체스트 착용 등으로 신뢰도가 떨어질 때 오염됨)를 그대로 로그에 저장했음.
 // 바로 위에서 계산한 구간(4초) 거리/시간 기반 값이 순간 GPS 노이즈에 훨씬 강하므로
@@ -6062,7 +6241,9 @@ gyroBeta: gyroB,
 gyroGamma: gyroG,
 stepDetectorCnt: stepDetectorCnt,
 stepCounterSteps: stepCounterSteps,
-leanAngleDeg: leanAngleDeg
+leanAngleDeg: leanAngleDeg,
+leanForwardDeg: leanForwardDeg, // [추가]
+leanLateralDeg: leanLateralDeg  // [추가]
 });
 }
 // [신규] 화면 꺼짐 대응: setInterval 대신 네이티브 모션/위치 이벤트가 들어올 때마다
@@ -6136,6 +6317,9 @@ this.state.totalFlight = 0;
 this.state.stepCount = 0;
 this.state.cadenceSamples = [];
 this.state.lastValidCadenceDisplay = 0; // [추가] 케이던스 클램프용 직전 유효값도 새 러닝마다 초기화
+this.state.pendingCadVal = null; // [추가] 케이던스 확정 대기값도 새 러닝마다 초기화
+this.state.pendingCadCount = 0;
+this.state.cadValHistory = [];
 this.state.splits = [];
 this.state.precisionLog = []; // [추가] 정밀 비교용 초당 로그 (가민 워치 데이터와 대조용)
 this.state.strideWindow = []; // [추가] 보폭(step_length) 구간평균 계산용 슬라이딩 윈도우 버퍼
@@ -6150,9 +6334,11 @@ this.state.lastPosTimestamp = Date.now();
 this.state.speedBuffer = [];
 this.state.lastValidSpeed = 0;
 this.state.emaSpeedKmh = 0;
+this.state.pendingSpeedVal = null; // [추가] 페이스 이상치 확인 대기값도 새 러닝마다 초기화
 this.state.metricSpeedBuffer = [];
 this.state.lastValidMetricSpeed = 0;
 this.state.metricSpeedKmh = 0;
+this.state.pendingMetricSpeedVal = null; // [추가]
 this._lastDeltaDist = null;
 this._lastDeltaTime = null;
 this._kalman = null; // 칼만 필터 리셋 (새 러닝 시작 시 첫 GPS 포인트로 재초기화)
@@ -6419,6 +6605,10 @@ sensorDiag: _strideSensorFlag,     // [추가] 개발자 전용 진단 플래그
 devicePos: this.state.runDevicePos || null, // [추가] 이번 러닝에 실제로 적용된 착용 위치(클램프 여부와 무관하게 항상 기록)
 // [신규] 가슴 착용 러닝일 때만 값이 채워지는 세션 평균 린각도(도). 그 외 착용위치/걷기 기록은 null.
 avgLeanAngleDeg: (this.leanTracker && this.leanTracker.getSessionAvg() != null) ? parseFloat(this.leanTracker.getSessionAvg().toFixed(1)) : null,
+// [추가] 전방/측방 분해 평균값. avgLeanAngleDeg와 별개 필드라 기존 UI/저장 스키마는 안 건드림.
+// 축 학습이 세션 내내 충분히 안 됐으면(짧은 러닝 등) null일 수 있음.
+avgLeanForwardDeg: (this.leanTracker && this.leanTracker.getSessionAvgForward() != null) ? parseFloat(this.leanTracker.getSessionAvgForward().toFixed(1)) : null,
+avgLeanLateralDeg: (this.leanTracker && this.leanTracker.getSessionAvgLateral() != null) ? parseFloat(this.leanTracker.getSessionAvgLateral().toFixed(1)) : null,
 nativeStepRescueCount: this.motion.nativeRescueCount, // [추가] 네이티브 걸음센서가 자이로 노이즈 필터의 오판을 구제해준 횟수(개발자 전용, UI 비노출)
 weightKgSnapshot: weightKg,        // [추가] 당시 체중(kg) 스냅샷 저장
 alt: this.state.currentAlt,
@@ -7650,6 +7840,8 @@ const shareLeanAngle = opts.leanAngle !== false; // [신규] 린각도 공유 �
         // [신규] 린각도(가슴 착용 러닝일 때만 값 존재). Supabase 'records' 테이블에
         // avg_lean_angle_deg(numeric, nullable) 컬럼이 없다면 먼저 추가해야 저장됨.
         avg_lean_angle_deg: LeanAngleUI.sharePayloadValue(record, shareLeanAngle),
+avg_lean_forward_deg: LeanAngleUI.sharePayloadForwardValue(record, shareLeanAngle), // [추가]
+avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngle), // [추가]
         path: shareRoute ? (record.path || null) : null,
         splits: record.splits || null,
         photo_url: photoUrl,
@@ -8879,6 +9071,17 @@ const garmin = (function () {
     });
     return count ? (sum / count) : null;
   }
+  // [추가] 전방 린각도(leanForwardDeg)는 음수도 유효한 값(반대쪽으로 기울었다는 뜻)이라
+  // 위 avgFromPrecLog의 "v > 0만 인정" 조건을 그대로 쓰면 음수 샘플이 전부 제외되어
+  // 평균이 실제보다 전방쪽으로 왜곡됨. 0이 아닌 모든 숫자를 인정하는 버전을 별도로 둔다.
+  function avgFromPrecLogSigned(log, field) {
+    let sum = 0, count = 0;
+    log.forEach(r => {
+      const v = parseFloat(r[field]);
+      if (!isNaN(v) && r[field] !== '') { sum += v; count++; }
+    });
+    return count ? (sum / count) : null;
+  }
 
   // [추가] 폰 vs 가민 오버롤 비교를 막대그래프로 보여준다. 항목마다 단위/스케일이
   // 완전히 달라서(케이던스 spm, GCT ms, 보폭 mm, 수직진동 mm) 절대값으로 나란히 그리면
@@ -9072,6 +9275,10 @@ const garmin = (function () {
     const phoneAvgHr = avgArr(precItems.map(p => avgFromPrecLog(p.log, 'hrBpm')));
 // [신규] 린각도: 가민 쪽엔 대응 지표가 없으므로 비교값이 아니라 폰 전용 참고값으로만 계산
 const phoneAvgLeanDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, 'leanAngleDeg')));
+// [추가] 전방(부호있음)/측방(부호없음) 폰 평균값도 함께 계산 — 축 학습이 세션 초반엔
+// 안 돼 있으므로 값 없는 로그 행이 섞여도 avgFromPrecLog(Signed)가 알아서 제외함
+const phoneAvgLeanForwardDeg = avgArr(precItems.map(p => avgFromPrecLogSigned(p.log, 'leanForwardDeg')));
+const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, 'leanLateralDeg')));
     const hrDiffPct = (phoneAvgHr && garminAvgHr) ? ((phoneAvgHr - garminAvgHr) / garminAvgHr * 100) : null;
 
     // [추가] 실제 거리 비교. 정밀 로그의 마지막 행 distKm(폰이 실제로 누적한 GPS 거리)과
@@ -9197,7 +9404,7 @@ const phoneAvgLeanDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, 'leanAng
       + rowKm(isKo ? '실제 거리 (km)' : 'DISTANCE (km)', phoneDistanceKm, garminDistanceKm, distDiffPct)
       + rowFmt(isKo ? '페이스 (/km)' : 'PACE (/km)', phoneAvgPaceSec, garminAvgPaceSec, paceDiffPct, fmtPace)
       + row(isKo ? '평균 심박수 (bpm)' : 'AVG HR (bpm)', phoneAvgHr, garminAvgHr, hrDiffPct, '')
-      + LeanAngleUI.garminPhoneOnlyRowHtml(phoneAvgLeanDeg, isKo ? 'ko' : 'en');
+      + LeanAngleUI.garminPhoneOnlyRowHtml(phoneAvgLeanDeg, isKo ? 'ko' : 'en', phoneAvgLeanForwardDeg, phoneAvgLeanLateralDeg);
 
     // [추가] 자체 알고리즘 vs OS 걸음감지센서 vs OS 걸음수센서 중 어느 쪽이 가민 케이던스에
     // 가장 가까운지 짧게 안내. 값이 하나라도 있어야 의미가 있으므로 그때만 표시.
