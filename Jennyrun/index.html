@@ -2074,6 +2074,10 @@ const status = document.getElementById('autopause-status');
 if (box) box.classList.toggle('active', this.currentAutoPause === true);
 if (status) status.textContent = this.currentAutoPause ? 'ON' : 'OFF';
 }
+// [추가] 설정 페이지 최초 로드 시에도 걷기 모드/착용위치 조건에 맞춰 폰위치·로그기록·린각도 비활성화 상태를 반영
+this.updatePosAvailability();
+this.updatePrecisionLogAvailability();
+this.updateLeanAngleAvailability();
 
 }
 // ── 칼로리 계산 유틸 ──
@@ -2227,6 +2231,10 @@ if (trailBtn) trailBtn.classList.toggle('active', mode === 'trail');
 // [수정] 걷기 모드로 전환/유지될 때 설정 페이지의 기기 착용 위치 하이라이트도
 // 온보딩과 동일하게 즉시 꺼지도록 동기화 (러닝/트레일 복귀 시엔 저장된 위치로 복원)
 this.updateDevicePosUI(storage.loadProfile().devicePos);
+// [추가] 설정 페이지의 폰위치/로그기록/린각도 스위치도 걷기 모드 여부에 맞춰 활성/비활성 갱신
+this.updatePosAvailability();
+this.updatePrecisionLogAvailability();
+this.updateLeanAngleAvailability();
 // [신규] 메인 트래킹 화면 CADENCE/GCT/FLIGHT 카드를 걷기 모드용으로 라벨만 전환
 // (실제 계산 로직은 WalkStepDetector/updateWalkMetrics가 별도로 담당, 여기선 표시만 전환)
 const labelCadence = document.getElementById('label-cadence');
@@ -2266,17 +2274,25 @@ const el = document.getElementById('onb-devpos-' + p);
 if (el) el.classList.toggle('active', mode !== 'walk' && p === this.onbPos);
 });
 this.onbUpdateStartBtn();
+// [추가] 모드가 바뀌면 폰위치/로그기록/린각도 스위치 사용 가능 여부를 모두 재평가
+this.onbUpdatePosAvailability();
+this.onbUpdatePrecisionLogAvailability();
+this.onbUpdateLeanAngleAvailability();
 // [변경] 온보딩에서 바로 저장/적용해 설정 페이지와 항상 동일한 상태 유지
 this.setActivityMode(mode);
 }
 // [추가] 최초 실행 온보딩 화면 - 기기 착용 위치 선택
 onbSelectPos(pos) {
+// [추가] 걷기 모드에서는 착용 위치 선택이 필요 없으므로 변경 불가
+if (!this._isWalkGated(this.onbMode)) return;
 this.onbPos = pos;
 ['chest','waist','armband','hand'].forEach(p => {
 const el = document.getElementById('onb-devpos-' + p);
 if (el) el.classList.toggle('active', p === pos);
 });
 this.onbUpdateStartBtn();
+// [추가] 착용 위치가 바뀌면 린각도 스위치 사용 가능 여부(러닝+가슴)도 재평가
+this.onbUpdateLeanAngleAvailability();
 // [변경] 온보딩에서 바로 저장/적용해 설정 페이지와 항상 동일한 상태 유지
 this.setDevicePos(pos);
 }
@@ -2292,6 +2308,8 @@ this.setAutoPause(this.onbAutoPause);
 }
 // [추가] 최초 실행 온보딩 화면 - 러닝 중 정밀 로그 기록 on/off
 onbTogglePrecisionLog() {
+// [추가] 걷기 모드에서는 정밀 로그 기록 스위치 사용 불가
+if (!this._isWalkGated(this.onbMode)) return;
 this.onbPrecisionLog = !this.onbPrecisionLog;
 const box = document.getElementById('onb-precision-log-switch');
 const status = document.getElementById('onb-precision-log-status');
@@ -2304,12 +2322,65 @@ this.setPrecisionLogRecording(this.onbPrecisionLog);
 // lean-angle-switch DOM도 함께 갱신하므로, 온보딩/설정 어느 쪽에서 눌러도 항상 같은 상태로
 // 동기화된다(자동멈춤/로그기록과 동일한 방식).
 onbToggleLeanAngle() {
+// [추가] 러닝 모드 + 가슴 착용일 때만 토글 가능 (그 외 조건에서는 클릭해도 무시)
+if (!this._isLeanAngleGated(this.onbMode, this.onbPos)) return;
 this.onbLeanAngle = !this.onbLeanAngle;
 const box = document.getElementById('onb-lean-angle-switch');
 const status = document.getElementById('onb-lean-angle-status');
 if (box) box.classList.toggle('active', this.onbLeanAngle === true);
 if (status) status.textContent = this.onbLeanAngle ? 'ON' : 'OFF';
 this.setLeanAngleEnabled(this.onbLeanAngle);
+}
+// ── [리팩터링] 온보딩/설정 페이지 공용 게이팅 헬퍼 ──
+// 걷기 모드에서 비활성화되는 항목(폰위치/로그기록)의 조건 판정을 한 곳에 모음
+_isWalkGated(mode) {
+return mode !== 'walk';
+}
+// 린각도는 러닝 모드 + 가슴 착용일 때만 사용 가능하다는 조건 판정을 한 곳에 모음
+_isLeanAngleGated(mode, pos) {
+return mode === 'run' && pos === 'chest';
+}
+// 버튼 행(폰위치 등) 전체를 흐리게 처리 + 클릭 차단하는 공용 로직
+_applyRowGate(rowId, available) {
+const row = document.getElementById(rowId);
+if (row) {
+row.style.opacity = available ? '1' : '0.6';
+row.style.pointerEvents = available ? 'auto' : 'none';
+}
+}
+// on/off 스위치 하나(로그기록/린각도 등)에 대해 비활성 시 강제 OFF + 흐리게 처리 + 클릭 차단하는
+// 공용 로직. 저장 버튼/공유 버튼과 동일한 opacity 0.6 컨벤션을 따른다. 최종 on/off 값을 반환한다.
+_applySwitchGate(boxId, statusId, available, isOn, onForceOff) {
+let finalOn = isOn;
+if (!available && isOn) {
+finalOn = false;
+if (onForceOff) onForceOff();
+}
+const box = document.getElementById(boxId);
+const status = document.getElementById(statusId);
+if (box) {
+box.classList.toggle('active', available && finalOn === true);
+box.style.opacity = available ? '1' : '0.6';
+box.style.pointerEvents = available ? 'auto' : 'none';
+box.style.cursor = available ? 'pointer' : 'not-allowed';
+}
+if (status) status.textContent = finalOn ? 'ON' : 'OFF';
+return finalOn;
+}
+// [추가] 폰위치 선택은 걷기 모드에서는 필요 없으므로 비활성화(흐리게 + 클릭 차단)
+onbUpdatePosAvailability() {
+this._applyRowGate('onb-device-pos-row', this._isWalkGated(this.onbMode));
+}
+// [추가] 정밀 로그 기록 스위치는 걷기 모드에서는 사용 불가. 강제 OFF 처리 + 비활성화 표시
+onbUpdatePrecisionLogAvailability() {
+const available = this._isWalkGated(this.onbMode);
+this.onbPrecisionLog = this._applySwitchGate('onb-precision-log-switch', 'onb-precision-log-status', available, this.onbPrecisionLog, () => this.setPrecisionLogRecording(false));
+}
+// [추가] 린각도 스위치는 러닝 모드 + 가슴 착용일 때만 사용 가능. 그 외 조합에서는
+// 강제로 OFF 처리하고 시각적으로 비활성화(흐리게 + 클릭 차단)한다.
+onbUpdateLeanAngleAvailability() {
+const available = this._isLeanAngleGated(this.onbMode, this.onbPos);
+this.onbLeanAngle = this._applySwitchGate('onb-lean-angle-switch', 'onb-lean-angle-status', available, this.onbLeanAngle, () => this.setLeanAngleEnabled(false));
 }
 // [추가] 두 항목이 모두 선택되어야 START 버튼이 활성화됨
 onbUpdateStartBtn() {
@@ -2364,6 +2435,8 @@ const el = document.getElementById('onb-devpos-' + p);
 if (el) el.classList.toggle('active', this.onbMode !== 'walk' && p === this.onbPos);
 });
 this.onbUpdateStartBtn();
+// [추가] 최초 표시 시에도 걷기 모드면 폰위치/로그기록을 비활성화 처리
+this.onbUpdatePosAvailability();
 // [추가] 자동멈춤/로그기록 토글을 현재 설정값으로 초기 표시
 this.onbAutoPause = this.currentAutoPause;
 this.onbPrecisionLog = this.currentPrecisionLogEnabled;
@@ -2371,16 +2444,11 @@ const autopauseBox = document.getElementById('onb-autopause-switch');
 const autopauseStatus = document.getElementById('onb-autopause-status');
 if (autopauseBox) autopauseBox.classList.toggle('active', this.onbAutoPause === true);
 if (autopauseStatus) autopauseStatus.textContent = this.onbAutoPause ? 'ON' : 'OFF';
-const precisionBox = document.getElementById('onb-precision-log-switch');
-const precisionStatus = document.getElementById('onb-precision-log-status');
-if (precisionBox) precisionBox.classList.toggle('active', this.onbPrecisionLog === true);
-if (precisionStatus) precisionStatus.textContent = this.onbPrecisionLog ? 'ON' : 'OFF';
+this.onbUpdatePrecisionLogAvailability();
 // [신규] 린각도 스위치도 현재 설정값으로 초기 표시
 this.onbLeanAngle = this.currentLeanAngleEnabled;
-const leanAngleBox = document.getElementById('onb-lean-angle-switch');
-const leanAngleStatus = document.getElementById('onb-lean-angle-status');
-if (leanAngleBox) leanAngleBox.classList.toggle('active', this.onbLeanAngle === true);
-if (leanAngleStatus) leanAngleStatus.textContent = this.onbLeanAngle ? 'ON' : 'OFF';
+// [변경] 러닝+가슴 조건이 아니면 초기 표시부터 강제 OFF + 비활성화 처리
+this.onbUpdateLeanAngleAvailability();
 }
 // ── 설정: 자동멈춤 / 거리단위 / 지도테마 ──
 toggleAutoPause() {
@@ -2389,6 +2457,8 @@ this.setAutoPause(!this.currentAutoPause);
 // [추가] 정밀 로그 기록 on/off 스위치. 러닝마다 자동 저장되는 초당 로그(oppaRunPrecisionLogs)
 // 자체를 켜고 끄는 스위치로, 폰 로깅 부하(배터리/저장공간)가 걱정될 때 꺼둘 수 있게 함.
 togglePrecisionLogRecording() {
+// [추가] 걷기 모드에서는 정밀 로그 기록 스위치 사용 불가
+if (!this._isWalkGated(this.currentActivityMode)) return;
 this.setPrecisionLogRecording(!this.currentPrecisionLogEnabled);
 }
 setPrecisionLogRecording(enabled) {
@@ -2399,10 +2469,28 @@ const status = document.getElementById('precision-log-record-status');
 if (box) box.classList.toggle('active', enabled === true);
 if (status) status.textContent = enabled ? 'ON' : 'OFF';
 }
+// [추가] 설정 페이지: 폰위치 선택은 걷기 모드에서는 필요 없으므로 비활성화(흐리게 + 클릭 차단)
+updatePosAvailability() {
+this._applyRowGate('device-pos-row', this._isWalkGated(this.currentActivityMode));
+}
+// [추가] 설정 페이지: 정밀 로그 기록 스위치는 걷기 모드에서는 사용 불가. 강제 OFF + 비활성화 표시
+updatePrecisionLogAvailability() {
+const available = this._isWalkGated(this.currentActivityMode);
+this.currentPrecisionLogEnabled = this._applySwitchGate('precision-log-record-switch', 'precision-log-record-status', available, this.currentPrecisionLogEnabled, () => this.setPrecisionLogRecording(false));
+}
+// [추가] 설정 페이지: 린각도 스위치는 러닝 모드 + 가슴 착용일 때만 사용 가능. 강제 OFF + 비활성화 표시
+updateLeanAngleAvailability() {
+const pos = storage.loadProfile().devicePos;
+const available = this._isLeanAngleGated(this.currentActivityMode, pos);
+this.currentLeanAngleEnabled = this._applySwitchGate('lean-angle-switch', 'lean-angle-status', available, this.currentLeanAngleEnabled, () => this.setLeanAngleEnabled(false));
+}
 // [신규] 린각도 추출 on/off 스위치. 가슴 착용 + 러닝 모드일 때만 실제로 켜지는 기능이지만,
 // 다른 착용위치/걷기 모드에서도 스위치 자체는 항상 눌러둘 수 있고, 그 경우 다음에
 // 가슴+러닝 조건이 될 때 자동 적용된다(onStart의 leanTracker.reset 게이팅 참고).
 toggleLeanAngleEnabled() {
+// [추가] 러닝 모드 + 가슴 착용일 때만 토글 가능
+const pos = storage.loadProfile().devicePos;
+if (!this._isLeanAngleGated(this.currentActivityMode, pos)) return;
 this.setLeanAngleEnabled(!this.currentLeanAngleEnabled);
 }
 setLeanAngleEnabled(enabled) {
@@ -3244,6 +3332,8 @@ const p = storage.loadProfile();
 p.devicePos = pos;
 storage.saveProfile(p);
 this.updateDevicePosUI(pos);
+// [추가] 착용 위치가 바뀌면 린각도 스위치 사용 가능 여부(러닝+가슴)도 재평가
+this.updateLeanAngleAvailability();
 // MotionManager에 즉시 반영 (러닝 중에 바꿔도 바로 적용됨)
 if (typeof app !== 'undefined' && app.motion) {
   app.motion.applyDevicePos(pos);
