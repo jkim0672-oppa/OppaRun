@@ -5056,14 +5056,21 @@ this.baseline = null; // 캘리브레이션된 "중립 자세" 기준벡터
 this.calibSamples = [];
 this.calibStartTime = null;
 this.calibDone = false;
-this.CALIB_MS = 4000; // 러닝 시작 후 4초간을 기준 자세 캘리브레이션 구간으로 사용
+this.CALIB_MS = 4000; // 캘리브레이션 구간 자체의 길이: 4초간 자세를 모아 평균낸다
+// [추가] START를 누른 뒤 폰을 가슴에 부착하는 시간을 벌어주기 위한 대기 구간.
+// 이 시간 동안은 handleMotion을 아예 건너뛰어서 "부착하는 움직임"이 캘리브레이션
+// 기준 자세로 잘못 잡히는 것을 막는다. GPS/페이스/거리 등 다른 트래킹은 이 대기와
+// 무관하게 START 즉시 정상 진행된다(린각도 계산만 지연됨).
+this.WEAR_DELAY_MS = 6000; // 착용 대기 6초 + 위 캘리브레이션 4초 = START 후 총 10초 뒤부터 린각도 값 표시 시작
+this.sessionStartTime = null;
 this.LPF_ALPHA = 0.08; // 저역통과 필터 계수: 작을수록 러닝 착지 충격 등 고주파 노이즈를 더 누른다
 this.currentLeanDeg = null; // 최신 스무딩된 린각도(표시/로그용 순간값)
 this.sessionSum = 0;
 this.sessionCount = 0;
+this.onCalibDone = null; // [추가] 캘리브레이션이 성공적으로 끝난 순간 호출되는 콜백 (비프음 등 알림용)
 }
 // 러닝 시작 시 app.onStart()에서 호출. enabled=true인 세션에서만 이후 handleMotion이 실제로 계산한다.
-reset(enabled) {
+reset(enabled, onCalibDone) {
 this.enabled = !!enabled;
 this.filtered = null;
 this.baseline = null;
@@ -5073,9 +5080,13 @@ this.calibDone = false;
 this.currentLeanDeg = null;
 this.sessionSum = 0;
 this.sessionCount = 0;
+this.sessionStartTime = Date.now(); // [추가] 착용 대기 구간 계산의 기준 시각
+this.onCalibDone = (typeof onCalibDone === 'function') ? onCalibDone : null; // [추가]
 }
 handleMotion(e) {
 if (!this.enabled) return;
+// [추가] 착용 대기 구간(WEAR_DELAY_MS)에는 필터/캘리브레이션 자체를 시작하지 않고 그냥 건너뜀
+if (this.sessionStartTime && (Date.now() - this.sessionStartTime) < this.WEAR_DELAY_MS) return;
 const acc = e.accelerationIncludingGravity;
 if (!acc || acc.x == null || acc.y == null || acc.z == null) return;
 // 1) 저역통과 필터로 고주파 바운스 노이즈를 누르고 중력 방향(자세)만 남긴다
@@ -5099,6 +5110,8 @@ this.baseline = { x: sum.x / n, y: sum.y / n, z: sum.z / n };
 }
 this.calibDone = true;
 this.calibSamples = [];
+// [추가] 기준 자세가 실제로 잡혔을 때만 "캘리브레이션 성공" 알림 콜백 호출
+if (this.baseline && this.onCalibDone) this.onCalibDone();
 }
 return; // 캘리브레이션 구간에는 아직 각도를 산출하지 않음
 }
@@ -5348,6 +5361,27 @@ if (this.state.pauseStartedAt) {
 this.state.pausedMs = (this.state.pausedMs || 0) + (Date.now() - this.state.pauseStartedAt);
 this.state.pauseStartedAt = null;
 }
+}
+// [추가] 린각도 캘리브레이션 완료 알림음. 이미 러닝 중 켜져있는 무음 keep-alive
+// AudioContext(this.silentAudio)를 그대로 재사용해서 별도 오디오 컨텍스트 생성이나
+// 권한 이슈 없이 짧은 비프음만 살짝 얹는다.
+playCalibDoneBeep() {
+try {
+const ctx = this.silentAudio;
+if (!ctx) return;
+const now = ctx.currentTime;
+const osc = ctx.createOscillator();
+const gain = ctx.createGain();
+osc.type = 'sine';
+osc.frequency.value = 880;
+gain.gain.value = 0.0001;
+gain.gain.exponentialRampToValueAtTime(0.25, now + 0.02);
+gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+osc.connect(gain);
+gain.connect(ctx.destination);
+osc.start(now);
+osc.stop(now + 0.2);
+} catch(e) { console.log('Calib beep failed', e); }
 }
 startSilentKeepAlive() {
 if (this.silentAudio) this.stopSilentKeepAlive();
@@ -6125,7 +6159,7 @@ if (this.walkMotion) this.walkMotion.reset();
 // 계속 계산이 돌아가는 게 어색하다는 피드백에 따라 명시적 on/off 스위치를 추가함.
 // 이 판단은 세션 시작 시점 한 번만 고정되고(위 runDevicePos/activityMode와 동일 패턴),
 // 스위치가 꺼져있거나 손/허리/암밴드 착용, 걷기 모드면 세션 내내 no-op으로 남는다.
-if (this.leanTracker) this.leanTracker.reset(this.state.runDevicePos === 'chest' && this.state.activityMode !== 'walk' && storage.getLeanAngleEnabled());
+if (this.leanTracker) this.leanTracker.reset(this.state.runDevicePos === 'chest' && this.state.activityMode !== 'walk' && storage.getLeanAngleEnabled(), () => this.playCalibDoneBeep());
 if (this.state.activityMode === 'walk') {
 if (ui.dom.cadence) ui.dom.cadence.textContent = '0';
 if (ui.dom.gct) ui.dom.gct.textContent = '--';
