@@ -1323,6 +1323,55 @@ function calcStride(speedKmh, cadence, heightCm, personalFactor) {
   const pf = (typeof personalFactor === 'number' && personalFactor > 0) ? personalFactor : 1.0;
   return stride * pf;
 }
+// [리팩토링] "5'30\"" 형태의 페이스 문자열을 km/h 속도로 바꾸는 로직이 기록상세/진단팝업/
+// 통계카드 등 4곳에 똑같이 복붙돼 있었음 → 여기 하나로 통합. 파싱 공식을 고칠 일이 생기면
+// 이제 이 함수 하나만 고치면 모든 화면에 반영된다.
+// 무효/파싱불가 시 null 반환 (호출부에서 각자의 기본값 정책을 적용하도록 함).
+function paceStrToSpeedKmh(paceStr) {
+if (!paceStr || paceStr === INVALID_PACE || !paceStr.includes("'")) return null;
+const parts = paceStr.replace('"', '').split("'");
+const min = parseInt(parts[0]) || 5;
+const sec = parseInt(parts[1]) || 0;
+if (min <= 0) return null;
+return 60 / (min + sec / 60);
+}
+// [리팩토링] "가민 비교 → 보정 제안 적용" 로직이 두 곳(평균값 적용 / 개별 러닝 선택 적용)에
+// 변수명(avgSuggestion vs sel)만 다르고 완전히 동일하게 복붙돼 있던 것을 하나로 통합.
+// prof 객체를 직접 수정한다(호출부에서 storage.saveProfile(prof) 저장은 그대로 각자 담당).
+function applyMotionCalibSuggestion(prof, pos, suggestion) {
+if (!prof.motionCalibOverrides) prof.motionCalibOverrides = {};
+if (!prof.strideCorrectionFactorByPos) prof.strideCorrectionFactorByPos = {};
+if (!prof.gpsDistCorrectionFactorByPos) prof.gpsDistCorrectionFactorByPos = {};
+
+const override = { devicePos: pos, appliedAt: new Date().toISOString() };
+if (suggestion.gct != null) override.gctFallbackRatio = suggestion.gct;
+if (suggestion.rot != null) override.rotRejectThreshold = suggestion.rot;
+if (suggestion.vertScale != null) override.vertScale = suggestion.vertScale;
+
+const curStride = (typeof prof.strideCorrectionFactorByPos[pos] === 'number' && prof.strideCorrectionFactorByPos[pos] > 0) ? prof.strideCorrectionFactorByPos[pos] : 1.0;
+const curGps = (typeof prof.gpsDistCorrectionFactorByPos[pos] === 'number' && prof.gpsDistCorrectionFactorByPos[pos] > 0) ? prof.gpsDistCorrectionFactorByPos[pos] : 1.0;
+// 되돌리기(UNDO)용 스냅샷을 위치별로 독립 저장 — motionCalibUndos[pos]에 각자 따로 저장해서
+// 위치별로 독립적으로 되돌릴 수 있다.
+if (!prof.motionCalibUndos) prof.motionCalibUndos = {};
+prof.motionCalibUndos[pos] = {
+devicePos: pos,
+prevOverride: prof.motionCalibOverrides[pos] ? JSON.parse(JSON.stringify(prof.motionCalibOverrides[pos])) : null,
+prevStrideCorrectionFactor: curStride,
+prevGpsDistCorrectionFactor: curGps,
+savedAt: new Date().toISOString()
+};
+prof.motionCalibOverrides[pos] = override;
+if (suggestion.strideFactor != null) prof.strideCorrectionFactorByPos[pos] = suggestion.strideFactor;
+if (suggestion.gpsDistFactor != null) prof.gpsDistCorrectionFactorByPos[pos] = suggestion.gpsDistFactor;
+// calcStride() 등이 읽는 플랫 필드는 "지금 실제로 착용 중인 위치"일 때만 갱신 —
+// 예를 들어 지금 가슴을 차고 있는데 손 위치 보정값을 적용했다고 해서 지금 러닝에
+// 손 보정계수가 끼어들면 안 되기 때문.
+if (prof.devicePos === pos) {
+if (suggestion.strideFactor != null) prof.strideCorrectionFactor = suggestion.strideFactor;
+if (suggestion.gpsDistFactor != null) prof.gpsDistCorrectionFactor = suggestion.gpsDistFactor;
+}
+return override;
+}
 // [추가] 개인 맞춤 피드백 생성 함수
 // record(케이던스/GCT/보폭/밸런스 등)와 profile(키/나이)+gender를 조합해
 // 지표별로 여러 줄의 구체적인 피드백 문구를 생성한다.
@@ -2188,6 +2237,38 @@ if (data.steps !== undefined && this.dom.cadence) this.dom.cadence.textContent =
 if (data.spm !== undefined && this.dom.flight) this.dom.flight.textContent = data.spm;
 if (data.stride !== undefined && this.dom.gct) this.dom.gct.textContent = data.stride;
 }
+// [개선-3] 걷기↔러닝 자동 감지 배너: app.checkAutoActivityModeTransition()이 일정 속도가
+// 지속되었다고 판단하면 호출한다. 자동으로 모드를 "강제 전환"하지 않고 사용자가 직접
+// 확인 후 선택하게 하는 이유: GCT/린각도 등은 전환 시점부터 새로 캘리브레이션되므로,
+// 신호대기 등으로 인한 일시적 속도 변화까지 자동으로 모드를 바꿔버리면 오히려
+// 캘리브레이션이 쓸데없이 자주 리셋되어 정확도가 떨어질 수 있기 때문.
+showAutoModeSuggestion(mode) {
+this.hideAutoModeSuggestion();
+const isKo = storage.getLang() === 'ko';
+const t = translations[storage.getLang()] || translations['en'];
+const modeLabel = mode === 'run' ? t.modeRunLabel : t.modeWalkLabel;
+const msg = isKo
+? (mode === 'run' ? '뛰는 속도가 계속 감지돼요. 러닝 모드로 바꿀까요?' : '걷는 속도가 계속 유지되고 있어요. 걷기 모드로 바꿀까요?')
+: (mode === 'run' ? 'Running pace detected for a while. Switch to RUN mode?' : 'Sustained walking pace detected. Switch to WALK mode?');
+const el = document.createElement('div');
+el.id = 'auto-mode-banner';
+el.style.cssText = 'position:fixed; left:12px; right:12px; bottom:calc(var(--tabbar-h) + 14px); z-index:9000; background:#1e1e1e; border:1.5px solid var(--primary); border-radius:14px; padding:12px 14px; display:flex; align-items:center; gap:10px; box-shadow:0 6px 24px rgba(0,0,0,0.5);';
+el.innerHTML = '<div style="flex:1; font-size:12.5px; font-weight:800; color:#fff; line-height:1.4;">' + msg + '</div>'
++ '<button onclick="app.applyAutoModeSwitch(\'' + mode + '\')" style="background:var(--primary); color:#000; border:none; padding:9px 14px; border-radius:10px; font-weight:900; font-size:12px; cursor:pointer; white-space:nowrap; flex-shrink:0;">' + modeLabel + '</button>'
++ '<button onclick="ui.dismissAutoModeSuggestion(\'' + mode + '\')" style="background:none; color:#888; border:none; padding:9px 6px; font-weight:800; font-size:12px; cursor:pointer; flex-shrink:0;">' + (isKo ? '무시' : 'Ignore') + '</button>';
+document.body.appendChild(el);
+}
+hideAutoModeSuggestion() {
+const el = document.getElementById('auto-mode-banner');
+if (el) el.remove();
+}
+dismissAutoModeSuggestion(mode) {
+if (typeof app !== 'undefined' && app.state) {
+app.state.autoModeBannerDismissedFor = mode;
+app.state.autoModeBannerShown = false;
+}
+this.hideAutoModeSuggestion();
+}
 updateLiveCalories() {
 const calEl = document.getElementById('cal-val');
 if (!calEl) return;
@@ -2859,13 +2940,7 @@ const cadence = record.cadence || 170;
 const gct = record.gct && record.gct !== '--' ? parseInt(record.gct) : 250;
 const flight = record.flight && record.flight !== '--' ? parseInt(record.flight) : 25;
 const alt = record.alt || 0;
-let speedKmh = 12;
-if (record.avgPace && record.avgPace.includes("'")) {
-const parts = record.avgPace.replace('"', '').split("'");
-const min = parseInt(parts[0]) || 5;
-const sec = parseInt(parts[1]) || 0;
-if(min > 0) speedKmh = 60 / (min + (sec / 60));
-}
+let speedKmh = paceStrToSpeedKmh(record.avgPace) ?? 12;
 const strideCalculated = (() => {
   const prof = storage.loadProfile();
   const heightCm = prof.hu === 'inch' ? Math.round(prof.h * 2.54) : prof.h;
@@ -3697,6 +3772,18 @@ window.AndroidBridge.exitApp();
 }
 }
 // ── 히스토리 목록 / 통계(TOTAL) ──
+// [리팩토링] 심박수/존 박스 HTML이 아래 updateHistoryList()의 걷기/러닝 두 분기에
+// 완전히 동일하게 복붙돼 있던 것을 통합 (삼항연산자로 서로 배타적이라 버그는 아니었음).
+buildHrBoxHtml(r, t) {
+const hasHr = r.avgHr != null && r.avgHr > 0;
+const maxHrVal = (r.maxHr != null && r.maxHr > 0) ? r.maxHr : (hasHr ? r.avgHr : null);
+const hrText = hasHr ? (r.avgHr + ' / ' + (maxHrVal || r.avgHr)) : '--';
+const zoneInfo = hasHr ? hrManager.getZone(r.avgHr) : null;
+const zoneColor = zoneInfo ? zoneInfo.color : '#aaa';
+const zoneText = r.hrZone || (zoneInfo ? ('Z' + zoneInfo.z) : '--');
+return '<div class="h-det-box"><div class="h-det-label">' + t.hrAvgMax + '</div><div class="h-det-val" style="color:#e53935">' + hrText + ' <span style="font-size:7px">BPM</span></div></div>' +
+'<div class="h-det-box"><div class="h-det-label">' + t.hrZoneLabel + '</div><div class="h-det-val" style="color:' + zoneColor + '">' + zoneText + '</div></div>';
+}
 updateHistoryList() {
 const h = storage.loadHistory(); const lang = storage.getLang(); const t = translations[lang] || translations['en'];
 if (!this.dom.historyList) return;
@@ -3733,11 +3820,8 @@ return '<div class="history-item">' +
 ((() => {
 const unit = storage.getUnit();
 let speedVal = '--';
-if (r.avgPace && r.avgPace !== INVALID_PACE && r.avgPace.includes("'")) {
-const parts = r.avgPace.replace('"','').split("'");
-const min = parseInt(parts[0]) || 5;
-const sec = parseInt(parts[1]) || 0;
-const kmh = 60 / (min + sec / 60);
+const kmh = paceStrToSpeedKmh(r.avgPace);
+if (kmh != null) {
 speedVal = unit === 'mi' ? (kmh * 0.621371).toFixed(1) : kmh.toFixed(1);
 }
 const speedUnitStr = unit === 'mi' ? 'MI/H' : 'KM/H';
@@ -3756,16 +3840,7 @@ return '<div style="display:flex;flex-direction:column;align-items:flex-start;ma
 '<div class="h-det-box"><div class="h-det-label">' + t.stride + '</div><div class="h-det-val" style="color:#dddddd">' + (r.stride ? parseFloat(r.stride).toFixed(2) : '--') + ' <span style="font-size:7px">M</span></div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.spmLabel + '</div><div class="h-det-val" style="color:#dddddd">' + (r.walkSpm || 0) + '</div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.altChange + '</div><div class="h-det-val" style="color:#dddddd">' + ((r.splits && r.splits.length > 0) ? r.splits.reduce((sum,s)=>sum+Math.max(0,s.altDiff||0),0) : 0) + ' <span style="font-size:7px">M</span></div></div>' +
-((() => {
-  const hasHr = r.avgHr != null && r.avgHr > 0;
-  const maxHrVal = (r.maxHr != null && r.maxHr > 0) ? r.maxHr : (hasHr ? r.avgHr : null);
-  const hrText = hasHr ? (r.avgHr + ' / ' + (maxHrVal || r.avgHr)) : '--';
-  const zoneInfo = hasHr ? hrManager.getZone(r.avgHr) : null;
-  const zoneColor = zoneInfo ? zoneInfo.color : '#aaa';
-  const zoneText = r.hrZone || (zoneInfo ? ('Z' + zoneInfo.z) : '--');
-  return '<div class="h-det-box"><div class="h-det-label">' + t.hrAvgMax + '</div><div class="h-det-val" style="color:#e53935">' + hrText + ' <span style="font-size:7px">BPM</span></div></div>' +
-  '<div class="h-det-box"><div class="h-det-label">' + t.hrZoneLabel + '</div><div class="h-det-val" style="color:' + zoneColor + '">' + zoneText + '</div></div>';
-})())
+this.buildHrBoxHtml(r, t)
 ) : (
 '<div class="h-det-box"><div class="h-det-label">' + t.pace + '</div><div class="h-det-val">' + displayPace + '</div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.cadence + '</div><div class="h-det-val" style="color:' + this.getCadenceColor(r.cadence) + '">' + (r.cadence || 0) + '</div></div>' +
@@ -3777,14 +3852,13 @@ let strideVal = '--';
 if (r.stride) {
   // 저장된 스냅샷 우선 사용 (당시 키 기준 정확한 값)
   strideVal = parseFloat(r.stride).toFixed(2);
-} else if (r.cadence && r.cadence > 0 && r.avgPace && r.avgPace !== INVALID_PACE && r.avgPace.includes("'")) {
-  const parts = r.avgPace.replace('"','').split("'");
-  const min = parseInt(parts[0]) || 5;
-  const sec = parseInt(parts[1]) || 0;
-  const speedKmh = 60 / (min + sec / 60);
-  const prof = storage.loadProfile();
-  const heightCm = prof.hu === 'inch' ? Math.round(prof.h * 2.54) : prof.h;
-  strideVal = calcStride(speedKmh, r.cadence, heightCm, prof.strideCorrectionFactor).toFixed(2);
+} else if (r.cadence && r.cadence > 0) {
+  const speedKmh = paceStrToSpeedKmh(r.avgPace);
+  if (speedKmh != null) {
+    const prof = storage.loadProfile();
+    const heightCm = prof.hu === 'inch' ? Math.round(prof.h * 2.54) : prof.h;
+    strideVal = calcStride(speedKmh, r.cadence, heightCm, prof.strideCorrectionFactor).toFixed(2);
+  }
 }
 return '<div class="h-det-box"><div class="h-det-label">' + t.stride + '</div><div class="h-det-val" style="color:#dddddd">' + strideVal + ' <span style="font-size:7px">M</span></div></div>';
 })()) +
@@ -3795,16 +3869,7 @@ return '<div class="h-det-box"><div class="h-det-label">' + t.stride + '</div><d
 '<div class="h-det-box"><div class="h-det-label">' + t.altChange + '</div><div class="h-det-val" style="color:#dddddd">' + ((r.splits && r.splits.length > 0) ? r.splits.reduce((sum,s)=>sum+Math.max(0,s.altDiff||0),0) : 0) + ' <span style="font-size:7px">M</span></div></div>' +
 LeanAngleUI.listDetBoxHtml(r, lang) +
 // [추가] 심박수 평균/최고 + 심박 존 (가민 연동 데이터, 기존 6개 데이터 밑에 추가)
-((() => {
-  const hasHr = r.avgHr != null && r.avgHr > 0;
-  const maxHrVal = (r.maxHr != null && r.maxHr > 0) ? r.maxHr : (hasHr ? r.avgHr : null);
-  const hrText = hasHr ? (r.avgHr + ' / ' + (maxHrVal || r.avgHr)) : '--';
-  const zoneInfo = hasHr ? hrManager.getZone(r.avgHr) : null;
-  const zoneColor = zoneInfo ? zoneInfo.color : '#aaa';
-  const zoneText = r.hrZone || (zoneInfo ? ('Z' + zoneInfo.z) : '--');
-  return '<div class="h-det-box"><div class="h-det-label">' + t.hrAvgMax + '</div><div class="h-det-val" style="color:#e53935">' + hrText + ' <span style="font-size:7px">BPM</span></div></div>' +
-  '<div class="h-det-box"><div class="h-det-label">' + t.hrZoneLabel + '</div><div class="h-det-val" style="color:' + zoneColor + '">' + zoneText + '</div></div>';
-})())
+this.buildHrBoxHtml(r, t)
 )) +
 '</div>' +
 '<div class="h-delete-row" style="display:flex;justify-content:space-between;align-items:center;">' +
@@ -4237,14 +4302,13 @@ let strideVal = '--';
 if (r.stride) {
   // 저장된 스냅샷 우선 사용
   strideVal = parseFloat(r.stride).toFixed(2) + ' m';
-} else if (r.cadence && r.cadence > 0 && r.avgPace && r.avgPace !== INVALID_PACE && r.avgPace.includes("'")) {
-  const parts = r.avgPace.replace('"','').split("'");
-  const min = parseInt(parts[0]) || 5;
-  const sec = parseInt(parts[1]) || 0;
-  const speedKmh = 60 / (min + sec / 60);
-  const _prof2 = storage.loadProfile();
-  const _hcm2 = _prof2.hu === 'inch' ? Math.round(_prof2.h * 2.54) : _prof2.h;
-  strideVal = calcStride(speedKmh, r.cadence, _hcm2, _prof2.strideCorrectionFactor).toFixed(2) + ' m';
+} else if (r.cadence && r.cadence > 0) {
+  const speedKmh = paceStrToSpeedKmh(r.avgPace);
+  if (speedKmh != null) {
+    const _prof2 = storage.loadProfile();
+    const _hcm2 = _prof2.hu === 'inch' ? Math.round(_prof2.h * 2.54) : _prof2.h;
+    strideVal = calcStride(speedKmh, r.cadence, _hcm2, _prof2.strideCorrectionFactor).toFixed(2) + ' m';
+  }
 }
 // 체공시간
 const flightVal = r.flight && r.flight !== '--' ? r.flight : '--';
@@ -4348,6 +4412,19 @@ this.sideStepCount = [0, 0];
 this.impactTime = 0;
 this.belowThresholdSince = 0;
 this.quietPhaseSinceLastStep = false; // [추가] 걸음 이중 감지 방지용 플래그
+// [개선-1] 접지구간(GCT) 판정 전용 저역통과 필터: 원본 force는 착지 피크를 날카롭게
+// 유지해야 impactThreshold 감지가 정확하므로 그대로 두고, groundThreshold 비교(=접지
+// 안정구간 판정)에만 별도로 필터링된 값을 써서 고주파 잡음(옷 안 덜렁거림 등)이
+// belowThresholdSince/GCT 계산에 그대로 섞여 들어가는 것을 줄인다.
+this.filteredForce = null;
+this.forceLpfAlpha = 0.35; // 걸음 1주기(약 0.3~0.6초) 대비 충분히 빠르게 반응하면서 고주파만 눌러줌
+// [개선-2] GCT 폴백(실측 실패 시 cycleTime*비율로 대체) 정확도 개선: 위치별 고정 상수 대신,
+// 이번 세션에서 "실제로 측정에 성공한" GCT/cycleTime 비율을 느린 EMA로 학습해두었다가
+// 폴백이 발동할 때 우선 사용한다. 노이즈로 학습값이 튀는 걸 막기 위해 위치별 기본값의
+// ±25% 이내로만 허용하고, 최소 5회 실측 전에는 학습값을 신뢰하지 않고 기존 고정값을 쓴다.
+this.gctRatioLearned = null;
+this.gctMeasuredCount = 0; // 진단용: 실측 성공 횟수
+this.gctFallbackCount = 0; // 진단용: 폴백 발동 횟수
 // 착용 위치별 기본값 (chest 기준)
 this.groundThreshold = 11.0;
 this.impactThreshold = 10.5;
@@ -4563,6 +4640,10 @@ this.sideStepCount = [0, 0];
 this.impactTime = 0;
 this.belowThresholdSince = 0;
 this.quietPhaseSinceLastStep = false; // [추가] 걸음 이중 감지 방지용 플래그
+this.filteredForce = null; // [개선-1] 새 러닝마다 필터 상태 초기화(이전 러닝 값이 섞이지 않도록)
+this.gctRatioLearned = null; // [개선-2] 세션마다 새로 학습 (착용/조임 정도가 매번 다를 수 있음)
+this.gctMeasuredCount = 0;
+this.gctFallbackCount = 0;
 this.vertMin = Infinity;
 this.vertMax = -Infinity;
 this.vertAmplitudeAccumulator = 0;
@@ -4731,10 +4812,16 @@ this.gyroCycleCount++;
 this.gyroCycleMagSum += rotMag;
 }
 
+// [개선-1] groundThreshold 비교 전용 저역통과 필터: 원본 force의 고주파 잡음을 눌러서
+// "접지 안정구간"을 더 매끈하게 판정한다. 착지 피크 자체(impactThreshold 비교)는
+// 아래에서 여전히 원본 force를 쓰므로 걸음 판정 민감도에는 영향이 없다.
+if (this.filteredForce === null) this.filteredForce = force;
+else this.filteredForce += this.forceLpfAlpha * (force - this.filteredForce);
+
 // [추가] GCT(지면 접촉 시간) 실측: 충격(impact) 발생 시점부터
 // 다음 충격까지의 시간 중, 가속도가 '안정 구간'(접지 상태로 추정)에
 // 머문 비율을 추적. 이전의 cycleTime * 0.35 고정값을 대체.
-if (force < this.groundThreshold) {
+if (this.filteredForce < this.groundThreshold) {
 // 가속도가 낮음 = 발이 지면에 닿아 충격이 흡수/안정된 구간으로 추정
 if (this.belowThresholdSince === 0) this.belowThresholdSince = now;
 // [수정] 걸음 이중 감지(더블 카운트) 방지용 플래그.
@@ -4854,8 +4941,21 @@ if (this.isFeetOnGround) {
 let measuredGCT;
 if (this.belowThresholdSince > 0 && this.belowThresholdSince > this.impactTime) {
 measuredGCT = this.belowThresholdSince - this.impactTime;
+this.gctMeasuredCount++;
+// [개선-2] 이번 세션의 실측 성공 사례로부터 GCT/cycleTime 비율을 느린 EMA로 학습.
+// 이후 폴백이 발동하면(예: 일시적 노이즈로 안정구간 감지 실패) 위치별 고정 상수보다
+// "이 사람이 이번 러닝에서 실제로 보인 접지 패턴"에 더 가까운 값을 쓸 수 있게 된다.
+const observedRatio = Math.max(0.15, Math.min(0.75, measuredGCT / cycleTime));
+this.gctRatioLearned = (this.gctRatioLearned == null) ? observedRatio : (this.gctRatioLearned * 0.9 + observedRatio * 0.1);
 } else {
-measuredGCT = cycleTime * this.gctFallbackRatio; // 위치별 폴백 비율
+this.gctFallbackCount++;
+// 학습된 세션 비율이 있고(최소 5회 실측 후) 신뢰할 만하면 그걸 우선 사용하되,
+// 노이즈로 극단값에 수렴하는 걸 막기 위해 위치별 기본값의 ±25% 이내로만 허용한다.
+const base = this.gctFallbackRatio;
+const effectiveRatio = (this.gctRatioLearned != null && this.gctMeasuredCount >= 5)
+? Math.max(base * 0.75, Math.min(base * 1.25, this.gctRatioLearned))
+: base;
+measuredGCT = cycleTime * effectiveRatio; // 위치별 폴백 비율(또는 세션 학습값)
 }
 // 비정상 범위(50ms 미만, cycleTime 초과) 보정
 measuredGCT = Math.max(50, Math.min(measuredGCT, cycleTime * 0.9));
@@ -5472,7 +5572,9 @@ isCalibrationRun: false, calibrationKnownDistanceM: 0,
 // [추가] GPS 고도 보정용 - Open-Elevation API 지형고도값 기반 offset 보정
 elevOffset: 0, elevOffsetReady: false, lastElevFetchTime: 0, lastElevFetchPos: null, elevFetchInFlight: false,
 // [신규] 걷기 모드 전용 상태 (러닝 상태와 완전 분리)
-activityMode: 'run', walkSteps: 0, walkStepTimes: [], walkSpmSamples: []
+activityMode: 'run', walkSteps: 0, walkStepTimes: [], walkSpmSamples: [],
+// [개선-3] 걷기↔러닝 자동 감지 상태 (checkAutoActivityModeTransition에서 사용)
+autoModeCandidateMode: null, autoModeCandidateSince: null, autoModeBannerShown: false, autoModeBannerDismissedFor: null
 };
 this.map = null; this.marker = null; this.polyline = null; this.timer = null;
 this.motion = new MotionManager((data) => this.updateMetrics(data));
@@ -5578,6 +5680,81 @@ if (this._silentKeepAliveTimeout) { clearTimeout(this._silentKeepAliveTimeout); 
 if (this.silentAudio) { this.silentAudio.close().catch(()=>{}); this.silentAudio = null; }
 // [수정] 러닝 종료 시 화면 꺼짐 방지 잠금도 함께 해제 (배터리 절약)
 if (this.noSleep) { try { this.noSleep.disable(); } catch(e) {} }
+}
+// [개선-3] 걷기↔러닝 자동 감지: 1초 타이머(onStart/onResume/checkResume)에서 매초 호출.
+// GPS 기반 지표계산 전용 속도(metricSpeedKmh, 모드 무관하게 항상 갱신됨)가 한쪽 모드의
+// 범위를 SUSTAIN_MS 이상 지속하면, 강제 전환 대신 화면 하단에 배너로 "전환할지" 물어본다.
+// (자동 강제전환을 하지 않는 이유는 showAutoModeSuggestion 주석 참고)
+checkAutoActivityModeTransition() {
+if (!this.state.isRunning || this.state.isPaused || this.state.isAutoPaused) return;
+if (this.state.activityMode === 'trail') return; // 트레일은 러닝 지표 체계를 그대로 쓰므로 대상에서 제외
+const speed = this.state.metricSpeedKmh || 0;
+const mode = this.state.activityMode;
+const RUN_SPEED_KMH = 6.8;  // 빠른 걷기 상한보다 높게 잡아 오탐(파워워킹 등) 방지
+const WALK_SPEED_KMH = 5.0; // 이 이하가 지속되면 걷기로 전환 걷기 제안 (신호대기 등 완전정지는 speed>0 조건에서 제외)
+const SUSTAIN_MS = 25000;   // 25초 이상 지속돼야 제안 - 짧은 가감속/신호대기 등 오탐 방지
+
+let candidateMode = null;
+if (mode === 'walk' && speed >= RUN_SPEED_KMH) candidateMode = 'run';
+else if (mode === 'run' && speed > 0 && speed <= WALK_SPEED_KMH) candidateMode = 'walk';
+
+if (!candidateMode) {
+this.state.autoModeCandidateMode = null;
+this.state.autoModeCandidateSince = null;
+return;
+}
+const now = Date.now();
+if (this.state.autoModeCandidateMode !== candidateMode) {
+this.state.autoModeCandidateMode = candidateMode;
+this.state.autoModeCandidateSince = now;
+return;
+}
+if (this.state.autoModeBannerDismissedFor === candidateMode) return; // 이번 세션에서 이미 무시함
+if (this.state.autoModeBannerShown) return; // 이미 표시 중
+if ((now - this.state.autoModeCandidateSince) >= SUSTAIN_MS) {
+this.state.autoModeBannerShown = true;
+ui.showAutoModeSuggestion(candidateMode);
+}
+}
+// [개선-3] 배너에서 사용자가 실제로 "전환"을 선택했을 때 러닝 도중 모드를 실시간으로 바꾼다.
+// 걸음 라우팅(this.state.activityMode === 'walk' 체크)이 매 모션 이벤트마다 다시 평가되는
+// 구조라(handleMotion 호출부 참고), 여기서 activityMode만 바꿔주면 이후 이벤트부터 자연스럽게
+// 새 감지기(motion/walkMotion)로 넘어간다. 각 감지기는 전환 시점부터 새로 시작해야 정확하므로
+// reset()으로 초기화한다(그전까지 쌓인 걸음수/거리/시간 등 다른 지표는 전혀 건드리지 않음).
+applyAutoModeSwitch(newMode) {
+const prevMode = this.state.activityMode;
+if (prevMode === newMode || !this.state.isRunning) { ui.hideAutoModeSuggestion(); return; }
+this.state.activityMode = newMode;
+storage.setActivityMode(newMode);
+if (newMode === 'run' && this.motion) this.motion.reset();
+if (newMode === 'walk' && this.walkMotion) this.walkMotion.reset();
+// [주의] 린각도 추출기는 세션 시작 시점에만 활성화 여부가 고정되는 모듈이라, 걷기→러닝
+// 중간 전환 시 이번 세션에서는 계속 비활성 상태로 남는다(다음 러닝부터 정상 동작).
+if (typeof ui !== 'undefined' && ui.setActivityMode) ui.setActivityMode(newMode); // 카드 라벨/탭 라벨 동기화
+ui.hideAutoModeSuggestion();
+this.state.autoModeBannerShown = false;
+this.state.autoModeCandidateMode = null;
+this.state.autoModeCandidateSince = null;
+this.state.autoModeBannerDismissedFor = null;
+}
+// [리팩토링] 원래 onStart/onResume/checkResume 3곳에 각각 통째로 복붙돼 있던 "매초 실행"
+// 콜백을 하나로 통합. 이제 매초 로직은 runTick() 한 곳에만 존재하고, 3곳은 모두
+// startLiveTimer()만 호출한다. 새 지표/훅을 추가할 땐 runTick() 한 곳만 고치면 되고,
+// 세 곳 중 하나를 빠뜨려서 특정 상황(재개/복구)에서만 동작 안 하는 실수를 방지한다.
+runTick() {
+if (!this.state.isRunning || this.state.isPaused || this.state.isAutoPaused) return;
+this.state.seconds = this.getElapsedSeconds();
+let m = Math.floor(this.state.seconds / 60);
+let s = this.state.seconds % 60;
+ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')});
+if (this.state.activityMode === "walk") { this.updateWalkLiveMetrics(); } else { ui.updateLiveCalories(); }
+this.checkAutoActivityModeTransition();
+}
+// runTick()을 1초 간격으로 도는 타이머를 (재)시작. 기존 타이머가 있으면 정리 후 새로 건다
+// (중복 인터벌 방지). onStart/onResume/checkResume은 이 함수 하나만 호출하면 된다.
+startLiveTimer() {
+if (this.timer) clearInterval(this.timer);
+this.timer = setInterval(() => this.runTick(), 1000);
 }
 // ── 지도 / GPS 위치 트래킹 ──
 initMap() {
@@ -6269,30 +6446,25 @@ if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.request
 try {
 const permissionState = await DeviceMotionEvent.requestPermission();
 if (permissionState === 'granted') {
-if (!this.motionListenerAttached) {
-window.addEventListener('devicemotion', (e) => {
-if (this.state.isRunning && !this.state.isPaused) {
-if (this.state.activityMode === "walk") { this.walkMotion.handleMotion(e); } else { this.motion.handleMotion(e); }
-if (this.leanTracker) this.leanTracker.handleMotion(e); // [신규] 린각도 추출기: 완전 분리된 별도 경로, 걸음 감지에는 관여하지 않음
-if (!this.state.isAutoPaused && typeof this.maybeLogPrecisionSample === 'function') { this.maybeLogPrecisionSample(); }
-}
-});
-this.motionListenerAttached = true;
-}
+this.attachMotionListener();
 }
 } catch (err) { console.log('Motion permission denied', err); }
 } else {
-if (!this.motionListenerAttached) {
-window.addEventListener('devicemotion', (e) => {
-if (this.state.isRunning && !this.state.isPaused) {
+this.attachMotionListener();
+}
+}
+// [리팩토링] iOS 권한분기/일반기기 분기 두 곳에 완전히 같은 핸들러 본문이 복붙돼 있던 것을
+// 하나로 통합. handleDeviceMotionEvent()가 실제 처리를 전담하고, 여기서는 등록(1회 보장)만 한다.
+attachMotionListener() {
+if (this.motionListenerAttached) return;
+window.addEventListener('devicemotion', (e) => this.handleDeviceMotionEvent(e));
+this.motionListenerAttached = true;
+}
+handleDeviceMotionEvent(e) {
+if (!this.state.isRunning || this.state.isPaused) return;
 if (this.state.activityMode === "walk") { this.walkMotion.handleMotion(e); } else { this.motion.handleMotion(e); }
 if (this.leanTracker) this.leanTracker.handleMotion(e); // [신규] 린각도 추출기: 완전 분리된 별도 경로, 걸음 감지에는 관여하지 않음
 if (!this.state.isAutoPaused && typeof this.maybeLogPrecisionSample === 'function') { this.maybeLogPrecisionSample(); }
-}
-});
-this.motionListenerAttached = true;
-}
-}
 }
 // ── 러닝 시작 / 정지 / 재개 / 종료 흐름 ──
 onStart() {
@@ -6354,6 +6526,12 @@ this.state.activityMode = storage.getActivityMode();
 this.state.walkSteps = 0;
 this.state.walkStepTimes = [];
 this.state.walkSpmSamples = [];
+// [개선-3] 새 세션마다 자동 모드전환 감지 상태 초기화
+this.state.autoModeCandidateMode = null;
+this.state.autoModeCandidateSince = null;
+this.state.autoModeBannerShown = false;
+this.state.autoModeBannerDismissedFor = null;
+if (typeof ui !== 'undefined' && ui.hideAutoModeSuggestion) ui.hideAutoModeSuggestion();
 if (this.walkMotion) this.walkMotion.reset();
 // [신규] 린각도 추출기 리셋: 가슴 착용 + 러닝(걷기 아님) + 설정에서 스위치가 켜져
 // 있을 때만 활성화. 예전엔 가슴+러닝이면 무조건 자동 작동했는데, 사용자가 원치 않을 때도
@@ -6381,15 +6559,7 @@ AndroidLockBridge.lockRun();
 }
 if(metro) metro.init();
 this.requestMotionPermission(); // iOS 권한 요청 + 일반기기 리스너 한번만
-this.timer = setInterval(() => {
-if(this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
-this.state.seconds = this.getElapsedSeconds();
-let m = Math.floor(this.state.seconds / 60);
-let s = this.state.seconds % 60;
-ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')});
-if (this.state.activityMode === "walk") { this.updateWalkLiveMetrics(); } else { this.updateLiveCalories(); }
-}
-}, 1000);
+this.startLiveTimer();
 // [수정] 정밀 비교용 로깅을 기존 setInterval 방식에서 이벤트 트리거 방식으로 전환.
 // 기존엔 화면이 꺼지면 이 setInterval 자체가 스로틀링(사실상 정지)돼서
 // 화면 꺼짐 구간의 정밀 로그(precisionLog)가 텅 비는 문제가 있었음.
@@ -6401,6 +6571,7 @@ this.state.lastPrecisionLogAt = 0;
 onStop() {
 this.state.isPaused = true;
 this.state.isAutoPaused = false;
+if (typeof ui !== 'undefined' && ui.hideAutoModeSuggestion) ui.hideAutoModeSuggestion(); // [개선-3] 일시정지 중엔 전환 제안 숨김
 this.markPauseStart(); // [수정] 일시정지 시작 시각 기록 (경과시간 재계산에 사용)
 // [신규] 일시정지 중엔 화면 고정 해제 (신호 대기 중 다른 앱 확인 가능하도록)
 if (window.AndroidLockBridge && AndroidLockBridge.unlockRun) {
@@ -6431,17 +6602,7 @@ try { if (this.noSleep) this.noSleep.enable(); } catch(e) {}
 if (window.AndroidLockBridge && AndroidLockBridge.lockRun) {
 AndroidLockBridge.lockRun();
 }
-if (!this.timer) {
-this.timer = setInterval(() => {
-if(this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
-this.state.seconds = this.getElapsedSeconds();
-let m = Math.floor(this.state.seconds / 60);
-let s = this.state.seconds % 60;
-ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')});
-if (this.state.activityMode === "walk") { this.updateWalkLiveMetrics(); } else { this.updateLiveCalories(); }
-}
-}, 1000);
-}
+this.startLiveTimer(); // startLiveTimer 자체가 중복 인터벌을 정리하므로 별도 if(!this.timer) 가드 불필요
 // [수정] setInterval 기반 정밀 로그 타이머 제거(위 onStart 참고) - 이벤트 트리거 방식으로 전환.
 // 재개 시에는 스로틀 타임스탬프만 리셋해서 재개 직후 첫 모션/위치 이벤트에서 바로 한 번 찍히게 함.
 this.state.lastPrecisionLogAt = 0;
@@ -6474,9 +6635,58 @@ this.state.isAutoPaused = false;
 // 모든 화면/상태를 START 버튼이 보이는 초기 상태로 되돌린다(0에서 다시 시작 가능).
 window.location.reload();
 }
+// [리팩토링] 아래 두 헬퍼는 원래 onFinish(러닝)/finishWalk(걷기)에 각각 거의 그대로
+// 복붙돼 있던 로직. 하나로 합치면서 걷기 쪽 폴백에 개인 보폭 보정계수
+// (strideCorrectionFactor)가 빠져있던 작은 불일치도 함께 바로잡음(이제 러닝/걷기 모두
+// 같은 공식 사용).
+// 현재 위치가 마지막 스플릿 지점보다 1km(오차 10m) 이상 더 갔으면 새 스플릿 1건 기록.
+pushKmSplitIfNeeded() {
+if (this.state.totalDist > this.state.lastKmCheckpoint + 0.01 && this.state.seconds > this.state.lastKmSeconds) {
+let splitDuration = this.state.seconds - this.state.lastKmSeconds;
+let min = Math.floor(splitDuration / 60);
+let sec = splitDuration % 60;
+let paceStr = min + "'" + String(sec).padStart(2,'0') + '"';
+this.state.splits.push({ km: parseFloat(this.state.totalDist).toFixed(2), pace: paceStr, altFrom: this.state.lastKmAlt, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastKmAlt, coord: this.state.pathCoords[this.state.pathCoords.length - 1] || null });
+}
+}
+// 총거리÷총걸음수로 "실측" 평균 보폭을 구하고, 비현실적인 값이면 물리적 범위로 클램프한다.
+// 걸음 데이터가 없는 예외 상황에서만 케이던스+페이스 기반 모델 추정치로 폴백.
+// 반환: { stride: 최종 보폭(m) 또는 null, sensorFlag: 클램프 발동 시 진단용 객체 또는 null }
+buildStrideSnapshot(stepCount, cadenceForFallback, avgPaceSec, devicePos) {
+stepCount = stepCount || 0;
+const totalDistM = (this.state.totalDist || 0) * 1000;
+let sensorFlag = null;
+let stride = null;
+if (stepCount > 0 && totalDistM > 0) {
+const measured = totalDistM / stepCount;
+// 안전장치: GPS 튐/걸음 오감지 등으로 비현실적인 값이 나오면 물리적 범위로 클램프
+const clamped = Math.max(0.3, Math.min(2.2, measured));
+// 개발자 진단용 플래그: 클램프가 실제로 발동했다는 건(=측정값이 물리적 범위를
+// 벗어났다는 건) 센서 쪽에 문제가 있었다는 신호. 사용자에게 노출하진 않되 기록에
+// 조용히 남겨서 나중에 export해서 검토·수정할 수 있게 한다.
+if (measured !== clamped) {
+sensorFlag = {
+type: 'stride_clamped',
+measuredM: parseFloat(measured.toFixed(3)),
+clampedToM: parseFloat(clamped.toFixed(2)),
+stepCount,
+totalDistM: parseFloat(totalDistM.toFixed(1)),
+devicePos: devicePos || null
+};
+}
+stride = parseFloat(clamped.toFixed(2));
+} else if (cadenceForFallback > 0 && avgPaceSec > 0) {
+const spd = 3600 / avgPaceSec;
+const prof = storage.loadProfile();
+const hcm = prof.hu === 'inch' ? Math.round(prof.h * 2.54) : prof.h;
+stride = parseFloat(calcStride(spd, cadenceForFallback, hcm, prof.strideCorrectionFactor).toFixed(2));
+}
+return { stride, sensorFlag };
+}
 onFinish() {
 if(this.timer) clearInterval(this.timer);
 this.stopSilentKeepAlive();
+if (typeof ui !== 'undefined' && ui.hideAutoModeSuggestion) ui.hideAutoModeSuggestion(); // [개선-3]
 // [추가] 캘리브레이션 러닝(4번 개선사항)이면 일반 기록 저장 대신
 // 개인 보폭 보정계수만 계산해서 저장하고 종료한다.
 if (this.state.isCalibrationRun) {
@@ -6523,13 +6733,7 @@ const _hcmVert = _profVert.hu === 'inch' ? Math.round(_profVert.h * 2.54) : _pro
 strideForVert = calcStride(speedKmh, avgCadence, _hcmVert, _profVert.strideCorrectionFactor);
 }
 const measuredVertRatio = this.motion ? this.motion.getVertRatio(strideForVert) : null;
-if (this.state.totalDist > this.state.lastKmCheckpoint + 0.01 && this.state.seconds > this.state.lastKmSeconds) {
-let splitDuration = this.state.seconds - this.state.lastKmSeconds;
-let min = Math.floor(splitDuration / 60);
-let sec = splitDuration % 60;
-let paceStr = min + "'" + String(sec).padStart(2,'0') + '"';
-this.state.splits.push({ km: parseFloat(this.state.totalDist).toFixed(2), pace: paceStr, altFrom: this.state.lastKmAlt, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastKmAlt, coord: this.state.pathCoords[this.state.pathCoords.length - 1] || null });
-}
+this.pushKmSplitIfNeeded();
 const _now = new Date();
 const _h = _now.getHours();
 const _isKo = storage.getLang() === 'ko';
@@ -6542,45 +6746,11 @@ const _autoTitle = _isKo
   : (_isTrailTitle
       ? (_h>=5&&_h<11?'Morning Trail Run':_h>=11&&_h<17?'Afternoon Trail Run':_h>=17&&_h<21?'Evening Trail Run':'Night Trail Run')
       : (_h>=5&&_h<11?'Morning Run':_h>=11&&_h<17?'Afternoon Run':_h>=17&&_h<21?'Evening Run':'Night Run'));
-// [수정] 보폭 스냅샷: 기존엔 avgPace(총거리/총시간)와 avgCadence(트림평균)로 calcStride
-// 공식을 다시 계산해서 저장했는데, 이건 실측이 아니라 모델 추정치였음(정밀 로그용으로
-// 만든 "구간평균+순간공식" 블렌드 계산 결과가 정작 최종 기록엔 전혀 반영되지 않던 문제).
-// 총거리와 총걸음수는 런 전체에 걸쳐 이미 정확히 측정된 값이므로, 나눗셈 한 번으로
-// 모델 없이 "진짜 평균 보폭"을 직접 구할 수 있음 — 이쪽이 더 정확하고 근거도 명확함.
-// (키 보정/personalFactor는 "측정값이 없을 때"의 추정 모델용 보정이라 실측값엔 적용하지 않음)
-let _strideSensorFlag = null;
-const _snapshotStride = (() => {
-  const stepCount = this.state.stepCount || 0;
-  const totalDistM = (this.state.totalDist || 0) * 1000;
-  if (stepCount > 0 && totalDistM > 0) {
-    const measured = totalDistM / stepCount;
-    // 안전장치: GPS 튐/걸음 오감지 등으로 비현실적인 값이 나오면 물리적 범위로 클램프
-    const clamped = Math.max(0.3, Math.min(2.2, measured));
-    // [추가] 개발자 진단용 플래그: 클램프가 실제로 발동했다는 건(=측정값이 물리적
-    // 범위를 벗어났다는 건) 센서 쪽에 문제가 있었다는 신호(예: 자이로 필터가 걸음을
-    // 오판해서 stepCount가 틀어짐). 사용자에게 경고를 띄우진 않되, 기록에 조용히
-    // 남겨서 나중에 export해서 검토·수정할 수 있게 한다.
-    if (measured !== clamped) {
-      _strideSensorFlag = {
-        type: 'stride_clamped',
-        measuredM: parseFloat(measured.toFixed(3)),
-        clampedToM: parseFloat(clamped.toFixed(2)),
-        stepCount,
-        totalDistM: parseFloat(totalDistM.toFixed(1)),
-        devicePos: this.state.runDevicePos || null // [수정] 종료 시점이 아닌 이번 러닝 시작 시점 값 사용
-      };
-    }
-    return parseFloat(clamped.toFixed(2));
-  }
-  // 걸음 카운트가 없는 예외 상황(센서 미지원 등)에 한해서만 기존 모델 추정 방식으로 폴백
-  if (avgCadence > 0 && avgPaceSec > 0) {
-    const spd = 3600 / avgPaceSec;
-    const prof = storage.loadProfile();
-    const hcm = prof.hu === 'inch' ? Math.round(prof.h * 2.54) : prof.h;
-    return parseFloat(calcStride(spd, avgCadence, hcm, prof.strideCorrectionFactor).toFixed(2));
-  }
-  return null;
-})();
+// [수정] 보폭 스냅샷: 총거리÷총걸음수 기반 실측값 우선, 걸음 데이터 없을 때만 모델 추정 폴백.
+// (러닝/걷기 공용 buildStrideSnapshot()으로 통합 — 아래 onFinish/finishWalk 리팩토링 참고)
+const _strideSnap = this.buildStrideSnapshot(this.state.stepCount, avgCadence, avgPaceSec, this.state.runDevicePos);
+const _snapshotStride = _strideSnap.stride;
+const _strideSensorFlag = _strideSnap.sensorFlag;
 const record = {
 id: Date.now(),
 // [수정] 기존엔 'run'으로 하드코딩되어 있어서 TRAIL 모드로 뛰어도 항상 'run'으로
@@ -6658,41 +6828,13 @@ const avgSpm = (this.state.seconds > 0 && this.state.walkSteps > 0)
 // [수정] 러닝(onFinish)과 동일하게 통일: 총거리÷총걸음수를 기본으로 사용.
 // 기존엔 걷기만 속도+케이던스+키보정 공식(calcStride)에 의존해서, 같은 앱 안에서
 // 러닝/걷기의 보폭 정확도 기준이 서로 달랐음(러닝은 실측, 걷기는 모델 추정).
-let _strideSensorFlag = null;
-const _snapshotStride = (() => {
-  const stepCount = this.state.walkSteps || 0;
-  const totalDistM = (this.state.totalDist || 0) * 1000;
-  if (stepCount > 0 && totalDistM > 0) {
-    const measured = totalDistM / stepCount;
-    const clamped = Math.max(0.3, Math.min(2.2, measured));
-    // [추가] 개발자 진단용 플래그 (러닝 쪽과 동일한 원칙) — 사용자에게는 노출 안 함
-    if (measured !== clamped) {
-      _strideSensorFlag = {
-        type: 'stride_clamped',
-        measuredM: parseFloat(measured.toFixed(3)),
-        clampedToM: parseFloat(clamped.toFixed(2)),
-        stepCount,
-        totalDistM: parseFloat(totalDistM.toFixed(1)),
-        devicePos: this.state.runDevicePos || null // [수정] 종료 시점이 아닌 이번 세션 시작 시점 값 사용
-      };
-    }
-    return parseFloat(clamped.toFixed(2));
-  }
-  // 걸음 카운트가 없는 예외 상황에 한해서만 기존 모델 추정 방식으로 폴백
-  if (avgSpm > 0 && avgPaceSec > 0) {
-    const spd = 3600 / avgPaceSec;
-    const hcm = p.hu === 'inch' ? Math.round(p.h * 2.54) : p.h;
-    return parseFloat(calcStride(spd, avgSpm, hcm, 1.0).toFixed(2));
-  }
-  return null;
-})();
-if (this.state.totalDist > this.state.lastKmCheckpoint + 0.01 && this.state.seconds > this.state.lastKmSeconds) {
-let splitDuration = this.state.seconds - this.state.lastKmSeconds;
-let min = Math.floor(splitDuration / 60);
-let sec = splitDuration % 60;
-let paceStr = min + "'" + String(sec).padStart(2,'0') + '"';
-this.state.splits.push({ km: parseFloat(this.state.totalDist).toFixed(2), pace: paceStr, altFrom: this.state.lastKmAlt, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastKmAlt, coord: this.state.pathCoords[this.state.pathCoords.length - 1] || null });
-}
+// [리팩토링] buildStrideSnapshot()으로 통합 — 기존엔 폴백 계산에서 개인 보폭
+// 보정계수(strideCorrectionFactor)가 빠진 채 1.0(보정없음)으로 고정돼 있었는데,
+// 러닝 쪽과 같은 공용 함수를 쓰게 되면서 그 불일치도 함께 해결됨.
+const _strideSnap = this.buildStrideSnapshot(this.state.walkSteps, avgSpm, avgPaceSec, this.state.runDevicePos);
+const _snapshotStride = _strideSnap.stride;
+const _strideSensorFlag = _strideSnap.sensorFlag;
+this.pushKmSplitIfNeeded();
 const _now = new Date();
 const _h = _now.getHours();
 const _isKo = storage.getLang() === 'ko';
@@ -6817,16 +6959,7 @@ if(ui.dom.btnStart) ui.dom.btnStart.style.display = 'none';
 if(ui.dom.btnStop) ui.dom.btnStop.style.display = 'block';
 if(this.state.isAutoPaused && ui.dom.pauseStatus) ui.dom.pauseStatus.style.display = 'block';
 ui.updateRunningDisplay({dist: this.state.totalDist.toFixed(2)});
-if(this.timer) clearInterval(this.timer);
-this.timer = setInterval(() => {
-if(this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
-this.state.seconds = this.getElapsedSeconds();
-let m = Math.floor(this.state.seconds / 60);
-let s = this.state.seconds % 60;
-ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')});
-if (this.state.activityMode === "walk") { this.updateWalkLiveMetrics(); } else { this.updateLiveCalories(); }
-}
-}, 1000);
+this.startLiveTimer();
 } else { storage.clearTempSession(); }
 });
 }
@@ -7715,6 +7848,17 @@ class CommunityManager {
     }
   }
 
+  // [리팩토링] 이메일 연결해제(signOutEmail)와 계정삭제 두 곳에서 "로컬 세션 정리"
+  // 4줄이 그대로 복붙돼 있던 것을 통합. 서버쪽 처리(주석 해제/데이터 삭제 등)는
+  // 두 흐름이 서로 다르므로 호출부에 그대로 남겨두고, 로컬 정리만 공용화했다.
+  async resetLocalAccountSession() {
+    localStorage.removeItem(this.EMAIL_KEY);
+    localStorage.removeItem(this.USER_ID_KEY);
+    this.userId = null;
+    await this.ensureUserId();
+    this.refreshEmailUI();
+    this.refreshAvatarPreview();
+  }
   // 이메일 연결 해제 (이 기기는 다시 새로운 익명 계정으로 전환됨)
   async signOutEmail() {
     const t = this._t();
@@ -7722,12 +7866,7 @@ class CommunityManager {
     if (!ok) return;
     this.clearEmailCodeTimer();
     try { await _sb.auth.signOut(); } catch (e) { console.warn('signOut error', e); }
-    localStorage.removeItem(this.EMAIL_KEY);
-    localStorage.removeItem(this.USER_ID_KEY);
-    this.userId = null;
-    await this.ensureUserId();
-    this.refreshEmailUI();
-    this.refreshAvatarPreview();
+    await this.resetLocalAccountSession();
   }
 
 // ── 사진 업로드 / 피드 / 좋아요 / 댓글 ──
@@ -8031,12 +8170,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
       try { await _sb.storage.from('run-photos').remove(['avatars/' + uid + '.jpg']); } catch(e) { console.warn('avatar remove failed', e); }
       try { await _sb.functions.invoke('delete-account'); } catch(e) { console.warn('delete-account edge function unavailable', e); }
       try { await _sb.auth.signOut(); } catch(e) { console.warn('signOut error', e); }
-      localStorage.removeItem(this.EMAIL_KEY);
-      localStorage.removeItem(this.USER_ID_KEY);
-      this.userId = null;
-      await this.ensureUserId();
-      this.refreshEmailUI();
-      this.refreshAvatarPreview();
+      await this.resetLocalAccountSession();
       await this.renderFeed();
       await appAlert(t.deleteAccountDone);
     } catch (e) {
@@ -9667,33 +9801,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     try {
       const prof = storage.loadProfile();
       const pos = avgSuggestion.devicePos;
-      if (!prof.motionCalibOverrides) prof.motionCalibOverrides = {};
-      if (!prof.strideCorrectionFactorByPos) prof.strideCorrectionFactorByPos = {};
-      if (!prof.gpsDistCorrectionFactorByPos) prof.gpsDistCorrectionFactorByPos = {};
-
-      const override = { devicePos: pos, appliedAt: new Date().toISOString() };
-      if (avgSuggestion.gct != null) override.gctFallbackRatio = avgSuggestion.gct;
-      if (avgSuggestion.rot != null) override.rotRejectThreshold = avgSuggestion.rot;
-      if (avgSuggestion.vertScale != null) override.vertScale = avgSuggestion.vertScale;
-
-      const curStride = (typeof prof.strideCorrectionFactorByPos[pos] === 'number' && prof.strideCorrectionFactorByPos[pos] > 0) ? prof.strideCorrectionFactorByPos[pos] : 1.0;
-      const curGps = (typeof prof.gpsDistCorrectionFactorByPos[pos] === 'number' && prof.gpsDistCorrectionFactorByPos[pos] > 0) ? prof.gpsDistCorrectionFactorByPos[pos] : 1.0;
-      // [수정] 평균값 적용 직전 상태도 위치별로 독립 저장 (되돌리기용)
-      if (!prof.motionCalibUndos) prof.motionCalibUndos = {};
-      prof.motionCalibUndos[pos] = {
-        devicePos: pos,
-        prevOverride: prof.motionCalibOverrides[pos] ? JSON.parse(JSON.stringify(prof.motionCalibOverrides[pos])) : null,
-        prevStrideCorrectionFactor: curStride,
-        prevGpsDistCorrectionFactor: curGps,
-        savedAt: new Date().toISOString()
-      };
-      prof.motionCalibOverrides[pos] = override;
-      if (avgSuggestion.strideFactor != null) prof.strideCorrectionFactorByPos[pos] = avgSuggestion.strideFactor;
-      if (avgSuggestion.gpsDistFactor != null) prof.gpsDistCorrectionFactorByPos[pos] = avgSuggestion.gpsDistFactor;
-      if (prof.devicePos === pos) {
-        if (avgSuggestion.strideFactor != null) prof.strideCorrectionFactor = avgSuggestion.strideFactor;
-        if (avgSuggestion.gpsDistFactor != null) prof.gpsDistCorrectionFactor = avgSuggestion.gpsDistFactor;
-      }
+      const override = applyMotionCalibSuggestion(prof, pos, avgSuggestion);
       storage.saveProfile(prof);
 
       if (typeof app !== 'undefined' && app && app.motion && prof.devicePos === pos) {
@@ -9740,38 +9848,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     try {
       const prof = storage.loadProfile();
       const pos = sel.devicePos; // 이번 비교/제안이 어느 착용위치 기준이었는지
-      if (!prof.motionCalibOverrides) prof.motionCalibOverrides = {};
-      if (!prof.strideCorrectionFactorByPos) prof.strideCorrectionFactorByPos = {};
-      if (!prof.gpsDistCorrectionFactorByPos) prof.gpsDistCorrectionFactorByPos = {};
-
-      const override = { devicePos: pos, appliedAt: new Date().toISOString() };
-      if (sel.gct != null) override.gctFallbackRatio = sel.gct;
-      if (sel.rot != null) override.rotRejectThreshold = sel.rot;
-      if (sel.vertScale != null) override.vertScale = sel.vertScale;
-
-      const curStride = (typeof prof.strideCorrectionFactorByPos[pos] === 'number' && prof.strideCorrectionFactorByPos[pos] > 0) ? prof.strideCorrectionFactorByPos[pos] : 1.0;
-      const curGps = (typeof prof.gpsDistCorrectionFactorByPos[pos] === 'number' && prof.gpsDistCorrectionFactorByPos[pos] > 0) ? prof.gpsDistCorrectionFactorByPos[pos] : 1.0;
-      // [수정] 되돌리기(UNDO)용 스냅샷을 위치별로 독립 저장 — 예전엔 motionCalibUndo 슬롯이
-      // 하나뿐이라 다른 위치를 나중에 적용하면 이전 위치의 되돌리기가 사라졌음.
-      // 이제 motionCalibUndos[pos]에 각자 따로 저장해서 위치별로 독립적으로 되돌릴 수 있다.
-      if (!prof.motionCalibUndos) prof.motionCalibUndos = {};
-      prof.motionCalibUndos[pos] = {
-        devicePos: pos,
-        prevOverride: prof.motionCalibOverrides[pos] ? JSON.parse(JSON.stringify(prof.motionCalibOverrides[pos])) : null,
-        prevStrideCorrectionFactor: curStride,
-        prevGpsDistCorrectionFactor: curGps,
-        savedAt: new Date().toISOString()
-      };
-      prof.motionCalibOverrides[pos] = override;
-      if (sel.strideFactor != null) prof.strideCorrectionFactorByPos[pos] = sel.strideFactor;
-      if (sel.gpsDistFactor != null) prof.gpsDistCorrectionFactorByPos[pos] = sel.gpsDistFactor;
-      // [수정] calcStride() 등이 읽는 플랫 필드는 "지금 실제로 착용 중인 위치"일 때만 갱신 —
-      // 예를 들어 지금 가슴을 차고 있는데 손 위치 보정값을 적용했다고 해서 지금 러닝에
-      // 손 보정계수가 끼어들면 안 되기 때문.
-      if (prof.devicePos === pos) {
-        if (sel.strideFactor != null) prof.strideCorrectionFactor = sel.strideFactor;
-        if (sel.gpsDistFactor != null) prof.gpsDistCorrectionFactor = sel.gpsDistFactor;
-      }
+      const override = applyMotionCalibSuggestion(prof, pos, sel);
       storage.saveProfile(prof);
 
       if (typeof app !== 'undefined' && app && app.motion && prof.devicePos === pos) {
@@ -10308,15 +10385,10 @@ let s = app.state.seconds % 60;
 ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')});
 }
 /* 타이머가 완전히 죽어있었으면(예: 앱 프로세스가 살아있는 상태에서 인터벌만 정지) 재시작 */
-if (app && app.state && app.state.isRunning && !app.timer && !app.state.isPaused && !app.state.isAutoPaused) {
-app.timer = setInterval(() => {
-if (app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
-app.state.seconds = app.getElapsedSeconds();
-let m = Math.floor(app.state.seconds / 60);
-let s = app.state.seconds % 60;
-ui.updateRunningDisplay({time: String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')});
-}
-}, 1000);
+/* [리팩토링] 이 지점도 예전엔 tick 로직을 그대로 복붙해서 걷기모드/자동전환 훅이
+빠져있던 4번째 중복이었음 → app.startLiveTimer() 호출로 통합, 나머지 3곳과 완전히 동일하게 동작 */
+if (app && app.state && app.state.isRunning && !app.timer && !app.state.isPaused && !app.state.isAutoPaused && typeof app.startLiveTimer === 'function') {
+app.startLiveTimer();
 }
 
 }
