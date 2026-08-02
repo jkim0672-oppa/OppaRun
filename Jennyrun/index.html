@@ -5300,6 +5300,16 @@ this.movementConfirmed = true; // GPS 속도 신호가 아직 없을 때(수신 
 // 실사용 상한). 학습 초반 축이 불안정할 때 30도 같은 비현실적 값이 튀는 걸 막는다.
 this.FORWARD_MAX_DEG = 20;
 this.LATERAL_MAX_DEG = 10;
+// [추가] 나침반(회전벡터)+GPS 기반 전방축 직접 계산 — 러닝 시작 후 GPS 이동거리
+// DIRECTION_CALIB_DIST_M(10m)까지만 사용하고, 그 이후엔 값이 들어와도 무시한다.
+// 자기장 센서는 러닝 중 가슴 스트랩 금속 등으로 계속 흔들릴 수 있어, 짧은 초반
+// 구간에서 한 번만 확정하고 이후엔 기존 적응형(meanDevVector) 학습에 맡기는 설계.
+this.DIRECTION_CALIB_DIST_M = 10;
+this.directionCalibVector = { x: 0, y: 0, z: 0 };
+this.directionCalibSamples = 0;
+this.directionCalibFinalized = false;
+this.forwardAxisSource = 'adaptive'; // 진단용: 'adaptive'(기존 방식) 또는 'compass_gps'(방향 캘리브레이션 성공)
+this._latestOrientationMatrix = null; // 네이티브에서 받은 최신 디바이스→월드 회전행렬(9개 float, 행 우선)
 this.sessionSumForward = 0;
 this.sessionSumLateral = 0;
 this.sessionCountForward = 0;
@@ -5324,6 +5334,10 @@ this.axisSampleCount = 0;
 this.currentLeanForwardDeg = null;
 this.currentLeanLateralDeg = null;
 this.movementConfirmed = true; // [추가] 새 러닝마다 초기화 — GPS 속도 수신 전까지는 학습 허용
+this.directionCalibVector = { x: 0, y: 0, z: 0 }; // [추가] 새 러닝마다 방향 캘리브레이션 초기화
+this.directionCalibSamples = 0;
+this.directionCalibFinalized = false;
+this.forwardAxisSource = 'adaptive';
 this.sessionSumForward = 0;
 this.sessionSumLateral = 0;
 this.sessionCountForward = 0;
@@ -5332,13 +5346,62 @@ this.sessionCount = 0;
 this.sessionStartTime = Date.now(); // [추가] 착용 대기 구간 계산의 기준 시각
 this.onCalibDone = (typeof onCalibDone === 'function') ? onCalibDone : null; // [추가]
 }
-// [추가] 두 벡터 사이의 각도(도) 계산 헬퍼. 캘리브레이션 이상치 판정에 사용.
 // [추가] GPS 기반 지표계산용 속도(app.state.metricSpeedKmh)를 매 GPS 갱신마다 전달받아
 // "실제로 러닝 페이스로 이동 중"인지를 판단한다. 값이 없거나 아직 신호가 안 잡혔을 땐
 // 기존 동작(학습 허용)을 유지해서, GPS 실내/터널 등에서 아예 학습이 멈춰버리지 않게 한다.
 setGpsSpeedKmh(speedKmh) {
 if (typeof speedKmh !== 'number' || !isFinite(speedKmh) || speedKmh <= 0) return;
 this.movementConfirmed = speedKmh >= this.MOVEMENT_MIN_KMH;
+}
+// [추가] 네이티브(LocationForegroundService)의 회전벡터 센서에서 온 디바이스→월드 회전행렬을
+// 저장해둔다. 러닝 내내 계속 갱신되지만, 실제로 "쓰이는" 건 updateDirectionCalibration()이
+// directionCalibFinalized=false인 동안뿐이다.
+setOrientationMatrix(m) {
+if (Array.isArray(m) && m.length === 9) this._latestOrientationMatrix = m;
+}
+// [추가] GPS 진행방향(coords.heading, 도)과 회전행렬을 대조해 린각도 전방축을 직접 계산한다.
+// distSinceStartM이 DIRECTION_CALIB_DIST_M(10m)을 넘어가는 순간 확정하고, 그 뒤로는
+// 이 메서드가 호출돼도 즉시 return — 나침반/GPS 방향 데이터를 더 이상 참조하지 않는다.
+updateDirectionCalibration(headingDeg, distSinceStartM) {
+if (this.directionCalibFinalized) return;
+if (!this.baseline || !this.calibDone) return; // 자세 캘리브레이션(정지 상태 기준) 전엔 의미 없음
+if (typeof distSinceStartM !== 'number' || !isFinite(distSinceStartM)) return;
+if (distSinceStartM > this.DIRECTION_CALIB_DIST_M) {
+this._finalizeDirectionCalibration();
+return;
+}
+if (typeof headingDeg !== 'number' || !isFinite(headingDeg)) return; // GPS heading 없음(정지/신호 약함) — 이번 샘플 skip
+if (!this._latestOrientationMatrix) return; // 회전행렬 아직 미수신 — 이번 샘플 skip
+// 1) GPS 진행방향의 월드 좌표계(ENU: x=동, y=북, z=위) 수평 단위벡터
+const rad = headingDeg * Math.PI / 180;
+const fwdWorld = { x: Math.sin(rad), y: Math.cos(rad), z: 0 };
+// 2) world = R * device 이므로 device = R^T * world (R이 회전행렬이라 전치 = 역행렬).
+// 즉 "GPS 기준 진짜 전방"이 디바이스 로컬 축에서는 어떤 벡터에 해당하는지 역산.
+const m = this._latestOrientationMatrix; // 행 우선 3x3
+const devFwd = {
+x: m[0] * fwdWorld.x + m[3] * fwdWorld.y + m[6] * fwdWorld.z,
+y: m[1] * fwdWorld.x + m[4] * fwdWorld.y + m[7] * fwdWorld.z,
+z: m[2] * fwdWorld.x + m[5] * fwdWorld.y + m[8] * fwdWorld.z
+};
+// 3) 여러 샘플에 걸쳐 누적(마지막에 정규화) — 보폭마다 흔들리는 순간값을 평균으로 안정화
+this.directionCalibVector.x += devFwd.x;
+this.directionCalibVector.y += devFwd.y;
+this.directionCalibVector.z += devFwd.z;
+this.directionCalibSamples++;
+}
+// [추가] 방향 캘리브레이션 확정. 샘플이 너무 적거나 벡터가 서로 상쇄돼 방향이 불분명하면
+// 신뢰하지 않고 기존 적응형(meanDevVector) 방식에 그대로 맡긴다(안전 폴백).
+_finalizeDirectionCalibration() {
+this.directionCalibFinalized = true;
+if (this.directionCalibSamples < 5) return;
+const v = this.directionCalibVector;
+const mag = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+if (mag < this.directionCalibSamples * 0.2) return; // 샘플 대비 상쇄가 심하면(방향 불일치) 신뢰 못 함
+this.forwardAxis = { x: v.x / mag, y: v.y / mag, z: v.z / mag };
+// 적응형 학습이 이 축에서부터 이어가도록 시드 — 이후 세션 내내 완만하게 계속 다듬어짐
+this.meanDevVector = { x: this.forwardAxis.x * 0.3, y: this.forwardAxis.y * 0.3, z: this.forwardAxis.z * 0.3 };
+this.axisSampleCount = this.AXIS_READY_SAMPLES; // 즉시 전/측방 분해값 표시 가능하게
+this.forwardAxisSource = 'compass_gps';
 }
 _vectorAngleDeg(v1, v2) {
 const dot = v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
@@ -6354,6 +6417,8 @@ if (backupKmh > 0.5) metricSpeedKmh = backupKmh;
 }
 this.state.metricSpeedKmh = metricSpeedKmh;
 if (this.leanTracker) this.leanTracker.setGpsSpeedKmh(metricSpeedKmh); // [추가] 전방축 학습 게이트용
+// [추가] 나침반+GPS 방향 캘리브레이션용 — 러닝 시작 후 첫 10m 동안만 leanTracker 내부에서 실제로 반영됨
+if (this.leanTracker) this.leanTracker.updateDirectionCalibration(p.coords.heading, (this.state.totalDist || 0) * 1000);
 // ─────────────────────────────────────────────────────────
 
 const currentPaceStr = this.formatPace(smoothedKmh);
@@ -7317,6 +7382,20 @@ app.maybeLogPrecisionSample();
 }
 }
 } catch (e) { console.error('onNativeMotionUpdate error', e); }
+};
+
+// [신규] 네이티브 회전벡터 센서(TYPE_ROTATION_VECTOR) 브릿지 수신부.
+// LocationForegroundService.kt의 orientationListener → MainActivity가 이 함수를 호출해줌을 전제로 함.
+// matrixArr: 디바이스→월드(동/북/위) 변환 3x3 회전행렬(행 우선, 9개 float).
+// 러닝 중 계속 호출되지만, 실제로 값이 쓰이는 건 leanTracker 내부에서 러닝 시작 후 첫 10m
+// 구간으로 제한되어 있음(그 이후엔 leanTracker가 알아서 무시함 — 여기서는 그냥 최신값만 전달).
+window.onNativeOrientationUpdate = function (matrixArr, timestamp) {
+try {
+if (typeof app !== 'undefined' && app && app.leanTracker &&
+    app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
+app.leanTracker.setOrientationMatrix(matrixArr);
+}
+} catch (e) { console.error('onNativeOrientationUpdate error', e); }
 };
 
 // [신규] 네이티브 안드로이드 걸음 센서(TYPE_STEP_DETECTOR) 브릿지 수신부.
