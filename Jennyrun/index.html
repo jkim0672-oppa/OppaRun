@@ -691,7 +691,7 @@ alt="runner"/>
      기존 계산 로직은 전혀 건드리지 않는 읽기 전용 진단 도구. -->
 <div class="diag-card" style="margin: 0 0 10px 0;">
 <div id="garmin-calib-title" style="color:var(--primary); font-weight:900; font-size:14px; margin-bottom:8px;">CALIBRATION CHECK</div>
-<div id="garmin-calib-desc" style="font-size:10px; color:#888; margin-bottom:10px; line-height:1.6;">Check 1-3 Garmin records and 1-3 precision logs. With one of each, they're compared directly; with multiple, the selected records are averaged before comparing cadence/GCT and other metrics.</div>
+<div id="garmin-calib-desc" style="font-size:10px; color:#888; margin-bottom:10px; line-height:1.6;">Check 1-10 Garmin records and 1-10 precision logs. With one of each, they're compared directly; with multiple, the selected records are averaged before comparing cadence/GCT and other metrics.</div>
 <!-- [추가] 자동저장된 최근 로그(최대 3개)를 임포트 로그와 분리해서 보여주고,
      각 항목마다 COMPARE 버튼으로 바로 1개씩 비교할 수 있게 한다.
      (기존엔 자동저장 로그와 임포트 로그가 드롭다운 하나에 섞여 있어서 구분이 어려웠음) -->
@@ -2048,7 +2048,7 @@ reader.readAsText(file);
 saveProfile(profile) { localStorage.setItem(this.PROFILE_KEY, JSON.stringify(profile)); }
 loadProfile() {
 // [CALIB_ANCHOR:DEFAULT_PROFILE] 캘리브레이션 스니펫(코드 반영용)을 여기 strideCorrectionFactor/gpsDistCorrectionFactor에 반영하세요.
-const defaultProfile = { h: 175, hu: "cm", w: 70, wu: "kg", age: 30, devicePos: "chest", strideCorrectionFactor: 1.0, gpsDistCorrectionFactor: 0.950 }; // [수정 2026-07-30] CHEST 실측 권장값 반영 (1.000→0.950)
+const defaultProfile = { h: 175, hu: "cm", w: 70, wu: "kg", age: 30, devicePos: "chest", strideCorrectionFactor: 1.049, gpsDistCorrectionFactor: 0.950 }; // [수정 2026-08-02] CHEST 실측 3회 평균 반영 (strideCorrectionFactor 1.000→1.049, 스텝길이 평균 -4.7% 과소측정 기준. gpsDistCorrectionFactor는 3회 평균 거리오차 -0.3%로 유의미한 변화 없어 0.950 유지)
 const data = localStorage.getItem(this.PROFILE_KEY);
 // [수정] 기존 저장 데이터에 새 필드(age, devicePos)가 없을 경우 기본값으로 보완
 return data ? Object.assign({}, defaultProfile, JSON.parse(data)) : defaultProfile;
@@ -4623,7 +4623,7 @@ const profiles = {
 // 위치에서 groundThreshold/impactThreshold/rotRejectThreshold는 걸음을 세는 데는 쓰이지
 // 않고, GCT 추정·수직진동·좌우밸런스 등 보조 지표 계산에만 쓰인다(값 자체는 위치별
 // 신호 패턴이 달라 계속 따로 유지).
-chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.631, vertScale: 0.45, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정] Garmin FIT 실측 대비 보정 (2026-07-30 gctFallbackRatio 0.701→0.631, vertScale 0.50→0.45 하향)
+chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.508, vertScale: 0.536, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정] Garmin FIT 실측 3회 평균 반영 (2026-08-02 gctFallbackRatio 0.631→0.508, vertScale 0.45→0.536 — GCT 평균 +24.2%, VertOsc 평균 -15.8% 오차 기준)
   waist:   { groundThreshold: 10.5, impactThreshold: 10.0, gctFallbackRatio: 0.38, vertScale: 5.5, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
   armband: { groundThreshold: 12.0, impactThreshold: 12.5, gctFallbackRatio: 0.33, vertScale: 4.5, minStepInterval: 240, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
   // [수정] 손에 들고 뛸 때는 자체 가속도/자이로 임계값 알고리즘으로 걸음을 "직접 판정"하지 않고,
@@ -4633,7 +4633,12 @@ chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.631
   // 걸음 유무 판정 자체를 하드웨어 센서에 맡긴다. groundThreshold/impactThreshold/rotRejectThreshold는
   // 이제 걸음을 세는 데는 쓰이지 않고, GCT 추정 등 보조 계산에만 남아있는 값이라 의미 없음(폴백용으로만 유지).
   // stepTrigger: 'native'면 handleMotion()의 자체 판정 블록은 건너뛰고, onNativeStep()이 실제 트리거가 됨.
-  hand:    { groundThreshold: 13.5, impactThreshold: 14.0, gctFallbackRatio: 0.35, vertScale: 0,   minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: false, stepTrigger: 'native' },
+  // [수정 2026-08-02] hand는 chest와 반대로 GCT가 과소측정(가민 대비 -35%, 1회 실측 기준)되는
+  // 경향이 나와서 gctFallbackRatio를 올림(0.35→0.42, ±20% clamp 적용). chest처럼 3회 평균이
+  // 아니라 1회 실측만 반영한 잠정치이므로, 손 위치로 2~3번 더 뛰어서 CALIBRATION CHECK로
+  // 재확인 후 다듬는 걸 권장. vertScale/vertEnabled는 그대로 유지(팔 스윙 때문에 수직진동
+  // 자체를 계산하지 않는 건 의도된 동작이라 이번 수정 대상이 아님).
+  hand:    { groundThreshold: 13.5, impactThreshold: 14.0, gctFallbackRatio: 0.42, vertScale: 0,   minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: false, stepTrigger: 'native' },
 };
 const p = profiles[pos] || profiles.chest;
 this.groundThreshold  = p.groundThreshold;
@@ -5567,6 +5572,21 @@ return (lang === 'ko') ? '린각도' : 'LEAN ANGLE';
 },
 labelForward(lang) { return (lang === 'ko') ? '전방' : 'FWD'; },
 labelLateral(lang) { return (lang === 'ko') ? '측방' : 'LAT'; },
+labelTotal(lang) { return (lang === 'ko') ? '총' : 'TOTAL'; }, // [추가 2026-08-02]
+// [추가 2026-08-02] "메인으로 보여줄 값" 결정 로직. 화면에 찍히던 총 기울기(전방+측방+노이즈가
+// 섞인 3D 벡터각)는 실제 러닝역학에서 말하는 "전방 기울기"보다 항상 크게 나올 수밖에 없어서
+// 오해를 샀음 — 축 학습이 끝나 전방 성분(avgLeanForwardDeg)이 있으면 그걸 메인으로 쓰고,
+// 축 학습이 아직 안 된 아주 짧은 러닝 등 forward가 없을 때만 total로 폴백한다.
+primary(totalDeg, fwdDeg) {
+if (typeof fwdDeg === 'number') return { deg: fwdDeg, signed: true };
+if (typeof totalDeg === 'number') return { deg: totalDeg, signed: false };
+return null;
+},
+fmtPrimary(totalDeg, fwdDeg) {
+const p = this.primary(totalDeg, fwdDeg);
+if (!p) return '--';
+return p.signed ? this.fmtSigned(p.deg) : this.fmt(p.deg);
+},
 // [추가] "전방 +X° · 측방 Y°" 형태의 작은 서브텍스트 — 값이 raw number로 오면 어디서든 재사용 가능
 directionSubHtml(fwd, lat, lang, fontSize) {
 if (!this.hasDirection(fwd, lat)) return '';
@@ -5575,20 +5595,31 @@ return '<div style="font-size:' + fs + '; color:#888; font-weight:700; margin-to
 + this.labelForward(lang) + ' ' + this.fmtSigned(fwd) + ' · ' + this.labelLateral(lang) + ' ' + this.fmt(lat)
 + '</div>';
 },
+// [추가 2026-08-02] 메인값이 전방 성분으로 바뀌었으니, 서브텍스트는 반대로 "총 기울기·측방"을
+// 참고용으로 보여준다. forward가 없어서(축 학습 미완료) total을 메인으로 폴백한 경우엔
+// 보여줄 보조 성분이 없으므로 빈 문자열(기존 hasDirection 게이트와 동일 조건).
+primarySubHtml(totalDeg, latDeg, fwdDeg, lang, fontSize) {
+if (!this.hasDirection(fwdDeg, latDeg)) return '';
+const fs = fontSize || '9px';
+const parts = [];
+if (typeof totalDeg === 'number') parts.push(this.labelTotal(lang) + ' ' + this.fmt(totalDeg));
+parts.push(this.labelLateral(lang) + ' ' + this.fmt(latDeg));
+return '<div style="font-size:' + fs + '; color:#888; font-weight:700; margin-top:2px; white-space:nowrap;">' + parts.join(' · ') + '</div>';
+},
 // [리스트] 히스토리 카드용 h-det-box 한 칸
 listDetBoxHtml(record, lang) {
 if (!this.has(record)) return '';
-return '<div class="h-det-box"><div class="h-det-label">' + this.label(lang) + '</div><div class="h-det-val" style="color:#ffb86b">' + this.fmt(record.avgLeanAngleDeg) + '</div>'
-+ this.directionSubHtml(record.avgLeanForwardDeg, record.avgLeanLateralDeg, lang, '8px')
+return '<div class="h-det-box"><div class="h-det-label">' + this.label(lang) + '</div><div class="h-det-val" style="color:#ffb86b">' + this.fmtPrimary(record.avgLeanAngleDeg, record.avgLeanForwardDeg) + '</div>'
++ this.primarySubHtml(record.avgLeanAngleDeg, record.avgLeanLateralDeg, record.avgLeanForwardDeg, lang, '8px')
 + '</div>';
 },
-// [루트맵] 상세 페이지 DYNAMICS SUMMARY용 한 줄 (+ 값이 있으면 전방/측방 보조 줄 추가)
+// [루트맵] 상세 페이지 DYNAMICS SUMMARY용 한 줄 (+ 값이 있으면 총기울기/측방 보조 줄 추가)
 routeDetailRowHtml(record, lang) {
 if (!this.has(record)) return '';
-let html = '<div class="detail-log-item"><span>' + this.label(lang) + '</span><span>' + this.fmt(record.avgLeanAngleDeg) + '</span></div>';
+let html = '<div class="detail-log-item"><span>' + this.label(lang) + '</span><span>' + this.fmtPrimary(record.avgLeanAngleDeg, record.avgLeanForwardDeg) + '</span></div>';
 if (this.hasDirection(record.avgLeanForwardDeg, record.avgLeanLateralDeg)) {
-html += '<div class="detail-log-item"><span style="color:#888; font-size:11px;">' + this.labelForward(lang) + ' / ' + this.labelLateral(lang) + '</span><span style="color:#888; font-size:11px;">'
-+ this.fmtSigned(record.avgLeanForwardDeg) + ' / ' + this.fmt(record.avgLeanLateralDeg) + '</span></div>';
+html += '<div class="detail-log-item"><span style="color:#888; font-size:11px;">' + this.labelTotal(lang) + ' / ' + this.labelLateral(lang) + '</span><span style="color:#888; font-size:11px;">'
++ this.fmt(record.avgLeanAngleDeg) + ' / ' + this.fmt(record.avgLeanLateralDeg) + '</span></div>';
 }
 return html;
 },
@@ -5612,26 +5643,34 @@ const vals = records.filter(r => r.avgLeanLateralDeg != null).map(r => r.avgLean
 if (!vals.length) return null;
 return vals.reduce((a, b) => a + b, 0) / vals.length;
 },
+// [추가 2026-08-02] 메인으로 쓰는 값(전방 우선, 폴백 total)의 기간 평균
+computeLifetimePrimaryAvg(records) {
+if (!this.ENABLED || !records || !records.length) return null;
+const vals = records.map(r => this.primary(r.avgLeanAngleDeg, r.avgLeanForwardDeg)).filter(p => p != null).map(p => p.deg);
+if (!vals.length) return null;
+return vals.reduce((a, b) => a + b, 0) / vals.length;
+},
 lifetimeCardHtml(records, lang) {
-const avg = this.computeLifetimeAvg(records);
+const avg = this.computeLifetimePrimaryAvg(records);
 if (avg == null) return '';
+const totalAvg = this.computeLifetimeAvg(records);
 const fwd = this.computeLifetimeAvgForward(records);
 const lat = this.computeLifetimeAvgLateral(records);
-return '<div class="card"><div class="label">' + this.label(lang) + '</div><div class="value" style="font-size:20px;">' + this.fmt(avg) + '</div>'
-+ this.directionSubHtml(fwd, lat, lang, '10px')
+return '<div class="card"><div class="label">' + this.label(lang) + '</div><div class="value" style="font-size:20px;">' + (fwd != null ? this.fmtSigned(avg) : this.fmt(avg)) + '</div>'
++ this.primarySubHtml(totalAvg, lat, fwd, lang, '10px')
 + '</div>';
 },
 // [가민 분석실] 가민 쪽엔 린각도 대응 지표가 없으므로 비교(vs)가 아닌 "폰 전용" 정보 행으로 표시
 garminPhoneOnlyRowHtml(phoneAvgDeg, lang, phoneAvgFwdDeg, phoneAvgLatDeg) {
-if (!this.ENABLED || phoneAvgDeg == null) return '';
+if (!this.ENABLED || (phoneAvgDeg == null && phoneAvgFwdDeg == null)) return '';
 const isKo = lang === 'ko';
 let html = '<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #2a2a2a;">'
 + '<div style="font-size:11px; color:#999; font-weight:800;">' + (isKo ? '린각도 (°, 가민 대응 지표 없음)' : 'LEAN ANGLE (°, no Garmin counterpart)') + '</div>'
-+ '<div style="font-size:12px; font-weight:900;">' + this.fmt(phoneAvgDeg) + ' <span style="color:#666;">(' + (isKo ? '폰 전용' : 'phone-only') + ')</span></div>'
++ '<div style="font-size:12px; font-weight:900;">' + this.fmtPrimary(phoneAvgDeg, phoneAvgFwdDeg) + ' <span style="color:#666;">(' + (isKo ? '폰 전용' : 'phone-only') + ')</span></div>'
 + '</div>';
 if (this.hasDirection(phoneAvgFwdDeg, phoneAvgLatDeg)) {
 html += '<div style="display:flex; justify-content:flex-end; padding:0 0 8px 0; border-bottom:1px solid #2a2a2a;">'
-+ this.directionSubHtml(phoneAvgFwdDeg, phoneAvgLatDeg, lang, '10px')
++ this.primarySubHtml(phoneAvgDeg, phoneAvgLatDeg, phoneAvgFwdDeg, lang, '10px')
 + '</div>';
 }
 return html;
@@ -5650,13 +5689,13 @@ sharePayloadLateralValue(record, shareEnabled) {
 if (!this.has(record) || !shareEnabled || record.avgLeanLateralDeg == null) return null;
 return record.avgLeanLateralDeg;
 },
-// [크루카드] 피드 카드 렌더링용 스탯박스 (원격 레코드의 avg_lean_angle_deg 기준)
+// [크루카드] 피드 카드 렌더링용 스탯박스 (원격 레코드의 avg_lean_angle_deg/avg_lean_forward_deg 기준)
 feedStatBoxHtml(r, lang) {
-if (!this.ENABLED || r.avg_lean_angle_deg == null) return '';
+if (!this.ENABLED || (r.avg_lean_angle_deg == null && r.avg_lean_forward_deg == null)) return '';
 return '<div style="flex:1; text-align:center; padding:2px; min-width:0;">'
 + '<div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">' + this.label(lang) + '</div>'
-+ '<div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + this.fmt(r.avg_lean_angle_deg) + '</div>'
-+ this.directionSubHtml(r.avg_lean_forward_deg, r.avg_lean_lateral_deg, lang, '7px')
++ '<div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + this.fmtPrimary(r.avg_lean_angle_deg, r.avg_lean_forward_deg) + '</div>'
++ this.primarySubHtml(r.avg_lean_angle_deg, r.avg_lean_lateral_deg, r.avg_lean_forward_deg, lang, '7px')
 + '</div>';
 }
 };
@@ -8977,13 +9016,13 @@ const garmin = (function () {
   const FIT_EPOCH_OFFSET = 631065600; // 1989-12-31 00:00:00 UTC -> Unix epoch 초 차이
   // [추가] 정밀 로그(savePrecisionLog)와 동일하게 최근 3개까지만 보관.
   // 그 이상은 오래돼서 비교 의미가 떨어지고 localStorage 용량도 아낄 수 있음.
-  const MAX_GARMIN_IMPORTS = 5;
+  const MAX_GARMIN_IMPORTS = 10; // [수정] 가민 FIT 최대 5→10개로 확장
   // [추가] 캘리브레이션 비교 전용 "지난 로그 불러오기" 저장소.
   // storage.oppaRunPrecisionLogs(자동 저장분)와는 별도의 키를 사용해서
   // 지난 로그를 불러와도 최근 자동 기록 3개가 밀려나지 않도록 분리한다.
   // (가민 가져오기가 oppaRunGarminImports를 쓰는 것과 동일한 방식)
   const PRECLOG_IMPORT_KEY = 'oppaRunPrecLogImports';
-  const MAX_PRECLOG_IMPORTS = 5;
+  const MAX_PRECLOG_IMPORTS = 10; // [수정] 폰 정밀 로그 최대 5→10개로 확장
 
   const BASE_TYPES = {
     0x00: { size: 1, invalid: 0xFF, read: (v,o,le) => v.getUint8(o) },
@@ -9254,8 +9293,8 @@ const garmin = (function () {
     // [추가] 캘리브레이션 비교 카드 다국어 처리
     setText('garmin-calib-title', isKo ? '캘리브레이션 비교' : 'CALIBRATION CHECK');
     setText('garmin-calib-desc', isKo
-      ? '가민 기록과 정밀 로그를 체크박스로 각각 1~3개 선택하세요. 1개씩 선택하면 그 둘을 그대로 비교하고, 여러 개 선택하면 선택한 기록들의 평균으로 비교해서 케이던스/GCT 등 오차와 조정 제안값을 보여줍니다.'
-      : 'Check 1-3 Garmin records and 1-3 precision logs. With one of each, they\'re compared directly; with multiple, the selected records are averaged before comparing cadence/GCT and other metrics.');
+      ? '가민 기록과 정밀 로그를 체크박스로 각각 1~10개 선택하세요. 1개씩 선택하면 그 둘을 그대로 비교하고, 여러 개 선택하면 선택한 기록들의 평균으로 비교해서 케이던스/GCT 등 오차와 조정 제안값을 보여줍니다.'
+      : 'Check 1-10 Garmin records and 1-10 precision logs. With one of each, they\'re compared directly; with multiple, the selected records are averaged before comparing cadence/GCT and other metrics.');
     setText('btn-run-calib-compare', isKo ? '선택한 기록 비교' : 'COMPARE SELECTED');
     // [추가] 지난 로그 불러오기 버튼/전체삭제 버튼 다국어 처리 (개수는 renderPrecLogDropdown에서 갱신)
     setText('btn-import-preclog-csv', isKo ? '지난 로그 불러오기 (.CSV/.JSON)' : 'IMPORT PAST LOG (.CSV/.JSON)');
@@ -9655,7 +9694,17 @@ const garmin = (function () {
         + (isKo
           ? 'ℹ️ 모든 착용위치는 네이티브 걸음센서가 걸음 판정을 직접 하므로, 아래 PHONE 케이던스와 OS 걸음감지센서 값이 사실상 같은 소스입니다(오차가 작게 나오는 게 정상). GCT·수직진동·좌우밸런스는 이와 별개로 가속도/자이로 분석으로 계산됩니다.'
           : 'ℹ️ All wear positions now use the native step sensor to drive step detection directly, so PHONE cadence and OS Step Detector below are effectively the same source (a small diff is expected/normal). GCT, vertical oscillation, and L/R balance are calculated separately from accel/gyro analysis.')
-        + '</div>';
+        + '</div>'
+      // [추가 2026-08-02] hand는 vertEnabled:false라서 수직진동이 애초에 계산되지 않는다(팔 스윙
+      // 진폭이 실제 상체 수직진동과 무관해 신뢰할 수 없기 때문 — 버그 아님). 이 사실을 모르면
+      // 아래 VERT OSC 행에서 PHONE 쪽이 항상 "--"로 보이는 게 계산 실패처럼 보일 수 있어 안내 추가.
+      + (resolvedDevicePos === 'hand'
+        ? '<div style="font-size:10px; color:#ffcc66; font-weight:600; margin-bottom:10px; line-height:1.5;">'
+          + (isKo
+            ? '⚠️ 손(HAND) 위치는 팔 스윙 때문에 수직진동(VERT OSC) 자체를 계산하지 않습니다(의도된 동작, 오류 아님). 아래 표에서 PHONE 값이 "--"로 나오는 게 정상이며, GCT도 팔 스윙 특성상 가슴 위치와 반대 방향(과소측정)으로 어긋나는 경향이 있어 보정계수가 별도로 관리됩니다.'
+            : '⚠️ At the HAND position, vertical oscillation (VERT OSC) is not calculated at all because of arm swing (this is intentional, not a bug). PHONE showing "--" below is expected, and GCT also tends to skew the opposite direction from chest (underestimated) due to arm-swing characteristics, so its calibration is tracked separately.')
+          + '</div>'
+        : '');
 
     if (!garminItems.length || !precItems.length) {
       lastSuggestion = null;
@@ -9975,7 +10024,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
   // 대기목록. motionCalibOverride는 덮어쓰기 방식이라 순차 적용하면 마지막 결과만
   // 남고 앞의 결과들은 그냥 버려지는 문제가 있었음 → 그래서 평균 후 1회 적용으로 변경.
   const PENDING_CALIB_KEY = 'oppaRunPendingCalibRuns';
-  const MAX_PENDING_CALIB = 3;
+  const MAX_PENDING_CALIB = 10; // [수정] 설정 페이지 대기목록(평균 적용용) 최대 3→10개로 확장
 
   // ── 보정값 후보(Pending Calibration) 관리 ──
   function loadPendingCalib() {
@@ -10225,10 +10274,10 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
   // [추가] applyDevicePos()의 위치별 기본값과 동일한 표(코드와 반드시 값이 같아야
   // 정확한 스니펫이 나오므로, 코드 기본값을 고치면 이 표도 같이 고쳐야 함).
   const DEVICE_PROFILE_DEFAULTS = {
-    chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.631, vertScale: 0.45, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
+    chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.508, vertScale: 0.536, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정 2026-08-02] applyDevicePos()와 동일하게 실측 3회 평균 반영
     waist:   { groundThreshold: 10.5, impactThreshold: 10.0, gctFallbackRatio: 0.38,  vertScale: 5.5,   minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
     armband: { groundThreshold: 12.0, impactThreshold: 12.5, gctFallbackRatio: 0.33,  vertScale: 4.5,   minStepInterval: 240, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
-    hand:    { groundThreshold: 13.5, impactThreshold: 14.0, gctFallbackRatio: 0.35,  vertScale: 0,     minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: false, stepTrigger: 'native' },
+    hand:    { groundThreshold: 13.5, impactThreshold: 14.0, gctFallbackRatio: 0.42,  vertScale: 0,     minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정 2026-08-02] applyDevicePos()와 동일하게 실측(1회) 반영
   };
   const DEFAULT_ROT_REJECT_THRESHOLD = 220;
 
