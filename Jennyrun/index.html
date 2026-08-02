@@ -2753,6 +2753,12 @@ this.updateCardColor(this.dom.cardFlight, this.getFlightLevel(data.flight));
 getCadenceLevel(val) { if (val >= 180) return 'good'; if (val >= 170) return 'warning'; return 'danger'; }
 getGctLevel(val) { if (val <= 240) return 'good'; if (val <= 270) return 'warning'; return 'danger'; }
 getFlightLevel(val) { if (val >= 30) return 'good'; if (val >= 20) return 'warning'; return 'danger'; }
+// [추가 2026-08-02] 전방 기울기: 러닝 바이오메카닉스 연구 기준 4~8도가 최적범위, 러닝 이코노미
+// 연구에서는 5.9도 부근이 가장 효율적. 10도 넘어가면 과도한 것으로 봄(부호 무시, 절대값 기준).
+getLeanForwardLevel(val) { const a = Math.abs(val); if (a <= 8) return 'good'; if (a <= 12) return 'warning'; return 'danger'; }
+// [추가 2026-08-02] 좌우 흔들림: 전방 기울기만큼 확립된 연구 기준은 없음. 실무적으로 몇 도 이내면
+// 무난하고, 계속 크게 나오면 코어/고관절 안정성 체크 신호로 보는 편이라 보수적으로 설정.
+getLeanLateralLevel(val) { const a = Math.abs(val); if (a <= 5) return 'good'; if (a <= 10) return 'warning'; return 'danger'; }
 updateCardColor(el, level) {
 const colors = { good: 'var(--good)', warning: 'var(--warning)', danger: 'var(--danger)', normal: '#333' };
 if(el) el.style.borderColor = colors[level] || colors.normal;
@@ -3981,6 +3987,8 @@ this.buildHrBoxHtml(r, t)
 getCadenceColor(v) { const l = this.getCadenceLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
 getGctColor(v) { const l = this.getGctLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
 getFlightColor(v) { const l = this.getFlightLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
+getLeanForwardColor(v) { const l = this.getLeanForwardLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
+getLeanLateralColor(v) { const l = this.getLeanLateralLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
 changeStatFilter(filterType) {
 this.currentStatFilter = filterType;
 document.querySelectorAll('#stat-period-nav .stat-filter-btn').forEach(btn => btn.classList.remove('active'));
@@ -5562,6 +5570,18 @@ return this.ENABLED && typeof fwd === 'number' && typeof lat === 'number';
 fmt(deg) {
 return (typeof deg === 'number') ? deg.toFixed(1) + '°' : '--';
 },
+// [추가 2026-08-02] 전방/측방 양호-주의-과다 판정. ui 객체의 getCadenceLevel 등과 동일한 패턴이지만,
+// LeanAngleUI는 독립 모듈이라 별도로 둔다(연구 기준: FWD 4~8도가 최적, 10도 넘으면 과도.
+// LAT은 확립된 기준이 없어 보수적으로 5/10도 컷).
+levelForward(val) { if (typeof val !== 'number') return null; const a = Math.abs(val); if (a <= 8) return 'good'; if (a <= 12) return 'warning'; return 'danger'; },
+levelLateral(val) { if (typeof val !== 'number') return null; const a = Math.abs(val); if (a <= 5) return 'good'; if (a <= 10) return 'warning'; return 'danger'; },
+colorFor(level) { return level === 'good' ? 'var(--good)' : level === 'warning' ? 'var(--warning)' : level === 'danger' ? 'var(--danger)' : '#888'; },
+// 메인값(전방 우선, total 폴백)의 색상 — total로 폴백된 경우엔 판정 기준이 다르므로 색상 없음(null)
+colorForPrimary(totalDeg, fwdDeg) {
+const p = this.primary(totalDeg, fwdDeg);
+if (!p || !p.signed) return null;
+return this.colorFor(this.levelForward(p.deg));
+},
 // [추가] 전방 성분은 부호가 의미있음(+숙임/−반대) → +기호를 명시적으로 붙여서 표시
 fmtSigned(deg) {
 if (typeof deg !== 'number') return '--';
@@ -5603,20 +5623,21 @@ if (!this.hasDirection(fwdDeg, latDeg)) return '';
 const fs = fontSize || '9px';
 const parts = [];
 if (typeof totalDeg === 'number') parts.push(this.labelTotal(lang) + ' ' + this.fmt(totalDeg));
-parts.push(this.labelLateral(lang) + ' ' + this.fmt(latDeg));
+const latColor = this.colorFor(this.levelLateral(latDeg));
+parts.push(this.labelLateral(lang) + ' <span style="color:' + latColor + ';">' + this.fmt(latDeg) + '</span>');
 return '<div style="font-size:' + fs + '; color:#888; font-weight:700; margin-top:2px; white-space:nowrap;">' + parts.join(' · ') + '</div>';
 },
 // [리스트] 히스토리 카드용 h-det-box 한 칸
 listDetBoxHtml(record, lang) {
 if (!this.has(record)) return '';
-return '<div class="h-det-box"><div class="h-det-label">' + this.label(lang) + '</div><div class="h-det-val" style="color:#ffb86b">' + this.fmtPrimary(record.avgLeanAngleDeg, record.avgLeanForwardDeg) + '</div>'
+return '<div class="h-det-box"><div class="h-det-label">' + this.label(lang) + '</div><div class="h-det-val" style="color:' + (this.colorForPrimary(record.avgLeanAngleDeg, record.avgLeanForwardDeg) || '#ffb86b') + '">' + this.fmtPrimary(record.avgLeanAngleDeg, record.avgLeanForwardDeg) + '</div>'
 + this.primarySubHtml(record.avgLeanAngleDeg, record.avgLeanLateralDeg, record.avgLeanForwardDeg, lang, '8px')
 + '</div>';
 },
 // [루트맵] 상세 페이지 DYNAMICS SUMMARY용 한 줄 (+ 값이 있으면 총기울기/측방 보조 줄 추가)
 routeDetailRowHtml(record, lang) {
 if (!this.has(record)) return '';
-let html = '<div class="detail-log-item"><span>' + this.label(lang) + '</span><span>' + this.fmtPrimary(record.avgLeanAngleDeg, record.avgLeanForwardDeg) + '</span></div>';
+let html = '<div class="detail-log-item"><span>' + this.label(lang) + '</span><span style="color:' + (this.colorForPrimary(record.avgLeanAngleDeg, record.avgLeanForwardDeg) || 'inherit') + ';">' + this.fmtPrimary(record.avgLeanAngleDeg, record.avgLeanForwardDeg) + '</span></div>';
 if (this.hasDirection(record.avgLeanForwardDeg, record.avgLeanLateralDeg)) {
 html += '<div class="detail-log-item"><span style="color:#888; font-size:11px;">' + this.labelTotal(lang) + ' / ' + this.labelLateral(lang) + '</span><span style="color:#888; font-size:11px;">'
 + this.fmt(record.avgLeanAngleDeg) + ' / ' + this.fmt(record.avgLeanLateralDeg) + '</span></div>';
@@ -5656,7 +5677,8 @@ if (avg == null) return '';
 const totalAvg = this.computeLifetimeAvg(records);
 const fwd = this.computeLifetimeAvgForward(records);
 const lat = this.computeLifetimeAvgLateral(records);
-return '<div class="card"><div class="label">' + this.label(lang) + '</div><div class="value" style="font-size:20px;">' + (fwd != null ? this.fmtSigned(avg) : this.fmt(avg)) + '</div>'
+const avgColor = fwd != null ? this.colorFor(this.levelForward(avg)) : null;
+return '<div class="card"><div class="label">' + this.label(lang) + '</div><div class="value" style="font-size:20px;' + (avgColor ? (' color:' + avgColor + ';') : '') + '">' + (fwd != null ? this.fmtSigned(avg) : this.fmt(avg)) + '</div>'
 + this.primarySubHtml(totalAvg, lat, fwd, lang, '10px')
 + '</div>';
 },
@@ -5666,13 +5688,24 @@ if (!this.ENABLED || (phoneAvgDeg == null && phoneAvgFwdDeg == null)) return '';
 const isKo = lang === 'ko';
 let html = '<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #2a2a2a;">'
 + '<div style="font-size:11px; color:#999; font-weight:800;">' + (isKo ? '린각도 (°, 가민 대응 지표 없음)' : 'LEAN ANGLE (°, no Garmin counterpart)') + '</div>'
-+ '<div style="font-size:12px; font-weight:900;">' + this.fmtPrimary(phoneAvgDeg, phoneAvgFwdDeg) + ' <span style="color:#666;">(' + (isKo ? '폰 전용' : 'phone-only') + ')</span></div>'
++ '<div style="font-size:12px; font-weight:900; color:' + (this.colorForPrimary(phoneAvgDeg, phoneAvgFwdDeg) || '#fff') + ';">' + this.fmtPrimary(phoneAvgDeg, phoneAvgFwdDeg) + ' <span style="color:#666;">(' + (isKo ? '폰 전용' : 'phone-only') + ')</span></div>'
 + '</div>';
 if (this.hasDirection(phoneAvgFwdDeg, phoneAvgLatDeg)) {
 html += '<div style="display:flex; justify-content:flex-end; padding:0 0 8px 0; border-bottom:1px solid #2a2a2a;">'
 + this.primarySubHtml(phoneAvgDeg, phoneAvgLatDeg, phoneAvgFwdDeg, lang, '10px')
 + '</div>';
 }
+// [추가 2026-08-02] 린각도는 값이 3개(메인/총/측방)라 헷갈리기 쉬워서 INFO 탭에 짧은 설명을 붙임.
+// 색상 기준은 위 colorFor* 판정 로직과 동일 수치(전방 8/12도, 측방 5/10도)를 그대로 문구로 노출.
+html += '<div style="font-size:9.5px; color:#777; font-weight:600; line-height:1.7; margin-bottom:10px; padding:8px 10px; background:#1a1a1a; border-radius:6px;">'
++ (isKo
+  ? '메인으로 보이는 값은 <b style="color:#bbb;">전방 기울기</b>(축 학습 전 짧은 러닝은 총 기울기로 대체 표시)이고, 보조로 <b style="color:#bbb;">총 기울기</b>(전방+측방+노이즈가 섞인 순수 3D 각도)와 <b style="color:#bbb;">측방 흔들림</b>을 같이 보여줍니다. '
+    + '전방 기울기는 러닝 바이오메카닉스 연구 기준 <span style="color:var(--good);">4~8도가 양호</span>, <span style="color:var(--warning);">8~12도는 주의</span>, <span style="color:var(--danger);">12도 초과는 과도</span>한 편입니다. '
+    + '측방 흔들림은 확립된 연구 기준은 없지만 <span style="color:var(--good);">5도 이내면 무난</span>, <span style="color:var(--warning);">5~10도는 주의</span>, <span style="color:var(--danger);">10도 초과는 코어/고관절 안정성을 점검해볼 신호</span>로 보시면 됩니다.'
+  : 'The headline value is your <b style="color:#bbb;">forward lean</b> (falls back to total lean for very short runs before the axis is learned). Alongside it you\'ll see <b style="color:#bbb;">total lean</b> (a pure 3D angle mixing forward, lateral sway, and noise) and <b style="color:#bbb;">lateral sway</b>. '
+    + 'Per running biomechanics research, forward lean of <span style="color:var(--good);">4-8° is good</span>, <span style="color:var(--warning);">8-12° is borderline</span>, and <span style="color:var(--danger);">over 12° is excessive</span>. '
+    + 'Lateral sway has no established consensus range, but as a rule of thumb <span style="color:var(--good);">under 5° is fine</span>, <span style="color:var(--warning);">5-10° is worth watching</span>, and <span style="color:var(--danger);">over 10° may signal weak core/hip stability</span>.')
++ '</div>';
 return html;
 },
 // [크루카드] 업로드 payload용 값 — 공유 옵션에서 꺼져 있으면 null(비공개)
@@ -5694,7 +5727,7 @@ feedStatBoxHtml(r, lang) {
 if (!this.ENABLED || (r.avg_lean_angle_deg == null && r.avg_lean_forward_deg == null)) return '';
 return '<div style="flex:1; text-align:center; padding:2px; min-width:0;">'
 + '<div style="font-size:8px; color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">' + this.label(lang) + '</div>'
-+ '<div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + this.fmtPrimary(r.avg_lean_angle_deg, r.avg_lean_forward_deg) + '</div>'
++ '<div style="font-size:clamp(11px,4vw,14px); font-weight:900; color:' + (this.colorForPrimary(r.avg_lean_angle_deg, r.avg_lean_forward_deg) || '#111') + '; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + this.fmtPrimary(r.avg_lean_angle_deg, r.avg_lean_forward_deg) + '</div>'
 + this.primarySubHtml(r.avg_lean_angle_deg, r.avg_lean_lateral_deg, r.avg_lean_forward_deg, lang, '7px')
 + '</div>';
 }
