@@ -714,6 +714,19 @@ alt="runner"/>
 4. Use the dropdown to switch between imported records.
 </div>
 </div>
+<!-- ===== [ANGLE UTILITY] 독립 모듈: 자이로 실시간 전/후방 각도 측정 유틸리티.
+     이 카드와 아래 모달(#angle-util-overlay) + 전용 <script>는 앱의 다른 로직/전역상태와
+     전혀 공유하지 않는 완전 독립 기능입니다. (state, 이벤트 리스너, 오디오, 번역 모두 자체 보유) ===== -->
+<div id="angle-util-entry-card" class="diag-card" style="margin: 0 0 10px 0; cursor:pointer;" onclick="angleUtil.open()">
+<div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+<div style="flex:1;">
+<div id="angle-util-entry-title" style="color:var(--primary); font-weight:900; font-size:13px; margin-bottom:4px;">📐 REAL-TIME ANGLE UTILITY</div>
+<div id="angle-util-entry-desc" style="font-size:10.5px; color:#888; line-height:1.5;">Measure your chest-worn phone's forward/backward tilt using the gyro sensor.</div>
+</div>
+<div style="font-size:20px; color:var(--primary); flex-shrink:0;">›</div>
+</div>
+</div>
+<!-- ===== [/ANGLE UTILITY entry card] ===== -->
 <div class="diag-card" style="margin: 0 0 10px 0;">
 <div id="garmin-import-header-title" style="color: var(--primary); font-weight: 900; font-size: 14px; margin-bottom: 12px;">GARMIN IMPORT</div>
 <button id="btn-import-garmin-fit" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:12px;" onclick="document.getElementById('garmin-fit-input').click()">IMPORT GARMIN DATA (.FIT)</button>
@@ -11729,5 +11742,363 @@ if (btn) { btn.textContent = '▶ PLAY'; btn.classList.remove('playing'); }
 </div>
 </div>
 </div>
+
+<!-- =====================================================================
+ [ANGLE UTILITY MODAL] 완전 독립 모듈 — 자이로 실시간 전/후방 각도 측정.
+ 이 블록(마크업 + 아래 <script>)은 앱의 다른 로직/전역 변수/이벤트 리스너와
+ 절대 공유하지 않습니다. window.angleUtil 하나만 노출하고, 그 외에는
+ 전부 IIFE 내부에 캡슐화되어 있어 다른 기능과 섞일 일이 없습니다.
+====================================================================== -->
+<div id="angle-util-overlay" style="display:none; position:fixed; inset:0; z-index:60000; background:#000; flex-direction:column;">
+  <div style="flex:0 0 auto; padding:calc(var(--top-inset) + 14px) 18px 14px 18px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid #1e1e1e;">
+    <div id="angle-util-modal-title" style="color:#fff; font-weight:900; font-size:15px;">REAL-TIME ANGLE UTILITY</div>
+    <button id="angle-util-close-btn" onclick="angleUtil.close()" style="background:var(--primary); color:#000; border:none; padding:8px 16px; border-radius:20px; font-weight:900; font-size:12px; cursor:pointer;">CLOSE</button>
+  </div>
+  <div style="flex:1; overflow-y:auto; padding:26px 20px 40px 20px; display:flex; flex-direction:column; align-items:center;">
+
+    <div id="angle-util-instructions" style="font-size:12px; color:#999; line-height:1.7; text-align:center; max-width:320px; margin-bottom:28px;"></div>
+
+    <label id="angle-util-switch-label" style="display:flex; align-items:center; gap:12px; margin-bottom:32px; cursor:pointer; user-select:none;">
+      <span id="angle-util-switch-text" style="font-size:13px; font-weight:800; color:#ccc;"></span>
+      <span id="angle-util-switch" onclick="angleUtil.toggle()" style="position:relative; display:inline-block; width:54px; height:30px; background:#333; border-radius:20px; transition:background 0.2s; flex-shrink:0;">
+        <span id="angle-util-switch-knob" style="position:absolute; top:3px; left:3px; width:24px; height:24px; background:#fff; border-radius:50%; transition:left 0.2s;"></span>
+      </span>
+    </label>
+
+    <div id="angle-util-status-box" style="width:100%; max-width:320px; text-align:center;">
+      <div id="angle-util-phase-label" style="font-size:11.5px; color:var(--text-dim); font-weight:800; letter-spacing:0.5px; margin-bottom:10px;"></div>
+      <div id="angle-util-countdown" style="font-size:56px; font-weight:900; color:var(--primary); line-height:1; margin-bottom:10px;">--</div>
+      <div id="angle-util-live-angle" style="font-size:13px; color:#aaa; font-weight:700; min-height:18px; margin-bottom:6px;"></div>
+    </div>
+
+    <div id="angle-util-result-box" style="display:none; width:100%; max-width:320px; margin-top:16px;">
+      <div style="display:flex; gap:10px;">
+        <div style="flex:1; background:#151515; border:1.5px solid #2c2c2c; border-radius:14px; padding:16px; text-align:center;">
+          <div id="angle-util-min-label" style="font-size:10.5px; color:#888; font-weight:800; margin-bottom:6px;"></div>
+          <div id="angle-util-min-value" style="font-size:24px; font-weight:900; color:#fff;">--°</div>
+        </div>
+        <div style="flex:1; background:#151515; border:1.5px solid #2c2c2c; border-radius:14px; padding:16px; text-align:center;">
+          <div id="angle-util-max-label" style="font-size:10.5px; color:#888; font-weight:800; margin-bottom:6px;"></div>
+          <div id="angle-util-max-value" style="font-size:24px; font-weight:900; color:#fff;">--°</div>
+        </div>
+      </div>
+      <div id="angle-util-result-hint" style="font-size:10.5px; color:#666; text-align:center; margin-top:12px; line-height:1.5;"></div>
+    </div>
+
+    <div id="angle-util-error-box" style="display:none; color:var(--danger); font-size:12px; text-align:center; margin-top:18px; max-width:300px; line-height:1.6;"></div>
+  </div>
+</div>
+
+<script>
+/* ===== [ANGLE UTILITY] 완전 독립 IIFE — 다른 스크립트 블록과 변수/함수 공유 없음 ===== */
+window.angleUtil = (function () {
+  'use strict';
+
+  var WEAR_DELAY_MS = 8000;   // 스위치 On 후 가슴에 착용할 시간
+  var MEASURE_MS = 10000;     // 실측정 구간 길이
+  var TICK_MS = 100;
+
+  var phase = 'idle';         // idle | waiting | measuring | done
+  var phaseStart = null;
+  var tickHandle = null;
+  var orientationHandler = null;
+  var minAngle = null, maxAngle = null, lastAngle = null;
+  var audioCtx = null;
+  var permissionBusy = false;
+
+  function isKo() {
+    try { return storage.getLang() === 'ko'; } catch (e) { return true; }
+  }
+
+  function T() {
+    return isKo() ? {
+      title: '실시간 각도 측정 유틸리티',
+      entryTitle: '📐 실시간 각도 측정 유틸리티',
+      entryDesc: '자이로 센서로 가슴에 착용한 폰의 전/후방 기울기를 측정합니다.',
+      instructions: '스위치를 켜면 8초의 착용 대기시간이 주어집니다. 그 안에 폰을 가슴에 착용하세요. 삐 소리가 나면 측정이 시작되고, 약 10초 후 다시 삐 소리가 나면 측정이 끝난 것이니 폰을 제거하고 아래 결과를 확인하세요.',
+      switchStandby: '측정 시작',
+      switchRunning: '측정 중지',
+      phaseStandby: '대기',
+      phaseWaiting: '착용 대기 중',
+      phaseMeasuring: '측정 중',
+      phaseDone: '측정 완료',
+      minLabel: '최저 각도',
+      maxLabel: '최고 각도',
+      hint: '0° = 수직(직립) 기준. 양수는 전방 기울임, 음수는 후방 기울임입니다.',
+      live: '현재 각도 ',
+      errPermission: '자이로/방향 센서 권한이 거부되었습니다. 브라우저 또는 시스템 설정에서 모션 센서 권한을 허용한 뒤 다시 시도해주세요.',
+      errUnsupported: '이 기기 또는 브라우저는 방향 센서(자이로)를 지원하지 않습니다.'
+    } : {
+      title: 'REAL-TIME ANGLE UTILITY',
+      entryTitle: '📐 REAL-TIME ANGLE UTILITY',
+      entryDesc: "Measure your chest-worn phone's forward/backward tilt using the gyro sensor.",
+      instructions: 'Turn the switch on and you\'ll have 8 seconds to strap the phone to your chest. A beep marks the start of measurement, and another beep about 10 seconds later marks the end \u2014 remove the phone and check the result below.',
+      switchStandby: 'START MEASUREMENT',
+      switchRunning: 'STOP',
+      phaseStandby: 'STANDBY',
+      phaseWaiting: 'WAITING TO WEAR',
+      phaseMeasuring: 'MEASURING',
+      phaseDone: 'DONE',
+      minLabel: 'MIN ANGLE',
+      maxLabel: 'MAX ANGLE',
+      hint: '0° = vertical (upright). Positive = tilted forward, negative = tilted backward.',
+      live: 'Current angle ',
+      errPermission: 'Gyro/orientation sensor permission was denied. Please allow motion sensor access in your browser or system settings and try again.',
+      errUnsupported: 'This device or browser does not support orientation (gyro) sensors.'
+    };
+  }
+
+  function $(id) { return document.getElementById(id); }
+
+  function renderStaticTexts() {
+    var t = T();
+    var entryTitleEl = $('angle-util-entry-title');
+    var entryDescEl = $('angle-util-entry-desc');
+    if (entryTitleEl) entryTitleEl.textContent = t.entryTitle;
+    if (entryDescEl) entryDescEl.textContent = t.entryDesc;
+    var modalTitleEl = $('angle-util-modal-title');
+    if (modalTitleEl) modalTitleEl.textContent = t.title;
+    var instrEl = $('angle-util-instructions');
+    if (instrEl) instrEl.textContent = t.instructions;
+    var minLabelEl = $('angle-util-min-label');
+    if (minLabelEl) minLabelEl.textContent = t.minLabel;
+    var maxLabelEl = $('angle-util-max-label');
+    if (maxLabelEl) maxLabelEl.textContent = t.maxLabel;
+    var hintEl = $('angle-util-result-hint');
+    if (hintEl) hintEl.textContent = t.hint;
+    updateSwitchText();
+    updatePhaseLabel();
+  }
+
+  function updateSwitchText() {
+    var t = T();
+    var el = $('angle-util-switch-text');
+    if (el) el.textContent = (phase === 'idle' || phase === 'done') ? t.switchStandby : t.switchRunning;
+  }
+
+  function updatePhaseLabel() {
+    var t = T();
+    var el = $('angle-util-phase-label');
+    if (!el) return;
+    if (phase === 'idle') el.textContent = t.phaseStandby;
+    else if (phase === 'waiting') el.textContent = t.phaseWaiting;
+    else if (phase === 'measuring') el.textContent = t.phaseMeasuring;
+    else if (phase === 'done') el.textContent = t.phaseDone;
+  }
+
+  function setSwitchVisual(on) {
+    var sw = $('angle-util-switch');
+    var knob = $('angle-util-switch-knob');
+    if (sw) sw.style.background = on ? 'var(--primary)' : '#333';
+    if (knob) knob.style.left = on ? '27px' : '3px';
+  }
+
+  function setCountdown(txt) {
+    var el = $('angle-util-countdown');
+    if (el) el.textContent = txt;
+  }
+
+  function setLiveAngle() {
+    var el = $('angle-util-live-angle');
+    if (!el) return;
+    if (lastAngle == null) { el.textContent = ''; return; }
+    el.textContent = T().live + lastAngle.toFixed(1) + '\u00b0';
+  }
+
+  function showError(msg) {
+    var el = $('angle-util-error-box');
+    if (!el) return;
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  function hideError() {
+    var el = $('angle-util-error-box');
+    if (el) el.style.display = 'none';
+  }
+
+  function showResults() {
+    var minEl = $('angle-util-min-value');
+    var maxEl = $('angle-util-max-value');
+    if (minEl) minEl.textContent = (minAngle == null ? '--' : minAngle.toFixed(1)) + '\u00b0';
+    if (maxEl) maxEl.textContent = (maxAngle == null ? '--' : maxAngle.toFixed(1)) + '\u00b0';
+    var box = $('angle-util-result-box');
+    if (box) box.style.display = 'block';
+  }
+
+  function hideResults() {
+    var box = $('angle-util-result-box');
+    if (box) box.style.display = 'none';
+  }
+
+  function beep() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      var osc = audioCtx.createOscillator();
+      var gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 1000;
+      var now = audioCtx.currentTime;
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.5, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(now);
+      osc.stop(now + 0.36);
+    } catch (e) { /* 무음 환경 등은 조용히 무시 — 다른 로직에 영향 없음 */ }
+  }
+
+  function unlockAudio() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) {}
+  }
+
+  function requestOrientationPermission() {
+    return new Promise(function (resolve, reject) {
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission().then(function (state) {
+          resolve(state === 'granted');
+        }).catch(reject);
+      } else if (typeof window !== 'undefined' && 'DeviceOrientationEvent' in window) {
+        resolve(true);
+      } else {
+        reject(new Error('unsupported'));
+      }
+    });
+  }
+
+  function handleOrientation(e) {
+    if (e.beta == null) return;
+    var angle = e.beta - 90; // 0 = 수직(직립) 기준 편차각
+    lastAngle = angle;
+    if (phase === 'measuring') {
+      if (minAngle === null || angle < minAngle) minAngle = angle;
+      if (maxAngle === null || angle > maxAngle) maxAngle = angle;
+    }
+  }
+
+  function attachOrientationListener() {
+    if (orientationHandler) return;
+    orientationHandler = handleOrientation;
+    window.addEventListener('deviceorientation', orientationHandler);
+  }
+
+  function detachOrientationListener() {
+    if (!orientationHandler) return;
+    window.removeEventListener('deviceorientation', orientationHandler);
+    orientationHandler = null;
+  }
+
+  function clearTick() {
+    if (tickHandle) { clearInterval(tickHandle); tickHandle = null; }
+  }
+
+  function tick() {
+    var elapsed = Date.now() - phaseStart;
+    if (phase === 'waiting') {
+      var remainW = Math.max(0, Math.ceil((WEAR_DELAY_MS - elapsed) / 1000));
+      setCountdown(String(remainW));
+      setLiveAngle();
+      if (elapsed >= WEAR_DELAY_MS) {
+        beep();
+        minAngle = null; maxAngle = null;
+        phase = 'measuring';
+        phaseStart = Date.now();
+        updatePhaseLabel();
+      }
+    } else if (phase === 'measuring') {
+      var remainM = Math.max(0, Math.ceil((MEASURE_MS - elapsed) / 1000));
+      setCountdown(String(remainM));
+      setLiveAngle();
+      if (elapsed >= MEASURE_MS) {
+        beep();
+        finishSequence();
+      }
+    }
+  }
+
+  function resetDisplay() {
+    phase = 'idle';
+    minAngle = null; maxAngle = null; lastAngle = null;
+    setCountdown('--');
+    setLiveAngle();
+    hideResults();
+    hideError();
+    setSwitchVisual(false);
+    updateSwitchText();
+    updatePhaseLabel();
+  }
+
+  function startSequence() {
+    hideError();
+    hideResults();
+    unlockAudio(); // 사용자 제스처(스위치 클릭) 안에서 즉시 오디오 언락
+    if (permissionBusy) return;
+    permissionBusy = true;
+    requestOrientationPermission().then(function (granted) {
+      permissionBusy = false;
+      if (!granted) { showError(T().errPermission); return; }
+      phase = 'waiting';
+      phaseStart = Date.now();
+      minAngle = null; maxAngle = null; lastAngle = null;
+      setSwitchVisual(true);
+      updateSwitchText();
+      updatePhaseLabel();
+      attachOrientationListener();
+      clearTick();
+      tickHandle = setInterval(tick, TICK_MS);
+    }).catch(function () {
+      permissionBusy = false;
+      showError(T().errUnsupported);
+    });
+  }
+
+  function finishSequence() {
+    clearTick();
+    detachOrientationListener();
+    phase = 'done';
+    setSwitchVisual(false);
+    updateSwitchText();
+    updatePhaseLabel();
+    setCountdown('--');
+    showResults();
+  }
+
+  function cancelSequence() {
+    clearTick();
+    detachOrientationListener();
+    resetDisplay();
+  }
+
+  function toggle() {
+    if (phase === 'idle' || phase === 'done') {
+      startSequence();
+    } else {
+      cancelSequence();
+    }
+  }
+
+  function open() {
+    resetDisplay();
+    renderStaticTexts();
+    var overlay = $('angle-util-overlay');
+    if (overlay) overlay.style.display = 'flex';
+  }
+
+  function close() {
+    cancelSequence();
+    var overlay = $('angle-util-overlay');
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  return { open: open, close: close, toggle: toggle };
+})();
+</script>
+<!-- ===== [/ANGLE UTILITY MODAL] ===== -->
+
 </body>
   </html>
