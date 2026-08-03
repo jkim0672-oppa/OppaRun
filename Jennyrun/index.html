@@ -254,6 +254,20 @@ line-height: 1.3;
 .compare-delta.delta-up { color: var(--primary); }
 .compare-delta.delta-down { color: var(--danger); }
 .compare-delta.delta-flat { color: var(--text-dim); }
+/* [신규] 일일추이 막대그래프 바로 밑 "오늘 요약" 한줄 바 */
+.today-summary-bar {
+display: flex; align-items: center; gap: 6px;
+background: var(--card-bg); border-radius: 10px;
+padding: 8px 10px; margin-top: 8px;
+font-size: 13px; font-weight: 800; color: var(--text-main);
+overflow-x: auto; white-space: nowrap; -ms-overflow-style: none; scrollbar-width: none;
+}
+.today-summary-bar::-webkit-scrollbar { display: none; }
+.today-summary-bar.today-summary-empty { justify-content: center; color: var(--text-dim); font-weight: 700; font-size: 13px; }
+.today-summary-bar .ts-item { display: inline-flex; align-items: baseline; gap: 4px; flex-shrink: 0; }
+.today-summary-bar .ts-label { color: var(--text-dim); font-size: 11px; font-weight: 700; }
+.today-summary-bar .ts-val { color: var(--primary); font-size: 13px; font-weight: 900; }
+.today-summary-bar .ts-sep { color: #444; flex-shrink: 0; }
 .bar-chart { background: var(--card-bg); border-radius: 12px; padding: 16px 8px 10px; display: flex; align-items: flex-end; gap: 4px; height: 130px; }
 .bar-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
 .bar-val { font-size: 8.5px; color: var(--text-dim); font-weight: 800; margin-bottom: 4px; white-space: nowrap; height: 11px; }
@@ -4291,6 +4305,64 @@ return '<div class="bar-col">' +
 return '<div class="stats-section-title">' + (t['chartTitle' + cap] || '') + '</div>' +
 '<div class="bar-chart">' + barsHtml + '</div>';
 }
+// [신규] 일일추이 막대그래프 바로 밑에 붙는 "오늘 요약" 한줄 바.
+// 날짜/시간, 총거리, 총시간, 총칼로리, 장소를 한 줄(font-size 13px)로 표시.
+// 장소는 비동기 역지오코딩이 필요해서 우선 자리표시자를 넣고, 조회가 끝나면 해당 span만 갱신함.
+buildTodaySummaryHtml(h, t) {
+const isKo = (storage.getLang() === 'ko');
+const today = new Date(); today.setHours(0,0,0,0);
+const todayKey = this.dayKey(today);
+const todayRecords = h.filter(r => {
+const d = this.parseRecordDate(r.date);
+if (isNaN(d.getTime())) return false;
+return this.dayKey(d) === todayKey;
+});
+if (todayRecords.length === 0) {
+return '<div class="today-summary-bar today-summary-empty">' + (isKo ? '오늘은 아직 뛴 기록이 없어요' : 'No runs yet today') + '</div>';
+}
+let dist = 0, sec = 0, kcal = 0;
+todayRecords.forEach(r => {
+dist += parseFloat(r.dist) || 0;
+kcal += parseInt(r.kcal) || 0;
+if (r.time && typeof r.time === 'string') {
+const parts = r.time.split(':');
+if (parts.length === 2) sec += (parseInt(parts[0],10)*60)+parseInt(parts[1],10);
+else if (parts.length === 3) sec += (parseInt(parts[0],10)*3600)+(parseInt(parts[1],10)*60)+parseInt(parts[2],10);
+}
+});
+const sorted = todayRecords.slice().sort((a,b) => this.parseRecordDate(b.date) - this.parseRecordDate(a.date));
+const latest = sorted[0];
+const latestDate = this.parseRecordDate(latest.date);
+const dateTimeDisplay = (latestDate.getMonth()+1) + '/' + latestDate.getDate() + ' ' + String(latestDate.getHours()).padStart(2,'0') + ':' + String(latestDate.getMinutes()).padStart(2,'0');
+const toUnit = v => this.currentUnit === 'km' ? v : (v * 0.621371);
+const unitLabel = this.currentUnit === 'km' ? 'km' : 'mi';
+const distDisplay = toUnit(dist).toFixed(2) + ' ' + unitLabel;
+const hh = Math.floor(sec/3600), mm = Math.floor((sec%3600)/60), ss = sec%60;
+const timeDisplay = sec > 0 ? (hh > 0 ? (hh + ':' + String(mm).padStart(2,'0') + ':' + String(ss).padStart(2,'0')) : (mm + ':' + String(ss).padStart(2,'0'))) : '--';
+const kcalDisplay = kcal + ' kcal';
+const locId = 'today-summary-loc-' + latest.id;
+const placeHolder = isKo ? '조회중…' : 'Loading…';
+if (typeof community !== 'undefined' && latest.path && latest.path.length > 0 && latest.path[0] && latest.path[0].length >= 2) {
+community.getLocationName(latest.path[0][0], latest.path[0][1]).then(name => {
+const el = document.getElementById(locId);
+if (el) el.textContent = name || (isKo ? '알 수 없음' : 'Unknown');
+}).catch(() => {
+const el = document.getElementById(locId);
+if (el) el.textContent = isKo ? '알 수 없음' : 'Unknown';
+});
+}
+return '<div class="today-summary-bar">' +
+'<span class="ts-item"><span class="ts-label">' + (isKo ? '오늘' : 'Today') + '</span><span class="ts-val">' + dateTimeDisplay + '</span></span>' +
+'<span class="ts-sep">/</span>' +
+'<span class="ts-item"><span class="ts-label">' + (isKo ? '거리' : 'Dist') + '</span><span class="ts-val">' + distDisplay + '</span></span>' +
+'<span class="ts-sep">/</span>' +
+'<span class="ts-item"><span class="ts-label">' + (isKo ? '시간' : 'Time') + '</span><span class="ts-val">' + timeDisplay + '</span></span>' +
+'<span class="ts-sep">/</span>' +
+'<span class="ts-item"><span class="ts-label">' + (isKo ? '칼로리' : 'Cal') + '</span><span class="ts-val">' + kcalDisplay + '</span></span>' +
+'<span class="ts-sep">/</span>' +
+'<span class="ts-item"><span class="ts-label">' + (isKo ? '장소' : 'Place') + '</span><span class="ts-val" id="' + locId + '">' + placeHolder + '</span></span>' +
+'</div>';
+}
 updateTotalStats() {
 const hAll = storage.loadHistory();
 // [신규] RUN/WALK 통계 완전 분리 - 과거 기록(activityMode 없음)은 'run'으로 간주
@@ -4333,6 +4405,7 @@ const extraHtml =
 : '<div class="card"><div class="label">' + t.prBestCadence + '</div><div class="value" style="font-size:18px;">' + bestCadenceDisplay + '</div></div>') +
 '</div>' +
 this.buildStatBarChartHtml(h, t) +
+this.buildTodaySummaryHtml(h, t) +
 (this.currentStatFilter === 'weekly' ? '' : ('<div class="stats-section-title">' + t.heatmapSectionTitle + '</div>' + this.buildHeatmapHtml(h, isKoStats)));
 if (filteredHistory.length === 0) {
 this.dom.totalStatsContainer.innerHTML = extraHtml + '<div style="text-align:center; padding:30px; color:#999; font-weight:900;">' + t.noRec + '</div>';
@@ -9840,22 +9913,31 @@ const garmin = (function () {
     const usable = items.filter(it => it.phone != null && it.garmin != null);
     if (!usable.length) return '';
     const barMaxH = 64;
+    // [수정] 항목이 6~7개로 많을 때(케이던스/GCT/보폭/수직진동/거리/페이스/심박) 컬럼이
+    // 줄어들 공간이 부족해서 화면 밖으로 밀려나 잘려 보이던 버그. 막대 폭/간격/글자 크기를
+    // 항목 수에 따라 살짝 줄여서 좁은 화면에서도 전부 한 화면에 들어오게 함.
+    const n = usable.length;
+    const barW = n >= 7 ? 12 : (n >= 6 ? 13 : 16);
+    const barGap = n >= 6 ? 3 : 5;
+    const labelFs = n >= 6 ? 8 : 9;
     const cols = usable.map(it => {
       const maxV = Math.max(it.phone, it.garmin, 0.0001);
       const phoneH = Math.max(2, Math.round((it.phone / maxV) * barMaxH));
       const garminH = Math.max(2, Math.round((it.garmin / maxV) * barMaxH));
-      return '<div style="flex:1; display:flex; flex-direction:column; align-items:center;">'
-        + '<div style="display:flex; align-items:flex-end; gap:5px; height:' + barMaxH + 'px;">'
-        + '<div style="width:16px; height:' + phoneH + 'px; background:var(--primary); border-radius:3px 3px 0 0;"></div>'
-        + '<div style="width:16px; height:' + garminH + 'px; background:#555; border-radius:3px 3px 0 0;"></div>'
+      return '<div style="flex:1; min-width:0; display:flex; flex-direction:column; align-items:center;">'
+        + '<div style="display:flex; align-items:flex-end; gap:' + barGap + 'px; height:' + barMaxH + 'px;">'
+        + '<div style="width:' + barW + 'px; height:' + phoneH + 'px; background:var(--primary); border-radius:3px 3px 0 0;"></div>'
+        + '<div style="width:' + barW + 'px; height:' + garminH + 'px; background:#555; border-radius:3px 3px 0 0;"></div>'
         + '</div>'
-        + '<div style="font-size:9px; color:#888; font-weight:800; text-align:center; margin-top:6px; line-height:1.3;">' + it.label + '</div>'
+        + '<div style="font-size:' + labelFs + 'px; color:#888; font-weight:800; text-align:center; margin-top:6px; line-height:1.3; word-break:break-word; overflow-wrap:break-word;">' + it.label + '</div>'
         + '</div>';
     }).join('');
 
     return '<div style="margin-top:14px;">'
       + '<div style="color:var(--primary); font-weight:900; font-size:11px; margin-bottom:10px;">' + (isKo ? '전체 비교 그래프' : 'OVERALL COMPARISON') + '</div>'
-      + '<div style="display:flex; gap:6px; align-items:flex-end; padding:0 2px;">' + cols + '</div>'
+      // [수정] 위 크기 축소로도 화면에 다 안 들어가는 극단적으로 좁은 화면을 대비해
+      // overflow-x:auto를 안전장치로 추가 — 잘려서 안 보이는 대신 옆으로 스크롤해서 볼 수 있음.
+      + '<div style="display:flex; gap:6px; align-items:flex-end; padding:0 2px; overflow-x:auto; -webkit-overflow-scrolling:touch;">' + cols + '</div>'
       + '<div style="display:flex; gap:16px; justify-content:center; margin-top:12px; font-size:10px; color:#999; font-weight:700;">'
       + '<div><span style="display:inline-block; width:9px; height:9px; background:var(--primary); border-radius:2px; margin-right:5px; vertical-align:middle;"></span>' + (isKo ? '폰' : 'PHONE') + '</div>'
       + '<div><span style="display:inline-block; width:9px; height:9px; background:#555; border-radius:2px; margin-right:5px; vertical-align:middle;"></span>' + (isKo ? '가민' : 'GARMIN') + '</div>'
@@ -10109,7 +10191,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       ? Math.round(curGpsDistFactor * clampGpsRatio(garminDistanceKm / phoneDistanceKm) * 1000) / 1000 : null;
     // [추가] 케이던스 보정계수 제안값. gpsDistCorrectionFactor와 동일한 패턴 —
     // 오차가 3% 이내면 노이즈로 보고 제안하지 않으며, ±10% clamp로 한 번에 과도하게 안 튀게 함.
-    const suggestedCadFactor = (phoneAvgCadence && garminAvgCadence && cadDiffPct != null && Math.abs(cadDiffPct) > 3)
+    // [수정] 오차 임계값 3%→1%로 낮춤(사용자 요청) — 작은 오차에도 보정수치가 뜨도록.
+    const suggestedCadFactor = (phoneAvgCadence && garminAvgCadence && cadDiffPct != null && Math.abs(cadDiffPct) > 1)
       ? Math.round(curCadFactor * clampRatio(garminAvgCadence / phoneAvgCadence) * 1000) / 1000 : null;
 
     // [추가] 리포트 저장(SAVE REPORT)용으로 이번 비교의 전체 수치를 보관해둔다.
