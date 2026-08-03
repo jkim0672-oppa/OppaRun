@@ -254,6 +254,20 @@ line-height: 1.3;
 .compare-delta.delta-up { color: var(--primary); }
 .compare-delta.delta-down { color: var(--danger); }
 .compare-delta.delta-flat { color: var(--text-dim); }
+/* [신규] 일일추이 막대그래프 바로 밑 "오늘 요약" 한줄 바 */
+.today-summary-bar {
+display: flex; align-items: center; gap: 6px;
+background: var(--card-bg); border-radius: 10px;
+padding: 8px 10px; margin-top: 8px;
+font-size: 13px; font-weight: 800; color: var(--text-main);
+overflow-x: auto; white-space: nowrap; -ms-overflow-style: none; scrollbar-width: none;
+}
+.today-summary-bar::-webkit-scrollbar { display: none; }
+.today-summary-bar.today-summary-empty { justify-content: center; color: var(--text-dim); font-weight: 700; font-size: 13px; }
+.today-summary-bar .ts-item { display: inline-flex; align-items: baseline; gap: 4px; flex-shrink: 0; }
+.today-summary-bar .ts-label { color: var(--text-dim); font-size: 11px; font-weight: 700; }
+.today-summary-bar .ts-val { color: var(--primary); font-size: 13px; font-weight: 900; }
+.today-summary-bar .ts-sep { color: #444; flex-shrink: 0; }
 .bar-chart { background: var(--card-bg); border-radius: 12px; padding: 16px 8px 10px; display: flex; align-items: flex-end; gap: 4px; height: 130px; }
 .bar-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
 .bar-val { font-size: 8.5px; color: var(--text-dim); font-weight: 800; margin-bottom: 4px; white-space: nowrap; height: 11px; }
@@ -1391,6 +1405,7 @@ function applyMotionCalibSuggestion(prof, pos, suggestion) {
 if (!prof.motionCalibOverrides) prof.motionCalibOverrides = {};
 if (!prof.strideCorrectionFactorByPos) prof.strideCorrectionFactorByPos = {};
 if (!prof.gpsDistCorrectionFactorByPos) prof.gpsDistCorrectionFactorByPos = {};
+if (!prof.cadCorrectionFactorByPos) prof.cadCorrectionFactorByPos = {};
 
 const override = { devicePos: pos, appliedAt: new Date().toISOString() };
 if (suggestion.gct != null) override.gctFallbackRatio = suggestion.gct;
@@ -1399,6 +1414,7 @@ if (suggestion.vertScale != null) override.vertScale = suggestion.vertScale;
 
 const curStride = (typeof prof.strideCorrectionFactorByPos[pos] === 'number' && prof.strideCorrectionFactorByPos[pos] > 0) ? prof.strideCorrectionFactorByPos[pos] : 1.0;
 const curGps = (typeof prof.gpsDistCorrectionFactorByPos[pos] === 'number' && prof.gpsDistCorrectionFactorByPos[pos] > 0) ? prof.gpsDistCorrectionFactorByPos[pos] : 1.0;
+const curCad = (typeof prof.cadCorrectionFactorByPos[pos] === 'number' && prof.cadCorrectionFactorByPos[pos] > 0) ? prof.cadCorrectionFactorByPos[pos] : 1.0;
 // 되돌리기(UNDO)용 스냅샷을 위치별로 독립 저장 — motionCalibUndos[pos]에 각자 따로 저장해서
 // 위치별로 독립적으로 되돌릴 수 있다.
 if (!prof.motionCalibUndos) prof.motionCalibUndos = {};
@@ -1407,17 +1423,20 @@ devicePos: pos,
 prevOverride: prof.motionCalibOverrides[pos] ? JSON.parse(JSON.stringify(prof.motionCalibOverrides[pos])) : null,
 prevStrideCorrectionFactor: curStride,
 prevGpsDistCorrectionFactor: curGps,
+prevCadCorrectionFactor: curCad,
 savedAt: new Date().toISOString()
 };
 prof.motionCalibOverrides[pos] = override;
 if (suggestion.strideFactor != null) prof.strideCorrectionFactorByPos[pos] = suggestion.strideFactor;
 if (suggestion.gpsDistFactor != null) prof.gpsDistCorrectionFactorByPos[pos] = suggestion.gpsDistFactor;
+if (suggestion.cadFactor != null) prof.cadCorrectionFactorByPos[pos] = suggestion.cadFactor;
 // calcStride() 등이 읽는 플랫 필드는 "지금 실제로 착용 중인 위치"일 때만 갱신 —
 // 예를 들어 지금 가슴을 차고 있는데 손 위치 보정값을 적용했다고 해서 지금 러닝에
 // 손 보정계수가 끼어들면 안 되기 때문.
 if (prof.devicePos === pos) {
 if (suggestion.strideFactor != null) prof.strideCorrectionFactor = suggestion.strideFactor;
 if (suggestion.gpsDistFactor != null) prof.gpsDistCorrectionFactor = suggestion.gpsDistFactor;
+if (suggestion.cadFactor != null) prof.cadCorrectionFactor = suggestion.cadFactor;
 }
 return override;
 }
@@ -2087,8 +2106,8 @@ reader.readAsText(file);
 }
 saveProfile(profile) { localStorage.setItem(this.PROFILE_KEY, JSON.stringify(profile)); }
 loadProfile() {
-// [CALIB_ANCHOR:DEFAULT_PROFILE] 캘리브레이션 스니펫(코드 반영용)을 여기 strideCorrectionFactor/gpsDistCorrectionFactor에 반영하세요.
-const defaultProfile = { h: 175, hu: "cm", w: 70, wu: "kg", age: 30, devicePos: "chest", strideCorrectionFactor: 1.049, gpsDistCorrectionFactor: 0.950 }; // [수정 2026-08-02] CHEST 실측 3회 평균 반영 (strideCorrectionFactor 1.000→1.049, 스텝길이 평균 -4.7% 과소측정 기준. gpsDistCorrectionFactor는 3회 평균 거리오차 -0.3%로 유의미한 변화 없어 0.950 유지)
+// [CALIB_ANCHOR:DEFAULT_PROFILE] 캘리브레이션 스니펫(코드 반영용)을 여기 strideCorrectionFactor/gpsDistCorrectionFactor/cadCorrectionFactor에 반영하세요.
+const defaultProfile = { h: 175, hu: "cm", w: 70, wu: "kg", age: 30, devicePos: "chest", strideCorrectionFactor: 1.049, gpsDistCorrectionFactor: 0.950, cadCorrectionFactor: 1.0 }; // [수정 2026-08-02] CHEST 실측 3회 평균 반영 (strideCorrectionFactor 1.000→1.049, 스텝길이 평균 -4.7% 과소측정 기준. gpsDistCorrectionFactor는 3회 평균 거리오차 -0.3%로 유의미한 변화 없어 0.950 유지) [추가] cadCorrectionFactor: 케이던스 보정계수 신규 도입, 기본 1.0(보정없음)
 const data = localStorage.getItem(this.PROFILE_KEY);
 // [수정] 기존 저장 데이터에 새 필드(age, devicePos)가 없을 경우 기본값으로 보완
 return data ? Object.assign({}, defaultProfile, JSON.parse(data)) : defaultProfile;
@@ -3777,7 +3796,7 @@ const data = storage._pendingImportData;
 const isKo = storage.getLang() === 'ko';
 // [수정] 러닝 기록(history)은 "설정"이 아니므로 더 이상 임포트로 덮어쓰지 않는다.
 // (구버전 백업 파일에 history가 남아있어도 무시하고, 설정 항목만 복원)
-if (data.profile) storage.saveProfile(Object.assign({ h:175, hu:'cm', w:70, wu:'kg', age:30, devicePos:'chest', strideCorrectionFactor:1.0, gpsDistCorrectionFactor:0.950 }, data.profile));
+if (data.profile) storage.saveProfile(Object.assign({ h:175, hu:'cm', w:70, wu:'kg', age:30, devicePos:'chest', strideCorrectionFactor:1.0, gpsDistCorrectionFactor:0.950, cadCorrectionFactor:1.0 }, data.profile));
 if (data.lang) storage.setLang(data.lang);
 if (data.unit) storage.setUnit(data.unit);
 if (data.gender) storage.setGender(data.gender);
@@ -4286,6 +4305,64 @@ return '<div class="bar-col">' +
 return '<div class="stats-section-title">' + (t['chartTitle' + cap] || '') + '</div>' +
 '<div class="bar-chart">' + barsHtml + '</div>';
 }
+// [신규] 일일추이 막대그래프 바로 밑에 붙는 "오늘 요약" 한줄 바.
+// 날짜/시간, 총거리, 총시간, 총칼로리, 장소를 한 줄(font-size 13px)로 표시.
+// 장소는 비동기 역지오코딩이 필요해서 우선 자리표시자를 넣고, 조회가 끝나면 해당 span만 갱신함.
+buildTodaySummaryHtml(h, t) {
+const isKo = (storage.getLang() === 'ko');
+const today = new Date(); today.setHours(0,0,0,0);
+const todayKey = this.dayKey(today);
+const todayRecords = h.filter(r => {
+const d = this.parseRecordDate(r.date);
+if (isNaN(d.getTime())) return false;
+return this.dayKey(d) === todayKey;
+});
+if (todayRecords.length === 0) {
+return '<div class="today-summary-bar today-summary-empty">' + (isKo ? '오늘은 아직 뛴 기록이 없어요' : 'No runs yet today') + '</div>';
+}
+let dist = 0, sec = 0, kcal = 0;
+todayRecords.forEach(r => {
+dist += parseFloat(r.dist) || 0;
+kcal += parseInt(r.kcal) || 0;
+if (r.time && typeof r.time === 'string') {
+const parts = r.time.split(':');
+if (parts.length === 2) sec += (parseInt(parts[0],10)*60)+parseInt(parts[1],10);
+else if (parts.length === 3) sec += (parseInt(parts[0],10)*3600)+(parseInt(parts[1],10)*60)+parseInt(parts[2],10);
+}
+});
+const sorted = todayRecords.slice().sort((a,b) => this.parseRecordDate(b.date) - this.parseRecordDate(a.date));
+const latest = sorted[0];
+const latestDate = this.parseRecordDate(latest.date);
+const dateTimeDisplay = (latestDate.getMonth()+1) + '/' + latestDate.getDate() + ' ' + String(latestDate.getHours()).padStart(2,'0') + ':' + String(latestDate.getMinutes()).padStart(2,'0');
+const toUnit = v => this.currentUnit === 'km' ? v : (v * 0.621371);
+const unitLabel = this.currentUnit === 'km' ? 'km' : 'mi';
+const distDisplay = toUnit(dist).toFixed(2) + ' ' + unitLabel;
+const hh = Math.floor(sec/3600), mm = Math.floor((sec%3600)/60), ss = sec%60;
+const timeDisplay = sec > 0 ? (hh > 0 ? (hh + ':' + String(mm).padStart(2,'0') + ':' + String(ss).padStart(2,'0')) : (mm + ':' + String(ss).padStart(2,'0'))) : '--';
+const kcalDisplay = kcal + ' kcal';
+const locId = 'today-summary-loc-' + latest.id;
+const placeHolder = isKo ? '조회중…' : 'Loading…';
+if (typeof community !== 'undefined' && latest.path && latest.path.length > 0 && latest.path[0] && latest.path[0].length >= 2) {
+community.getLocationName(latest.path[0][0], latest.path[0][1]).then(name => {
+const el = document.getElementById(locId);
+if (el) el.textContent = name || (isKo ? '알 수 없음' : 'Unknown');
+}).catch(() => {
+const el = document.getElementById(locId);
+if (el) el.textContent = isKo ? '알 수 없음' : 'Unknown';
+});
+}
+return '<div class="today-summary-bar">' +
+'<span class="ts-item"><span class="ts-label">' + (isKo ? '오늘' : 'Today') + '</span><span class="ts-val">' + dateTimeDisplay + '</span></span>' +
+'<span class="ts-sep">/</span>' +
+'<span class="ts-item"><span class="ts-label">' + (isKo ? '거리' : 'Dist') + '</span><span class="ts-val">' + distDisplay + '</span></span>' +
+'<span class="ts-sep">/</span>' +
+'<span class="ts-item"><span class="ts-label">' + (isKo ? '시간' : 'Time') + '</span><span class="ts-val">' + timeDisplay + '</span></span>' +
+'<span class="ts-sep">/</span>' +
+'<span class="ts-item"><span class="ts-label">' + (isKo ? '칼로리' : 'Cal') + '</span><span class="ts-val">' + kcalDisplay + '</span></span>' +
+'<span class="ts-sep">/</span>' +
+'<span class="ts-item"><span class="ts-label">' + (isKo ? '장소' : 'Place') + '</span><span class="ts-val" id="' + locId + '">' + placeHolder + '</span></span>' +
+'</div>';
+}
 updateTotalStats() {
 const hAll = storage.loadHistory();
 // [신규] RUN/WALK 통계 완전 분리 - 과거 기록(activityMode 없음)은 'run'으로 간주
@@ -4328,6 +4405,7 @@ const extraHtml =
 : '<div class="card"><div class="label">' + t.prBestCadence + '</div><div class="value" style="font-size:18px;">' + bestCadenceDisplay + '</div></div>') +
 '</div>' +
 this.buildStatBarChartHtml(h, t) +
+this.buildTodaySummaryHtml(h, t) +
 (this.currentStatFilter === 'weekly' ? '' : ('<div class="stats-section-title">' + t.heatmapSectionTitle + '</div>' + this.buildHeatmapHtml(h, isKoStats)));
 if (filteredHistory.length === 0) {
 this.dom.totalStatsContainer.innerHTML = extraHtml + '<div style="text-align:center; padding:30px; color:#999; font-weight:900;">' + t.noRec + '</div>';
@@ -4870,6 +4948,14 @@ try {
       _migrated = true;
     }
   }
+  // [추가] 케이던스 보정계수도 위치별로 독립 저장 (strideCorrectionFactorByPos와 동일 패턴).
+  if (!_prof.cadCorrectionFactorByPos) {
+    _prof.cadCorrectionFactorByPos = {};
+    if (typeof _prof.cadCorrectionFactor === 'number' && _prof.cadCorrectionFactor !== 1.0) {
+      _prof.cadCorrectionFactorByPos[_prof.devicePos || 'chest'] = _prof.cadCorrectionFactor;
+      _migrated = true;
+    }
+  }
 
   const _calibOv = _prof.motionCalibOverrides[pos];
   if (_calibOv) {
@@ -4882,11 +4968,16 @@ try {
   // 그 플랫 필드에 채워넣어 나머지 코드는 손대지 않아도 되게 한다.
   const _syncedStride = (typeof _prof.strideCorrectionFactorByPos[pos] === 'number' && _prof.strideCorrectionFactorByPos[pos] > 0) ? _prof.strideCorrectionFactorByPos[pos] : 1.0;
   const _syncedGps = (typeof _prof.gpsDistCorrectionFactorByPos[pos] === 'number' && _prof.gpsDistCorrectionFactorByPos[pos] > 0) ? _prof.gpsDistCorrectionFactorByPos[pos] : 1.0;
-  if (_migrated || _prof.strideCorrectionFactor !== _syncedStride || _prof.gpsDistCorrectionFactor !== _syncedGps) {
+  const _syncedCad = (typeof _prof.cadCorrectionFactorByPos[pos] === 'number' && _prof.cadCorrectionFactorByPos[pos] > 0) ? _prof.cadCorrectionFactorByPos[pos] : 1.0;
+  if (_migrated || _prof.strideCorrectionFactor !== _syncedStride || _prof.gpsDistCorrectionFactor !== _syncedGps || _prof.cadCorrectionFactor !== _syncedCad) {
     _prof.strideCorrectionFactor = _syncedStride;
     _prof.gpsDistCorrectionFactor = _syncedGps;
+    _prof.cadCorrectionFactor = _syncedCad;
     storage.saveProfile(_prof);
   }
+  // [추가] MotionManager 인스턴스가 매 러닝 계산 때마다 storage를 다시 읽지 않아도 되도록
+  // 케이던스 보정계수를 인스턴스 필드에도 캐싱해둔다 (nativeCadenceSpm 계산부에서 사용).
+  this.cadCorrectionFactor = _syncedCad;
 } catch (e) {}
 // [추가] 적응형 보정의 기준(중심)이 되는 위치별 기본값을 별도 보관.
 // 보정된 threshold는 항상 이 기본값의 ±15% 이내로만 움직이게 해서 과보정을 방지.
@@ -6715,7 +6806,12 @@ const windowSec = Math.min(10, this.state.seconds || 1);
 // 이렇게 하면 commitStep 쪽 게이트/부가지표 로직에 어떤 문제가 생겨도
 // 케이던스(및 이걸로 계산하는 페이스·보폭)는 항상 네이티브 센서 실측값을 그대로 반영한다.
 const useNativeCad = this.motion && this.motion.useNativeStepTrigger && typeof this.motion.nativeCadenceSpm === 'number';
-const cadVal = useNativeCad ? this.motion.nativeCadenceSpm : Math.round((this.state.stepTimes.length / windowSec) * 60);
+const cadRaw = useNativeCad ? this.motion.nativeCadenceSpm : Math.round((this.state.stepTimes.length / windowSec) * 60);
+// [추가] 가민 대비 일정하게 나는 케이던스 오차를 보정하기 위한 실측 계수.
+// gpsDistCorrectionFactor와 동일한 패턴 — 네이티브 원시값(cadRaw)은 그대로 두고,
+// 화면에 표시/기록되는 최종값에만 곱해서 반영한다.
+const _cadFactor = (this.motion && typeof this.motion.cadCorrectionFactor === 'number' && this.motion.cadCorrectionFactor > 0) ? this.motion.cadCorrectionFactor : 1.0;
+const cadVal = Math.round(cadRaw * _cadFactor);
 // [수정] 사람이 걷거나 뛸 때 낼 수 있는 물리적 케이던스 범위(대략 60~280 SPM)를
 // 벗어난 순간값은 오감지/노이즈로 간주. 기존엔 이 클램프가 cadenceSamples(평균 계산용)에만
 // 적용되고 실시간 화면 표시 + precision log(getTxt('cadence')로 DOM값을 그대로 읽어감)에는
@@ -9967,10 +10063,12 @@ const garmin = (function () {
     // 담당하므로(calcStride 참고) 별도로 현재값을 먼저 읽어온다 (아래 phoneAvgStepMm 계산에 필요).
     let curStrideFactor = 1.0;
     let curGpsDistFactor = 1.0; // [추가]
+    let curCadFactor = 1.0; // [추가]
     try {
       const _p0 = storage.loadProfile();
       curStrideFactor = (typeof _p0.strideCorrectionFactor === 'number' && _p0.strideCorrectionFactor > 0) ? _p0.strideCorrectionFactor : 1.0;
       curGpsDistFactor = (typeof _p0.gpsDistCorrectionFactor === 'number' && _p0.gpsDistCorrectionFactor > 0) ? _p0.gpsDistCorrectionFactor : 1.0; // [추가]
+      curCadFactor = (typeof _p0.cadCorrectionFactor === 'number' && _p0.cadCorrectionFactor > 0) ? _p0.cadCorrectionFactor : 1.0; // [추가]
     } catch (e) {}
 
     // [추가] 보폭(step_length)/수직진동(vert_osc) 비교. 정밀 로그엔 m/cm 단위,
@@ -10082,6 +10180,10 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     const clampGpsRatio = (r) => Math.max(0.9, Math.min(1.1, r));
     const suggestedGpsDistFactor = (phoneDistanceKm && garminDistanceKm && distDiffPct != null && Math.abs(distDiffPct) > 1)
       ? Math.round(curGpsDistFactor * clampGpsRatio(garminDistanceKm / phoneDistanceKm) * 1000) / 1000 : null;
+    // [추가] 케이던스 보정계수 제안값. gpsDistCorrectionFactor와 동일한 패턴 —
+    // 오차가 3% 이내면 노이즈로 보고 제안하지 않으며, ±10% clamp로 한 번에 과도하게 안 튀게 함.
+    const suggestedCadFactor = (phoneAvgCadence && garminAvgCadence && cadDiffPct != null && Math.abs(cadDiffPct) > 3)
+      ? Math.round(curCadFactor * clampRatio(garminAvgCadence / phoneAvgCadence) * 1000) / 1000 : null;
 
     // [추가] 리포트 저장(SAVE REPORT)용으로 이번 비교의 전체 수치를 보관해둔다.
     // appliedFields/appliedAt은 아직 비어있고, applyCalibration()/applyAveragedCalibration()이
@@ -10099,8 +10201,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         pace: { phone: phoneAvgPaceSec, garmin: garminAvgPaceSec, diffPct: paceDiffPct, unit: 'sec/km' },
         hr: { phone: phoneAvgHr, garmin: garminAvgHr, diffPct: hrDiffPct, unit: 'bpm' }
       },
-      current: { gct: curGct, rot: curRot, vertScale: curVertScale, strideFactor: curStrideFactor, gpsDistFactor: curGpsDistFactor },
-      suggested: { gct: suggestedGct, rot: suggestedRot, vertScale: suggestedVertScale, strideFactor: suggestedStrideFactor, gpsDistFactor: suggestedGpsDistFactor },
+      current: { gct: curGct, rot: curRot, vertScale: curVertScale, strideFactor: curStrideFactor, gpsDistFactor: curGpsDistFactor, cadFactor: curCadFactor },
+      suggested: { gct: suggestedGct, rot: suggestedRot, vertScale: suggestedVertScale, strideFactor: suggestedStrideFactor, gpsDistFactor: suggestedGpsDistFactor, cadFactor: suggestedCadFactor },
       appliedFields: null, // applyCalibration()/applyAveragedCalibration() 실행 시 채워짐
       appliedAt: null
     };
@@ -10171,7 +10273,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       { label: isKo ? '심박수' : 'AVG HR', phone: phoneAvgHr, garmin: garminAvgHr }
     ]);
 
-    const hasSuggestion = suggestedRot != null || suggestedRotOS != null || suggestedGct != null || suggestedVertScale != null || suggestedStrideFactor != null || suggestedGpsDistFactor != null;
+    const hasSuggestion = suggestedRot != null || suggestedRotOS != null || suggestedGct != null || suggestedVertScale != null || suggestedStrideFactor != null || suggestedGpsDistFactor != null || suggestedCadFactor != null;
 
     if (hasSuggestion) {
       // [수정] 예전엔 아래 5개 값이 있으면 무조건 전부 한꺼번에 적용됐음.
@@ -10203,6 +10305,9 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       if (suggestedGpsDistFactor != null) {
         html += checkRow('calib-sel-gps', (isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + curGpsDistFactor.toFixed(3) + ' → <b>' + suggestedGpsDistFactor.toFixed(3) + '</b> ' + (isKo ? '(실제 거리·페이스에 직접 반영됨)' : '(directly affects real distance/pace)'));
       }
+      if (suggestedCadFactor != null) {
+        html += checkRow('calib-sel-cad', (isKo ? '케이던스 보정계수' : 'cadCorrectionFactor') + ': ' + curCadFactor.toFixed(3) + ' → <b>' + suggestedCadFactor.toFixed(3) + '</b> ' + (isKo ? '(네이티브 걸음센서 원시값은 그대로, 표시/기록값에만 반영됨)' : '(native raw value untouched, applies only to displayed/logged cadence)'));
+      }
       html += '<div style="color:#888; margin-top:8px; margin-bottom:10px;">' + (isKo
         ? '체크된 항목만 아래 버튼으로 즉시 적용/저장됩니다. 적용 후 러닝을 한 번 더 진행해서 오차가 줄었는지 다시 비교해보세요.'
         : 'Only the checked items are applied and saved when you tap the button below. Run again afterward and re-compare to confirm the error shrank.') + '</div>'
@@ -10221,7 +10326,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         rotOS: suggestedRotOS,
         vertScale: suggestedVertScale,
         strideFactor: suggestedStrideFactor,
-        gpsDistFactor: suggestedGpsDistFactor
+        gpsDistFactor: suggestedGpsDistFactor,
+        cadFactor: suggestedCadFactor
       };
     } else {
       html += '<div style="margin-top:12px; font-size:11px; color:#888;">' + (isKo
@@ -10279,13 +10385,14 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       rot: rotVal,
       vertScale: (lastSuggestion.vertScale != null && isChecked('calib-sel-vert')) ? lastSuggestion.vertScale : null,
       strideFactor: (lastSuggestion.strideFactor != null && isChecked('calib-sel-stride')) ? lastSuggestion.strideFactor : null,
-      gpsDistFactor: (lastSuggestion.gpsDistFactor != null && isChecked('calib-sel-gps')) ? lastSuggestion.gpsDistFactor : null
+      gpsDistFactor: (lastSuggestion.gpsDistFactor != null && isChecked('calib-sel-gps')) ? lastSuggestion.gpsDistFactor : null,
+      cadFactor: (lastSuggestion.cadFactor != null && isChecked('calib-sel-cad')) ? lastSuggestion.cadFactor : null
     };
   }
 
   // [추가] 아무 필드도 선택되지 않은 상태로 적용/저장을 누르면 알려주기 위한 체크.
   function hasAnySelectedField(sel) {
-    return !!sel && (sel.gct != null || sel.rot != null || sel.vertScale != null || sel.strideFactor != null || sel.gpsDistFactor != null);
+    return !!sel && (sel.gct != null || sel.rot != null || sel.vertScale != null || sel.strideFactor != null || sel.gpsDistFactor != null || sel.cadFactor != null);
   }
 
   // [수정] 체크된 항목만 대기목록에 추가.
@@ -10310,7 +10417,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       rot: sel.rot,
       vertScale: sel.vertScale,
       strideFactor: sel.strideFactor,
-      gpsDistFactor: sel.gpsDistFactor
+      gpsDistFactor: sel.gpsDistFactor,
+      cadFactor: sel.cadFactor
     });
     savePendingCalibList(list);
     renderPendingCalibList(isKo);
@@ -10343,6 +10451,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     const avgVertScale = avgPendingField(list, 'vertScale') != null ? Math.round(avgPendingField(list, 'vertScale') * 1000) / 1000 : null;
     const avgStrideFactor = avgPendingField(list, 'strideFactor') != null ? Math.round(avgPendingField(list, 'strideFactor') * 1000) / 1000 : null;
     const avgGpsDistFactor = avgPendingField(list, 'gpsDistFactor') != null ? Math.round(avgPendingField(list, 'gpsDistFactor') * 1000) / 1000 : null;
+    const avgCadFactor = avgPendingField(list, 'cadFactor') != null ? Math.round(avgPendingField(list, 'cadFactor') * 1000) / 1000 : null;
 
     const rows = list.map((item, idx) => {
       const parts = [];
@@ -10351,6 +10460,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       if (item.vertScale != null) parts.push('vert ' + item.vertScale);
       if (item.strideFactor != null) parts.push((isKo ? '보폭' : 'stride') + ' ' + item.strideFactor.toFixed(3));
       if (item.gpsDistFactor != null) parts.push((isKo ? '거리' : 'dist') + ' ' + item.gpsDistFactor.toFixed(3));
+      if (item.cadFactor != null) parts.push((isKo ? '케이던스' : 'cad') + ' ' + item.cadFactor.toFixed(3));
       return '<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid #2a2a2a; font-size:11px; gap:6px;">'
         + '<div style="color:#999; flex-shrink:0;">#' + (idx + 1) + ' · ' + fmtDate(new Date(item.savedAt).getTime()) + '</div>'
         + '<div style="color:#ccc; text-align:right;">' + (parts.join(' / ') || '--') + '</div>'
@@ -10370,6 +10480,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     if (avgVertScale != null) html += 'vertScale → <b>' + avgVertScale + '</b><br>';
     if (avgStrideFactor != null) html += (isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ' → <b>' + avgStrideFactor.toFixed(3) + '</b><br>';
     if (avgGpsDistFactor != null) html += (isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ' → <b>' + avgGpsDistFactor.toFixed(3) + '</b><br>';
+    if (avgCadFactor != null) html += (isKo ? '케이던스 보정계수' : 'cadCorrectionFactor') + ' → <b>' + avgCadFactor.toFixed(3) + '</b><br>';
     html += '</div>';
 
     if (list.length < MAX_PENDING_CALIB) {
@@ -10398,7 +10509,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       gct: avgPendingField(list, 'gct') != null ? Math.round(avgPendingField(list, 'gct') * 1000) / 1000 : null,
       vertScale: avgPendingField(list, 'vertScale') != null ? Math.round(avgPendingField(list, 'vertScale') * 1000) / 1000 : null,
       strideFactor: avgPendingField(list, 'strideFactor') != null ? Math.round(avgPendingField(list, 'strideFactor') * 1000) / 1000 : null,
-      gpsDistFactor: avgPendingField(list, 'gpsDistFactor') != null ? Math.round(avgPendingField(list, 'gpsDistFactor') * 1000) / 1000 : null
+      gpsDistFactor: avgPendingField(list, 'gpsDistFactor') != null ? Math.round(avgPendingField(list, 'gpsDistFactor') * 1000) / 1000 : null,
+      cadFactor: avgPendingField(list, 'cadFactor') != null ? Math.round(avgPendingField(list, 'cadFactor') * 1000) / 1000 : null
     };
     try {
       const prof = storage.loadProfile();
@@ -10545,6 +10657,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       const posLabel = isKo ? (POS_LABEL_KO[pos] || pos) : (POS_LABEL_EN[pos] || pos.toUpperCase());
       const strideVal = curProf && curProf.strideCorrectionFactorByPos ? curProf.strideCorrectionFactorByPos[pos] : null;
       const gpsVal = curProf && curProf.gpsDistCorrectionFactorByPos ? curProf.gpsDistCorrectionFactorByPos[pos] : null;
+      const cadVal2 = curProf && curProf.cadCorrectionFactorByPos ? curProf.cadCorrectionFactorByPos[pos] : null;
 
       const parts = [];
       if (ov.gctFallbackRatio != null) parts.push('gctFallbackRatio: ' + ov.gctFallbackRatio);
@@ -10552,6 +10665,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       if (ov.vertScale != null) parts.push('vertScale: ' + ov.vertScale);
       if (typeof strideVal === 'number' && strideVal !== 1.0) parts.push((isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ': ' + strideVal.toFixed(3));
       if (typeof gpsVal === 'number' && gpsVal !== 1.0) parts.push((isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + gpsVal.toFixed(3));
+      if (typeof cadVal2 === 'number' && cadVal2 !== 1.0) parts.push((isKo ? '케이던스 보정계수' : 'cadCorrectionFactor') + ': ' + cadVal2.toFixed(3));
       const dateTxt = ov.appliedAt ? fmtDate(new Date(ov.appliedAt).getTime()) : '';
 
       // [추가] 코드(applyDevicePos)에 그대로 붙여넣을 수 있는 스니펫 생성.
@@ -10571,6 +10685,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       const factorParts = [];
       if (typeof strideVal === 'number' && strideVal !== 1.0) factorParts.push('strideCorrectionFactor: ' + strideVal.toFixed(3));
       if (typeof gpsVal === 'number' && gpsVal !== 1.0) factorParts.push('gpsDistCorrectionFactor: ' + gpsVal.toFixed(3));
+      if (typeof cadVal2 === 'number' && cadVal2 !== 1.0) factorParts.push('cadCorrectionFactor: ' + cadVal2.toFixed(3));
       if (factorParts.length) {
         profileFactorsLine = '\n\n// 찾기: CALIB_ANCHOR:DEFAULT_PROFILE (' + pos + ')\n' + factorParts.join(', ');
       }
@@ -10658,6 +10773,9 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       if (typeof curProf.gpsDistCorrectionFactor === 'number' && curProf.gpsDistCorrectionFactor > 0) {
         patchedWin = patchedWin.replace(/gpsDistCorrectionFactor:\s*[0-9.]+/, 'gpsDistCorrectionFactor: ' + curProf.gpsDistCorrectionFactor.toFixed(3));
       }
+      if (typeof curProf.cadCorrectionFactor === 'number' && curProf.cadCorrectionFactor > 0) {
+        patchedWin = patchedWin.replace(/cadCorrectionFactor:\s*[0-9.]+/, 'cadCorrectionFactor: ' + curProf.cadCorrectionFactor.toFixed(3));
+      }
       html = html.slice(0, defAnchorIdx) + patchedWin + html.slice(defAnchorIdx + win.length);
     }
 
@@ -10677,15 +10795,17 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       const ov = (prof.motionCalibOverrides || {})[pos];
       const strideVal = (prof.strideCorrectionFactorByPos || {})[pos];
       const gpsVal = (prof.gpsDistCorrectionFactorByPos || {})[pos];
+      const cadValDl = (prof.cadCorrectionFactorByPos || {})[pos];
       const hasStrideFactor = typeof strideVal === 'number' && strideVal !== 1.0;
       const hasGpsFactor = typeof gpsVal === 'number' && gpsVal !== 1.0;
-      if (!ov && !hasStrideFactor && !hasGpsFactor) {
+      const hasCadFactor = typeof cadValDl === 'number' && cadValDl !== 1.0;
+      if (!ov && !hasStrideFactor && !hasGpsFactor && !hasCadFactor) {
         alert(isKo ? '적용된 캘리브레이션 값이 없습니다.' : 'No calibration override is currently applied.');
         return;
       }
-      // [수정] buildPatchedHtml의 curProf는 이제 "지금 위치의 stride/gps 값"만 담아서 넘긴다
+      // [수정] buildPatchedHtml의 curProf는 이제 "지금 위치의 stride/gps/cad 값"만 담아서 넘긴다
       // (프로필 전체의 플랫 필드가 아니라, 리셋 대상 pos에 맞는 값이어야 하므로).
-      const posProf = { strideCorrectionFactor: hasStrideFactor ? strideVal : 1.0, gpsDistCorrectionFactor: hasGpsFactor ? gpsVal : 1.0 };
+      const posProf = { strideCorrectionFactor: hasStrideFactor ? strideVal : 1.0, gpsDistCorrectionFactor: hasGpsFactor ? gpsVal : 1.0, cadCorrectionFactor: hasCadFactor ? cadValDl : 1.0 };
       const patched = buildPatchedHtml(rawHtml, ov, posProf);
       const dateStr = new Date().toISOString().slice(0, 10);
       const fileName = 'jennyrun-patched-' + pos + '-' + dateStr + '.html';
@@ -10730,6 +10850,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       if (!prof.motionCalibOverrides) prof.motionCalibOverrides = {};
       if (!prof.strideCorrectionFactorByPos) prof.strideCorrectionFactorByPos = {};
       if (!prof.gpsDistCorrectionFactorByPos) prof.gpsDistCorrectionFactorByPos = {};
+      if (!prof.cadCorrectionFactorByPos) prof.cadCorrectionFactorByPos = {};
       if (undo.prevOverride) {
         prof.motionCalibOverrides[pos] = undo.prevOverride;
       } else {
@@ -10737,10 +10858,12 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       }
       prof.strideCorrectionFactorByPos[pos] = (typeof undo.prevStrideCorrectionFactor === 'number' && undo.prevStrideCorrectionFactor > 0) ? undo.prevStrideCorrectionFactor : 1.0;
       prof.gpsDistCorrectionFactorByPos[pos] = (typeof undo.prevGpsDistCorrectionFactor === 'number' && undo.prevGpsDistCorrectionFactor > 0) ? undo.prevGpsDistCorrectionFactor : 1.0;
+      prof.cadCorrectionFactorByPos[pos] = (typeof undo.prevCadCorrectionFactor === 'number' && undo.prevCadCorrectionFactor > 0) ? undo.prevCadCorrectionFactor : 1.0;
       // [수정] 지금 실제로 착용 중인 위치에 대한 되돌리기일 때만 플랫 필드(현재 적용값)도 갱신
       if (prof.devicePos === pos) {
         prof.strideCorrectionFactor = prof.strideCorrectionFactorByPos[pos];
         prof.gpsDistCorrectionFactor = prof.gpsDistCorrectionFactorByPos[pos];
+        prof.cadCorrectionFactor = prof.cadCorrectionFactorByPos[pos];
       }
       delete undos[pos]; // [수정] 이 위치의 되돌리기 스냅샷만 지운다 (다른 위치는 그대로 유지)
       prof.motionCalibUndos = undos;
@@ -10777,11 +10900,14 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       // 다른 위치(예: 가슴을 리셋해도 손 보정값)는 그대로 둔다.
       if (!prof.strideCorrectionFactorByPos) prof.strideCorrectionFactorByPos = {};
       if (!prof.gpsDistCorrectionFactorByPos) prof.gpsDistCorrectionFactorByPos = {};
+      if (!prof.cadCorrectionFactorByPos) prof.cadCorrectionFactorByPos = {};
       prof.strideCorrectionFactorByPos[pos] = 1.0;
       prof.gpsDistCorrectionFactorByPos[pos] = 1.0;
+      prof.cadCorrectionFactorByPos[pos] = 1.0;
       if (prof.devicePos === pos) {
         prof.strideCorrectionFactor = 1.0;
         prof.gpsDistCorrectionFactor = 1.0;
+        prof.cadCorrectionFactor = 1.0;
       }
       delete prof.motionCalibOverrides[pos];
       storage.saveProfile(prof);
@@ -10884,9 +11010,10 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
      suggLine('gctFallbackRatio', 'gctFallbackRatio', d.current.gct, d.suggested.gct, 3),
      suggLine('vertScale', 'vertScale', d.current.vertScale, d.suggested.vertScale, 3),
      suggLine(isKo ? '보폭 보정계수' : 'strideCorrectionFactor', 'strideCorrectionFactor', d.current.strideFactor, d.suggested.strideFactor, 3),
-     suggLine(isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor', 'gpsDistCorrectionFactor', d.current.gpsDistFactor, d.suggested.gpsDistFactor, 3)]
+     suggLine(isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor', 'gpsDistCorrectionFactor', d.current.gpsDistFactor, d.suggested.gpsDistFactor, 3),
+     suggLine(isKo ? '케이던스 보정계수' : 'cadCorrectionFactor', 'cadCorrectionFactor', d.current.cadFactor, d.suggested.cadFactor, 3)]
       .filter(Boolean).forEach(l => lines.push(l));
-    if (![d.suggested.rot, d.suggested.gct, d.suggested.vertScale, d.suggested.strideFactor, d.suggested.gpsDistFactor].some(v => v != null)) {
+    if (![d.suggested.rot, d.suggested.gct, d.suggested.vertScale, d.suggested.strideFactor, d.suggested.gpsDistFactor, d.suggested.cadFactor].some(v => v != null)) {
       lines.push(isKo ? '(제안할 보정값 없음 — 오차가 이미 3% 이내)' : '(nothing suggested — differences already within 3%)');
     }
     lines.push('');
@@ -10899,7 +11026,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
        af.gct != null ? 'gctFallbackRatio: ' + af.gct : null,
        af.vertScale != null ? 'vertScale: ' + af.vertScale : null,
        af.strideFactor != null ? (isKo ? '보폭 보정계수: ' : 'strideCorrectionFactor: ') + af.strideFactor : null,
-       af.gpsDistFactor != null ? (isKo ? 'GPS 거리 보정계수: ' : 'gpsDistCorrectionFactor: ') + af.gpsDistFactor : null]
+       af.gpsDistFactor != null ? (isKo ? 'GPS 거리 보정계수: ' : 'gpsDistCorrectionFactor: ') + af.gpsDistFactor : null,
+       af.cadFactor != null ? (isKo ? '케이던스 보정계수: ' : 'cadCorrectionFactor: ') + af.cadFactor : null]
         .filter(Boolean).forEach(l => lines.push('  ' + l));
     } else {
       lines.push(isKo ? '아직 적용되지 않음 (제안 단계)' : 'Not applied yet (suggestion only)');
