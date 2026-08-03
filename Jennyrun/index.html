@@ -179,7 +179,7 @@ filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
 .gender-toggle-row { display: flex; gap: 10px; margin-top: 10px; }
 .gender-btn { flex: 1; padding: 13px 12px; background: #2a2a2a; border: 1.5px solid #444; border-radius: 12px; color: #aaa; font-weight: 900; font-size: 13px; text-align: center; cursor: pointer; }
 .gender-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
-#device-pos-row .gender-btn, #onb-device-pos-row .gender-btn { font-size: 11px; padding: 13px 4px; }
+#device-pos-row .gender-btn, #onb-device-pos-row .gender-btn, #quick-devpos-row .gender-btn { font-size: 11px; padding: 13px 4px; }
 #calib-sound-row .gender-btn { font-size: 11px; padding: 13px 4px; }
 /* [추가] 착용 위치별 정확도를 색상으로 구분 (가슴=가장 정확 → 손=가장 부정확) */
 #device-pos-row { position: relative; }
@@ -447,11 +447,24 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 <!-- ===== [신규] 시작 화면 퀵 모드 전환 팝업 (온보딩 전체를 거치지 않고 RUN/WALK/TRAIL만 바로 전환) ===== -->
 <div id="quick-mode-modal" class="custom-confirm-overlay" onclick="if(event.target.id==='quick-mode-modal') ui.closeQuickModeSwitch()">
 <div class="custom-confirm-box">
+<div id="quick-mode-step1">
 <div id="quick-mode-title" class="custom-confirm-msg" style="margin-bottom:14px;">SWITCH MODE</div>
 <div class="gender-toggle-row" id="quick-mode-row">
 <div id="quick-mode-run" class="gender-btn" onclick="ui.quickSetActivityMode('run')">RUN</div>
 <div id="quick-mode-walk" class="gender-btn" onclick="ui.quickSetActivityMode('walk')">WALK</div>
 <div id="quick-mode-trail" class="gender-btn" onclick="ui.quickSetActivityMode('trail')">TRAIL</div>
+</div>
+</div>
+<!-- [신규] RUN/TRAIL 선택 시에만 노출되는 2단계: 폰 착용 위치 확인. 설정/온보딩과 동일한
+     ui.setDevicePos()를 그대로 재사용하므로 별도 동기화 로직 없이 항상 일치함. -->
+<div id="quick-mode-step2" style="display:none;">
+<div id="quick-devpos-title" class="custom-confirm-msg" style="margin-bottom:14px;">DEVICE PLACEMENT</div>
+<div class="gender-toggle-row" id="quick-devpos-row">
+<div id="quick-devpos-chest" class="gender-btn" onclick="ui.quickSetDevicePos('chest')">CHEST</div>
+<div id="quick-devpos-waist" class="gender-btn" onclick="ui.quickSetDevicePos('waist')">WAIST</div>
+<div id="quick-devpos-armband" class="gender-btn" onclick="ui.quickSetDevicePos('armband')">ARMBAND</div>
+<div id="quick-devpos-hand" class="gender-btn" onclick="ui.quickSetDevicePos('hand')">HAND</div>
+</div>
 </div>
 </div>
 </div>
@@ -2257,6 +2270,11 @@ const mode = this.currentActivityMode || 'run';
 if (runBtn) runBtn.classList.toggle('active', mode === 'run');
 if (walkBtn) walkBtn.classList.toggle('active', mode === 'walk');
 if (trailBtn) trailBtn.classList.toggle('active', mode === 'trail');
+// [추가] 항상 1단계(모드 선택)부터 열리도록 초기화 - 직전에 2단계에서 닫았어도 다음엔 처음부터
+const step1 = document.getElementById('quick-mode-step1');
+const step2 = document.getElementById('quick-mode-step2');
+if (step1) step1.style.display = '';
+if (step2) step2.style.display = 'none';
 const modal = document.getElementById('quick-mode-modal');
 if (modal) modal.style.display = 'flex';
 }
@@ -2268,6 +2286,42 @@ if (modal) modal.style.display = 'none';
 // 메인 화면 라벨/카드, 하단 탭 라벨, 설정 페이지 상태까지 한번에 동기화되도록 함
 quickSetActivityMode(mode) {
 this.setActivityMode(mode);
+// [추가] WALK는 착용 위치와 무관하게 동작하므로(기존 게이팅 로직과 동일) 바로 닫고,
+// RUN/TRAIL은 착용 위치를 다시 확인하도록 2단계로 넘어간다.
+if (mode === 'walk') {
+this.closeQuickModeSwitch();
+return;
+}
+this.showQuickDevicePosStep();
+}
+// [신규] 퀵 팝업 2단계: 폰 착용 위치 확인. 설정 페이지와 동일한 CHEST/WAIST/ARMBAND/HAND
+// 옵션을 그대로 노출하고, 현재 저장된 위치를 미리 하이라이트해준다.
+showQuickDevicePosStep() {
+const t = translations[storage.getLang()] || translations['en'];
+const titleEl = document.getElementById('quick-devpos-title');
+if (titleEl) titleEl.textContent = t.devicePos;
+const chestBtn = document.getElementById('quick-devpos-chest');
+const waistBtn = document.getElementById('quick-devpos-waist');
+const armbandBtn = document.getElementById('quick-devpos-armband');
+const handBtn = document.getElementById('quick-devpos-hand');
+if (chestBtn) chestBtn.textContent = t.devposChest;
+if (waistBtn) waistBtn.textContent = t.devposWaist;
+if (armbandBtn) armbandBtn.textContent = t.devposArmband;
+if (handBtn) handBtn.textContent = t.devposHand;
+const pos = storage.loadProfile().devicePos;
+if (chestBtn) chestBtn.classList.toggle('active', pos === 'chest');
+if (waistBtn) waistBtn.classList.toggle('active', pos === 'waist');
+if (armbandBtn) armbandBtn.classList.toggle('active', pos === 'armband');
+if (handBtn) handBtn.classList.toggle('active', pos === 'hand');
+const step1 = document.getElementById('quick-mode-step1');
+const step2 = document.getElementById('quick-mode-step2');
+if (step1) step1.style.display = 'none';
+if (step2) step2.style.display = 'block';
+}
+// [신규] 퀵 팝업 2단계에서 위치 선택 - 기존 setDevicePos()를 그대로 재사용해
+// 설정 페이지 하이라이트/린각도 가용성/실행 중인 MotionManager까지 한번에 동기화
+quickSetDevicePos(pos) {
+this.setDevicePos(pos);
 this.closeQuickModeSwitch();
 }
 updateWalkDisplay(data) {
