@@ -715,7 +715,7 @@ alt="runner"/>
 </div>
 </div>
 <!-- ===== [ANGLE UTILITY] 독립 모듈: 자이로 실시간 전/후방 각도 측정 유틸리티.
-     이 카드와 아래 모달(#angle-util-overlay) + 전용 <script>는 앱의 다른 로직/전역상태와
+     이 카드와 아래 모달(#angle-util-overlay) + 전용 스크립트 블록은 앱의 다른 로직/전역상태와
      전혀 공유하지 않는 완전 독립 기능입니다. (state, 이벤트 리스너, 오디오, 번역 모두 자체 보유) ===== -->
 <div id="angle-util-entry-card" class="diag-card" style="margin: 0 0 10px 0; cursor:pointer;" onclick="angleUtil.open()">
 <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
@@ -11745,7 +11745,7 @@ if (btn) { btn.textContent = '▶ PLAY'; btn.classList.remove('playing'); }
 
 <!-- =====================================================================
  [ANGLE UTILITY MODAL] 완전 독립 모듈 — 자이로 실시간 전/후방 각도 측정.
- 이 블록(마크업 + 아래 <script>)은 앱의 다른 로직/전역 변수/이벤트 리스너와
+ 이 블록(마크업 + 아래 스크립트)은 앱의 다른 로직/전역 변수/이벤트 리스너와
  절대 공유하지 않습니다. window.angleUtil 하나만 노출하고, 그 외에는
  전부 IIFE 내부에 캡슐화되어 있어 다른 기능과 섞일 일이 없습니다.
 ====================================================================== -->
@@ -11798,11 +11798,16 @@ window.angleUtil = (function () {
   var MEASURE_MS = 10000;     // 실측정 구간 길이
   var TICK_MS = 100;
 
+  var CALIB_MS = 400;         // 측정 시작 직후 기준 자세를 잡기 위한 짧은 캘리브레이션 구간
+
   var phase = 'idle';         // idle | waiting | measuring | done
   var phaseStart = null;
   var tickHandle = null;
-  var orientationHandler = null;
+  var motionHandler = null;
   var minAngle = null, maxAngle = null, lastAngle = null;
+  var calibrating = false;
+  var baselineVec = null;     // {x,y,z} 착용 직후 기준 중력벡터 (방향 무관 캘리브레이션)
+  var baselineSamples = [];
   var audioCtx = null;
   var permissionBusy = false;
 
@@ -11814,37 +11819,41 @@ window.angleUtil = (function () {
     return isKo() ? {
       title: '실시간 각도 측정 유틸리티',
       entryTitle: '📐 실시간 각도 측정 유틸리티',
-      entryDesc: '자이로 센서로 가슴에 착용한 폰의 전/후방 기울기를 측정합니다.',
-      instructions: '스위치를 켜면 8초의 착용 대기시간이 주어집니다. 그 안에 폰을 가슴에 착용하세요. 삐 소리가 나면 측정이 시작되고, 약 10초 후 다시 삐 소리가 나면 측정이 끝난 것이니 폰을 제거하고 아래 결과를 확인하세요.',
+      entryDesc: '가속도 센서로 착용 직후 자세를 기준삼아, 뛰는 동안 그 자세에서 얼마나 기울어졌는지 측정합니다.',
+      instructions: '스위치를 켜면 8초의 착용 대기시간이 주어집니다. 그 안에 폰을 가슴에 착용하세요. 삐 소리가 나면 그 순간의 자세를 기준(0°)으로 잡고 측정이 시작되며, 약 10초 후 다시 삐 소리가 나면 측정이 끝난 것이니 폰을 제거하고 아래 결과를 확인하세요. 폰을 위아래·앞뒤 어느 방향으로 착용해도 무관합니다.',
       switchStandby: '측정 시작',
       switchRunning: '측정 중지',
       phaseStandby: '대기',
       phaseWaiting: '착용 대기 중',
+      phaseCalibrating: '기준 자세 측정 중',
       phaseMeasuring: '측정 중',
       phaseDone: '측정 완료',
-      minLabel: '최저 각도',
-      maxLabel: '최고 각도',
-      hint: '0° = 수직(직립) 기준. 양수는 전방 기울임, 음수는 후방 기울임입니다.',
-      live: '현재 각도 ',
-      errPermission: '자이로/방향 센서 권한이 거부되었습니다. 브라우저 또는 시스템 설정에서 모션 센서 권한을 허용한 뒤 다시 시도해주세요.',
-      errUnsupported: '이 기기 또는 브라우저는 방향 센서(자이로)를 지원하지 않습니다.'
+      minLabel: '최저 편차각',
+      maxLabel: '최고 편차각',
+      hint: '0° = 착용 직후(2번째 삐) 자세 기준. 숫자가 클수록 그 자세에서 더 많이 벗어난 것입니다 (전/후방 방향 구분 없음, 착용 방향 무관).',
+      live: '현재 편차각 ',
+      liveCalibrating: '기준 자세 측정 중...',
+      errPermission: '모션 센서 권한이 거부되었습니다. 브라우저 또는 시스템 설정에서 모션 센서 권한을 허용한 뒤 다시 시도해주세요.',
+      errUnsupported: '이 기기 또는 브라우저는 가속도 센서(모션 센서)를 지원하지 않습니다.'
     } : {
       title: 'REAL-TIME ANGLE UTILITY',
       entryTitle: '📐 REAL-TIME ANGLE UTILITY',
-      entryDesc: "Measure your chest-worn phone's forward/backward tilt using the gyro sensor.",
-      instructions: 'Turn the switch on and you\'ll have 8 seconds to strap the phone to your chest. A beep marks the start of measurement, and another beep about 10 seconds later marks the end \u2014 remove the phone and check the result below.',
+      entryDesc: "Uses the accelerometer to measure how far you tilt from your starting posture right after strapping the phone to your chest.",
+      instructions: 'Turn the switch on and you\'ll have 8 seconds to strap the phone to your chest. A beep marks the moment your posture is captured as the 0\u00b0 baseline and measurement begins; another beep about 10 seconds later marks the end \u2014 remove the phone and check the result below. Works no matter which way up or which side out the phone is worn.',
       switchStandby: 'START MEASUREMENT',
       switchRunning: 'STOP',
       phaseStandby: 'STANDBY',
       phaseWaiting: 'WAITING TO WEAR',
+      phaseCalibrating: 'CAPTURING BASELINE',
       phaseMeasuring: 'MEASURING',
       phaseDone: 'DONE',
-      minLabel: 'MIN ANGLE',
-      maxLabel: 'MAX ANGLE',
-      hint: '0° = vertical (upright). Positive = tilted forward, negative = tilted backward.',
-      live: 'Current angle ',
-      errPermission: 'Gyro/orientation sensor permission was denied. Please allow motion sensor access in your browser or system settings and try again.',
-      errUnsupported: 'This device or browser does not support orientation (gyro) sensors.'
+      minLabel: 'MIN DEVIATION',
+      maxLabel: 'MAX DEVIATION',
+      hint: '0\u00b0 = posture at the 2nd beep (baseline). Larger numbers mean more deviation from that posture (no forward/backward sign, mount-orientation independent).',
+      live: 'Current deviation ',
+      liveCalibrating: 'Capturing baseline...',
+      errPermission: 'Motion sensor permission was denied. Please allow motion sensor access in your browser or system settings and try again.',
+      errUnsupported: 'This device or browser does not support the accelerometer (motion sensor).'
     };
   }
 
@@ -11882,7 +11891,7 @@ window.angleUtil = (function () {
     if (!el) return;
     if (phase === 'idle') el.textContent = t.phaseStandby;
     else if (phase === 'waiting') el.textContent = t.phaseWaiting;
-    else if (phase === 'measuring') el.textContent = t.phaseMeasuring;
+    else if (phase === 'measuring') el.textContent = calibrating ? t.phaseCalibrating : t.phaseMeasuring;
     else if (phase === 'done') el.textContent = t.phaseDone;
   }
 
@@ -11901,6 +11910,7 @@ window.angleUtil = (function () {
   function setLiveAngle() {
     var el = $('angle-util-live-angle');
     if (!el) return;
+    if (phase === 'measuring' && calibrating) { el.textContent = T().liveCalibrating; return; }
     if (lastAngle == null) { el.textContent = ''; return; }
     el.textContent = T().live + lastAngle.toFixed(1) + '\u00b0';
   }
@@ -11957,13 +11967,13 @@ window.angleUtil = (function () {
     } catch (e) {}
   }
 
-  function requestOrientationPermission() {
+  function requestMotionPermission() {
     return new Promise(function (resolve, reject) {
-      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-        DeviceOrientationEvent.requestPermission().then(function (state) {
+      if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+        DeviceMotionEvent.requestPermission().then(function (state) {
           resolve(state === 'granted');
         }).catch(reject);
-      } else if (typeof window !== 'undefined' && 'DeviceOrientationEvent' in window) {
+      } else if (typeof window !== 'undefined' && 'DeviceMotionEvent' in window) {
         resolve(true);
       } else {
         reject(new Error('unsupported'));
@@ -11971,26 +11981,60 @@ window.angleUtil = (function () {
     });
   }
 
-  function handleOrientation(e) {
-    if (e.beta == null) return;
-    var angle = e.beta - 90; // 0 = 수직(직립) 기준 편차각
-    lastAngle = angle;
-    if (phase === 'measuring') {
-      if (minAngle === null || angle < minAngle) minAngle = angle;
-      if (maxAngle === null || angle > maxAngle) maxAngle = angle;
+  // 착용 방향(위/아래, 전/후, 좌우 회전)에 완전히 무관하게 동작하도록,
+  // 절대 좌표계 각도(beta 등) 대신 "착용 직후 자세 벡터"를 0°로 캘리브레이션한 뒤
+  // 그 기준 벡터와의 각도 편차만 계산한다 (내적 기반, 방향 부호 없음).
+  function vecLen(v) { return Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z); }
+
+  function angleBetween(a, b) {
+    var la = vecLen(a), lb = vecLen(b);
+    if (la < 1e-6 || lb < 1e-6) return 0;
+    var dot = (a.x * b.x + a.y * b.y + a.z * b.z) / (la * lb);
+    dot = Math.max(-1, Math.min(1, dot));
+    return Math.acos(dot) * (180 / Math.PI);
+  }
+
+  function handleMotion(e) {
+    var g = e.accelerationIncludingGravity;
+    if (!g || g.x == null || g.y == null || g.z == null) return;
+    var v = { x: g.x, y: g.y, z: g.z };
+
+    if (phase !== 'measuring') return;
+
+    if (calibrating) {
+      baselineSamples.push(v);
+      if (Date.now() - phaseStart >= CALIB_MS) {
+        var n = baselineSamples.length || 1;
+        var sum = { x: 0, y: 0, z: 0 };
+        for (var i = 0; i < baselineSamples.length; i++) {
+          sum.x += baselineSamples[i].x;
+          sum.y += baselineSamples[i].y;
+          sum.z += baselineSamples[i].z;
+        }
+        baselineVec = { x: sum.x / n, y: sum.y / n, z: sum.z / n };
+        calibrating = false;
+        updatePhaseLabel();
+      }
+      return;
     }
+
+    if (!baselineVec) return;
+    var angle = angleBetween(v, baselineVec); // 0° = 기준 자세, 항상 0 이상 (방향 부호 없음)
+    lastAngle = angle;
+    if (minAngle === null || angle < minAngle) minAngle = angle;
+    if (maxAngle === null || angle > maxAngle) maxAngle = angle;
   }
 
-  function attachOrientationListener() {
-    if (orientationHandler) return;
-    orientationHandler = handleOrientation;
-    window.addEventListener('deviceorientation', orientationHandler);
+  function attachMotionListener() {
+    if (motionHandler) return;
+    motionHandler = handleMotion;
+    window.addEventListener('devicemotion', motionHandler);
   }
 
-  function detachOrientationListener() {
-    if (!orientationHandler) return;
-    window.removeEventListener('deviceorientation', orientationHandler);
-    orientationHandler = null;
+  function detachMotionListener() {
+    if (!motionHandler) return;
+    window.removeEventListener('devicemotion', motionHandler);
+    motionHandler = null;
   }
 
   function clearTick() {
@@ -12006,6 +12050,9 @@ window.angleUtil = (function () {
       if (elapsed >= WEAR_DELAY_MS) {
         beep();
         minAngle = null; maxAngle = null;
+        calibrating = true;
+        baselineVec = null;
+        baselineSamples = [];
         phase = 'measuring';
         phaseStart = Date.now();
         updatePhaseLabel();
@@ -12024,6 +12071,7 @@ window.angleUtil = (function () {
   function resetDisplay() {
     phase = 'idle';
     minAngle = null; maxAngle = null; lastAngle = null;
+    calibrating = false; baselineVec = null; baselineSamples = [];
     setCountdown('--');
     setLiveAngle();
     hideResults();
@@ -12039,16 +12087,17 @@ window.angleUtil = (function () {
     unlockAudio(); // 사용자 제스처(스위치 클릭) 안에서 즉시 오디오 언락
     if (permissionBusy) return;
     permissionBusy = true;
-    requestOrientationPermission().then(function (granted) {
+    requestMotionPermission().then(function (granted) {
       permissionBusy = false;
       if (!granted) { showError(T().errPermission); return; }
       phase = 'waiting';
       phaseStart = Date.now();
       minAngle = null; maxAngle = null; lastAngle = null;
+      calibrating = false; baselineVec = null; baselineSamples = [];
       setSwitchVisual(true);
       updateSwitchText();
       updatePhaseLabel();
-      attachOrientationListener();
+      attachMotionListener();
       clearTick();
       tickHandle = setInterval(tick, TICK_MS);
     }).catch(function () {
@@ -12059,7 +12108,7 @@ window.angleUtil = (function () {
 
   function finishSequence() {
     clearTick();
-    detachOrientationListener();
+    detachMotionListener();
     phase = 'done';
     setSwitchVisual(false);
     updateSwitchText();
@@ -12070,7 +12119,7 @@ window.angleUtil = (function () {
 
   function cancelSequence() {
     clearTick();
-    detachOrientationListener();
+    detachMotionListener();
     resetDisplay();
   }
 
