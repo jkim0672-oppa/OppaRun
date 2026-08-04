@@ -10235,6 +10235,15 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // [추가] 심박수는 보정계수가 아예 없어 예상값도 실측값과 동일하게 둔다.
     const correctedPhoneAvgHr = phoneAvgHr;
 
+    // [추가] "페이스 실효 보정배율" — 페이스는 strideCorrectionFactor/gpsDistCorrectionFactor처럼
+    // 별도로 저장되는 값이 없다(위 correctedPhoneAvgPaceSec 계산 주석 참고). 다만 GPS 거리
+    // 보정계수가 적용되면 페이스도 반비례로 자동 연동되므로, 그 실질 배율을 참고용으로
+    // 계산해서 그래프/표/권장수치 세 군데에 동일한 라벨로 노출한다. 별도 설정값이 아니라
+    // "GPS 거리 보정계수를 적용하면 페이스가 몇 배로 움직이는지"를 보여주는 파생값이다.
+    const paceImpliedFactor = suggestedGpsDistFactor != null
+      ? 1 / stepRatio(garminDistanceKm / phoneDistanceKm, GPS_STEP_FRACTION)
+      : null;
+
     // [추가] 리포트 저장(SAVE REPORT)용으로 이번 비교의 전체 수치를 보관해둔다.
     // appliedFields/appliedAt은 아직 비어있고, applyCalibration()/applyAveragedCalibration()이
     // 실행될 때 채워져서 "제안만 됐는지" vs "실제로 적용됐는지"를 리포트에 구분해서 남긴다.
@@ -10252,7 +10261,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         hr: { phone: phoneAvgHr, garmin: garminAvgHr, diffPct: hrDiffPct, unit: 'bpm' }
       },
       current: { gct: curGct, rot: curRot, vertScale: curVertScale, strideFactor: curStrideFactor, gpsDistFactor: curGpsDistFactor, cadFactor: curCadFactor },
-      suggested: { gct: suggestedGct, rot: suggestedRot, vertScale: suggestedVertScale, strideFactor: suggestedStrideFactor, gpsDistFactor: suggestedGpsDistFactor, cadFactor: suggestedCadFactor },
+      suggested: { gct: suggestedGct, rot: suggestedRot, vertScale: suggestedVertScale, strideFactor: suggestedStrideFactor, gpsDistFactor: suggestedGpsDistFactor, cadFactor: suggestedCadFactor, paceImpliedFactor: paceImpliedFactor },
       appliedFields: null, // applyCalibration()/applyAveragedCalibration() 실행 시 채워짐
       appliedAt: null
     };
@@ -10293,6 +10302,16 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       + rowFmt(isKo ? '페이스 (/km)' : 'PACE (/km)', phoneAvgPaceSec, garminAvgPaceSec, paceDiffPct, fmtPace)
       + row(isKo ? '평균 심박수 (bpm)' : 'AVG HR (bpm)', phoneAvgHr, garminAvgHr, hrDiffPct, '')
       + LeanAngleUI.garminPhoneOnlyRowHtml(phoneAvgLeanDeg, isKo ? 'ko' : 'en', phoneAvgLeanForwardDeg, phoneAvgLeanLateralDeg);
+
+    // [추가] 페이스는 별도 보정계수가 없지만, GPS 거리 보정계수와 반비례로 연동되는
+    // 실질 배율(paceImpliedFactor)을 표 아래에 안내문으로 표시.
+    if (paceImpliedFactor != null) {
+      html += '<div style="font-size:9.5px; color:#7fd3ff; font-weight:700; padding:2px 0 10px 0; line-height:1.5;">'
+        + (isKo
+          ? '↳ 페이스 실효 보정배율: <b>' + paceImpliedFactor.toFixed(3) + '×</b> (별도 저장값 아님 — GPS 거리 보정계수와 반비례로 자동 연동됨)'
+          : '↳ Pace effective correction ratio: <b>' + paceImpliedFactor.toFixed(3) + '×</b> (not a separate stored value — auto-linked inversely with the GPS distance factor)')
+        + '</div>';
+    }
 
     // [추가] 자체 알고리즘 vs OS 걸음감지센서 vs OS 걸음수센서 중 어느 쪽이 가민 케이던스에
     // 가장 가까운지 짧게 안내. 값이 하나라도 있어야 의미가 있으므로 그때만 표시.
@@ -10337,9 +10356,14 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     ], {
       title: isKo ? '보정 적용 후 예상 그래프' : 'PROJECTED AFTER CORRECTION',
       phoneLabel: isKo ? '폰 (보정 후 예상)' : 'PHONE (projected)',
-      note: isKo
+      note: (isKo
         ? '⚠ 아직 앱에 실제로 적용된 값이 아니에요. 위 권장 보정수치를 반영했을 때 예상되는 결과를 미리 보여주는 그래프입니다.'
-        : '⚠ Not actually applied to the app yet. This shows the expected result if the recommended correction values above were applied.'
+        : '⚠ Not actually applied to the app yet. This shows the expected result if the recommended correction values above were applied.')
+        + (paceImpliedFactor != null
+          ? (isKo
+            ? ' 페이스 실효 보정배율: ' + paceImpliedFactor.toFixed(3) + '× (별도 저장값 아님, GPS 거리 보정계수와 반비례 연동)'
+            : ' Pace effective correction ratio: ' + paceImpliedFactor.toFixed(3) + '× (not stored separately, auto-linked inversely with GPS distance factor)')
+          : '')
     });
 
     const hasSuggestion = suggestedRot != null || suggestedRotOS != null || suggestedGct != null || suggestedVertScale != null || suggestedStrideFactor != null || suggestedGpsDistFactor != null || suggestedCadFactor != null;
@@ -10373,6 +10397,15 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       }
       if (suggestedGpsDistFactor != null) {
         html += checkRow('calib-sel-gps', (isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + curGpsDistFactor.toFixed(3) + ' → <b>' + suggestedGpsDistFactor.toFixed(3) + '</b> ' + (isKo ? '(실제 거리·페이스에 직접 반영됨)' : '(directly affects real distance/pace)'));
+        // [추가] 페이스는 위 GPS 거리 보정계수와 별개로 저장되는 값이 없으므로 체크박스는
+        // 만들지 않고, 위 항목을 적용하면 페이스가 실질적으로 몇 배 움직이는지만 안내한다.
+        if (paceImpliedFactor != null) {
+          html += '<div style="font-size:10px; color:#7fd3ff; padding:2px 0 6px 23px; line-height:1.5;">'
+            + (isKo
+              ? '↳ 페이스 실효 보정배율: <b>' + paceImpliedFactor.toFixed(3) + '×</b> (별도 설정 아님, 위 항목 적용 시 자동 연동)'
+              : '↳ Pace effective correction ratio: <b>' + paceImpliedFactor.toFixed(3) + '×</b> (not a separate setting — auto-linked when the item above is applied)')
+            + '</div>';
+        }
       }
       if (suggestedCadFactor != null) {
         html += checkRow('calib-sel-cad', (isKo ? '케이던스 보정계수' : 'cadCorrectionFactor') + ': ' + curCadFactor.toFixed(3) + ' → <b>' + suggestedCadFactor.toFixed(3) + '</b> ' + (isKo ? '(네이티브 걸음센서 원시값은 그대로, 표시/기록값에만 반영됨)' : '(native raw value untouched, applies only to displayed/logged cadence)'));
