@@ -268,6 +268,11 @@ overflow-x: auto; white-space: nowrap; -ms-overflow-style: none; scrollbar-width
 .today-summary-bar .ts-label { color: var(--text-dim); font-size: 11px; font-weight: 700; }
 .today-summary-bar .ts-val { color: var(--primary); font-size: 13px; font-weight: 900; }
 .today-summary-bar .ts-sep { color: #444; flex-shrink: 0; }
+/* [신규] 오늘 요약을 일일추이와 같은 막대그래프 형태로 표시 */
+.today-caption { font-size: 12px; font-weight: 800; color: var(--text-dim); margin-top: 8px; display: flex; align-items: center; gap: 6px; overflow-x: auto; white-space: nowrap; }
+.today-caption .tc-val { color: var(--text-main); font-weight: 900; }
+.today-caption .tc-sep { color: #444; }
+.today-bar-chart { margin-top: 6px; }
 .bar-chart { background: var(--card-bg); border-radius: 12px; padding: 16px 8px 10px; display: flex; align-items: flex-end; gap: 4px; height: 130px; }
 .bar-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
 .bar-val { font-size: 8.5px; color: var(--text-dim); font-weight: 800; margin-bottom: 4px; white-space: nowrap; height: 11px; }
@@ -2107,7 +2112,7 @@ reader.readAsText(file);
 saveProfile(profile) { localStorage.setItem(this.PROFILE_KEY, JSON.stringify(profile)); }
 loadProfile() {
 // [CALIB_ANCHOR:DEFAULT_PROFILE] 캘리브레이션 스니펫(코드 반영용)을 여기 strideCorrectionFactor/gpsDistCorrectionFactor/cadCorrectionFactor에 반영하세요.
-const defaultProfile = { h: 175, hu: "cm", w: 70, wu: "kg", age: 30, devicePos: "chest", strideCorrectionFactor: 1.090, gpsDistCorrectionFactor: 0.976, cadCorrectionFactor: 1.031 }; // [수정 2026-08-02] CHEST 실측 3회 평균 반영 (strideCorrectionFactor 1.000→1.049, 스텝길이 평균 -4.7% 과소측정 기준. gpsDistCorrectionFactor는 3회 평균 거리오차 -0.3%로 유의미한 변화 없어 0.950 유지) [추가] cadCorrectionFactor: 케이던스 보정계수 신규 도입, 기본 1.0(보정없음)
+const defaultProfile = { h: 175, hu: "cm", w: 70, wu: "kg", age: 30, devicePos: "chest", strideCorrectionFactor: 1.049, gpsDistCorrectionFactor: 0.950, cadCorrectionFactor: 1.0 }; // [수정 2026-08-02] CHEST 실측 3회 평균 반영 (strideCorrectionFactor 1.000→1.049, 스텝길이 평균 -4.7% 과소측정 기준. gpsDistCorrectionFactor는 3회 평균 거리오차 -0.3%로 유의미한 변화 없어 0.950 유지) [추가] cadCorrectionFactor: 케이던스 보정계수 신규 도입, 기본 1.0(보정없음)
 const data = localStorage.getItem(this.PROFILE_KEY);
 // [수정] 기존 저장 데이터에 새 필드(age, devicePos)가 없을 경우 기본값으로 보완
 return data ? Object.assign({}, defaultProfile, JSON.parse(data)) : defaultProfile;
@@ -4305,41 +4310,57 @@ return '<div class="bar-col">' +
 return '<div class="stats-section-title">' + (t['chartTitle' + cap] || '') + '</div>' +
 '<div class="bar-chart">' + barsHtml + '</div>';
 }
-// [신규] 일일추이 막대그래프 바로 밑에 붙는 "오늘 요약" 한줄 바.
-// 날짜/시간, 총거리, 총시간, 총칼로리, 장소를 한 줄(font-size 13px)로 표시.
-// 장소는 비동기 역지오코딩이 필요해서 우선 자리표시자를 넣고, 조회가 끝나면 해당 span만 갱신함.
+// [신규] 일일추이 막대그래프 바로 밑에 붙는 "오늘의 기록" 그래프.
+// 위쪽 일일추이(.bar-chart/.bar-col/.bar/.bar-val/.bar-label)와 완전히 같은 스타일을 재사용해서
+// 거리/시간/칼로리 3개 막대로 보여줌. 막대 높이는 "역대 하루 최고 기록 대비 오늘 비율".
+// 날짜/시간, 장소는 막대로 표현할 수 없어서 그래프 위 캡션 한 줄로 표시(장소는 비동기 역지오코딩).
 buildTodaySummaryHtml(h, t) {
 const isKo = (storage.getLang() === 'ko');
 const today = new Date(); today.setHours(0,0,0,0);
 const todayKey = this.dayKey(today);
-const todayRecords = h.filter(r => {
+// 날짜별 합산(거리/시간/칼로리) 집계 - 오늘 값 + 역대 최고 하루 기록(막대 높이 정규화용)
+const dayAgg = {};
+h.forEach(r => {
 const d = this.parseRecordDate(r.date);
-if (isNaN(d.getTime())) return false;
-return this.dayKey(d) === todayKey;
-});
-if (todayRecords.length === 0) {
-return '<div class="today-summary-bar today-summary-empty">' + (isKo ? '오늘은 아직 뛴 기록이 없어요' : 'No runs yet today') + '</div>';
-}
-let dist = 0, sec = 0, kcal = 0;
-todayRecords.forEach(r => {
-dist += parseFloat(r.dist) || 0;
-kcal += parseInt(r.kcal) || 0;
+if (isNaN(d.getTime())) return;
+const key = this.dayKey(d);
+if (!dayAgg[key]) dayAgg[key] = { dist: 0, sec: 0, kcal: 0, records: [] };
+dayAgg[key].dist += parseFloat(r.dist) || 0;
+dayAgg[key].kcal += parseInt(r.kcal) || 0;
 if (r.time && typeof r.time === 'string') {
 const parts = r.time.split(':');
-if (parts.length === 2) sec += (parseInt(parts[0],10)*60)+parseInt(parts[1],10);
-else if (parts.length === 3) sec += (parseInt(parts[0],10)*3600)+(parseInt(parts[1],10)*60)+parseInt(parts[2],10);
+if (parts.length === 2) dayAgg[key].sec += (parseInt(parts[0],10)*60)+parseInt(parts[1],10);
+else if (parts.length === 3) dayAgg[key].sec += (parseInt(parts[0],10)*3600)+(parseInt(parts[1],10)*60)+parseInt(parts[2],10);
 }
+dayAgg[key].records.push(r);
 });
-const sorted = todayRecords.slice().sort((a,b) => this.parseRecordDate(b.date) - this.parseRecordDate(a.date));
+const todayAgg = dayAgg[todayKey];
+if (!todayAgg || todayAgg.records.length === 0) {
+return '<div class="stats-section-title">' + (isKo ? '오늘의 기록' : "Today's Run") + '</div>' +
+'<div class="today-summary-bar today-summary-empty">' + (isKo ? '오늘은 아직 뛴 기록이 없어요' : 'No runs yet today') + '</div>';
+}
+let maxDist = 0.1, maxSec = 1, maxKcal = 1;
+Object.keys(dayAgg).forEach(key => {
+const a = dayAgg[key];
+if (a.dist > maxDist) maxDist = a.dist;
+if (a.sec > maxSec) maxSec = a.sec;
+if (a.kcal > maxKcal) maxKcal = a.kcal;
+});
+const distPct = Math.max(4, Math.round((todayAgg.dist / maxDist) * 100));
+const secPct = Math.max(4, Math.round((todayAgg.sec / maxSec) * 100));
+const kcalPct = Math.max(4, Math.round((todayAgg.kcal / maxKcal) * 100));
+const toUnit = v => this.currentUnit === 'km' ? v : (v * 0.621371);
+const unitLabel = this.currentUnit === 'km' ? 'km' : 'mi';
+const distDisplay = toUnit(todayAgg.dist).toFixed(2) + ' ' + unitLabel;
+const sec = todayAgg.sec;
+const hh = Math.floor(sec/3600), mm = Math.floor((sec%3600)/60), ss = sec%60;
+const timeDisplay = sec > 0 ? (hh > 0 ? (hh + ':' + String(mm).padStart(2,'0') + ':' + String(ss).padStart(2,'0')) : (mm + ':' + String(ss).padStart(2,'0'))) : '--';
+const kcalDisplay = todayAgg.kcal + ' kcal';
+// 캡션용 날짜/시간(가장 최근 기록 기준) + 장소(비동기 역지오코딩)
+const sorted = todayAgg.records.slice().sort((a,b) => this.parseRecordDate(b.date) - this.parseRecordDate(a.date));
 const latest = sorted[0];
 const latestDate = this.parseRecordDate(latest.date);
 const dateTimeDisplay = (latestDate.getMonth()+1) + '/' + latestDate.getDate() + ' ' + String(latestDate.getHours()).padStart(2,'0') + ':' + String(latestDate.getMinutes()).padStart(2,'0');
-const toUnit = v => this.currentUnit === 'km' ? v : (v * 0.621371);
-const unitLabel = this.currentUnit === 'km' ? 'km' : 'mi';
-const distDisplay = toUnit(dist).toFixed(2) + ' ' + unitLabel;
-const hh = Math.floor(sec/3600), mm = Math.floor((sec%3600)/60), ss = sec%60;
-const timeDisplay = sec > 0 ? (hh > 0 ? (hh + ':' + String(mm).padStart(2,'0') + ':' + String(ss).padStart(2,'0')) : (mm + ':' + String(ss).padStart(2,'0'))) : '--';
-const kcalDisplay = kcal + ' kcal';
 const locId = 'today-summary-loc-' + latest.id;
 const placeHolder = isKo ? '조회중…' : 'Loading…';
 if (typeof community !== 'undefined' && latest.path && latest.path.length > 0 && latest.path[0] && latest.path[0].length >= 2) {
@@ -4351,17 +4372,32 @@ const el = document.getElementById(locId);
 if (el) el.textContent = isKo ? '알 수 없음' : 'Unknown';
 });
 }
-return '<div class="today-summary-bar">' +
-'<span class="ts-item"><span class="ts-label">' + (isKo ? '오늘' : 'Today') + '</span><span class="ts-val">' + dateTimeDisplay + '</span></span>' +
-'<span class="ts-sep">/</span>' +
-'<span class="ts-item"><span class="ts-label">' + (isKo ? '거리' : 'Dist') + '</span><span class="ts-val">' + distDisplay + '</span></span>' +
-'<span class="ts-sep">/</span>' +
-'<span class="ts-item"><span class="ts-label">' + (isKo ? '시간' : 'Time') + '</span><span class="ts-val">' + timeDisplay + '</span></span>' +
-'<span class="ts-sep">/</span>' +
-'<span class="ts-item"><span class="ts-label">' + (isKo ? '칼로리' : 'Cal') + '</span><span class="ts-val">' + kcalDisplay + '</span></span>' +
-'<span class="ts-sep">/</span>' +
-'<span class="ts-item"><span class="ts-label">' + (isKo ? '장소' : 'Place') + '</span><span class="ts-val" id="' + locId + '">' + placeHolder + '</span></span>' +
+const distLabel = isKo ? '거리' : 'Dist';
+const timeLabel = isKo ? '시간' : 'Time';
+const calLabel = isKo ? '칼로리' : 'Cal';
+const barsHtml =
+'<div class="bar-col">' +
+'<div class="bar-val">' + distDisplay + '</div>' +
+'<div class="bar hl" style="height:' + distPct + '%;"></div>' +
+'<div class="bar-label hl">' + distLabel + '</div>' +
+'</div>' +
+'<div class="bar-col">' +
+'<div class="bar-val">' + timeDisplay + '</div>' +
+'<div class="bar hl" style="height:' + secPct + '%;"></div>' +
+'<div class="bar-label hl">' + timeLabel + '</div>' +
+'</div>' +
+'<div class="bar-col">' +
+'<div class="bar-val">' + kcalDisplay + '</div>' +
+'<div class="bar hl" style="height:' + kcalPct + '%;"></div>' +
+'<div class="bar-label hl">' + calLabel + '</div>' +
 '</div>';
+return '<div class="stats-section-title">' + (isKo ? '오늘의 기록' : "Today's Run") + '</div>' +
+'<div class="today-caption">' +
+'<span class="tc-val">' + dateTimeDisplay + '</span>' +
+'<span class="tc-sep">·</span>' +
+'<span>📍</span><span class="tc-val" id="' + locId + '">' + placeHolder + '</span>' +
+'</div>' +
+'<div class="bar-chart today-bar-chart">' + barsHtml + '</div>';
 }
 updateTotalStats() {
 const hAll = storage.loadHistory();
@@ -4887,7 +4923,7 @@ const profiles = {
 // 위치에서 groundThreshold/impactThreshold/rotRejectThreshold는 걸음을 세는 데는 쓰이지
 // 않고, GCT 추정·수직진동·좌우밸런스 등 보조 지표 계산에만 쓰인다(값 자체는 위치별
 // 신호 패턴이 달라 계속 따로 유지).
-chest:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.419, vertScale: 0.521, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220 }, // [수정] Garmin FIT 실측 3회 평균 반영 (2026-08-02 gctFallbackRatio 0.631→0.508, vertScale 0.45→0.536 — GCT 평균 +24.2%, VertOsc 평균 -15.8% 오차 기준)
+chest:   { groundThreshold: 11.0, impactThreshold: 10.5, gctFallbackRatio: 0.508, vertScale: 0.536, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정] Garmin FIT 실측 3회 평균 반영 (2026-08-02 gctFallbackRatio 0.631→0.508, vertScale 0.45→0.536 — GCT 평균 +24.2%, VertOsc 평균 -15.8% 오차 기준)
   waist:   { groundThreshold: 10.5, impactThreshold: 10.0, gctFallbackRatio: 0.38, vertScale: 5.5, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
   armband: { groundThreshold: 12.0, impactThreshold: 12.5, gctFallbackRatio: 0.33, vertScale: 4.5, minStepInterval: 240, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
   // [수정] 손에 들고 뛸 때는 자체 가속도/자이로 임계값 알고리즘으로 걸음을 "직접 판정"하지 않고,
@@ -10174,15 +10210,14 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // 웜업 구간 노이즈나 GPS 튐 등으로 오차가 유난히 크게 나온 러닝 하나만 비교해도
     // 제안값이 과도하게(2~3배 이상) 튈 수 있는 문제가 있었음. 다른 항목들과 동일하게
     // ±10% clamp를 적용해 한 번에 너무 크게 바뀌지 않도록 안전장치 추가.
-    // [수정] 오차 임계값 3%→1%로 낮춤(사용자 요청) — 작은 오차에도 보정수치가 뜨도록.
-    const suggestedGct = (curGct != null && phoneAvgGct && garminAvgGct && gctDiffPct != null && Math.abs(gctDiffPct) > 1)
+    const suggestedGct = (curGct != null && phoneAvgGct && garminAvgGct && gctDiffPct != null && Math.abs(gctDiffPct) > 3)
       ? Math.round(curGct * clampRatio(garminAvgGct / phoneAvgGct) * 1000) / 1000 : null;
     // [추가] 수직진동(vertScale)과 보폭(strideCorrectionFactor) 제안값.
-    // [수정] 오차 임계값 3%→1%로 낮춤(사용자 요청) — 작은 오차에도 노이즈로 보지 않고 제안.
-    // 과보정 방지를 위해 한 번에 ±10% 이상 바뀌지 않도록 clamp.
-    const suggestedVertScale = (curVertScale != null && curVertScale > 0 && phoneAvgVertMm && garminAvgVertMm && vertDiffPct != null && Math.abs(vertDiffPct) > 1)
+    // 오차가 3% 이내면 노이즈로 보고 제안하지 않음. 과보정 방지를 위해 한 번에
+    // ±10% 이상 바뀌지 않도록 clamp.
+    const suggestedVertScale = (curVertScale != null && curVertScale > 0 && phoneAvgVertMm && garminAvgVertMm && vertDiffPct != null && Math.abs(vertDiffPct) > 3)
       ? Math.round(curVertScale * clampRatio(garminAvgVertMm / phoneAvgVertMm) * 1000) / 1000 : null;
-    const suggestedStrideFactor = (phoneAvgStepMm && garminAvgStepMm && stepDiffPct != null && Math.abs(stepDiffPct) > 1)
+    const suggestedStrideFactor = (phoneAvgStepMm && garminAvgStepMm && stepDiffPct != null && Math.abs(stepDiffPct) > 3)
       ? Math.round(curStrideFactor * clampRatio(garminAvgStepMm / phoneAvgStepMm) * 1000) / 1000 : null;
     // [추가] GPS 거리 보정계수 제안값. 실측 거리라 노이즈가 적으므로 1% 초과 오차부터
     // 제안하되, 한 번에 과도하게 튀지 않도록 ±5%로 더 좁게 clamp.
@@ -10192,8 +10227,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       ? Math.round(curGpsDistFactor * clampGpsRatio(garminDistanceKm / phoneDistanceKm) * 1000) / 1000 : null;
     // [추가] 케이던스 보정계수 제안값. gpsDistCorrectionFactor와 동일한 패턴 —
     // 오차가 3% 이내면 노이즈로 보고 제안하지 않으며, ±10% clamp로 한 번에 과도하게 안 튀게 함.
-    // [수정] 오차 임계값 3%→1%로 낮춤(사용자 요청) — 작은 오차에도 보정수치가 뜨도록.
-    const suggestedCadFactor = (phoneAvgCadence && garminAvgCadence && cadDiffPct != null && Math.abs(cadDiffPct) > 1)
+    const suggestedCadFactor = (phoneAvgCadence && garminAvgCadence && cadDiffPct != null && Math.abs(cadDiffPct) > 3)
       ? Math.round(curCadFactor * clampRatio(garminAvgCadence / phoneAvgCadence) * 1000) / 1000 : null;
 
     // [추가] 리포트 저장(SAVE REPORT)용으로 이번 비교의 전체 수치를 보관해둔다.
@@ -10342,8 +10376,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       };
     } else {
       html += '<div style="margin-top:12px; font-size:11px; color:#888;">' + (isKo
-        ? '오차가 이미 충분히 작아서(1% 이내) 제안할 보정값이 없습니다.'
-        : 'Differences are already small (within 1%) — nothing to suggest.') + '</div>';
+        ? '오차가 이미 충분히 작아서(3% 이내) 제안할 보정값이 없습니다.'
+        : 'Differences are already small (within 3%) — nothing to suggest.') + '</div>';
       lastSuggestion = null;
     }
     html += '<button id="btn-save-calib-report" style="margin-top:10px; background:transparent; color:#999; border:1.5px solid #333; padding:11px; border-radius:10px; width:100%; font-weight:800; font-size:11px; cursor:pointer;" onclick="garmin.exportCalibReport()">' + (isKo ? '⬇ 리포트 다운로드 (.txt)' : '⬇ DOWNLOAD REPORT (.txt)') + '</button>';
@@ -11025,7 +11059,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
      suggLine(isKo ? '케이던스 보정계수' : 'cadCorrectionFactor', 'cadCorrectionFactor', d.current.cadFactor, d.suggested.cadFactor, 3)]
       .filter(Boolean).forEach(l => lines.push(l));
     if (![d.suggested.rot, d.suggested.gct, d.suggested.vertScale, d.suggested.strideFactor, d.suggested.gpsDistFactor, d.suggested.cadFactor].some(v => v != null)) {
-      lines.push(isKo ? '(제안할 보정값 없음 — 오차가 이미 1% 이내)' : '(nothing suggested — differences already within 1%)');
+      lines.push(isKo ? '(제안할 보정값 없음 — 오차가 이미 3% 이내)' : '(nothing suggested — differences already within 3%)');
     }
     lines.push('');
     lines.push(isKo ? '--- 실제 적용 여부 ---' : '--- Applied Status ---');
