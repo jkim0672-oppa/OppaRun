@@ -156,20 +156,6 @@ filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
 .diag-main-val { font-size: 20px; font-weight: 900; color: #ffffff; letter-spacing: -0.3px; }
 .diag-ref { font-size: 11px; color: var(--warning); font-weight: 800; }
 .diag-tip { font-size: 13px; color: #ffffff; line-height: 1.6; font-weight: 600; padding-top: 12px; border-top: 1px solid #2a2a2a; word-break: keep-all; }
-/* [추가] 구간별 변화 그래프 리디자인 — 컬러 도트+제목 헤더, 큰 카드, 하단 3분할 스탯 박스 */
-.split-block { margin: 18px 0 6px; }
-.split-block-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.split-block-title-wrap { display: flex; align-items: center; gap: 8px; }
-.split-block-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
-.split-block-title { font-size: 16px; font-weight: 900; color: #fff; letter-spacing: -0.2px; }
-.split-block-range { font-size: 12px; font-weight: 700; color: #777; }
-.split-block-card { background: #141414; border-radius: 16px; padding: 18px 16px 16px; border: 1px solid #262626; box-sizing: border-box; }
-.split-block-xlabels { display: flex; justify-content: space-between; font-size: 12px; color: #777; font-weight: 700; margin-top: 6px; }
-.split-block-stats { display: flex; gap: 10px; margin-top: 14px; }
-.split-stat-box { flex: 1; min-width: 0; background: #1c1c1c; border-radius: 12px; padding: 12px 10px; border: 1px solid #2a2a2a; box-sizing: border-box; }
-.split-stat-label { font-size: 11px; color: #888; font-weight: 700; margin-bottom: 6px; white-space: nowrap; }
-.split-stat-value { font-size: 19px; font-weight: 900; color: #fff; letter-spacing: -0.3px; }
-.split-stat-value span { font-size: 11px; font-weight: 700; color: #888; margin-left: 1px; }
 .close-detail { position: absolute; top: calc(var(--top-inset) + 5px); right: 20px; z-index: 20001; background: var(--primary); color: #000; border: none; padding: 8px 16px; border-radius: 20px; font-weight: 900; font-size: 12px; }
 .recovery-highlight { color: var(--primary); font-size: 26px; font-weight: 900; margin: 10px 0; display: block; letter-spacing: -0.5px; }
 /* ===== 설정(SETTINGS) 화면: 드롭다운/단위/성별/기기 착용위치 ===== */
@@ -2183,24 +2169,43 @@ function findPrecisionLogForRecordId(recordId) {
 // [추가] 단일 지표의 구간별(km) 변화를 채워진 영역 그래프(SVG)로 그린다.
 // opts: { title, points:[{x:거리km,y:값}], color, fillColor, invertY(값이 클수록 위로),
 //         avgVal, bestVal, fmtY: (v)=>문자열 }
-// [수정] 기존엔 좌표를 직선(L)으로만 이어서 꺾여 보였고, 페이스/케이던스/심박 색이
-// 파랑/마젠타/빨강이라 앱 전체의 네온그린·블랙 톤과 따로 놀았음. 아래처럼 개선:
-// - 좌표를 캣멀롬 스플라인 → 3차 베지어로 변환해서 부드러운 곡선으로 연결
-// - 색상을 앱의 --primary(네온그린) 계열로 통일하고 지표별로는 밝기/색조만 살짝 다르게
-// - 선 아래 은은한 네온 글로우(blur) + 위→아래 그라데이션 채우기 추가
-// - 격자선 1개(평균선)는 유지하되 더 얇게, 하단 라벨은 앱 공통 caption 톤(자간 있는 대문자)으로
-// [수정 2026-08-05] 리스트형 카드에서 "컬러 도트 헤더 + 큰 그래프 카드 + 하단 3분할 스탯 박스"
-// 레이아웃으로 리디자인 (레퍼런스 스크린샷 기준). 평균/최고 옆에 지표별 세 번째 보조값
-// (opts.extraLabel/extraVal — 페이스=이동시간, 케이던스=밸런스)을 넣을 수 있게 확장.
+// [수정 2026-08-04] 미리보기(A안: 축 Floor만, 스무딩 없음) 반영 — 실측값은 그대로 두되
+// 아래 개선만 적용:
+//  1) 직선 대신 Catmull-Rom 스플라인으로 부드러운 곡선
+//  2) 단색 반투명 채우기 대신 위→아래 그라디언트
+//  3) 은은한 격자선 3줄
+//  4) 축 범위에 최소폭(floorRange)을 둬서, 실제로는 미세한 변동인데 축이 좁아서
+//     과장되게 요동치는 것처럼 보이는 문제를 방지 (opts.floorRange로 지표별 지정)
+//  5) 하단 수치를 한 줄 텍스트 대신 스트라바 스타일 카드형 박스 그리드로
+function smoothSplinePath(points) {
+  if (points.length < 3) return 'M' + points.map(p => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' L');
+  let d = 'M' + points[0].x.toFixed(1) + ',' + points[0].y.toFixed(1);
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i === 0 ? 0 : i - 1];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2 < points.length ? i + 2 : i + 1];
+    const cp1x = p1.x + (p2.x - p0.x) / 6, cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6, cp2y = p2.y - (p3.y - p1.y) / 6;
+    d += ' C' + cp1x.toFixed(1) + ',' + cp1y.toFixed(1) + ' ' + cp2x.toFixed(1) + ',' + cp2y.toFixed(1) + ' ' + p2.x.toFixed(1) + ',' + p2.y.toFixed(1);
+  }
+  return d;
+}
 function buildTimeSeriesChartHtml(isKo, opts) {
   const points = opts.points;
   if (!points || points.length < 3) return '';
-  const W = 320, H = 130, padTop = 14, padBottom = 10;
+  const W = 320, H = 84, padTop = 8, padBottom = 6;
   const xs = points.map(p => p.x), ys = points.map(p => p.y);
   const xMin = xs[0], xMax = xs[xs.length - 1];
   let yMin = Math.min.apply(null, ys), yMax = Math.max.apply(null, ys);
+  // [추가] 축 최소폭 강제 — 실측 변동폭이 opts.floorRange보다 좁으면 중앙값 기준으로 벌려준다.
+  if (opts.floorRange && (yMax - yMin) < opts.floorRange) {
+    const mid = (yMin + yMax) / 2;
+    yMin = mid - opts.floorRange / 2;
+    yMax = mid + opts.floorRange / 2;
+  }
   if (yMin === yMax) { yMin -= 1; yMax += 1; }
-  const yPad = (yMax - yMin) * 0.12;
+  const yPad = (yMax - yMin) * 0.15;
   yMin -= yPad; yMax += yPad;
   const xScale = (x) => (xMax > xMin) ? ((x - xMin) / (xMax - xMin)) * W : 0;
   const yScale = (y) => {
@@ -2208,78 +2213,57 @@ function buildTimeSeriesChartHtml(isKo, opts) {
     const usable = H - padTop - padBottom;
     return opts.invertY ? (padTop + (1 - tRatio) * usable) : (padTop + tRatio * usable);
   };
-  const px = points.map(p => ({ x: xScale(p.x), y: yScale(p.y) }));
-
-  // 캣멀롬 → 3차 베지어 스무딩 (부드러운 곡선 연결)
-  const smoothPath = (pts) => {
-    let d = 'M' + pts[0].x.toFixed(1) + ',' + pts[0].y.toFixed(1);
-    for (let i = 0; i < pts.length - 1; i++) {
-      const p0 = pts[i - 1] || pts[i];
-      const p1 = pts[i];
-      const p2 = pts[i + 1];
-      const p3 = pts[i + 2] || p2;
-      const c1x = p1.x + (p2.x - p0.x) / 6, c1y = p1.y + (p2.y - p0.y) / 6;
-      const c2x = p2.x - (p3.x - p1.x) / 6, c2y = p2.y - (p3.y - p1.y) / 6;
-      d += ' C' + c1x.toFixed(1) + ',' + c1y.toFixed(1) + ' ' + c2x.toFixed(1) + ',' + c2y.toFixed(1) + ' ' + p2.x.toFixed(1) + ',' + p2.y.toFixed(1);
-    }
-    return d;
-  };
-  const linePath = smoothPath(px);
-  const curveOnly = linePath.slice(linePath.indexOf('C'));
-  const areaPath = 'M' + px[0].x.toFixed(1) + ',' + H + ' L' + px[0].x.toFixed(1) + ',' + px[0].y.toFixed(1) + ' ' + curveOnly + ' L' + px[px.length - 1].x.toFixed(1) + ',' + H + ' Z';
-
+  const pts = points.map(p => ({ x: xScale(p.x), y: yScale(p.y) }));
+  const linePath = smoothSplinePath(pts);
+  const areaPath = linePath + ' L' + xScale(xMax).toFixed(1) + ',' + H + ' L' + xScale(xMin).toFixed(1) + ',' + H + ' Z';
   const avgY = (opts.avgVal != null) ? yScale(opts.avgVal) : null;
-  // [추가] 참고용 옅은 격자선 2개(1/3, 2/3 지점) + 평균값 위치의 점선 — 레퍼런스 이미지 스타일
-  const staticGrid = [0.32, 0.68].map(r => {
-    const gy = (padTop + r * (H - padTop - padBottom)).toFixed(1);
-    return '<line x1="0" y1="' + gy + '" x2="' + W + '" y2="' + gy + '" stroke="#2a2a2a" stroke-width="1"/>';
-  }).join('');
   const avgLine = avgY != null
-    ? '<line x1="0" y1="' + avgY.toFixed(1) + '" x2="' + W + '" y2="' + avgY.toFixed(1) + '" stroke="#555" stroke-width="1" stroke-dasharray="3,3"/>'
+    ? '<line x1="0" y1="' + avgY.toFixed(1) + '" x2="' + W + '" y2="' + avgY.toFixed(1) + '" stroke="#666" stroke-width="1" stroke-dasharray="3,3"/>'
     : '';
-  const startCircle = '<circle cx="' + px[0].x.toFixed(1) + '" cy="' + px[0].y.toFixed(1) + '" r="4" fill="#141414" stroke="' + opts.color + '" stroke-width="2"/>';
-  const endCircle = '<circle cx="' + px[px.length - 1].x.toFixed(1) + '" cy="' + px[px.length - 1].y.toFixed(1) + '" r="4" fill="#141414" stroke="' + opts.color + '" stroke-width="2"/>';
-  // 시작 라벨은 "0.0km" 대신 레퍼런스처럼 단위만 표시
-  const xLabels = [(xMin <= 0 ? (isKo ? 'km' : 'KM') : xMin.toFixed(1) + 'km'), ((xMin + xMax) / 2).toFixed(1) + 'km', xMax.toFixed(1) + 'km'];
-  const uid = 'ts-' + String(opts.title).replace(/[^a-zA-Z0-9]/g, '').toLowerCase() + '-' + Math.round(opts.avgVal || 0);
+  const startCircle = '<circle cx="' + pts[0].x.toFixed(1) + '" cy="' + pts[0].y.toFixed(1) + '" r="3" fill="#111" stroke="' + opts.color + '" stroke-width="2"/>';
+  const endCircle = '<circle cx="' + pts[pts.length - 1].x.toFixed(1) + '" cy="' + pts[pts.length - 1].y.toFixed(1) + '" r="3" fill="#111" stroke="' + opts.color + '" stroke-width="2"/>';
+  const xLabels = [xMin, (xMin + xMax) / 2, xMax].map(v => v.toFixed(1) + 'km');
+  const gid = 'jrgrad-' + Math.random().toString(36).slice(2, 9);
+  const gridLines = [0.25, 0.5, 0.75].map(f =>
+    '<line x1="0" y1="' + (padTop + f * (H - padTop - padBottom)).toFixed(1) + '" x2="' + W + '" y2="' + (padTop + f * (H - padTop - padBottom)).toFixed(1) + '" stroke="#232323" stroke-width="1"/>'
+  ).join('');
+  const rangeVal = (opts.bestVal != null && opts.avgVal != null) ? Math.max.apply(null, ys) - Math.min.apply(null, ys) : null;
 
-  const statBox = (label, val) => '<div class="split-stat-box"><div class="split-stat-label">' + label + '</div><div class="split-stat-value">' + val + '</div></div>';
-
-  return '<div class="split-block">'
-    + '<div class="split-block-header">'
-    + '<div class="split-block-title-wrap"><span class="split-block-dot" style="background:' + opts.color + ';"></span><span class="split-block-title">' + opts.title + '</span></div>'
-    + '<span class="split-block-range">' + xMin.toFixed(1) + ' – ' + xMax.toFixed(1) + 'km</span>'
-    + '</div>'
-    + '<div class="split-block-card">'
-    + '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%; height:132px; display:block; overflow:visible;">'
-    + '<defs>'
-    + '<linearGradient id="' + uid + '-fill" x1="0" y1="0" x2="0" y2="1">'
+  return '<div class="diag-card" style="padding-bottom:14px;">'
+    + '<div class="diag-label">' + opts.title + '</div>'
+    + '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%; height:76px; display:block; margin-top:6px; overflow:visible;">'
+    + '<defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="0" y2="1">'
     + '<stop offset="0%" stop-color="' + opts.color + '" stop-opacity="0.38"/>'
-    + '<stop offset="100%" stop-color="' + opts.color + '" stop-opacity="0"/>'
-    + '</linearGradient>'
-    + '<filter id="' + uid + '-glow" x="-30%" y="-30%" width="160%" height="160%">'
-    + '<feGaussianBlur stdDeviation="2.1" result="blur"/>'
-    + '<feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>'
-    + '</filter>'
-    + '</defs>'
-    + staticGrid + avgLine
-    + '<path d="' + areaPath + '" fill="url(#' + uid + '-fill)"/>'
-    + '<path d="' + linePath + '" fill="none" stroke="' + opts.color + '" stroke-width="2" stroke-linecap="round" filter="url(#' + uid + '-glow)"/>'
+    + '<stop offset="100%" stop-color="' + opts.color + '" stop-opacity="0.02"/>'
+    + '</linearGradient></defs>'
+    + gridLines
+    + '<path d="' + areaPath + '" fill="url(#' + gid + ')"/>'
+    + avgLine
+    + '<path d="' + linePath + '" fill="none" stroke="' + opts.color + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
     + startCircle + endCircle
     + '</svg>'
-    + '<div class="split-block-xlabels"><span>' + xLabels[0] + '</span><span>' + xLabels[1] + '</span><span>' + xLabels[2] + '</span></div>'
-    + '<div class="split-block-stats">'
-    + statBox(isKo ? '평균' : 'AVG', (opts.avgVal != null ? opts.fmtY(opts.avgVal) : '--'))
-    + statBox(isKo ? '최고' : 'BEST', (opts.bestVal != null ? opts.fmtY(opts.bestVal) : '--'))
-    + statBox(opts.extraLabel || '--', opts.extraVal || '--')
+    + '<div style="display:flex; justify-content:space-between; font-size:9px; color:#666; margin-top:2px;"><span>' + xLabels[0] + '</span><span>' + xLabels[1] + '</span><span>' + xLabels[2] + '</span></div>'
+    + '<div style="display:grid; grid-template-columns: repeat(' + (rangeVal != null ? 3 : 2) + ', 1fr); gap:8px; margin-top:10px;">'
+    + '<div style="background:#101010; border:1px solid #262626; border-radius:10px; padding:8px 8px 7px;">'
+    + '<div style="font-size:8.5px; color:#666; font-weight:800; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:3px;">' + (isKo ? '평균' : 'AVG') + '</div>'
+    + '<div style="font-size:14px; font-weight:900; color:' + opts.color + ';">' + (opts.avgVal != null ? opts.fmtY(opts.avgVal) : '--') + '</div>'
     + '</div>'
+    + '<div style="background:#101010; border:1px solid #262626; border-radius:10px; padding:8px 8px 7px;">'
+    + '<div style="font-size:8.5px; color:#666; font-weight:800; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:3px;">' + (isKo ? '최고' : 'BEST') + '</div>'
+    + '<div style="font-size:14px; font-weight:900; color:#fff;">' + (opts.bestVal != null ? opts.fmtY(opts.bestVal) : '--') + '</div>'
+    + '</div>'
+    + (rangeVal != null
+      ? '<div style="background:#101010; border:1px solid #262626; border-radius:10px; padding:8px 8px 7px;">'
+        + '<div style="font-size:8.5px; color:#666; font-weight:800; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:3px;">' + (isKo ? '변동폭' : 'RANGE') + '</div>'
+        + '<div style="font-size:14px; font-weight:900; color:#fff;">' + opts.fmtRange(rangeVal) + '</div>'
+        + '</div>'
+      : '')
     + '</div>'
     + '</div>';
 }
 // [추가] 정밀 로그 원본에서 페이스/케이던스/심박수 3개 그래프 HTML을 한번에 만든다.
 // 유효 표본이 3개 미만인 지표는 그래프를 생략(빈 배터리/센서 미착용 등으로 데이터가 없을 때).
-// [수정 2026-08-05] 세 번째 스탯 박스(이동시간/밸런스/존)를 채우기 위해 record(r)도 함께 받는다.
-function buildDiagTimeSeriesHtml(isKo, log, record) {
+function buildDiagTimeSeriesHtml(isKo, log) {
   if (!log || log.length < 5) return '';
   const MAX_PTS = 60; // SVG path가 너무 촘촘해지지 않도록 다운샘플링
   const step = Math.max(1, Math.ceil(log.length / MAX_PTS));
@@ -2297,31 +2281,28 @@ function buildDiagTimeSeriesHtml(isKo, log, record) {
   const hrPts = extract(p => { const h = parseFloat(p.hrBpm); return (h && h > 0) ? h : null; });
 
   const avgOf = (pts) => pts.length ? pts.reduce((s, p) => s + p.y, 0) / pts.length : null;
-  const fmtPaceSec = (sec) => { const m = Math.floor(sec / 60), s = Math.round(sec % 60); return m + ':' + String(s).padStart(2, '0'); };
+  const fmtPaceSec = (sec) => { const m = Math.floor(sec / 60), s = Math.round(sec % 60); return m + ':' + String(s).padStart(2, '0') + ' /km'; };
 
   let html = '';
   if (pacePts.length >= 3) {
     html += buildTimeSeriesChartHtml(isKo, {
-      title: isKo ? '페이스' : 'PACE', points: pacePts, color: '#3ea6ff',
-      invertY: false, avgVal: avgOf(pacePts), bestVal: Math.min.apply(null, pacePts.map(p => p.y)),
-      fmtY: (v) => fmtPaceSec(v) + '<span>/km</span>',
-      extraLabel: isKo ? '이동시간' : 'MOVING TIME', extraVal: (record && record.time) ? record.time : '--'
+      title: isKo ? '페이스 (구간별)' : 'PACE (SPLITS)', points: pacePts, color: '#4fc3f7', fillColor: '#4fc3f7',
+      invertY: false, avgVal: avgOf(pacePts), bestVal: Math.min.apply(null, pacePts.map(p => p.y)), fmtY: fmtPaceSec,
+      floorRange: 40, fmtRange: (v) => Math.round(v) + '초'
     });
   }
   if (cadPts.length >= 3) {
     html += buildTimeSeriesChartHtml(isKo, {
-      title: isKo ? '케이던스' : 'CADENCE', points: cadPts, color: '#ff3ec8',
-      invertY: true, avgVal: avgOf(cadPts), bestVal: Math.max.apply(null, cadPts.map(p => p.y)),
-      fmtY: (v) => Math.round(v) + '<span>spm</span>',
-      extraLabel: isKo ? '균형' : 'BALANCE', extraVal: (record && record.cadenceBal) ? record.cadenceBal : '50:50'
+      title: isKo ? '케이던스 (구간별)' : 'CADENCE (SPLITS)', points: cadPts, color: '#e26fe2', fillColor: '#e26fe2',
+      invertY: true, avgVal: avgOf(cadPts), bestVal: Math.max.apply(null, cadPts.map(p => p.y)), fmtY: (v) => Math.round(v) + ' spm',
+      floorRange: 14, fmtRange: (v) => Math.round(v) + ' spm'
     });
   }
   if (hrPts.length >= 3) {
     html += buildTimeSeriesChartHtml(isKo, {
-      title: isKo ? '심박수' : 'HEART RATE', points: hrPts, color: '#ff6a4d',
-      invertY: true, avgVal: avgOf(hrPts), bestVal: Math.max.apply(null, hrPts.map(p => p.y)),
-      fmtY: (v) => Math.round(v) + '<span>bpm</span>',
-      extraLabel: isKo ? '심박존' : 'HR ZONE', extraVal: (record && record.hrZone) ? ('Z' + record.hrZone) : '--'
+      title: isKo ? '심박수 (구간별)' : 'HEART RATE (SPLITS)', points: hrPts, color: '#ff6b6b', fillColor: '#ff6b6b',
+      invertY: true, avgVal: avgOf(hrPts), bestVal: Math.max.apply(null, hrPts.map(p => p.y)), fmtY: (v) => Math.round(v) + ' bpm',
+      floorRange: 24, fmtRange: (v) => Math.round(v) + ' bpm'
     });
   }
   if (!html) return '';
@@ -4920,7 +4901,7 @@ hrComment = zoneInfo.z <= 2 ? t.diagHrZoneLow
 // [추가] 정밀 로그가 남아있는 러닝이면(최근 10개 이내) 페이스/케이던스/심박수
 // 구간별 변화 그래프를 추가로 보여준다. 없으면 조용히 생략(카드 자체가 안 생김).
 const matchedPrecLog = findPrecisionLogForRecordId(r.id);
-const diagTimeSeriesHtml = matchedPrecLog ? buildDiagTimeSeriesHtml(lang === 'ko', matchedPrecLog, r) : '';
+const diagTimeSeriesHtml = matchedPrecLog ? buildDiagTimeSeriesHtml(lang === 'ko', matchedPrecLog) : '';
 contentArea.innerHTML =
 '<div class="diag-card"><div class="diag-label">' + (t.diagEffScore) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + effColor + '">' + effScore + ' <span style="font-size:14px;color:#aaa">/ 100</span></div><div class="diag-ref">Ref: ≥80</div></div><div class="diag-tip">' + effComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.time||'TIME') + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.time||'--') + '</div></div>' +
