@@ -2214,15 +2214,28 @@ function buildTimeSeriesChartHtml(isKo, opts) {
   const areaPath = 'M' + px[0].x.toFixed(1) + ',' + H + ' L' + px[0].x.toFixed(1) + ',' + px[0].y.toFixed(1) + ' ' + curveOnly + ' L' + px[px.length - 1].x.toFixed(1) + ',' + H + ' Z';
 
   const avgY = (opts.avgVal != null) ? yScale(opts.avgVal) : null;
-  const gridLine = avgY != null
-    ? '<line x1="0" y1="' + avgY.toFixed(1) + '" x2="' + W + '" y2="' + avgY.toFixed(1) + '" stroke="#333" stroke-width="1" stroke-dasharray="3,3"/>'
+  // [수정] 은은한 격자선 3개(25/50/75%)를 추가해서 값 가늠이 쉽게 만들고,
+  // 평균선은 더 뚜렷한 대시 라인으로 유지한다.
+  const gridLines = [0.25, 0.5, 0.75].map(f => {
+    const gy = (padTop + f * (H - padTop - padBottom)).toFixed(1);
+    return '<line x1="0" y1="' + gy + '" x2="' + W + '" y2="' + gy + '" stroke="#232323" stroke-width="1"/>';
+  }).join('');
+  const avgLine = avgY != null
+    ? '<line x1="0" y1="' + avgY.toFixed(1) + '" x2="' + W + '" y2="' + avgY.toFixed(1) + '" stroke="#555" stroke-width="1" stroke-dasharray="3,3"/>'
     : '';
-  const startCircle = '<circle cx="' + px[0].x.toFixed(1) + '" cy="' + px[0].y.toFixed(1) + '" r="2.5" fill="#0a0a0a" stroke="' + opts.color + '" stroke-width="1.5"/>';
-  const endCircle = '<circle cx="' + px[px.length - 1].x.toFixed(1) + '" cy="' + px[px.length - 1].y.toFixed(1) + '" r="3" fill="' + opts.color + '"/>';
+  // [수정] 시작/끝 점 모두 같은 스타일(속이 빈 원형 마커)로 통일
+  const startCircle = '<circle cx="' + px[0].x.toFixed(1) + '" cy="' + px[0].y.toFixed(1) + '" r="3" fill="#101010" stroke="' + opts.color + '" stroke-width="2"/>';
+  const endCircle = '<circle cx="' + px[px.length - 1].x.toFixed(1) + '" cy="' + px[px.length - 1].y.toFixed(1) + '" r="3" fill="#101010" stroke="' + opts.color + '" stroke-width="2"/>';
   const xLabels = [xMin, (xMin + xMax) / 2, xMax].map(v => v.toFixed(1) + 'km');
   // [추가] 그래프마다 고유한 gradient/glow id가 필요 — title에서 슬러그를 뽑아서 사용
   // (한 화면에 페이스/케이던스/심박 3개가 동시에 그려지므로 id 충돌 방지).
   const uid = 'ts-' + String(opts.title).replace(/[^a-zA-Z0-9]/g, '').toLowerCase() + '-' + Math.round(opts.avgVal || 0);
+
+  // [수정] 하단 수치를 한 줄 텍스트 대신 스트라바식 카드형 박스 2개(평균/최고)로 분리
+  const statBox = (label, val, accent) => '<div style="background:#101010; border:1px solid #232323; border-radius:10px; padding:9px 8px 8px; text-align:left;">'
+    + '<div style="font-size:8.5px; color:#55555a; font-weight:800; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:3px;">' + label + '</div>'
+    + '<div style="font-size:15px; font-weight:900; letter-spacing:-0.2px; color:' + (accent ? opts.color : '#fff') + ';">' + val + '</div>'
+    + '</div>';
 
   return '<div class="diag-card" style="padding-bottom:14px;">'
     + '<div class="diag-label">' + opts.title + '</div>'
@@ -2237,15 +2250,16 @@ function buildTimeSeriesChartHtml(isKo, opts) {
     + '<feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>'
     + '</filter>'
     + '</defs>'
-    + gridLine
+    + gridLines
     + '<path d="' + areaPath + '" fill="url(#' + uid + '-fill)"/>'
+    + avgLine
     + '<path d="' + linePath + '" fill="none" stroke="' + opts.color + '" stroke-width="1.6" stroke-linecap="round" filter="url(#' + uid + '-glow)"/>'
     + startCircle + endCircle
     + '</svg>'
     + '<div style="display:flex; justify-content:space-between; font-size:9px; color:#666; font-weight:700; letter-spacing:0.3px; text-transform:uppercase; margin-top:4px;"><span>' + xLabels[0] + '</span><span>' + xLabels[1] + '</span><span>' + xLabels[2] + '</span></div>'
-    + '<div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc; font-weight:700; margin-top:8px;">'
-    + '<span style="letter-spacing:0.3px;">' + (isKo ? '평균 ' : 'AVG ') + '<span style="color:' + opts.color + ';">' + (opts.avgVal != null ? opts.fmtY(opts.avgVal) : '--') + '</span></span>'
-    + '<span style="color:#888; letter-spacing:0.3px;">' + (isKo ? '최고 ' : 'BEST ') + (opts.bestVal != null ? opts.fmtY(opts.bestVal) : '--') + '</span>'
+    + '<div style="display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-top:12px;">'
+    + statBox(isKo ? '평균' : 'AVG', opts.avgVal != null ? opts.fmtY(opts.avgVal) : '--', true)
+    + statBox(isKo ? '최고' : 'BEST', opts.bestVal != null ? opts.fmtY(opts.bestVal) : '--', false)
     + '</div>'
     + '</div>';
 }
