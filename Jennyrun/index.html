@@ -2146,6 +2146,114 @@ setActivityMode(mode) { localStorage.setItem(this.ACTIVITY_MODE_KEY, mode); }
 getOnboardingDone() { return sessionStorage.getItem(this.ONBOARDING_DONE_KEY) === '1'; }
 setOnboardingDone(done) { sessionStorage.setItem(this.ONBOARDING_DONE_KEY, done ? '1' : '0'); }
 }
+// [추가 2026-08-04] "정밀진단(DIAG)" 화면에 페이스/케이던스/심박수 구간 변화 그래프를
+// 넣기 위한 헬퍼들. 정밀 로그(storage.precisionLogs)는 히스토리 기록(record)과 별도로
+// 저장되고 서로 id로 연결돼있지 않으므로, 저장 시각이 가장 가까운 로그를 찾아 매칭한다.
+// 최근 10개까지만 보관되므로 오래된 기록은 매칭되는 로그가 없을 수 있음(그래프 생략).
+function findPrecisionLogForRecordId(recordId) {
+  try {
+    if (typeof storage === 'undefined' || typeof recordId !== 'number') return null;
+    const logs = storage.loadPrecisionLogs();
+    if (!logs || !logs.length) return null;
+    let best = null, bestDiff = Infinity;
+    logs.forEach(item => {
+      const t = Date.parse(item.savedAt);
+      if (isNaN(t)) return;
+      const diff = Math.abs(t - recordId);
+      if (diff < bestDiff) { bestDiff = diff; best = item; }
+    });
+    // 같은 러닝의 로그일 가능성이 높은 5분 이내 것만 인정 (그 이상 벌어지면 다른 러닝일 수 있음)
+    return (best && bestDiff <= 5 * 60 * 1000) ? best.log : null;
+  } catch (e) { return null; }
+}
+// [추가] 단일 지표의 구간별(km) 변화를 채워진 영역 그래프(SVG)로 그린다.
+// opts: { title, points:[{x:거리km,y:값}], color, fillColor, invertY(값이 클수록 위로),
+//         avgVal, bestVal, fmtY: (v)=>문자열 }
+function buildTimeSeriesChartHtml(isKo, opts) {
+  const points = opts.points;
+  if (!points || points.length < 3) return '';
+  const W = 320, H = 84, padTop = 6, padBottom = 4;
+  const xs = points.map(p => p.x), ys = points.map(p => p.y);
+  const xMin = xs[0], xMax = xs[xs.length - 1];
+  let yMin = Math.min.apply(null, ys), yMax = Math.max.apply(null, ys);
+  if (yMin === yMax) { yMin -= 1; yMax += 1; }
+  const yPad = (yMax - yMin) * 0.1;
+  yMin -= yPad; yMax += yPad;
+  const xScale = (x) => (xMax > xMin) ? ((x - xMin) / (xMax - xMin)) * W : 0;
+  const yScale = (y) => {
+    const tRatio = (y - yMin) / (yMax - yMin);
+    const usable = H - padTop - padBottom;
+    return opts.invertY ? (padTop + (1 - tRatio) * usable) : (padTop + tRatio * usable);
+  };
+  const pathPts = points.map(p => xScale(p.x).toFixed(1) + ',' + yScale(p.y).toFixed(1));
+  const linePath = 'M' + pathPts.join(' L');
+  const areaPath = 'M' + xScale(xMin).toFixed(1) + ',' + H + ' L' + pathPts.join(' L') + ' L' + xScale(xMax).toFixed(1) + ',' + H + ' Z';
+  const avgY = (opts.avgVal != null) ? yScale(opts.avgVal) : null;
+  const avgLine = avgY != null
+    ? '<line x1="0" y1="' + avgY.toFixed(1) + '" x2="' + W + '" y2="' + avgY.toFixed(1) + '" stroke="#888" stroke-width="1" stroke-dasharray="4,3"/>'
+    : '';
+  const startCircle = '<circle cx="' + xScale(xMin).toFixed(1) + '" cy="' + yScale(points[0].y).toFixed(1) + '" r="2.5" fill="#111" stroke="' + opts.color + '" stroke-width="1.5"/>';
+  const endCircle = '<circle cx="' + xScale(xMax).toFixed(1) + '" cy="' + yScale(points[points.length - 1].y).toFixed(1) + '" r="2.5" fill="#111" stroke="' + opts.color + '" stroke-width="1.5"/>';
+  const xLabels = [xMin, (xMin + xMax) / 2, xMax].map(v => v.toFixed(1) + 'km');
+
+  return '<div class="diag-card" style="padding-bottom:14px;">'
+    + '<div class="diag-label">' + opts.title + '</div>'
+    + '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%; height:76px; display:block; margin-top:6px;">'
+    + '<path d="' + areaPath + '" fill="' + opts.fillColor + '" opacity="0.28"/>'
+    + '<path d="' + linePath + '" fill="none" stroke="' + opts.color + '" stroke-width="1.8"/>'
+    + avgLine + startCircle + endCircle
+    + '</svg>'
+    + '<div style="display:flex; justify-content:space-between; font-size:9px; color:#666; margin-top:2px;"><span>' + xLabels[0] + '</span><span>' + xLabels[1] + '</span><span>' + xLabels[2] + '</span></div>'
+    + '<div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc; font-weight:700; margin-top:8px;">'
+    + '<span>' + (isKo ? '평균 ' : 'AVG ') + (opts.avgVal != null ? opts.fmtY(opts.avgVal) : '--') + '</span>'
+    + '<span style="color:#888;">' + (isKo ? '최고 ' : 'BEST ') + (opts.bestVal != null ? opts.fmtY(opts.bestVal) : '--') + '</span>'
+    + '</div>'
+    + '</div>';
+}
+// [추가] 정밀 로그 원본에서 페이스/케이던스/심박수 3개 그래프 HTML을 한번에 만든다.
+// 유효 표본이 3개 미만인 지표는 그래프를 생략(빈 배터리/센서 미착용 등으로 데이터가 없을 때).
+function buildDiagTimeSeriesHtml(isKo, log) {
+  if (!log || log.length < 5) return '';
+  const MAX_PTS = 60; // SVG path가 너무 촘촘해지지 않도록 다운샘플링
+  const step = Math.max(1, Math.ceil(log.length / MAX_PTS));
+  const sampled = log.filter((_, i) => i % step === 0 || i === log.length - 1);
+
+  const extract = (fieldGetter) => sampled.map(p => {
+    const dist = parseFloat(p.distKm);
+    const v = fieldGetter(p);
+    if (isNaN(dist) || v == null || isNaN(v)) return null;
+    return { x: dist, y: v };
+  }).filter(Boolean);
+
+  const pacePts = extract(p => { const kmh = parseFloat(p.speedKmh); return (kmh && kmh >= 0.5) ? 3600 / kmh : null; });
+  const cadPts = extract(p => { const c = parseFloat(p.cadence); return (c && c > 0) ? c : null; });
+  const hrPts = extract(p => { const h = parseFloat(p.hrBpm); return (h && h > 0) ? h : null; });
+
+  const avgOf = (pts) => pts.length ? pts.reduce((s, p) => s + p.y, 0) / pts.length : null;
+  const fmtPaceSec = (sec) => { const m = Math.floor(sec / 60), s = Math.round(sec % 60); return m + ':' + String(s).padStart(2, '0') + ' /km'; };
+
+  let html = '';
+  if (pacePts.length >= 3) {
+    html += buildTimeSeriesChartHtml(isKo, {
+      title: isKo ? '페이스 (구간별)' : 'PACE (SPLITS)', points: pacePts, color: '#42a5f5', fillColor: '#42a5f5',
+      invertY: false, avgVal: avgOf(pacePts), bestVal: Math.min.apply(null, pacePts.map(p => p.y)), fmtY: fmtPaceSec
+    });
+  }
+  if (cadPts.length >= 3) {
+    html += buildTimeSeriesChartHtml(isKo, {
+      title: isKo ? '케이던스 (구간별)' : 'CADENCE (SPLITS)', points: cadPts, color: '#e05fe0', fillColor: '#e05fe0',
+      invertY: true, avgVal: avgOf(cadPts), bestVal: Math.max.apply(null, cadPts.map(p => p.y)), fmtY: (v) => Math.round(v) + ' spm'
+    });
+  }
+  if (hrPts.length >= 3) {
+    html += buildTimeSeriesChartHtml(isKo, {
+      title: isKo ? '심박수 (구간별)' : 'HEART RATE (SPLITS)', points: hrPts, color: '#ef5350', fillColor: '#ef5350',
+      invertY: true, avgVal: avgOf(hrPts), bestVal: Math.max.apply(null, hrPts.map(p => p.y)), fmtY: (v) => Math.round(v) + ' bpm'
+    });
+  }
+  if (!html) return '';
+  return '<div class="stats-section-title" style="margin-top:16px;">' + (isKo ? '구간별 변화 그래프' : 'SPLITS OVER DISTANCE') + '</div>' + html;
+}
 // ========== UIManager ==========
 class UIManager {
 constructor() {
@@ -4736,6 +4844,10 @@ hrComment = zoneInfo.z <= 2 ? t.diagHrZoneLow
 : zoneInfo.z === 3 ? t.diagHrZoneGood
 : t.diagHrZoneHigh;
 }
+// [추가] 정밀 로그가 남아있는 러닝이면(최근 10개 이내) 페이스/케이던스/심박수
+// 구간별 변화 그래프를 추가로 보여준다. 없으면 조용히 생략(카드 자체가 안 생김).
+const matchedPrecLog = findPrecisionLogForRecordId(r.id);
+const diagTimeSeriesHtml = matchedPrecLog ? buildDiagTimeSeriesHtml(lang === 'ko', matchedPrecLog) : '';
 contentArea.innerHTML =
 '<div class="diag-card"><div class="diag-label">' + (t.diagEffScore) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + effColor + '">' + effScore + ' <span style="font-size:14px;color:#aaa">/ 100</span></div><div class="diag-ref">Ref: ≥80</div></div><div class="diag-tip">' + effComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.time||'TIME') + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.time||'--') + '</div></div>' +
@@ -4748,7 +4860,8 @@ contentArea.innerHTML =
 '<div class="diag-card"><div class="diag-label">' + (t.diagBalanceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.cadenceBal || '50:50') + ' <span style="font-size:11px;color:#aaa">L:R</span></div><div class="diag-ref">GCT ' + (r.gctBal || '50:50') + ' &nbsp;·&nbsp; GYRO ' + (r.gyroBal || '50:50') + '</div></div><div class="diag-tip">' + diagFeedback.balance + '</div><div style="font-size:11px;color:#888;font-weight:600;line-height:1.5;margin-top:8px;padding-top:8px;border-top:1px solid #222;">' + (t.diagBalanceExplain || '') + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagFlightLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (isNaN(flightNum)?'#aaa':this.getFlightColor(flightNum)) + '">' + flightVal + (flightVal!=='--'?' %':'') + '</div><div class="diag-ref">Ref: 30~45%</div></div><div class="diag-tip">' + flightComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagHrLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + hrColor + '">' + hrMainVal + '</div><div class="diag-ref">' + t.hrZoneLabel + ': ' + hrZoneDisplay + '</div></div><div class="diag-tip">' + hrComment + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagRecov || "RECOVERY GUIDE") + '</div>' + recovHighlightHTML + '<div class="diag-tip">' + recovComment + '</div></div>';
+'<div class="diag-card"><div class="diag-label">' + (t.diagRecov || "RECOVERY GUIDE") + '</div>' + recovHighlightHTML + '<div class="diag-tip">' + recovComment + '</div></div>'
++ diagTimeSeriesHtml;
 }
 }
 closeDiag() { const dv = document.getElementById('diag-view'); if(dv) dv.style.display = 'none'; }
