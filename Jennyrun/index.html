@@ -2169,15 +2169,21 @@ function findPrecisionLogForRecordId(recordId) {
 // [추가] 단일 지표의 구간별(km) 변화를 채워진 영역 그래프(SVG)로 그린다.
 // opts: { title, points:[{x:거리km,y:값}], color, fillColor, invertY(값이 클수록 위로),
 //         avgVal, bestVal, fmtY: (v)=>문자열 }
+// [수정] 기존엔 좌표를 직선(L)으로만 이어서 꺾여 보였고, 페이스/케이던스/심박 색이
+// 파랑/마젠타/빨강이라 앱 전체의 네온그린·블랙 톤과 따로 놀았음. 아래처럼 개선:
+// - 좌표를 캣멀롬 스플라인 → 3차 베지어로 변환해서 부드러운 곡선으로 연결
+// - 색상을 앱의 --primary(네온그린) 계열로 통일하고 지표별로는 밝기/색조만 살짝 다르게
+// - 선 아래 은은한 네온 글로우(blur) + 위→아래 그라데이션 채우기 추가
+// - 격자선 1개(평균선)는 유지하되 더 얇게, 하단 라벨은 앱 공통 caption 톤(자간 있는 대문자)으로
 function buildTimeSeriesChartHtml(isKo, opts) {
   const points = opts.points;
   if (!points || points.length < 3) return '';
-  const W = 320, H = 84, padTop = 6, padBottom = 4;
+  const W = 320, H = 88, padTop = 10, padBottom = 6;
   const xs = points.map(p => p.x), ys = points.map(p => p.y);
   const xMin = xs[0], xMax = xs[xs.length - 1];
   let yMin = Math.min.apply(null, ys), yMax = Math.max.apply(null, ys);
   if (yMin === yMax) { yMin -= 1; yMax += 1; }
-  const yPad = (yMax - yMin) * 0.1;
+  const yPad = (yMax - yMin) * 0.12;
   yMin -= yPad; yMax += yPad;
   const xScale = (x) => (xMax > xMin) ? ((x - xMin) / (xMax - xMin)) * W : 0;
   const yScale = (y) => {
@@ -2185,28 +2191,61 @@ function buildTimeSeriesChartHtml(isKo, opts) {
     const usable = H - padTop - padBottom;
     return opts.invertY ? (padTop + (1 - tRatio) * usable) : (padTop + tRatio * usable);
   };
-  const pathPts = points.map(p => xScale(p.x).toFixed(1) + ',' + yScale(p.y).toFixed(1));
-  const linePath = 'M' + pathPts.join(' L');
-  const areaPath = 'M' + xScale(xMin).toFixed(1) + ',' + H + ' L' + pathPts.join(' L') + ' L' + xScale(xMax).toFixed(1) + ',' + H + ' Z';
+  const px = points.map(p => ({ x: xScale(p.x), y: yScale(p.y) }));
+
+  // [추가] 캣멀롬 → 3차 베지어 스무딩. 점 4개(이전/현재/다음/다다음)로 매 구간의
+  // 제어점을 계산 — 표준적인 부드러운 라인 차트 곡선 공식.
+  const smoothPath = (pts) => {
+    let d = 'M' + pts[0].x.toFixed(1) + ',' + pts[0].y.toFixed(1);
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1] || pts[i];
+      const p1 = pts[i];
+      const p2 = pts[i + 1];
+      const p3 = pts[i + 2] || p2;
+      const c1x = p1.x + (p2.x - p0.x) / 6, c1y = p1.y + (p2.y - p0.y) / 6;
+      const c2x = p2.x - (p3.x - p1.x) / 6, c2y = p2.y - (p3.y - p1.y) / 6;
+      d += ' C' + c1x.toFixed(1) + ',' + c1y.toFixed(1) + ' ' + c2x.toFixed(1) + ',' + c2y.toFixed(1) + ' ' + p2.x.toFixed(1) + ',' + p2.y.toFixed(1);
+    }
+    return d;
+  };
+  const linePath = smoothPath(px);
+  // areaPath: 첫 점 아래로 내려갔다가 같은 곡선을 따라간 뒤 마지막 점 아래로 닫음
+  const curveOnly = linePath.slice(linePath.indexOf('C')); // 'M x,y' 이후의 'C ...' 구간만
+  const areaPath = 'M' + px[0].x.toFixed(1) + ',' + H + ' L' + px[0].x.toFixed(1) + ',' + px[0].y.toFixed(1) + ' ' + curveOnly + ' L' + px[px.length - 1].x.toFixed(1) + ',' + H + ' Z';
+
   const avgY = (opts.avgVal != null) ? yScale(opts.avgVal) : null;
-  const avgLine = avgY != null
-    ? '<line x1="0" y1="' + avgY.toFixed(1) + '" x2="' + W + '" y2="' + avgY.toFixed(1) + '" stroke="#888" stroke-width="1" stroke-dasharray="4,3"/>'
+  const gridLine = avgY != null
+    ? '<line x1="0" y1="' + avgY.toFixed(1) + '" x2="' + W + '" y2="' + avgY.toFixed(1) + '" stroke="#333" stroke-width="1" stroke-dasharray="3,3"/>'
     : '';
-  const startCircle = '<circle cx="' + xScale(xMin).toFixed(1) + '" cy="' + yScale(points[0].y).toFixed(1) + '" r="2.5" fill="#111" stroke="' + opts.color + '" stroke-width="1.5"/>';
-  const endCircle = '<circle cx="' + xScale(xMax).toFixed(1) + '" cy="' + yScale(points[points.length - 1].y).toFixed(1) + '" r="2.5" fill="#111" stroke="' + opts.color + '" stroke-width="1.5"/>';
+  const startCircle = '<circle cx="' + px[0].x.toFixed(1) + '" cy="' + px[0].y.toFixed(1) + '" r="2.5" fill="#0a0a0a" stroke="' + opts.color + '" stroke-width="1.5"/>';
+  const endCircle = '<circle cx="' + px[px.length - 1].x.toFixed(1) + '" cy="' + px[px.length - 1].y.toFixed(1) + '" r="3" fill="' + opts.color + '"/>';
   const xLabels = [xMin, (xMin + xMax) / 2, xMax].map(v => v.toFixed(1) + 'km');
+  // [추가] 그래프마다 고유한 gradient/glow id가 필요 — title에서 슬러그를 뽑아서 사용
+  // (한 화면에 페이스/케이던스/심박 3개가 동시에 그려지므로 id 충돌 방지).
+  const uid = 'ts-' + String(opts.title).replace(/[^a-zA-Z0-9]/g, '').toLowerCase() + '-' + Math.round(opts.avgVal || 0);
 
   return '<div class="diag-card" style="padding-bottom:14px;">'
     + '<div class="diag-label">' + opts.title + '</div>'
-    + '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%; height:76px; display:block; margin-top:6px;">'
-    + '<path d="' + areaPath + '" fill="' + opts.fillColor + '" opacity="0.28"/>'
-    + '<path d="' + linePath + '" fill="none" stroke="' + opts.color + '" stroke-width="1.8"/>'
-    + avgLine + startCircle + endCircle
+    + '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%; height:80px; display:block; margin-top:6px; overflow:visible;">'
+    + '<defs>'
+    + '<linearGradient id="' + uid + '-fill" x1="0" y1="0" x2="0" y2="1">'
+    + '<stop offset="0%" stop-color="' + opts.color + '" stop-opacity="0.32"/>'
+    + '<stop offset="100%" stop-color="' + opts.color + '" stop-opacity="0"/>'
+    + '</linearGradient>'
+    + '<filter id="' + uid + '-glow" x="-30%" y="-30%" width="160%" height="160%">'
+    + '<feGaussianBlur stdDeviation="2.1" result="blur"/>'
+    + '<feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>'
+    + '</filter>'
+    + '</defs>'
+    + gridLine
+    + '<path d="' + areaPath + '" fill="url(#' + uid + '-fill)"/>'
+    + '<path d="' + linePath + '" fill="none" stroke="' + opts.color + '" stroke-width="1.6" stroke-linecap="round" filter="url(#' + uid + '-glow)"/>'
+    + startCircle + endCircle
     + '</svg>'
-    + '<div style="display:flex; justify-content:space-between; font-size:9px; color:#666; margin-top:2px;"><span>' + xLabels[0] + '</span><span>' + xLabels[1] + '</span><span>' + xLabels[2] + '</span></div>'
+    + '<div style="display:flex; justify-content:space-between; font-size:9px; color:#666; font-weight:700; letter-spacing:0.3px; text-transform:uppercase; margin-top:4px;"><span>' + xLabels[0] + '</span><span>' + xLabels[1] + '</span><span>' + xLabels[2] + '</span></div>'
     + '<div style="display:flex; justify-content:space-between; font-size:11px; color:#ccc; font-weight:700; margin-top:8px;">'
-    + '<span>' + (isKo ? '평균 ' : 'AVG ') + (opts.avgVal != null ? opts.fmtY(opts.avgVal) : '--') + '</span>'
-    + '<span style="color:#888;">' + (isKo ? '최고 ' : 'BEST ') + (opts.bestVal != null ? opts.fmtY(opts.bestVal) : '--') + '</span>'
+    + '<span style="letter-spacing:0.3px;">' + (isKo ? '평균 ' : 'AVG ') + '<span style="color:' + opts.color + ';">' + (opts.avgVal != null ? opts.fmtY(opts.avgVal) : '--') + '</span></span>'
+    + '<span style="color:#888; letter-spacing:0.3px;">' + (isKo ? '최고 ' : 'BEST ') + (opts.bestVal != null ? opts.fmtY(opts.bestVal) : '--') + '</span>'
     + '</div>'
     + '</div>';
 }
@@ -2235,19 +2274,19 @@ function buildDiagTimeSeriesHtml(isKo, log) {
   let html = '';
   if (pacePts.length >= 3) {
     html += buildTimeSeriesChartHtml(isKo, {
-      title: isKo ? '페이스 (구간별)' : 'PACE (SPLITS)', points: pacePts, color: '#42a5f5', fillColor: '#42a5f5',
+      title: isKo ? '페이스 (구간별)' : 'PACE (SPLITS)', points: pacePts, color: '#00ff88',
       invertY: false, avgVal: avgOf(pacePts), bestVal: Math.min.apply(null, pacePts.map(p => p.y)), fmtY: fmtPaceSec
     });
   }
   if (cadPts.length >= 3) {
     html += buildTimeSeriesChartHtml(isKo, {
-      title: isKo ? '케이던스 (구간별)' : 'CADENCE (SPLITS)', points: cadPts, color: '#e05fe0', fillColor: '#e05fe0',
+      title: isKo ? '케이던스 (구간별)' : 'CADENCE (SPLITS)', points: cadPts, color: '#4dffb8',
       invertY: true, avgVal: avgOf(cadPts), bestVal: Math.max.apply(null, cadPts.map(p => p.y)), fmtY: (v) => Math.round(v) + ' spm'
     });
   }
   if (hrPts.length >= 3) {
     html += buildTimeSeriesChartHtml(isKo, {
-      title: isKo ? '심박수 (구간별)' : 'HEART RATE (SPLITS)', points: hrPts, color: '#ef5350', fillColor: '#ef5350',
+      title: isKo ? '심박수 (구간별)' : 'HEART RATE (SPLITS)', points: hrPts, color: '#8fffca',
       invertY: true, avgVal: avgOf(hrPts), bestVal: Math.max.apply(null, hrPts.map(p => p.y)), fmtY: (v) => Math.round(v) + ' bpm'
     });
   }
