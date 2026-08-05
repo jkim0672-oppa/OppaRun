@@ -9546,6 +9546,7 @@ const garmin = (function () {
   }
   let lastSuggestion = null; // [추가] 마지막 비교에서 계산된 제안값 (APPLY 버튼이 참조)
   let lastCompareData = null; // [추가] 마지막 비교의 전체 수치(리포트 저장용). appliedFields/appliedAt은 실제 적용 시 채워짐.
+  let lastPreviewRaw = null; // [추가] "보정 적용 후 예상 그래프"를 수동 입력값 기준으로 실시간 재계산하기 위한 원시 실측값/현재 계수 스냅샷 (updateProjectedPreview 참고)
 
   // [수정] 저장된 가민 기록(최대 3개)을 전부 카드로 보여주도록 isSelected 인자 추가.
   // isSelected면 캘리브레이션 비교 기준으로 쓰이는 카드라는 표시(테두리 강조 + 라벨)를 해준다.
@@ -10266,6 +10267,15 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       appliedAt: null
     };
 
+    // [추가] 실시간 미리보기 재계산(updateProjectedPreview)에 필요한 원시값 스냅샷.
+    // 입력 박스 값이 바뀔 때마다 이 값들을 기준으로 "실측값 × (입력값/현재값)" 비율을
+    // 다시 계산해서 그래프만 다시 그린다 — 위 correctedPhoneXxx와 동일한 선형 근사 가정.
+    lastPreviewRaw = {
+      cur: { gct: curGct, vertScale: curVertScale, strideFactor: curStrideFactor, gpsDistFactor: curGpsDistFactor, cadFactor: curCadFactor },
+      phone: { cadence: phoneAvgCadence, gct: phoneAvgGct, stepMm: phoneAvgStepMm, vertMm: phoneAvgVertMm, distanceKm: phoneDistanceKm, paceSec: phoneAvgPaceSec, hr: phoneAvgHr },
+      garmin: { cadence: garminAvgCadence, gct: garminAvgGct, stepMm: garminAvgStepMm, vertMm: garminAvgVertMm, distanceKm: garminDistanceKm, paceSec: garminAvgPaceSec, hr: garminAvgHr }
+    };
+
     const row = (label, phoneVal, garminVal, diffPct, unit) => {
       const diffTxt = diffPct != null ? (diffPct > 0 ? '+' : '') + diffPct.toFixed(1) + '%' : '--';
       const diffColor = diffPct == null ? '#888' : (Math.abs(diffPct) < 5 ? 'var(--good)' : (Math.abs(diffPct) < 15 ? 'var(--warning)' : 'var(--danger)'));
@@ -10345,7 +10355,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // [추가] 보정 적용 후 예상 비교 그래프 — 위 그래프 바로 밑에, 같은 형태로 하나 더.
     // 실제 앱에 적용된 값이 아니라 권장 보정수치를 반영했을 때의 예상치를 보여주는
     // 미리보기 전용 그래프이므로 제목/하단에 명확히 안내한다.
-    html += buildOverallChart(isKo, [
+    html += '<div id="projected-chart-wrap">' + buildOverallChart(isKo, [
       { label: isKo ? '케이던스' : 'CADENCE', phone: correctedPhoneCadence, garmin: garminAvgCadence },
       { label: 'GCT', phone: correctedPhoneGct, garmin: garminAvgGct },
       { label: isKo ? '보폭' : 'STEP LEN', phone: correctedPhoneStepMm, garmin: garminAvgStepMm },
@@ -10357,14 +10367,14 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       title: isKo ? '보정 적용 후 예상 그래프' : 'PROJECTED AFTER CORRECTION',
       phoneLabel: isKo ? '폰 (보정 후 예상)' : 'PHONE (projected)',
       note: (isKo
-        ? '⚠ 아직 앱에 실제로 적용된 값이 아니에요. 위 권장 보정수치를 반영했을 때 예상되는 결과를 미리 보여주는 그래프입니다.'
-        : '⚠ Not actually applied to the app yet. This shows the expected result if the recommended correction values above were applied.')
+        ? '⚠ 아직 앱에 실제로 적용된 값이 아니에요. 위 권장 보정수치를 반영했을 때 예상되는 결과를 미리 보여주는 그래프입니다. 입력 박스 값을 직접 고치면 이 그래프도 실시간으로 다시 그려져요.'
+        : '⚠ Not actually applied to the app yet. This shows the expected result if the recommended correction values above were applied. Editing the input boxes redraws this graph live.')
         + (paceImpliedFactor != null
           ? (isKo
             ? ' 페이스 실효 보정배율: ' + paceImpliedFactor.toFixed(3) + '× (별도 저장값 아님, GPS 거리 보정계수와 반비례 연동)'
             : ' Pace effective correction ratio: ' + paceImpliedFactor.toFixed(3) + '× (not stored separately, auto-linked inversely with GPS distance factor)')
           : '')
-    });
+    }) + '</div>';
 
     const hasSuggestion = suggestedRot != null || suggestedRotOS != null || suggestedGct != null || suggestedVertScale != null || suggestedStrideFactor != null || suggestedGpsDistFactor != null || suggestedCadFactor != null;
 
@@ -10372,9 +10382,23 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       // [수정] 예전엔 아래 5개 값이 있으면 무조건 전부 한꺼번에 적용됐음.
       // 각 항목 앞에 체크박스를 둬서, 원하는 값만 선택해서 적용/대기목록 저장할 수 있게 함.
       // 기본은 전부 체크(기존 동작과 동일)라 아무것도 안 건드리면 이전과 똑같이 동작함.
-      const checkRow = (id, line, defaultChecked) => '<label style="display:flex; align-items:flex-start; gap:8px; padding:4px 0; cursor:pointer;">'
-        + '<input type="checkbox" id="' + id + '" ' + (defaultChecked !== false ? 'checked' : '') + ' style="width:15px; height:15px; margin-top:1px; accent-color: var(--primary); flex-shrink:0;">'
-        + '<span>' + line + '</span></label>';
+      const checkRow = (id, line, defaultChecked, inputId, inputValue) => {
+        // [추가] 체크박스 옆에 수동 입력 박스를 둬서, 권장값이 마음에 안 들면 직접 숫자를
+        // 타이핑해서 적용할 수 있게 함. 기본값은 권장값으로 미리 채워두고, 사용자가 값을
+        // 고치면 APPLY/SAVE 버튼을 누를 때 이 입력값이 우선 사용됨(getCheckedSuggestion 참고).
+        // 그래프 미리보기는 건드리지 않음 — 여전히 권장값 기준으로 그려짐.
+        const inputHtml = inputId
+          ? '<input type="number" id="' + inputId + '" value="' + inputValue + '" step="0.001" '
+            + 'style="width:74px; flex-shrink:0; background:#111; color:var(--primary); border:1px solid #2a3a2f; border-radius:6px; padding:5px 6px; font-size:11px; font-weight:800; text-align:right;" '
+            + 'onclick="event.stopPropagation()" oninput="garmin.updateProjectedPreview()">'
+          : '';
+        return '<div style="display:flex; align-items:center; gap:8px; padding:4px 0;">'
+          + '<label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer; flex:1; min-width:0;">'
+          + '<input type="checkbox" id="' + id + '" ' + (defaultChecked !== false ? 'checked' : '') + ' style="width:15px; height:15px; margin-top:1px; accent-color: var(--primary); flex-shrink:0;" onchange="garmin.updateProjectedPreview()">'
+          + '<span>' + line + '</span></label>'
+          + inputHtml
+          + '</div>';
+      };
       html += '<div style="margin-top:12px; font-size:11px; color:#ccc; line-height:1.5;">'
         + '<div style="color:var(--primary); font-weight:900; margin-bottom:4px;">' + (isKo ? '권장 보정수치 (적용할 항목 선택)' : 'RECOMMENDED CALIBRATION (select items to apply)') + '</div>';
       // [수정 2026-07-30] hand는 이제 suggestedRot/suggestedRotOS 자체가 계산 단계에서
@@ -10387,16 +10411,16 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
           + (isKo ? '<span style="color:#7fd3ff;">(OS 센서 기준 대안 — 체크 시 위 값 대신 이 값이 적용됨)</span>' : '<span style="color:#7fd3ff;">(alt., based on OS sensor — overrides the row above if checked)</span>'), false);
       }
       if (suggestedGct != null) {
-        html += checkRow('calib-sel-gct', 'gctFallbackRatio: ' + curGct + ' → <b>' + suggestedGct + '</b>');
+        html += checkRow('calib-sel-gct', 'gctFallbackRatio: ' + curGct + ' → <b>' + suggestedGct + '</b>', true, 'calib-input-gct', suggestedGct);
       }
       if (suggestedVertScale != null) {
-        html += checkRow('calib-sel-vert', 'vertScale: ' + curVertScale + ' → <b>' + suggestedVertScale + '</b>');
+        html += checkRow('calib-sel-vert', 'vertScale: ' + curVertScale + ' → <b>' + suggestedVertScale + '</b>', true, 'calib-input-vert', suggestedVertScale);
       }
       if (suggestedStrideFactor != null) {
-        html += checkRow('calib-sel-stride', (isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ': ' + curStrideFactor.toFixed(3) + ' → <b>' + suggestedStrideFactor.toFixed(3) + '</b>');
+        html += checkRow('calib-sel-stride', (isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ': ' + curStrideFactor.toFixed(3) + ' → <b>' + suggestedStrideFactor.toFixed(3) + '</b>', true, 'calib-input-stride', suggestedStrideFactor.toFixed(3));
       }
       if (suggestedGpsDistFactor != null) {
-        html += checkRow('calib-sel-gps', (isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + curGpsDistFactor.toFixed(3) + ' → <b>' + suggestedGpsDistFactor.toFixed(3) + '</b> ' + (isKo ? '(실제 거리·페이스에 직접 반영됨)' : '(directly affects real distance/pace)'));
+        html += checkRow('calib-sel-gps', (isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + curGpsDistFactor.toFixed(3) + ' → <b>' + suggestedGpsDistFactor.toFixed(3) + '</b> ' + (isKo ? '(실제 거리·페이스에 직접 반영됨)' : '(directly affects real distance/pace)'), true, 'calib-input-gps', suggestedGpsDistFactor.toFixed(3));
         // [추가] 페이스는 위 GPS 거리 보정계수와 별개로 저장되는 값이 없으므로 체크박스는
         // 만들지 않고, 위 항목을 적용하면 페이스가 실질적으로 몇 배 움직이는지만 안내한다.
         if (paceImpliedFactor != null) {
@@ -10408,7 +10432,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         }
       }
       if (suggestedCadFactor != null) {
-        html += checkRow('calib-sel-cad', (isKo ? '케이던스 보정계수' : 'cadCorrectionFactor') + ': ' + curCadFactor.toFixed(3) + ' → <b>' + suggestedCadFactor.toFixed(3) + '</b> ' + (isKo ? '(네이티브 걸음센서 원시값은 그대로, 표시/기록값에만 반영됨)' : '(native raw value untouched, applies only to displayed/logged cadence)'));
+        html += checkRow('calib-sel-cad', (isKo ? '케이던스 보정계수' : 'cadCorrectionFactor') + ': ' + curCadFactor.toFixed(3) + ' → <b>' + suggestedCadFactor.toFixed(3) + '</b> ' + (isKo ? '(네이티브 걸음센서 원시값은 그대로, 표시/기록값에만 반영됨)' : '(native raw value untouched, applies only to displayed/logged cadence)'), true, 'calib-input-cad', suggestedCadFactor.toFixed(3));
       }
       html += '<div style="color:#888; margin-top:8px; margin-bottom:10px;">' + (isKo
         ? '체크된 항목만 아래 버튼으로 즉시 적용/저장됩니다. 적용 후 러닝을 한 번 더 진행해서 오차가 줄었는지 다시 비교해보세요.'
@@ -10475,20 +10499,28 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
   function getCheckedSuggestion() {
     if (!lastSuggestion) return null;
     const isChecked = (id) => { const el = document.getElementById(id); return el ? el.checked : true; };
+    // [추가] 체크박스 옆 수동 입력 박스에 값이 있고 유효한 숫자면 그 값을 우선 사용,
+    // 없거나 비어있거나 숫자가 아니면 원래 권장값(fallback)으로 되돌아간다.
+    const inputVal = (id, fallback) => {
+      const el = document.getElementById(id);
+      if (!el) return fallback;
+      const v = parseFloat(el.value);
+      return isFinite(v) ? v : fallback;
+    };
     // [수정] rotRejectThreshold는 이제 두 개의 후보(가민 기준 / OS 센서 기준)가 있을 수 있음.
     // OS 센서 기준 체크박스가 켜져 있으면 그 값이 우선(가민 기준 체크 여부와 무관하게 대체),
     // 아니면 기존처럼 가민 기준 체크박스를 따른다.
     const rotVal = (lastSuggestion.rotOS != null && isChecked('calib-sel-rot-os'))
-      ? lastSuggestion.rotOS
-      : ((lastSuggestion.rot != null && isChecked('calib-sel-rot')) ? lastSuggestion.rot : null);
+      ? inputVal('calib-input-rot-os', lastSuggestion.rotOS)
+      : ((lastSuggestion.rot != null && isChecked('calib-sel-rot')) ? inputVal('calib-input-rot', lastSuggestion.rot) : null);
     return {
       devicePos: lastSuggestion.devicePos,
-      gct: (lastSuggestion.gct != null && isChecked('calib-sel-gct')) ? lastSuggestion.gct : null,
+      gct: (lastSuggestion.gct != null && isChecked('calib-sel-gct')) ? inputVal('calib-input-gct', lastSuggestion.gct) : null,
       rot: rotVal,
-      vertScale: (lastSuggestion.vertScale != null && isChecked('calib-sel-vert')) ? lastSuggestion.vertScale : null,
-      strideFactor: (lastSuggestion.strideFactor != null && isChecked('calib-sel-stride')) ? lastSuggestion.strideFactor : null,
-      gpsDistFactor: (lastSuggestion.gpsDistFactor != null && isChecked('calib-sel-gps')) ? lastSuggestion.gpsDistFactor : null,
-      cadFactor: (lastSuggestion.cadFactor != null && isChecked('calib-sel-cad')) ? lastSuggestion.cadFactor : null
+      vertScale: (lastSuggestion.vertScale != null && isChecked('calib-sel-vert')) ? inputVal('calib-input-vert', lastSuggestion.vertScale) : null,
+      strideFactor: (lastSuggestion.strideFactor != null && isChecked('calib-sel-stride')) ? inputVal('calib-input-stride', lastSuggestion.strideFactor) : null,
+      gpsDistFactor: (lastSuggestion.gpsDistFactor != null && isChecked('calib-sel-gps')) ? inputVal('calib-input-gps', lastSuggestion.gpsDistFactor) : null,
+      cadFactor: (lastSuggestion.cadFactor != null && isChecked('calib-sel-cad')) ? inputVal('calib-input-cad', lastSuggestion.cadFactor) : null
     };
   }
 
@@ -10652,6 +10684,67 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
   // 2) 지금 살아있는 app.motion 인스턴스에도 바로 값을 꽂아서, 재시작하지 않아도
   //    다음 러닝부터 즉시 반영되게 함.
   // 3) 보폭 보정계수는 MotionManager가 아니라 profile.strideCorrectionFactor이므로 같이 저장.
+  // [추가] 권장 보정수치 옆 입력 박스 값(또는 체크 여부)이 바뀔 때마다 "보정 적용 후 예상
+  // 그래프"를 다시 그린다. 실제 앱 설정엔 아무 영향 없음 — 순수 미리보기 전용.
+  // correctedPhoneXxx 계산과 동일한 선형 근사 가정을 쓰되, 권장값 대신 입력 박스의
+  // 현재 값(체크 해제 시엔 보정 없음=현재값과 동일)을 기준으로 비율을 새로 구한다:
+  //   보정 후 예상값 = 실측값 × (사용자가 입력한 계수 / 현재 적용 중인 계수)
+  function updateProjectedPreview() {
+    const isKo = isKoLang();
+    const wrap = document.getElementById('projected-chart-wrap');
+    if (!wrap || !lastPreviewRaw) return;
+    const cur = lastPreviewRaw.cur, phone = lastPreviewRaw.phone, garmin_ = lastPreviewRaw.garmin;
+    const isChecked = (id) => { const el = document.getElementById(id); return el ? el.checked : false; };
+    const inputVal = (id, fallback) => {
+      const el = document.getElementById(id);
+      if (!el) return fallback;
+      const v = parseFloat(el.value);
+      return isFinite(v) ? v : fallback;
+    };
+    // ratio(항목): 체크 안 돼있으면 1(보정 없음=실측값 그대로), 체크돼있으면 입력값/현재값.
+    // 현재값이 0이거나 없으면(예: hand 위치 vertScale=0) 나눗셈이 무의미하므로 1로 둔다.
+    const ratio = (checkId, inputId, curVal) => {
+      if (!isChecked(checkId) || !curVal) return 1;
+      return inputVal(inputId, curVal) / curVal;
+    };
+    const gctR = ratio('calib-sel-gct', 'calib-input-gct', cur.gct);
+    const vertR = ratio('calib-sel-vert', 'calib-input-vert', cur.vertScale);
+    const strideR = ratio('calib-sel-stride', 'calib-input-stride', cur.strideFactor);
+    const gpsR = ratio('calib-sel-gps', 'calib-input-gps', cur.gpsDistFactor);
+    const cadR = ratio('calib-sel-cad', 'calib-input-cad', cur.cadFactor);
+
+    const pCadence = phone.cadence != null ? phone.cadence * cadR : null;
+    const pGct = phone.gct != null ? phone.gct * gctR : null;
+    const pStepMm = phone.stepMm != null ? phone.stepMm * strideR : null;
+    const pVertMm = phone.vertMm != null ? phone.vertMm * vertR : null;
+    const pDistanceKm = phone.distanceKm != null ? phone.distanceKm * gpsR : null;
+    // 페이스는 거리와 반비례로 연동(위 correctedPhoneAvgPaceSec와 동일한 가정).
+    const pPaceSec = phone.paceSec != null ? phone.paceSec / gpsR : null;
+    const pHr = phone.hr; // 심박수는 보정계수가 없어 항상 실측값 그대로.
+    const pacePreviewFactor = gpsR !== 1 ? (1 / gpsR) : null;
+
+    wrap.innerHTML = buildOverallChart(isKo, [
+      { label: isKo ? '케이던스' : 'CADENCE', phone: pCadence, garmin: garmin_.cadence },
+      { label: 'GCT', phone: pGct, garmin: garmin_.gct },
+      { label: isKo ? '보폭' : 'STEP LEN', phone: pStepMm, garmin: garmin_.stepMm },
+      { label: isKo ? '수직진동' : 'VERT OSC', phone: pVertMm, garmin: garmin_.vertMm },
+      { label: isKo ? '거리' : 'DISTANCE', phone: pDistanceKm, garmin: garmin_.distanceKm },
+      { label: isKo ? '페이스' : 'PACE', phone: pPaceSec, garmin: garmin_.paceSec },
+      { label: isKo ? '심박수' : 'AVG HR', phone: pHr, garmin: garmin_.hr }
+    ], {
+      title: isKo ? '보정 적용 후 예상 그래프' : 'PROJECTED AFTER CORRECTION',
+      phoneLabel: isKo ? '폰 (보정 후 예상)' : 'PHONE (projected)',
+      note: (isKo
+        ? '⚠ 아직 앱에 실제로 적용된 값이 아니에요. 입력 박스 값 기준으로 실시간 재계산된 미리보기입니다.'
+        : '⚠ Not actually applied to the app yet. Live preview recalculated from the input box values.')
+        + (pacePreviewFactor != null
+          ? (isKo
+            ? ' 페이스 실효 보정배율: ' + pacePreviewFactor.toFixed(3) + '× (별도 저장값 아님, GPS 거리 보정계수와 반비례 연동)'
+            : ' Pace effective correction ratio: ' + pacePreviewFactor.toFixed(3) + '× (not stored separately, auto-linked inversely with GPS distance factor)')
+          : '')
+    });
+  }
+
   function applyCalibration() {
     const isKo = isKoLang();
     if (!lastSuggestion) return;
@@ -11154,7 +11247,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     }
   }
 
-  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, selectImport, selectPrecLog, toggleGarminSelect, togglePrecLogSelect, importPrecLogCsv, clearPrecLogImports, runCalibrationCompare, applyCalibration, resetCalibration, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, render };
+  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, selectImport, selectPrecLog, toggleGarminSelect, togglePrecLogSelect, importPrecLogCsv, clearPrecLogImports, runCalibrationCompare, applyCalibration, resetCalibration, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
