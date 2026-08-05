@@ -2227,14 +2227,7 @@ function buildTimeSeriesChartHtml(isKo, opts) {
   const gridLines = [0.25, 0.5, 0.75].map(f =>
     '<line x1="0" y1="' + (padTop + f * (H - padTop - padBottom)).toFixed(1) + '" x2="' + W + '" y2="' + (padTop + f * (H - padTop - padBottom)).toFixed(1) + '" stroke="#232323" stroke-width="1"/>'
   ).join('');
-  // [수정 2026-08-04] 3번째 박스를 "변동폭" 고정 대신 지표별로 실제 의미있는 값으로 커스텀
-  // 가능하게 함 — opts.extraBox = { label, value }가 있으면 그걸 쓰고, 없으면 기존처럼
-  // 변동폭(RANGE)을 보여준다 (호출부에서 안 넘기면 기존 동작 그대로 유지됨).
-  const thirdBox = opts.extraBox
-    ? { label: opts.extraBox.label, value: opts.extraBox.value }
-    : ((opts.bestVal != null && opts.avgVal != null)
-      ? { label: (isKo ? '변동폭' : 'RANGE'), value: opts.fmtRange ? opts.fmtRange(Math.max.apply(null, ys) - Math.min.apply(null, ys)) : null }
-      : null);
+  const rangeVal = (opts.bestVal != null && opts.avgVal != null) ? Math.max.apply(null, ys) - Math.min.apply(null, ys) : null;
 
   return '<div class="diag-card" style="padding-bottom:14px;">'
     + '<div class="diag-label">' + opts.title + '</div>'
@@ -2250,7 +2243,7 @@ function buildTimeSeriesChartHtml(isKo, opts) {
     + startCircle + endCircle
     + '</svg>'
     + '<div style="display:flex; justify-content:space-between; font-size:9px; color:#666; margin-top:2px;"><span>' + xLabels[0] + '</span><span>' + xLabels[1] + '</span><span>' + xLabels[2] + '</span></div>'
-    + '<div style="display:grid; grid-template-columns: repeat(' + (thirdBox ? 3 : 2) + ', 1fr); gap:8px; margin-top:10px;">'
+    + '<div style="display:grid; grid-template-columns: repeat(' + (rangeVal != null ? 3 : 2) + ', 1fr); gap:8px; margin-top:10px;">'
     + '<div style="background:#101010; border:1px solid #262626; border-radius:10px; padding:8px 8px 7px;">'
     + '<div style="font-size:8.5px; color:#666; font-weight:800; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:3px;">' + (isKo ? '평균' : 'AVG') + '</div>'
     + '<div style="font-size:14px; font-weight:900; color:' + opts.color + ';">' + (opts.avgVal != null ? opts.fmtY(opts.avgVal) : '--') + '</div>'
@@ -2259,10 +2252,10 @@ function buildTimeSeriesChartHtml(isKo, opts) {
     + '<div style="font-size:8.5px; color:#666; font-weight:800; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:3px;">' + (isKo ? '최고' : 'BEST') + '</div>'
     + '<div style="font-size:14px; font-weight:900; color:#fff;">' + (opts.bestVal != null ? opts.fmtY(opts.bestVal) : '--') + '</div>'
     + '</div>'
-    + (thirdBox
+    + (rangeVal != null
       ? '<div style="background:#101010; border:1px solid #262626; border-radius:10px; padding:8px 8px 7px;">'
-        + '<div style="font-size:8.5px; color:#666; font-weight:800; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:3px;">' + thirdBox.label + '</div>'
-        + '<div style="font-size:14px; font-weight:900; color:#fff;">' + (thirdBox.value || '--') + '</div>'
+        + '<div style="font-size:8.5px; color:#666; font-weight:800; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:3px;">' + (isKo ? '변동폭' : 'RANGE') + '</div>'
+        + '<div style="font-size:14px; font-weight:900; color:#fff;">' + opts.fmtRange(rangeVal) + '</div>'
         + '</div>'
       : '')
     + '</div>'
@@ -2270,17 +2263,11 @@ function buildTimeSeriesChartHtml(isKo, opts) {
 }
 // [추가] 정밀 로그 원본에서 페이스/케이던스/심박수 3개 그래프 HTML을 한번에 만든다.
 // 유효 표본이 3개 미만인 지표는 그래프를 생략(빈 배터리/센서 미착용 등으로 데이터가 없을 때).
-function buildDiagTimeSeriesHtml(isKo, log, record) {
+function buildDiagTimeSeriesHtml(isKo, log) {
   if (!log || log.length < 5) return '';
-  // [수정 2026-08-04] 러닝 시작 직후(GPS/센서가 아직 안 잠긴 구간)의 이상치 때문에
-  // 축 범위가 확 벌어져서 나머지 구간이 납작하게 눌려 보이는 문제 수정.
-  // 1) 시작 후 5초 이내 샘플은 워밍업 노이즈로 보고 그래프 계산에서 제외.
-  const warmedUp = log.filter(p => { const t = parseFloat(p.t); return isNaN(t) || t >= 5; });
-  const baseLog = warmedUp.length >= 5 ? warmedUp : log;
-
   const MAX_PTS = 60; // SVG path가 너무 촘촘해지지 않도록 다운샘플링
-  const step = Math.max(1, Math.ceil(baseLog.length / MAX_PTS));
-  const sampled = baseLog.filter((_, i) => i % step === 0 || i === baseLog.length - 1);
+  const step = Math.max(1, Math.ceil(log.length / MAX_PTS));
+  const sampled = log.filter((_, i) => i % step === 0 || i === log.length - 1);
 
   const extract = (fieldGetter) => sampled.map(p => {
     const dist = parseFloat(p.distKm);
@@ -2289,32 +2276,9 @@ function buildDiagTimeSeriesHtml(isKo, log, record) {
     return { x: dist, y: v };
   }).filter(Boolean);
 
-  // 2) 물리적으로 말이 안 되는 값은 애초에 후보에서 제외:
-  //    - 페이스: 순간속도 1.5km/h 미만(거의 정지)은 GPS 드리프트로 보고 제외, 페이스가
-  //      20:00/km(1200초)를 넘으면 "뛰는 중" 데이터로 보기 어려워 제외.
-  //    - 케이던스: 사람이 실제로 뛸 때 나올 수 없는 100spm 미만/230spm 초과는 제외.
-  const pacePtsRaw = extract(p => {
-    const kmh = parseFloat(p.speedKmh);
-    if (!kmh || kmh < 1.5) return null;
-    const sec = 3600 / kmh;
-    return sec <= 1200 ? sec : null;
-  });
-  const cadPtsRaw = extract(p => { const c = parseFloat(p.cadence); return (c && c >= 100 && c <= 230) ? c : null; });
-  const hrPtsRaw = extract(p => { const h = parseFloat(p.hrBpm); return (h && h > 0) ? h : null; });
-
-  // 3) 그래도 남을 수 있는 통계적 이상치에 대한 추가 안전망 — 백분위수 3%~97% 밖의
-  //    값은 그래프에서 제외(축소된 표본으로 평균/최고는 다시 계산되므로 왜곡 없음).
-  const trimOutliers = (pts) => {
-    if (pts.length < 8) return pts;
-    const sortedY = pts.map(p => p.y).slice().sort((a, b) => a - b);
-    const lo = sortedY[Math.floor(sortedY.length * 0.03)];
-    const hi = sortedY[Math.ceil(sortedY.length * 0.97) - 1];
-    const trimmed = pts.filter(p => p.y >= lo && p.y <= hi);
-    return trimmed.length >= 3 ? trimmed : pts;
-  };
-  const pacePts = trimOutliers(pacePtsRaw);
-  const cadPts = trimOutliers(cadPtsRaw);
-  const hrPts = trimOutliers(hrPtsRaw);
+  const pacePts = extract(p => { const kmh = parseFloat(p.speedKmh); return (kmh && kmh >= 0.5) ? 3600 / kmh : null; });
+  const cadPts = extract(p => { const c = parseFloat(p.cadence); return (c && c > 0) ? c : null; });
+  const hrPts = extract(p => { const h = parseFloat(p.hrBpm); return (h && h > 0) ? h : null; });
 
   const avgOf = (pts) => pts.length ? pts.reduce((s, p) => s + p.y, 0) / pts.length : null;
   const fmtPaceSec = (sec) => { const m = Math.floor(sec / 60), s = Math.round(sec % 60); return m + ':' + String(s).padStart(2, '0') + ' /km'; };
@@ -2324,24 +2288,21 @@ function buildDiagTimeSeriesHtml(isKo, log, record) {
     html += buildTimeSeriesChartHtml(isKo, {
       title: isKo ? '페이스 (구간별)' : 'PACE (SPLITS)', points: pacePts, color: '#4fc3f7', fillColor: '#4fc3f7',
       invertY: false, avgVal: avgOf(pacePts), bestVal: Math.min.apply(null, pacePts.map(p => p.y)), fmtY: fmtPaceSec,
-      floorRange: 40,
-      extraBox: { label: isKo ? '이동시간' : 'MOVING TIME', value: (record && record.time) || '--' }
+      floorRange: 40, fmtRange: (v) => Math.round(v) + '초'
     });
   }
   if (cadPts.length >= 3) {
     html += buildTimeSeriesChartHtml(isKo, {
       title: isKo ? '케이던스 (구간별)' : 'CADENCE (SPLITS)', points: cadPts, color: '#e26fe2', fillColor: '#e26fe2',
       invertY: true, avgVal: avgOf(cadPts), bestVal: Math.max.apply(null, cadPts.map(p => p.y)), fmtY: (v) => Math.round(v) + ' spm',
-      floorRange: 14,
-      extraBox: { label: isKo ? '균형' : 'BALANCE', value: (record && record.cadenceBal) || '50:50' }
+      floorRange: 14, fmtRange: (v) => Math.round(v) + ' spm'
     });
   }
   if (hrPts.length >= 3) {
     html += buildTimeSeriesChartHtml(isKo, {
       title: isKo ? '심박수 (구간별)' : 'HEART RATE (SPLITS)', points: hrPts, color: '#ff6b6b', fillColor: '#ff6b6b',
       invertY: true, avgVal: avgOf(hrPts), bestVal: Math.max.apply(null, hrPts.map(p => p.y)), fmtY: (v) => Math.round(v) + ' bpm',
-      floorRange: 24,
-      extraBox: { label: 'ZONE', value: (record && record.hrZone) || null }
+      floorRange: 24, fmtRange: (v) => Math.round(v) + ' bpm'
     });
   }
   if (!html) return '';
@@ -4940,8 +4901,7 @@ hrComment = zoneInfo.z <= 2 ? t.diagHrZoneLow
 // [추가] 정밀 로그가 남아있는 러닝이면(최근 10개 이내) 페이스/케이던스/심박수
 // 구간별 변화 그래프를 추가로 보여준다. 없으면 조용히 생략(카드 자체가 안 생김).
 const matchedPrecLog = findPrecisionLogForRecordId(r.id);
-// [수정] hrZoneDisplay는 이미 위에서 계산된 값(가민 심박존 등 반영)이라 그대로 재사용.
-const diagTimeSeriesHtml = matchedPrecLog ? buildDiagTimeSeriesHtml(lang === 'ko', matchedPrecLog, Object.assign({}, r, { hrZone: hrZoneDisplay !== '--' ? hrZoneDisplay : null })) : '';
+const diagTimeSeriesHtml = matchedPrecLog ? buildDiagTimeSeriesHtml(lang === 'ko', matchedPrecLog) : '';
 contentArea.innerHTML =
 '<div class="diag-card"><div class="diag-label">' + (t.diagEffScore) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + effColor + '">' + effScore + ' <span style="font-size:14px;color:#aaa">/ 100</span></div><div class="diag-ref">Ref: ≥80</div></div><div class="diag-tip">' + effComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.time||'TIME') + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.time||'--') + '</div></div>' +
