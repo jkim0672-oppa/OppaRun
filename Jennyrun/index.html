@@ -1259,6 +1259,11 @@ window.alert = function(msg) { appAlert(msg); };
 
 // ========== 전역 상수 (문자열 오류 방지) ==========
 const INVALID_PACE = "--'--\"";
+// [수정] 진단 화면 미니 그래프 전용 구간 해상도. 지도 마커/SPLIT ANALYTICS 목록에 쓰이는
+// 기존 1km splits와는 별개(state.diagSplits)로, 100m(0.1km) 단위로 더 촘촘히 기록해
+// 그래프에서 오르내림이 잘 보이게 한다. 러닝 길이 자체는 무제한이며 구간 수가 많아지는
+// 긴 러닝은 buildSparklineSVG에서 다운샘플링해 시각적으로만 단순화한다(원본 데이터는 보존).
+const DIAG_SPLIT_INTERVAL_KM = 0.1;
 
 // [추가] 효율 점수 공통 계산 함수 (6개 지표 + 밸런스 패널티 + HR 보너스)
 // record 객체를 받아서 0~100 점수 반환. 데이터 없으면 null 반환.
@@ -1412,8 +1417,23 @@ return total > 0 ? total : null;
 // 올라가게 그림(페이스처럼 "작을수록 좋음"인 지표에 사용). 유효 포인트가 2개 미만이면 빈 문자열 반환.
 function buildSparklineSVG(values, colorHex, invert) {
 if (!values || !values.length) return '';
-const pts = values.map((v, i) => ({ i, v })).filter(p => typeof p.v === 'number' && isFinite(p.v));
+let pts = values.map((v, i) => ({ i, v })).filter(p => typeof p.v === 'number' && isFinite(p.v));
 if (pts.length < 2) return '';
+// [추가] 100m 단위 스플릿이라 긴 러닝(예: 하프/풀코스)은 포인트가 수십~백여 개가 될 수 있음.
+// 작은 박스 안에서 지저분해 보이지 않도록, 너무 많으면 구간 평균으로 묶어 단순화(데이터 손실은
+// 저장된 splits 자체가 아니라 이 미니 그래프 표시에만 적용됨).
+const MAX_POINTS = 40;
+if (pts.length > MAX_POINTS) {
+  const bucketSize = Math.ceil(pts.length / MAX_POINTS);
+  const bucketed = [];
+  for (let b = 0; b < pts.length; b += bucketSize) {
+    const chunk = pts.slice(b, b + bucketSize);
+    const avgV = chunk.reduce((a, p) => a + p.v, 0) / chunk.length;
+    bucketed.push({ i: bucketed.length, v: avgV });
+  }
+  pts = bucketed;
+  values = pts; // x축 간격 계산에 다운샘플된 길이를 사용
+}
 const W = 100, H = 26, PAD = 2;
 let min = Math.min(...pts.map(p => p.v));
 let max = Math.max(...pts.map(p => p.v));
@@ -4774,7 +4794,7 @@ hrComment = zoneInfo.z <= 2 ? t.diagHrZoneLow
 }
 // [추가] 박스 아래 작은 구간별(km 스플릿 기준) 변화 그래프 — 케이던스/페이스/심박/GPS고도
 // 한눈에 오르내림을 볼 수 있도록. 스플릿이 2개 미만이면(짧은 러닝 등) 해당 그래프는 표시 안 함.
-const _splitsForGraph = r.splits || [];
+const _splitsForGraph = r.diagSplits || [];
 const paceSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => paceStrToSeconds(s.pace)), '#00ff88', true);
 const cadSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.avgCadence === 'number' ? s.avgCadence : null)), '#4fc3f7', false);
 const hrSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.avgHr === 'number' ? s.avgHr : null)), '#e53935', false);
@@ -6184,10 +6204,11 @@ seconds: 0, steps: 0, totalDist: 0, lastPos: null, pathCoords: [],
 currentAlt: 0, lowSpeedStartTime: null, wakeLock: null,
 maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
 splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
+diagSplits: [], lastDiagCheckpoint: 0, lastDiagSeconds: 0, lastDiagAlt: 0, diagCadenceSamples: [], diagHrSamples: [],
 // [추가] 실시간 상승고도 누적 상태 (트레일 모드 실시간 칼로리의 경사 보너스 계산용)
 totalAscent: 0, lastAscentAlt: null,
 lastPosTimestamp: Date.now(),
-speedBuffer: [], lastValidSpeed: 0, emaSpeedKmh: 0, metricSpeedBuffer: [], lastValidMetricSpeed: 0, metricSpeedKmh: 0, cadenceSamples: [], cadValHistory: [], splitCadenceSamples: [], splitHrSamples: [],
+speedBuffer: [], lastValidSpeed: 0, emaSpeedKmh: 0, metricSpeedBuffer: [], lastValidMetricSpeed: 0, metricSpeedKmh: 0, cadenceSamples: [], cadValHistory: [],
 isCalibrationRun: false, calibrationKnownDistanceM: 0,
 // [추가] GPS 고도 보정용 - Open-Elevation API 지형고도값 기반 offset 보정
 elevOffset: 0, elevOffsetReady: false, lastElevFetchTime: 0, lastElevFetchPos: null, elevFetchInFlight: false,
@@ -6692,17 +6713,34 @@ let splitDuration = this.state.seconds - this.state.lastKmSeconds;
 let min = Math.floor(splitDuration / 60);
 let sec = splitDuration % 60;
 let paceStr = min + "'" + String(sec).padStart(2,'0') + '"';
-// [추가] 진단 화면 구간별 그래프용: 이번 km 구간 동안 누적된 케이던스/심박 평균
-const _splitCadArr = this.state.splitCadenceSamples || [];
-const _splitAvgCad = _splitCadArr.length > 0 ? Math.round(_splitCadArr.reduce((a,b)=>a+b,0) / _splitCadArr.length) : null;
-const _splitHrArr = this.state.splitHrSamples || [];
-const _splitAvgHr = _splitHrArr.length > 0 ? Math.round(_splitHrArr.reduce((a,b)=>a+b,0) / _splitHrArr.length) : null;
-this.state.splits.push({ km: currentTargetKm, pace: paceStr, altFrom: this.state.lastKmAlt, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastKmAlt, coord: pos, avgCadence: _splitAvgCad, avgHr: _splitAvgHr });
+this.state.splits.push({ km: currentTargetKm, pace: paceStr, altFrom: this.state.lastKmAlt, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastKmAlt, coord: pos });
 this.state.lastKmCheckpoint = currentTargetKm;
 this.state.lastKmSeconds = this.state.seconds;
 this.state.lastKmAlt = this.state.currentAlt;
-this.state.splitCadenceSamples = [];
-this.state.splitHrSamples = [];
+}
+// [추가] 진단 화면 미니 그래프 전용 100m(DIAG_SPLIT_INTERVAL_KM) 단위 구간 기록.
+// 위의 1km splits(지도 마커·SPLIT ANALYTICS 목록용)는 그대로 두고, 그래프에만 쓰이는
+// 훨씬 촘촘한 별도 시계열을 만든다. GPS 공백 복구 등으로 한 번에 여러 구간을 넘을 수
+// 있어 while로 놓친 구간 없이 모두 기록.
+while (this.state.totalDist >= this.state.lastDiagCheckpoint + DIAG_SPLIT_INTERVAL_KM) {
+let diagTargetKm = Math.round((this.state.lastDiagCheckpoint + DIAG_SPLIT_INTERVAL_KM) * 1000) / 1000;
+let diagSplitDuration = this.state.seconds - this.state.lastDiagSeconds;
+// [수정] diagSplitDuration은 "100m를 가는 데 걸린 시간"이라 그대로 쓰면 페이스(분/km)가 아님.
+// 표시/향후 재사용 시 오해가 없도록 km당 페이스로 정규화(100m 구간이므로 ×10).
+let diagPaceSecPerKm = diagSplitDuration / DIAG_SPLIT_INTERVAL_KM;
+let dMin = Math.floor(diagPaceSecPerKm / 60);
+let dSec = Math.round(diagPaceSecPerKm % 60);
+let diagPaceStr = dMin + "'" + String(dSec).padStart(2,'0') + '"';
+const _diagCadArr = this.state.diagCadenceSamples || [];
+const _diagAvgCad = _diagCadArr.length > 0 ? Math.round(_diagCadArr.reduce((a,b)=>a+b,0) / _diagCadArr.length) : null;
+const _diagHrArr = this.state.diagHrSamples || [];
+const _diagAvgHr = _diagHrArr.length > 0 ? Math.round(_diagHrArr.reduce((a,b)=>a+b,0) / _diagHrArr.length) : null;
+this.state.diagSplits.push({ km: diagTargetKm, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastDiagAlt, avgCadence: _diagAvgCad, avgHr: _diagAvgHr });
+this.state.lastDiagCheckpoint = diagTargetKm;
+this.state.lastDiagSeconds = this.state.seconds;
+this.state.lastDiagAlt = this.state.currentAlt;
+this.state.diagCadenceSamples = [];
+this.state.diagHrSamples = [];
 }
 } else if (timeDelta > 4 && d < 0.4) {
 // GPS 갭(터널 등) 후 복구: 보수적으로 반영
@@ -6956,8 +6994,8 @@ if (windowSec >= 3 && cadValid) {
 if (!this.state.cadenceSamples) this.state.cadenceSamples = [];
 this.state.cadenceSamples.push(cadSmoothed);
 // [추가] 진단 화면 구간별(km) 케이던스 그래프용 — 현재 km 구간 동안의 케이던스도 별도 누적
-if (!this.state.splitCadenceSamples) this.state.splitCadenceSamples = [];
-this.state.splitCadenceSamples.push(cadSmoothed);
+if (!this.state.diagCadenceSamples) this.state.diagCadenceSamples = [];
+this.state.diagCadenceSamples.push(cadSmoothed);
 }
 }
 }
@@ -7244,8 +7282,12 @@ this.state.pendingCadVal = null; // [추가] 케이던스 확정 대기값도 �
 this.state.pendingCadCount = 0;
 this.state.cadValHistory = [];
 this.state.splits = [];
-this.state.splitCadenceSamples = []; // [추가] 진단 화면 구간별 그래프용: 현재 km 구간 케이던스 누적
-this.state.splitHrSamples = []; // [추가] 진단 화면 구간별 그래프용: 현재 km 구간 심박 누적
+this.state.diagSplits = [];
+this.state.diagCadenceSamples = []; // [추가] 진단 화면 미니 그래프용: 현재 100m 구간 케이던스 누적
+this.state.diagHrSamples = []; // [추가] 진단 화면 미니 그래프용: 현재 100m 구간 심박 누적
+this.state.lastDiagCheckpoint = 0;
+this.state.lastDiagSeconds = 0;
+this.state.lastDiagAlt = 0;
 this.state.precisionLog = []; // [추가] 정밀 비교용 초당 로그 (가민 워치 데이터와 대조용)
 this.state.strideWindow = []; // [추가] 보폭(step_length) 구간평균 계산용 슬라이딩 윈도우 버퍼
 this.state.lastKmCheckpoint = 0;
@@ -7399,13 +7441,27 @@ let splitDuration = this.state.seconds - this.state.lastKmSeconds;
 let min = Math.floor(splitDuration / 60);
 let sec = splitDuration % 60;
 let paceStr = min + "'" + String(sec).padStart(2,'0') + '"';
-const _splitCadArr2 = this.state.splitCadenceSamples || [];
-const _splitAvgCad2 = _splitCadArr2.length > 0 ? Math.round(_splitCadArr2.reduce((a,b)=>a+b,0) / _splitCadArr2.length) : null;
-const _splitHrArr2 = this.state.splitHrSamples || [];
-const _splitAvgHr2 = _splitHrArr2.length > 0 ? Math.round(_splitHrArr2.reduce((a,b)=>a+b,0) / _splitHrArr2.length) : null;
-this.state.splits.push({ km: parseFloat(this.state.totalDist).toFixed(2), pace: paceStr, altFrom: this.state.lastKmAlt, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastKmAlt, coord: this.state.pathCoords[this.state.pathCoords.length - 1] || null, avgCadence: _splitAvgCad2, avgHr: _splitAvgHr2 });
-this.state.splitCadenceSamples = [];
-this.state.splitHrSamples = [];
+this.state.splits.push({ km: parseFloat(this.state.totalDist).toFixed(2), pace: paceStr, altFrom: this.state.lastKmAlt, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastKmAlt, coord: this.state.pathCoords[this.state.pathCoords.length - 1] || null });
+}
+}
+// [추가] 진단 화면 미니 그래프 전용 100m 단위 diagSplits의 자투리 구간을 러닝 종료/일시정지
+// 시점에 마저 기록. pushKmSplitIfNeeded()와 같은 타이밍에 함께 호출된다(최소 10m 이상 남았을 때만).
+pushDiagSplitIfNeeded() {
+if (this.state.totalDist > this.state.lastDiagCheckpoint + 0.01 && this.state.seconds > this.state.lastDiagSeconds) {
+let diagSplitDuration = this.state.seconds - this.state.lastDiagSeconds;
+// [수정] diagSplitDuration은 "100m를 가는 데 걸린 시간"이라 그대로 쓰면 페이스(분/km)가 아님.
+// 표시/향후 재사용 시 오해가 없도록 km당 페이스로 정규화(100m 구간이므로 ×10).
+let diagPaceSecPerKm = diagSplitDuration / DIAG_SPLIT_INTERVAL_KM;
+let dMin = Math.floor(diagPaceSecPerKm / 60);
+let dSec = Math.round(diagPaceSecPerKm % 60);
+let diagPaceStr = dMin + "'" + String(dSec).padStart(2,'0') + '"';
+const _diagCadArr2 = this.state.diagCadenceSamples || [];
+const _diagAvgCad2 = _diagCadArr2.length > 0 ? Math.round(_diagCadArr2.reduce((a,b)=>a+b,0) / _diagCadArr2.length) : null;
+const _diagHrArr2 = this.state.diagHrSamples || [];
+const _diagAvgHr2 = _diagHrArr2.length > 0 ? Math.round(_diagHrArr2.reduce((a,b)=>a+b,0) / _diagHrArr2.length) : null;
+this.state.diagSplits.push({ km: parseFloat(this.state.totalDist).toFixed(2), pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastDiagAlt, avgCadence: _diagAvgCad2, avgHr: _diagAvgHr2 });
+this.state.diagCadenceSamples = [];
+this.state.diagHrSamples = [];
 }
 }
 // 총거리÷총걸음수로 "실측" 평균 보폭을 구하고, 비현실적인 값이면 물리적 범위로 클램프한다.
@@ -7493,6 +7549,7 @@ strideForVert = calcStride(speedKmh, avgCadence, _hcmVert, _profVert.strideCorre
 }
 const measuredVertRatio = this.motion ? this.motion.getVertRatio(strideForVert) : null;
 this.pushKmSplitIfNeeded();
+this.pushDiagSplitIfNeeded();
 const _now = new Date();
 const _h = _now.getHours();
 const _isKo = storage.getLang() === 'ko';
@@ -7543,6 +7600,7 @@ weightKgSnapshot: weightKg,        // [추가] 당시 체중(kg) 스냅샷 저�
 alt: this.state.currentAlt,
 path: this.state.pathCoords,
 splits: this.state.splits,
+diagSplits: this.state.diagSplits,
 avgHr: (() => { const hm = hrManager.getAvgMax(); return hm.avg !== null ? hm.avg : (hrManager._hr > 0 ? hrManager._hr : null); })(),
 maxHr: (() => { const hm = hrManager.getAvgMax(); return hm.max !== null ? hm.max : (hrManager._hr > 0 ? hrManager._hr : null); })(),
 hrZone: (() => { const hm = hrManager.getAvgMax(); const refHr = hm.avg !== null ? hm.avg : hrManager._hr; return refHr > 0 ? 'Z' + hrManager.getZone(refHr).z : null; })()
@@ -7594,6 +7652,7 @@ const _strideSnap = this.buildStrideSnapshot(this.state.walkSteps, avgSpm, avgPa
 const _snapshotStride = _strideSnap.stride;
 const _strideSensorFlag = _strideSnap.sensorFlag;
 this.pushKmSplitIfNeeded();
+this.pushDiagSplitIfNeeded();
 const _now = new Date();
 const _h = _now.getHours();
 const _isKo = storage.getLang() === 'ko';
@@ -7620,6 +7679,7 @@ weightKgSnapshot: weightKg,
 alt: this.state.currentAlt,
 path: this.state.pathCoords,
 splits: this.state.splits,
+diagSplits: this.state.diagSplits,
 avgHr: (() => { const hm = hrManager.getAvgMax(); return hm.avg !== null ? hm.avg : (hrManager._hr > 0 ? hrManager._hr : null); })(),
 maxHr: (() => { const hm = hrManager.getAvgMax(); return hm.max !== null ? hm.max : (hrManager._hr > 0 ? hrManager._hr : null); })(),
 hrZone: (() => { const hm = hrManager.getAvgMax(); const refHr = hm.avg !== null ? hm.avg : hrManager._hr; return refHr > 0 ? 'Z' + hrManager.getZone(refHr).z : null; })()
@@ -7732,9 +7792,10 @@ currentAlt: 0, lowSpeedStartTime: null, wakeLock: null,
 startTimestamp: null, pausedMs: 0, pauseStartedAt: null,
 maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
 splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
+diagSplits: [], lastDiagCheckpoint: 0, lastDiagSeconds: 0, lastDiagAlt: 0, diagCadenceSamples: [], diagHrSamples: [],
 totalAscent: 0, lastAscentAlt: null,
 lastPosTimestamp: Date.now(),
-speedBuffer: [], lastValidSpeed: 0, emaSpeedKmh: 0, metricSpeedBuffer: [], lastValidMetricSpeed: 0, metricSpeedKmh: 0, cadenceSamples: [], cadValHistory: [], splitCadenceSamples: [], splitHrSamples: [],
+speedBuffer: [], lastValidSpeed: 0, emaSpeedKmh: 0, metricSpeedBuffer: [], lastValidMetricSpeed: 0, metricSpeedKmh: 0, cadenceSamples: [], cadValHistory: [],
 isCalibrationRun: false, calibrationKnownDistanceM: 0,
 elevOffset: 0, elevOffsetReady: false, lastElevFetchTime: 0, lastElevFetchPos: null, elevFetchInFlight: false
 };
@@ -9296,8 +9357,8 @@ const hrManager = {
     if (hr && hr > 0 && typeof app !== 'undefined' && app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
       this._samples.push(hr);
       // [추가] 진단 화면 구간별(km) 심박 그래프용 — 현재 km 구간 동안의 심박도 별도 누적
-      if (!app.state.splitHrSamples) app.state.splitHrSamples = [];
-      app.state.splitHrSamples.push(hr);
+      if (!app.state.diagHrSamples) app.state.diagHrSamples = [];
+      app.state.diagHrSamples.push(hr);
     }
     const hrEl = document.getElementById('hr-val');
     const zoneEl = document.getElementById('hr-zone-val');
