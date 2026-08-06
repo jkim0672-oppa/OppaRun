@@ -156,6 +156,13 @@ filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
 .diag-main-val { font-size: 20px; font-weight: 900; color: #ffffff; letter-spacing: -0.3px; }
 .diag-ref { font-size: 11px; color: var(--warning); font-weight: 800; }
 .diag-tip { font-size: 13px; color: #ffffff; line-height: 1.6; font-weight: 600; padding-top: 12px; border-top: 1px solid #2a2a2a; word-break: keep-all; }
+/* [추가] DIAG 미니 그래프 아래 거리/시간 축 라벨. 첫 항목은 왼쪽, 마지막 항목은 오른쪽,
+   중간 항목들은 각자 칸의 중앙에 정렬되도록 flex space-between 방식으로 배치. */
+.diag-axis-labels { display: flex; margin-top: 4px; }
+.diag-axis-labels span { flex: 1; font-size: 8.5px; color: #666; font-weight: 700; line-height: 1.3; white-space: nowrap; }
+.diag-axis-labels span:first-child { text-align: left; }
+.diag-axis-labels span:last-child { text-align: right; }
+.diag-axis-labels span:not(:first-child):not(:last-child) { text-align: center; }
 .close-detail { position: absolute; top: calc(var(--top-inset) + 5px); right: 20px; z-index: 20001; background: var(--primary); color: #000; border: none; padding: 8px 16px; border-radius: 20px; font-weight: 900; font-size: 12px; }
 .recovery-highlight { color: var(--primary); font-size: 26px; font-weight: 900; margin: 10px 0; display: block; letter-spacing: -0.5px; }
 /* ===== 설정(SETTINGS) 화면: 드롭다운/단위/성별/기기 착용위치 ===== */
@@ -1415,7 +1422,10 @@ return total > 0 ? total : null;
 // [추가] 진단 화면 박스 안에 들어가는 작고 심플한 구간별(km 스플릿 기준) 변화 그래프.
 // values: 숫자 배열(null/NaN 섞여도 됨, 유효값만 사용). invert=true면 값이 작을수록 위로
 // 올라가게 그림(페이스처럼 "작을수록 좋음"인 지표에 사용). 유효 포인트가 2개 미만이면 빈 문자열 반환.
-function buildSparklineSVG(values, colorHex, invert) {
+// [수정] showAvgLine 파라미터 추가(기본 true): 그래프 중간에 평균값 위치를 가리키는
+// 회색 점선 기준선을 함께 그린다. 값이 위아래로 튀어도 "평균이 어디쯤인지" 한눈에 보이게.
+function buildSparklineSVG(values, colorHex, invert, showAvgLine) {
+if (showAvgLine === undefined) showAvgLine = true;
 if (!values || !values.length) return '';
 let pts = values.map((v, i) => ({ i, v })).filter(p => typeof p.v === 'number' && isFinite(p.v));
 if (pts.length < 2) return '';
@@ -1434,25 +1444,64 @@ if (pts.length > MAX_POINTS) {
   pts = bucketed;
   values = pts; // x축 간격 계산에 다운샘플된 길이를 사용
 }
-const W = 100, H = 26, PAD = 2;
+const W = 100, H = 32, PAD = 2; // [수정] 기준선이 덜 답답해 보이도록 높이 26→32
 let min = Math.min(...pts.map(p => p.v));
 let max = Math.max(...pts.map(p => p.v));
 if (max - min < 1e-6) { min -= 1; max += 1; }
+const yFor = (v) => {
+  let t = (v - min) / (max - min); // 0~1
+  if (invert) t = 1 - t;
+  return PAD + (1 - t) * (H - PAD * 2);
+};
 const xStep = (W - PAD * 2) / (values.length - 1 || 1);
 const coords = pts.map(p => {
   const x = PAD + p.i * xStep;
-  let t = (p.v - min) / (max - min); // 0~1
-  if (invert) t = 1 - t;
-  const y = PAD + (1 - t) * (H - PAD * 2);
+  const y = yFor(p.v);
   return x.toFixed(1) + ',' + y.toFixed(1);
 });
 const first = coords[0].split(',');
 const last = coords[coords.length - 1].split(',');
 const areaPts = first[0] + ',' + (H - PAD) + ' ' + coords.join(' ') + ' ' + last[0] + ',' + (H - PAD);
-return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%;height:26px;display:block;margin-top:6px;">'
+// [추가] 평균 기준선(회색 점선). yFor가 invert를 이미 반영하므로 그대로 사용.
+let avgLineSvg = '';
+if (showAvgLine) {
+  const avgVal = pts.reduce((a, p) => a + p.v, 0) / pts.length;
+  const avgY = yFor(avgVal).toFixed(1);
+  avgLineSvg = '<line x1="' + PAD + '" y1="' + avgY + '" x2="' + (W - PAD) + '" y2="' + avgY + '" stroke="#888" stroke-width="1" stroke-dasharray="2,2" vector-effect="non-scaling-stroke"></line>';
+}
+return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%;height:32px;display:block;margin-top:6px;">'
   + '<polyline points="' + areaPts + '" fill="' + colorHex + '" opacity="0.12" stroke="none"></polyline>'
+  + avgLineSvg
   + '<polyline points="' + coords.join(' ') + '" fill="none" stroke="' + colorHex + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>'
   + '</svg>';
+}
+// [추가] DIAG 미니 그래프 아래에 표시할 거리/시간 라벨 HTML.
+// 전체 거리에 따라 라벨 개수를 3→4→5개로 늘려서, 짧은 러닝에서는 카드 안에서
+// 겹치지 않게, 긴 러닝에서는 그래프 굴곡과 거리/시간을 맞춰볼 수 있게 한다.
+function getDiagAxisLabelCount(totalKm) {
+  if (totalKm > 6) return 5;
+  if (totalKm > 2) return 4;
+  return 3;
+}
+function fmtDiagAxisTime(sec) {
+  const m = Math.floor(sec / 60), s = Math.round(sec % 60);
+  return m + ':' + String(s).padStart(2, '0');
+}
+function buildDiagAxisLabelsHtml(splits) {
+  if (!splits || splits.length < 2) return '';
+  const totalKm = typeof splits[splits.length - 1].km === 'number' ? splits[splits.length - 1].km : parseFloat(splits[splits.length - 1].km);
+  const n = getDiagAxisLabelCount(totalKm);
+  const idxSet = new Set();
+  for (let k = 0; k < n; k++) {
+    idxSet.add(Math.round((k / (n - 1)) * (splits.length - 1)));
+  }
+  const idxs = Array.from(idxSet).sort((a, b) => a - b);
+  return '<div class="diag-axis-labels">' + idxs.map(i => {
+    const s = splits[i];
+    const kmStr = (typeof s.km === 'number' ? s.km : parseFloat(s.km)).toFixed(1);
+    const tSec = s.t_sec != null ? s.t_sec : (s.seconds != null ? s.seconds : 0);
+    return '<span>' + kmStr + 'km<br>' + fmtDiagAxisTime(tSec) + '</span>';
+  }).join('') + '</div>';
 }
 // [리팩토링] "가민 비교 → 보정 제안 적용" 로직이 두 곳(평균값 적용 / 개별 러닝 선택 적용)에
 // 변수명(avgSuggestion vs sel)만 다르고 완전히 동일하게 복붙돼 있던 것을 하나로 통합.
@@ -1972,8 +2021,10 @@ buildPrecisionCsv(log, devicePos) {
 // [추가] step_detector_cnt / step_counter_steps 컬럼 추가: 안드로이드 네이티브 걸음
 // 센서(TYPE_STEP_DETECTOR 누적 이벤트 수, TYPE_STEP_COUNTER 기준 이번 러닝 걸음수)를
 // 자체 알고리즘 케이던스와 나란히 비교할 수 있게 남겨둔다 (가민 비교 화면 교차검증용).
-const headers = ['t_sec','timestamp','lat','lng','gps_accuracy_m','dist_km','speed_kmh','cadence_spm','gct_ms','flight_pct','step_length_m','step_length_window_m','step_length_instant_m','vert_osc_mm','hr_bpm','hr_zone','rot_peak_dps','gyro_alpha_dps','gyro_beta_dps','gyro_gamma_dps','device_pos','step_detector_cnt','step_counter_steps','lean_angle_deg','lean_forward_deg','lean_lateral_deg'];
-const rows = log.map(r => [r.t, r.timestamp || '', r.lat || '', r.lng || '', r.gpsAcc != null ? r.gpsAcc : '', r.distKm, r.speedKmh, r.cadence, r.gctMs, r.flightPct, r.stepLengthM != null ? r.stepLengthM : '', r.stepLengthWindowM != null ? r.stepLengthWindowM : '', r.stepLengthInstantM != null ? r.stepLengthInstantM : '', r.vertOscMm != null ? r.vertOscMm : '', r.hrBpm, r.hrZone, r.rotPeakDps != null ? r.rotPeakDps : '', r.gyroAlpha != null ? r.gyroAlpha : '', r.gyroBeta != null ? r.gyroBeta : '', r.gyroGamma != null ? r.gyroGamma : '', devicePos || '', r.stepDetectorCnt != null ? r.stepDetectorCnt : '', r.stepCounterSteps != null ? r.stepCounterSteps : '', r.leanAngleDeg != null ? r.leanAngleDeg : '', r.leanForwardDeg != null ? r.leanForwardDeg : '', r.leanLateralDeg != null ? r.leanLateralDeg : ''].join(','));
+// [추가] alt_m 컬럼: GPS 기반 현재 고도(this.state.currentAlt, m 단위). 기존엔 정밀 로그에
+// 고도가 전혀 기록되지 않아 DIAG 화면의 고도 그래프를 이 로그만으로는 재구성할 수 없었음.
+const headers = ['t_sec','timestamp','lat','lng','gps_accuracy_m','dist_km','speed_kmh','cadence_spm','gct_ms','flight_pct','step_length_m','step_length_window_m','step_length_instant_m','vert_osc_mm','alt_m','hr_bpm','hr_zone','rot_peak_dps','gyro_alpha_dps','gyro_beta_dps','gyro_gamma_dps','device_pos','step_detector_cnt','step_counter_steps','lean_angle_deg','lean_forward_deg','lean_lateral_deg'];
+const rows = log.map(r => [r.t, r.timestamp || '', r.lat || '', r.lng || '', r.gpsAcc != null ? r.gpsAcc : '', r.distKm, r.speedKmh, r.cadence, r.gctMs, r.flightPct, r.stepLengthM != null ? r.stepLengthM : '', r.stepLengthWindowM != null ? r.stepLengthWindowM : '', r.stepLengthInstantM != null ? r.stepLengthInstantM : '', r.vertOscMm != null ? r.vertOscMm : '', r.altM != null ? r.altM : '', r.hrBpm, r.hrZone, r.rotPeakDps != null ? r.rotPeakDps : '', r.gyroAlpha != null ? r.gyroAlpha : '', r.gyroBeta != null ? r.gyroBeta : '', r.gyroGamma != null ? r.gyroGamma : '', devicePos || '', r.stepDetectorCnt != null ? r.stepDetectorCnt : '', r.stepCounterSteps != null ? r.stepCounterSteps : '', r.leanAngleDeg != null ? r.leanAngleDeg : '', r.leanForwardDeg != null ? r.leanForwardDeg : '', r.leanLateralDeg != null ? r.leanLateralDeg : ''].join(','));
 return headers.join(',') + '\n' + rows.join('\n');
 }
 downloadCsvFile(csvStr, fileName) {
@@ -4799,20 +4850,22 @@ const paceSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => paceStrToSeconds
 const cadSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.avgCadence === 'number' ? s.avgCadence : null)), '#4fc3f7', false);
 const hrSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.avgHr === 'number' ? s.avgHr : null)), '#e53935', false);
 const altSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.altTo === 'number' ? s.altTo : null)), '#90a4ae', false);
+// [추가] 그래프 아래 거리/시간 축 라벨 (기준선과 함께, v2 스타일)
+const diagAxisLabelsHtml = buildDiagAxisLabelsHtml(_splitsForGraph);
 const totalAltGainForDiag = _splitsForGraph.length > 0 ? _splitsForGraph.reduce((sum,s)=>sum+Math.max(0,s.altDiff||0),0) : 0;
 contentArea.innerHTML =
 '<div class="diag-card"><div class="diag-label">' + (t.diagEffScore) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + effColor + '">' + effScore + ' <span style="font-size:14px;color:#aaa">/ 100</span></div><div class="diag-ref">Ref: ≥80</div></div><div class="diag-tip">' + effComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.time||'TIME') + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.time||'--') + '</div></div>' +
 '<div style="margin-top:6px;font-size:12px;color:#aaa;font-weight:700;">' + (t.speed||'SPEED') + ' : ' + (() => { const p=r.avgPace||r.pace; if(p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60); return this.currentUnit==='mile'?(kmh*0.621371).toFixed(1)+' mi/h':kmh.toFixed(1)+' km/h';} return '--'; })() + '</div>' +
 '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + ' <span style="font-size:13px;color:#aaa">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div>' + paceSparkSvg + '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">CAD: ' + (r.cadence || 0) + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div>' + cadSparkSvg + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + ' <span style="font-size:13px;color:#aaa">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div>' + paceSparkSvg + (paceSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">CAD: ' + (r.cadence || 0) + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div>' + cadSparkSvg + (cadSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + strideVal + '</div><div class="diag-ref">Ref: 0.5~0.75m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">GCT: ' + r.gct + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagBalanceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.cadenceBal || '50:50') + ' <span style="font-size:11px;color:#aaa">L:R</span></div><div class="diag-ref">GCT ' + (r.gctBal || '50:50') + ' &nbsp;·&nbsp; GYRO ' + (r.gyroBal || '50:50') + '</div></div><div class="diag-tip">' + diagFeedback.balance + '</div><div style="font-size:11px;color:#888;font-weight:600;line-height:1.5;margin-top:8px;padding-top:8px;border-top:1px solid #222;">' + (t.diagBalanceExplain || '') + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagFlightLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (isNaN(flightNum)?'#aaa':this.getFlightColor(flightNum)) + '">' + flightVal + (flightVal!=='--'?' %':'') + '</div><div class="diag-ref">Ref: 30~45%</div></div><div class="diag-tip">' + flightComment + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagHrLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + hrColor + '">' + hrMainVal + '</div><div class="diag-ref">' + t.hrZoneLabel + ': ' + hrZoneDisplay + '</div></div><div class="diag-tip">' + hrComment + '</div>' + hrSparkSvg + '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagAltLabel || "GPS ALTITUDE") + '</div><div class="diag-val-group"><div class="diag-main-val">' + (altSparkSvg ? ('+' + totalAltGainForDiag.toFixed(0) + ' <span style="font-size:13px;color:#aaa">M</span>') : '--') + '</div></div>' + (altSparkSvg ? altSparkSvg : '<div class="diag-tip">' + (t.diagAltNoData || '') + '</div>') + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagHrLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + hrColor + '">' + hrMainVal + '</div><div class="diag-ref">' + t.hrZoneLabel + ': ' + hrZoneDisplay + '</div></div><div class="diag-tip">' + hrComment + '</div>' + hrSparkSvg + (hrSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagAltLabel || "GPS ALTITUDE") + '</div><div class="diag-val-group"><div class="diag-main-val">' + (altSparkSvg ? ('+' + totalAltGainForDiag.toFixed(0) + ' <span style="font-size:13px;color:#aaa">M</span>') : '--') + '</div></div>' + (altSparkSvg ? (altSparkSvg + diagAxisLabelsHtml) : '<div class="diag-tip">' + (t.diagAltNoData || '') + '</div>') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagRecov || "RECOVERY GUIDE") + '</div>' + recovHighlightHTML + '<div class="diag-tip">' + recovComment + '</div></div>';
 }
 }
@@ -6735,7 +6788,7 @@ const _diagCadArr = this.state.diagCadenceSamples || [];
 const _diagAvgCad = _diagCadArr.length > 0 ? Math.round(_diagCadArr.reduce((a,b)=>a+b,0) / _diagCadArr.length) : null;
 const _diagHrArr = this.state.diagHrSamples || [];
 const _diagAvgHr = _diagHrArr.length > 0 ? Math.round(_diagHrArr.reduce((a,b)=>a+b,0) / _diagHrArr.length) : null;
-this.state.diagSplits.push({ km: diagTargetKm, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastDiagAlt, avgCadence: _diagAvgCad, avgHr: _diagAvgHr });
+this.state.diagSplits.push({ km: diagTargetKm, t_sec: this.state.seconds, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastDiagAlt, avgCadence: _diagAvgCad, avgHr: _diagAvgHr });
 this.state.lastDiagCheckpoint = diagTargetKm;
 this.state.lastDiagSeconds = this.state.seconds;
 this.state.lastDiagAlt = this.state.currentAlt;
@@ -7199,6 +7252,7 @@ stepLengthM: stepLengthM,
 stepLengthWindowM: stepLengthWindowM != null ? stepLengthWindowM.toFixed(2) : '', // [추가] 구간평균 원본(디버그/재튜닝용)
 stepLengthInstantM: stepLengthInstantM != null ? stepLengthInstantM.toFixed(2) : '', // [추가] 순간공식 원본(디버그/재튜닝용)
 vertOscMm: vertOscMm,
+altM: (typeof this.state.currentAlt === 'number') ? this.state.currentAlt : '', // [추가] GPS 기반 현재 고도(m) 스냅샷
 hrBpm: getTxt('hr-val'),
 hrZone: getTxt('hr-zone-val'),
 rotPeakDps: rotPeakDps,
@@ -7459,7 +7513,7 @@ const _diagCadArr2 = this.state.diagCadenceSamples || [];
 const _diagAvgCad2 = _diagCadArr2.length > 0 ? Math.round(_diagCadArr2.reduce((a,b)=>a+b,0) / _diagCadArr2.length) : null;
 const _diagHrArr2 = this.state.diagHrSamples || [];
 const _diagAvgHr2 = _diagHrArr2.length > 0 ? Math.round(_diagHrArr2.reduce((a,b)=>a+b,0) / _diagHrArr2.length) : null;
-this.state.diagSplits.push({ km: parseFloat(this.state.totalDist).toFixed(2), pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastDiagAlt, avgCadence: _diagAvgCad2, avgHr: _diagAvgHr2 });
+this.state.diagSplits.push({ km: parseFloat(this.state.totalDist).toFixed(2), t_sec: this.state.seconds, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastDiagAlt, avgCadence: _diagAvgCad2, avgHr: _diagAvgHr2 });
 this.state.diagCadenceSamples = [];
 this.state.diagHrSamples = [];
 }
