@@ -159,7 +159,7 @@ filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
 /* [추가] DIAG 미니 그래프 아래 거리/시간 축 라벨. 첫 항목은 왼쪽, 마지막 항목은 오른쪽,
    중간 항목들은 각자 칸의 중앙에 정렬되도록 flex space-between 방식으로 배치. */
 .diag-axis-labels { display: flex; margin-top: 4px; }
-.diag-axis-labels span { flex: 1; font-size: 8.5px; color: #666; font-weight: 700; line-height: 1.3; white-space: nowrap; }
+.diag-axis-labels span { flex: 1; font-size: 11px; color: #aaa; font-weight: 700; line-height: 1.4; white-space: nowrap; }
 .diag-axis-labels span:first-child { text-align: left; }
 .diag-axis-labels span:last-child { text-align: right; }
 .diag-axis-labels span:not(:first-child):not(:last-child) { text-align: center; }
@@ -4853,13 +4853,27 @@ const altSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.altTo =
 // [추가] 그래프 아래 거리/시간 축 라벨 (기준선과 함께, v2 스타일)
 const diagAxisLabelsHtml = buildDiagAxisLabelsHtml(_splitsForGraph);
 const totalAltGainForDiag = _splitsForGraph.length > 0 ? _splitsForGraph.reduce((sum,s)=>sum+Math.max(0,s.altDiff||0),0) : 0;
+// [추가] HR처럼 "평균 / 최고"로 보여주기 위한 케이던스·페이스 최고값.
+// 순간 최고 케이던스/페이스를 러닝 중 별도로 저장하지 않으므로, 100m 구간(diagSplits)
+// 단위 평균들 중 최고값(케이던스는 최댓값, 페이스는 가장 빠른=초/km가 가장 작은 값)으로 근사.
+const _cadPeakVals = _splitsForGraph.map(s => s.avgCadence).filter(v => typeof v === 'number');
+const cadPeakForDiag = _cadPeakVals.length ? Math.max(..._cadPeakVals) : null;
+const _pacePeakSecs = _splitsForGraph.map(s => paceStrToSeconds(s.pace)).filter(v => typeof v === 'number');
+const pacePeakSecForDiag = _pacePeakSecs.length ? Math.min(..._pacePeakSecs) : null;
+function _fmtPeakPaceStr(sec) {
+  if (sec == null) return null;
+  const m = Math.floor(sec / 60), s = Math.round(sec % 60);
+  return m + "'" + String(s).padStart(2,'0') + '"';
+}
+let pacePeakDisplay = _fmtPeakPaceStr(pacePeakSecForDiag);
+if (pacePeakDisplay && this.currentUnit === 'mile') pacePeakDisplay = this.convertPaceToUnit(pacePeakDisplay, 'mile');
 contentArea.innerHTML =
 '<div class="diag-card"><div class="diag-label">' + (t.diagEffScore) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + effColor + '">' + effScore + ' <span style="font-size:14px;color:#aaa">/ 100</span></div><div class="diag-ref">Ref: ≥80</div></div><div class="diag-tip">' + effComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.time||'TIME') + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.time||'--') + '</div></div>' +
 '<div style="margin-top:6px;font-size:12px;color:#aaa;font-weight:700;">' + (t.speed||'SPEED') + ' : ' + (() => { const p=r.avgPace||r.pace; if(p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60); return this.currentUnit==='mile'?(kmh*0.621371).toFixed(1)+' mi/h':kmh.toFixed(1)+' km/h';} return '--'; })() + '</div>' +
 '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + ' <span style="font-size:13px;color:#aaa">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div>' + paceSparkSvg + (paceSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">CAD: ' + (r.cadence || 0) + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div>' + cadSparkSvg + (cadSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + (pacePeakDisplay ? (' / ' + pacePeakDisplay) : '') + ' <span style="font-size:13px;color:#aaa">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div>' + paceSparkSvg + (paceSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">CAD: ' + (r.cadence || 0) + (cadPeakForDiag != null ? (' / ' + cadPeakForDiag) : '') + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div>' + cadSparkSvg + (cadSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + strideVal + '</div><div class="diag-ref">Ref: 0.5~0.75m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">GCT: ' + r.gct + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagBalanceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.cadenceBal || '50:50') + ' <span style="font-size:11px;color:#aaa">L:R</span></div><div class="diag-ref">GCT ' + (r.gctBal || '50:50') + ' &nbsp;·&nbsp; GYRO ' + (r.gyroBal || '50:50') + '</div></div><div class="diag-tip">' + diagFeedback.balance + '</div><div style="font-size:11px;color:#888;font-weight:600;line-height:1.5;margin-top:8px;padding-top:8px;border-top:1px solid #222;">' + (t.diagBalanceExplain || '') + '</div></div>' +
