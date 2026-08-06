@@ -1398,6 +1398,42 @@ const sec = parseInt(parts[1]) || 0;
 if (min <= 0) return null;
 return 60 / (min + sec / 60);
 }
+// [추가] "M'SS\"" 페이스 문자열 → 총 초 (그래프용 스케일 계산에 사용)
+function paceStrToSeconds(paceStr) {
+if (!paceStr || paceStr === INVALID_PACE || !paceStr.includes("'")) return null;
+const parts = paceStr.replace('"', '').split("'");
+const min = parseInt(parts[0]) || 0;
+const sec = parseInt(parts[1]) || 0;
+const total = min * 60 + sec;
+return total > 0 ? total : null;
+}
+// [추가] 진단 화면 박스 안에 들어가는 작고 심플한 구간별(km 스플릿 기준) 변화 그래프.
+// values: 숫자 배열(null/NaN 섞여도 됨, 유효값만 사용). invert=true면 값이 작을수록 위로
+// 올라가게 그림(페이스처럼 "작을수록 좋음"인 지표에 사용). 유효 포인트가 2개 미만이면 빈 문자열 반환.
+function buildSparklineSVG(values, colorHex, invert) {
+if (!values || !values.length) return '';
+const pts = values.map((v, i) => ({ i, v })).filter(p => typeof p.v === 'number' && isFinite(p.v));
+if (pts.length < 2) return '';
+const W = 100, H = 26, PAD = 2;
+let min = Math.min(...pts.map(p => p.v));
+let max = Math.max(...pts.map(p => p.v));
+if (max - min < 1e-6) { min -= 1; max += 1; }
+const xStep = (W - PAD * 2) / (values.length - 1 || 1);
+const coords = pts.map(p => {
+  const x = PAD + p.i * xStep;
+  let t = (p.v - min) / (max - min); // 0~1
+  if (invert) t = 1 - t;
+  const y = PAD + (1 - t) * (H - PAD * 2);
+  return x.toFixed(1) + ',' + y.toFixed(1);
+});
+const first = coords[0].split(',');
+const last = coords[coords.length - 1].split(',');
+const areaPts = first[0] + ',' + (H - PAD) + ' ' + coords.join(' ') + ' ' + last[0] + ',' + (H - PAD);
+return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%;height:26px;display:block;margin-top:6px;">'
+  + '<polyline points="' + areaPts + '" fill="' + colorHex + '" opacity="0.12" stroke="none"></polyline>'
+  + '<polyline points="' + coords.join(' ') + '" fill="none" stroke="' + colorHex + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>'
+  + '</svg>';
+}
 // [리팩토링] "가민 비교 → 보정 제안 적용" 로직이 두 곳(평균값 적용 / 개별 러닝 선택 적용)에
 // 변수명(avgSuggestion vs sel)만 다르고 완전히 동일하게 복붙돼 있던 것을 하나로 통합.
 // prof 객체를 직접 수정한다(호출부에서 storage.saveProfile(prof) 저장은 그대로 각자 담당).
@@ -1601,7 +1637,7 @@ diagCadGood: "Optimal step frequency.", diagCadLow: "Slightly low cadence. Sync 
 diagStrideGood: "Single step length. 0.5~0.75m is ideal.",
 diagGctBad: "Ground contact time is prolonged. Focus on quick pull-off.", diagGctGood: "Excellent movement elasticity.",
 diagFlightShort: "Short flight time. Improve elastic energy return.", diagFlightGood: "Good flight time range.", diagFlightLong: "Long flight time. Check for excessive vertical oscillation.",
-diagHrLabel: "HEART RATE", diagHrNoData: "Connect a heart rate monitor (e.g. Garmin) to see heart rate analysis for this run.", diagHrZoneLow: "Low-intensity recovery zone. Great for building your aerobic base.", diagHrZoneGood: "Efficient aerobic zone. A solid intensity for building endurance.", diagHrZoneHigh: "High-intensity zone. Effective for speed and power, but make sure to recover properly.",
+diagHrLabel: "HEART RATE", diagHrNoData: "Connect a heart rate monitor (e.g. Garmin) to see heart rate analysis for this run.", diagHrZoneLow: "Low-intensity recovery zone. Great for building your aerobic base.", diagHrZoneGood: "Efficient aerobic zone. A solid intensity for building endurance.", diagHrZoneHigh: "High-intensity zone. Effective for speed and power, but make sure to recover properly.", diagAltLabel: "GPS ALTITUDE", diagAltNoData: "Not enough GPS split data was recorded for this run to show an elevation profile.",
 diagRecovSkip: "Distance under 100m, recovery analysis not provided.",
 devposHandWarning: "⚠ Holding the phone in your hand significantly reduces the accuracy of cadence, GCT, and balance data due to arm-swing motion. Chest, waist, or armband placement is recommended.",
 calibTitle: "STRIDE CALIBRATION", calibDesc: "Run a known, exact distance (a track lap, etc.) so the app can learn your real stride length instead of an estimate — this improves stride, cadence, and efficiency-score accuracy going forward.",
@@ -1697,7 +1733,7 @@ diagCadGood: "이상적인 보폭 빈도입니다.", diagCadLow: "케이던스�
 diagStrideGood: "한 걸음 기준 보폭입니다. 0.5~0.75m가 이상적입니다.",
 diagGctBad: "지면 접촉 시간이 다소 깁니다. 발을 빠르게 회수하세요.", diagGctGood: "매우 뛰어난 탄력성입니다.",
 diagFlightShort: "체공시간이 짧습니다. 탄성 에너지 활용을 높여보세요.", diagFlightGood: "적절한 체공시간입니다.", diagFlightLong: "체공시간이 깁니다. 과도한 수직 낭비가 있을 수 있습니다.",
-diagHrLabel: "심박수", diagHrNoData: "가민 등 심박계를 연결하면 이 러닝의 심박수 분석을 확인할 수 있어요.", diagHrZoneLow: "저강도 회복 구간입니다. 유산소 기초 체력을 다지기에 좋습니다.", diagHrZoneGood: "효율적인 유산소 구간입니다. 지구력 향상에 적합한 강도입니다.", diagHrZoneHigh: "고강도 구간입니다. 스피드와 파워 향상에 효과적이지만 충분한 회복이 필요합니다.",
+diagHrLabel: "심박수", diagHrNoData: "가민 등 심박계를 연결하면 이 러닝의 심박수 분석을 확인할 수 있어요.", diagHrZoneLow: "저강도 회복 구간입니다. 유산소 기초 체력을 다지기에 좋습니다.", diagHrZoneGood: "효율적인 유산소 구간입니다. 지구력 향상에 적합한 강도입니다.", diagHrZoneHigh: "고강도 구간입니다. 스피드와 파워 향상에 효과적이지만 충분한 회복이 필요합니다.", diagAltLabel: "GPS 고도", diagAltNoData: "이 러닝은 고도 그래프를 표시할 GPS 구간 데이터가 충분히 기록되지 않았습니다.",
 diagRecovSkip: "100m 미만 거리는 회복 분석이 제공되지 않습니다.",
 devposHandWarning: "⚠ 휴대폰을 손에 들고 뛰면 팔 흔들림으로 인해 케이던스, GCT, 밸런스 데이터의 정확도가 크게 떨어집니다. 가슴, 허리, 암밴드 착용을 권장합니다.",
 calibTitle: "정밀 보폭 캘리브레이션", calibDesc: "정확히 알고 있는 거리(트랙 한 바퀴 등)를 뛰어서, 추정값 대신 실제 보폭을 앱이 학습하게 하세요 — 이후 보폭, 케이던스, 효율점수 정확도가 개선됩니다.",
@@ -4736,18 +4772,27 @@ hrComment = zoneInfo.z <= 2 ? t.diagHrZoneLow
 : zoneInfo.z === 3 ? t.diagHrZoneGood
 : t.diagHrZoneHigh;
 }
+// [추가] 박스 아래 작은 구간별(km 스플릿 기준) 변화 그래프 — 케이던스/페이스/심박/GPS고도
+// 한눈에 오르내림을 볼 수 있도록. 스플릿이 2개 미만이면(짧은 러닝 등) 해당 그래프는 표시 안 함.
+const _splitsForGraph = r.splits || [];
+const paceSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => paceStrToSeconds(s.pace)), '#00ff88', true);
+const cadSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.avgCadence === 'number' ? s.avgCadence : null)), '#4fc3f7', false);
+const hrSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.avgHr === 'number' ? s.avgHr : null)), '#e53935', false);
+const altSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.altTo === 'number' ? s.altTo : null)), '#90a4ae', false);
+const totalAltGainForDiag = _splitsForGraph.length > 0 ? _splitsForGraph.reduce((sum,s)=>sum+Math.max(0,s.altDiff||0),0) : 0;
 contentArea.innerHTML =
 '<div class="diag-card"><div class="diag-label">' + (t.diagEffScore) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + effColor + '">' + effScore + ' <span style="font-size:14px;color:#aaa">/ 100</span></div><div class="diag-ref">Ref: ≥80</div></div><div class="diag-tip">' + effComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.time||'TIME') + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.time||'--') + '</div></div>' +
 '<div style="margin-top:6px;font-size:12px;color:#aaa;font-weight:700;">' + (t.speed||'SPEED') + ' : ' + (() => { const p=r.avgPace||r.pace; if(p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60); return this.currentUnit==='mile'?(kmh*0.621371).toFixed(1)+' mi/h':kmh.toFixed(1)+' km/h';} return '--'; })() + '</div>' +
 '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + ' <span style="font-size:13px;color:#aaa">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">CAD: ' + (r.cadence || 0) + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + ' <span style="font-size:13px;color:#aaa">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div>' + paceSparkSvg + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">CAD: ' + (r.cadence || 0) + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div>' + cadSparkSvg + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + strideVal + '</div><div class="diag-ref">Ref: 0.5~0.75m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">GCT: ' + r.gct + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagBalanceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.cadenceBal || '50:50') + ' <span style="font-size:11px;color:#aaa">L:R</span></div><div class="diag-ref">GCT ' + (r.gctBal || '50:50') + ' &nbsp;·&nbsp; GYRO ' + (r.gyroBal || '50:50') + '</div></div><div class="diag-tip">' + diagFeedback.balance + '</div><div style="font-size:11px;color:#888;font-weight:600;line-height:1.5;margin-top:8px;padding-top:8px;border-top:1px solid #222;">' + (t.diagBalanceExplain || '') + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagFlightLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (isNaN(flightNum)?'#aaa':this.getFlightColor(flightNum)) + '">' + flightVal + (flightVal!=='--'?' %':'') + '</div><div class="diag-ref">Ref: 30~45%</div></div><div class="diag-tip">' + flightComment + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagHrLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + hrColor + '">' + hrMainVal + '</div><div class="diag-ref">' + t.hrZoneLabel + ': ' + hrZoneDisplay + '</div></div><div class="diag-tip">' + hrComment + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagHrLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + hrColor + '">' + hrMainVal + '</div><div class="diag-ref">' + t.hrZoneLabel + ': ' + hrZoneDisplay + '</div></div><div class="diag-tip">' + hrComment + '</div>' + hrSparkSvg + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagAltLabel || "GPS ALTITUDE") + '</div><div class="diag-val-group"><div class="diag-main-val">' + (altSparkSvg ? ('+' + totalAltGainForDiag.toFixed(0) + ' <span style="font-size:13px;color:#aaa">M</span>') : '--') + '</div></div>' + (altSparkSvg ? altSparkSvg : '<div class="diag-tip">' + (t.diagAltNoData || '') + '</div>') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagRecov || "RECOVERY GUIDE") + '</div>' + recovHighlightHTML + '<div class="diag-tip">' + recovComment + '</div></div>';
 }
 }
@@ -6142,7 +6187,7 @@ splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
 // [추가] 실시간 상승고도 누적 상태 (트레일 모드 실시간 칼로리의 경사 보너스 계산용)
 totalAscent: 0, lastAscentAlt: null,
 lastPosTimestamp: Date.now(),
-speedBuffer: [], lastValidSpeed: 0, emaSpeedKmh: 0, metricSpeedBuffer: [], lastValidMetricSpeed: 0, metricSpeedKmh: 0, cadenceSamples: [], cadValHistory: [],
+speedBuffer: [], lastValidSpeed: 0, emaSpeedKmh: 0, metricSpeedBuffer: [], lastValidMetricSpeed: 0, metricSpeedKmh: 0, cadenceSamples: [], cadValHistory: [], splitCadenceSamples: [], splitHrSamples: [],
 isCalibrationRun: false, calibrationKnownDistanceM: 0,
 // [추가] GPS 고도 보정용 - Open-Elevation API 지형고도값 기반 offset 보정
 elevOffset: 0, elevOffsetReady: false, lastElevFetchTime: 0, lastElevFetchPos: null, elevFetchInFlight: false,
@@ -6647,10 +6692,17 @@ let splitDuration = this.state.seconds - this.state.lastKmSeconds;
 let min = Math.floor(splitDuration / 60);
 let sec = splitDuration % 60;
 let paceStr = min + "'" + String(sec).padStart(2,'0') + '"';
-this.state.splits.push({ km: currentTargetKm, pace: paceStr, altFrom: this.state.lastKmAlt, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastKmAlt, coord: pos });
+// [추가] 진단 화면 구간별 그래프용: 이번 km 구간 동안 누적된 케이던스/심박 평균
+const _splitCadArr = this.state.splitCadenceSamples || [];
+const _splitAvgCad = _splitCadArr.length > 0 ? Math.round(_splitCadArr.reduce((a,b)=>a+b,0) / _splitCadArr.length) : null;
+const _splitHrArr = this.state.splitHrSamples || [];
+const _splitAvgHr = _splitHrArr.length > 0 ? Math.round(_splitHrArr.reduce((a,b)=>a+b,0) / _splitHrArr.length) : null;
+this.state.splits.push({ km: currentTargetKm, pace: paceStr, altFrom: this.state.lastKmAlt, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastKmAlt, coord: pos, avgCadence: _splitAvgCad, avgHr: _splitAvgHr });
 this.state.lastKmCheckpoint = currentTargetKm;
 this.state.lastKmSeconds = this.state.seconds;
 this.state.lastKmAlt = this.state.currentAlt;
+this.state.splitCadenceSamples = [];
+this.state.splitHrSamples = [];
 }
 } else if (timeDelta > 4 && d < 0.4) {
 // GPS 갭(터널 등) 후 복구: 보수적으로 반영
@@ -6903,6 +6955,9 @@ ui.updateRunningDisplay({cadence: cadDisplay, gct: (data.gctDisplay != null ? da
 if (windowSec >= 3 && cadValid) {
 if (!this.state.cadenceSamples) this.state.cadenceSamples = [];
 this.state.cadenceSamples.push(cadSmoothed);
+// [추가] 진단 화면 구간별(km) 케이던스 그래프용 — 현재 km 구간 동안의 케이던스도 별도 누적
+if (!this.state.splitCadenceSamples) this.state.splitCadenceSamples = [];
+this.state.splitCadenceSamples.push(cadSmoothed);
 }
 }
 }
@@ -7189,6 +7244,8 @@ this.state.pendingCadVal = null; // [추가] 케이던스 확정 대기값도 �
 this.state.pendingCadCount = 0;
 this.state.cadValHistory = [];
 this.state.splits = [];
+this.state.splitCadenceSamples = []; // [추가] 진단 화면 구간별 그래프용: 현재 km 구간 케이던스 누적
+this.state.splitHrSamples = []; // [추가] 진단 화면 구간별 그래프용: 현재 km 구간 심박 누적
 this.state.precisionLog = []; // [추가] 정밀 비교용 초당 로그 (가민 워치 데이터와 대조용)
 this.state.strideWindow = []; // [추가] 보폭(step_length) 구간평균 계산용 슬라이딩 윈도우 버퍼
 this.state.lastKmCheckpoint = 0;
@@ -7342,7 +7399,13 @@ let splitDuration = this.state.seconds - this.state.lastKmSeconds;
 let min = Math.floor(splitDuration / 60);
 let sec = splitDuration % 60;
 let paceStr = min + "'" + String(sec).padStart(2,'0') + '"';
-this.state.splits.push({ km: parseFloat(this.state.totalDist).toFixed(2), pace: paceStr, altFrom: this.state.lastKmAlt, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastKmAlt, coord: this.state.pathCoords[this.state.pathCoords.length - 1] || null });
+const _splitCadArr2 = this.state.splitCadenceSamples || [];
+const _splitAvgCad2 = _splitCadArr2.length > 0 ? Math.round(_splitCadArr2.reduce((a,b)=>a+b,0) / _splitCadArr2.length) : null;
+const _splitHrArr2 = this.state.splitHrSamples || [];
+const _splitAvgHr2 = _splitHrArr2.length > 0 ? Math.round(_splitHrArr2.reduce((a,b)=>a+b,0) / _splitHrArr2.length) : null;
+this.state.splits.push({ km: parseFloat(this.state.totalDist).toFixed(2), pace: paceStr, altFrom: this.state.lastKmAlt, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastKmAlt, coord: this.state.pathCoords[this.state.pathCoords.length - 1] || null, avgCadence: _splitAvgCad2, avgHr: _splitAvgHr2 });
+this.state.splitCadenceSamples = [];
+this.state.splitHrSamples = [];
 }
 }
 // 총거리÷총걸음수로 "실측" 평균 보폭을 구하고, 비현실적인 값이면 물리적 범위로 클램프한다.
@@ -7671,7 +7734,7 @@ maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
 splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
 totalAscent: 0, lastAscentAlt: null,
 lastPosTimestamp: Date.now(),
-speedBuffer: [], lastValidSpeed: 0, emaSpeedKmh: 0, metricSpeedBuffer: [], lastValidMetricSpeed: 0, metricSpeedKmh: 0, cadenceSamples: [], cadValHistory: [],
+speedBuffer: [], lastValidSpeed: 0, emaSpeedKmh: 0, metricSpeedBuffer: [], lastValidMetricSpeed: 0, metricSpeedKmh: 0, cadenceSamples: [], cadValHistory: [], splitCadenceSamples: [], splitHrSamples: [],
 isCalibrationRun: false, calibrationKnownDistanceM: 0,
 elevOffset: 0, elevOffsetReady: false, lastElevFetchTime: 0, lastElevFetchPos: null, elevFetchInFlight: false
 };
@@ -9232,6 +9295,9 @@ const hrManager = {
     // [추가] 러닝 중이면 심박 샘플 누적 (평균/최고 심박 계산용)
     if (hr && hr > 0 && typeof app !== 'undefined' && app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
       this._samples.push(hr);
+      // [추가] 진단 화면 구간별(km) 심박 그래프용 — 현재 km 구간 동안의 심박도 별도 누적
+      if (!app.state.splitHrSamples) app.state.splitHrSamples = [];
+      app.state.splitHrSamples.push(hr);
     }
     const hrEl = document.getElementById('hr-val');
     const zoneEl = document.getElementById('hr-zone-val');
