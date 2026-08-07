@@ -2436,7 +2436,7 @@ crewFollow: "Follow", crewFollowing: "Following", crewUnfollow: "Unfollow",
 blockedUsersLabel: "BLOCKED USERS", noBlockedUsers: "No blocked users.", unblock: "Unblock",
 blockConfirm: "Block this user? You will no longer see their posts and comments.", reportSubmitted: "Report submitted. Thank you.",
 crewSharePrompt: "Are you sharing with the crew?", crewSavedConfirm: "✓ Saved to your history", crewIncludeRoute: "Route map", crewIncludeHr: "Heart rate", crewIncludeCadence: "Cadence", crewIncludeGct: "Ground contact time", crewIncludeFlight: "Flight ratio", crewIncludeStride: "Stride", crewIncludeKcal: "Calories", crewIncludeSteps: "Steps", crewIncludeLean: "Lean angle", crewShareItemsToggle: "Share items", crewAddPhoto: "Add a photo (optional)",
-crewShareBtn: "SHARE", crewChangePhoto: "Change photo",
+crewShareBtn: "SHARE", crewChangePhoto: "Change photo", shareToCrewListBtn: "SHARE",
 crewCancelBtn: "SKIP", crewExitBtn: "APP CLOSE", crewCancelConfirm: "Discard this run without saving it to history?",
 crewNicknameLabel: "CREW NICKNAME", nicknamePlaceholder: "Nickname (max 12 chars)", nicknameHint: "Your records will be shared publicly under this name",
 profilePhotoLabel: "PROFILE PHOTO", profilePhotoUpload: "UPLOAD PHOTO", profilePhotoHint: "This photo will be shown on your community posts", profilePhotoRemove: "REMOVE",
@@ -2532,7 +2532,7 @@ crewFollow: "팔로우", crewFollowing: "팔로잉", crewUnfollow: "언팔로우
 blockedUsersLabel: "차단 목록", noBlockedUsers: "차단한 사용자가 없습니다.", unblock: "차단 해제",
 blockConfirm: "이 사용자를 차단할까요? 앞으로 이 사용자의 게시글과 댓글이 보이지 않습니다.", reportSubmitted: "신고가 접수되었습니다. 감사합니다.",
 crewSharePrompt: "크루와 공유하시겠어요?", crewSavedConfirm: "✓ 기록에 저장 완료", crewIncludeRoute: "경로 지도", crewIncludeHr: "심박수", crewIncludeCadence: "케이던스", crewIncludeGct: "지면접촉시간", crewIncludeFlight: "체공비율", crewIncludeStride: "보폭", crewIncludeKcal: "칼로리", crewIncludeSteps: "걸음수", crewIncludeLean: "린각도", crewShareItemsToggle: "크루쉐어 아이템", crewAddPhoto: "사진 추가 (선택)",
-crewShareBtn: "공유하기", crewChangePhoto: "사진 변경",
+crewShareBtn: "공유하기", crewChangePhoto: "사진 변경", shareToCrewListBtn: "공유",
 crewCancelBtn: "닫기", crewExitBtn: "앱 종료", crewCancelConfirm: "이 러닝 기록을 저장하지 않고 취소할까요?",
 crewNicknameLabel: "크루 닉네임", nicknamePlaceholder: "닉네임 (최대 12자)", nicknameHint: "커뮤니티에 기록이 이 이름으로 공개됩니다",
 profilePhotoLabel: "프로필 사진", profilePhotoUpload: "사진 업로드", profilePhotoHint: "이 사진이 커뮤니티 게시물에 표시됩니다", profilePhotoRemove: "삭제",
@@ -4637,6 +4637,16 @@ overlay.style.display = 'flex';
 okBtn.onclick = () => { overlay.style.display = 'none'; if(callback) callback(); };
 }
 // ── 공유(크루) 모달 ──
+// [추가] 리스트 페이지의 개별 기록에서 "SHARE" 버튼을 눌러 크루 공유 모달을 여는 진입점.
+// 러닝 종료 직후 흐름(openShareCrewModal 단독 호출)과 구분하기 위해 _shareModalContext를 'list'로 표시해두고,
+// 모달 내부에서 이 값에 따라 저장뱃지/버튼 구성과 닫힘 동작(새로고침 없이 리스트로 복귀)을 분기한다.
+openShareFromList(id) {
+const history = storage.loadHistory();
+const record = history.find(r => r.id === id);
+if (!record) return;
+this._shareModalContext = 'list';
+this.openShareCrewModal(record);
+}
 openShareCrewModal(record) {
 this.pendingShareRecord = record;
 this.pendingSharePhotoFile = null;
@@ -4709,8 +4719,14 @@ if(fileInput) fileInput.value = '';
 if(shareBtn) shareBtn.textContent = t.crewShareBtn;
 const cancelRunBtn = document.getElementById('btn-share-crew-cancel-run');
 const exitAppBtn = document.getElementById('btn-share-crew-exit-app');
-if(cancelRunBtn) cancelRunBtn.textContent = t.crewCancelBtn;
-if(exitAppBtn) exitAppBtn.textContent = t.crewExitBtn;
+const exitAppRow = document.getElementById('share-crew-exit-row');
+// [추가] 리스트에서 열린 경우: 방금 저장된 게 아니므로 뱃지를 숨기고,
+// 버튼도 SHARE / CANCEL 두 개만 노출한다(APP CLOSE 숨김, SKIP 대신 CANCEL 라벨).
+if (!this._shareModalContext) this._shareModalContext = 'finish';
+const isFromList = this._shareModalContext === 'list';
+if(savedBadge) savedBadge.style.display = isFromList ? 'none' : 'inline-flex';
+if(cancelRunBtn) cancelRunBtn.textContent = isFromList ? t.cancelModal : t.crewCancelBtn;
+if(exitAppRow) exitAppRow.style.display = isFromList ? 'none' : '';
 const modal = document.getElementById('share-crew-modal');
 if(modal) modal.style.display = 'flex';
 }
@@ -4770,15 +4786,20 @@ const includeLean = leanCheckbox ? leanCheckbox.checked : true;
 const photoFile = this.pendingSharePhotoFile;
 const msgInput = document.getElementById('share-crew-message-input');
 const message = msgInput ? msgInput.value.trim() : '';
+// [추가] 리스트에서 연 경우엔 전체 새로고침 대신 리스트만 다시 그려서 그 화면에 머무른다.
+const isFromList = this._shareModalContext === 'list';
+this._shareModalContext = null;
 community.uploadRecord(record, photoFile, { route: includeRoute, hr: includeHr, cadence: includeCadence, gct: includeGct, flight: includeFlight, stride: includeStride, kcal: includeKcal, steps: includeSteps, leanAngle: includeLean }, message).then(() => {
 this._sharing = false;
-window.location.reload();
+if (isFromList) { this.updateHistoryList(); } else { window.location.reload(); }
 }).catch(() => {
 this._sharing = false;
-window.location.reload();
+if (isFromList) { this.updateHistoryList(); } else { window.location.reload(); }
 });
 } else {
-window.location.reload();
+const isFromList = this._shareModalContext === 'list';
+this._shareModalContext = null;
+if (!isFromList) window.location.reload();
 }
 this.pendingShareRecord = null;
 this.pendingSharePhotoFile = null;
@@ -4789,11 +4810,14 @@ this.pendingSharePhotoFile = null;
 // 저장된 기록까지 함께 삭제되던 버그가 있었음 — 삭제 로직 제거)
 cancelFinishAndDiscard() {
 if (this._sharing) return;
+// [추가] 리스트에서 연 경우엔 새로고침 없이 모달만 닫고 리스트 화면에 그대로 머무른다.
+const isFromList = this._shareModalContext === 'list';
+this._shareModalContext = null;
 this.pendingShareRecord = null;
 this.pendingSharePhotoFile = null;
 const modal = document.getElementById('share-crew-modal');
 if(modal) modal.style.display = 'none';
-window.location.reload();
+if (!isFromList) window.location.reload();
 }
 // [추가] "EXIT" 버튼: 이미 구현되어 있던 앱 종료 컨펌 다이얼로그(showExitDialog)를 재사용.
 // 이 경우 러닝 기록은 이미 저장된 상태이므로 그대로 두고 앱만 종료한다 (CANCEL과는 별개 동작).
@@ -4918,7 +4942,10 @@ this.buildHrBoxHtml(r, t) +
 )) +
 '</div>' +
 '<div class="h-delete-row" style="display:flex;justify-content:space-between;align-items:center;">' +
+'<div style="display:flex;gap:6px;">' +
 '<button style="background:#222;border:1px solid #444;color:var(--primary);font-size:var(--fs-xxs);padding:3px 7px;border-radius:5px;font-weight:900;cursor:pointer;" onclick="ui.openEditTitle(' + r.id + ')">' + (t.editTitle || 'EDIT TITLE') + '</button>' +
+'<button style="background:#222;border:1px solid #444;color:var(--primary);font-size:var(--fs-xxs);padding:3px 7px;border-radius:5px;font-weight:900;cursor:pointer;" onclick="ui.openShareFromList(' + r.id + ')">' + (t.shareToCrewListBtn || 'SHARE') + '</button>' +
+'</div>' +
 '<button class="btn-h-delete" onclick="ui.openConfirmModal(' + r.id + ')">' + t.deleteBtn + '</button>' +
 '</div>' +
 '</div>';
@@ -12929,7 +12956,7 @@ if (btn) { btn.textContent = '▶ PLAY'; btn.classList.remove('playing'); }
 <button id="btn-share-crew-share" class="btn-confirm-act btn-confirm-save" onclick="ui.closeShareCrewModal(true)">SHARE</button>
 <button id="btn-share-crew-cancel-run" class="btn-confirm-act btn-confirm-cancel" onclick="ui.cancelFinishAndDiscard()">SKIP</button>
 </div>
-<div class="custom-confirm-actions" style="margin-top:10px; justify-content:center;">
+<div id="share-crew-exit-row" class="custom-confirm-actions" style="margin-top:10px; justify-content:center;">
 <button id="btn-share-crew-exit-app" class="btn-confirm-act btn-confirm-cancel" onclick="ui.exitAppFromShareModal()" style="flex:0 0 auto; width:70%;">APP CLOSE</button>
 </div>
 </div>
