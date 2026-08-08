@@ -11934,7 +11934,6 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         + '<div style="font-size:var(--fs-xxs); color:#888; font-weight:800; margin-top:12px; margin-bottom:4px;">' + (isKo ? '코드 반영용 스니펫 (applyDevicePos / defaultProfile)' : 'CODE SNIPPET (applyDevicePos / defaultProfile)') + '</div>'
         + '<pre style="background:#000; border:1px solid #2a2a2a; border-radius:8px; padding:10px; font-size:var(--fs-xxs); color:#0f0; white-space:pre-wrap; word-break:break-all; margin:0;">' + snippet.replace(/</g,'&lt;') + '</pre>'
         + '<button style="margin-top:8px; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.copySnippet(\'' + escapedSnippet + '\')">' + (isKo ? '스니펫 복사' : 'COPY SNIPPET') + '</button>'
-        + '<button style="margin-top:8px; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.downloadPatchedHtml(\'' + pos + '\')">' + (isKo ? '수정된 HTML 다운로드' : 'DOWNLOAD PATCHED HTML') + '</button>'
         + undoBtnHtml(pos)
         + '<button style="margin-top:8px; background:transparent; color:#e57373; border:1px solid #663333; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.resetCalibration(\'' + pos + '\')">' + (isKo ? posLabel + '만 기본값으로 초기화' : 'RESET ' + posLabel + ' ONLY TO DEFAULT') + '</button>'
         + '</div>';
@@ -11945,7 +11944,11 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         '<div class="garmin-import-item" style="border-color:#3a3a2a;">'
           + '<div style="font-size:var(--fs-xxs); color:#888; margin-bottom:6px;">' + (isKo ? (POS_LABEL_KO[pos] || '') : (POS_LABEL_EN[pos] || '')) + '</div>'
           + undoBtnHtml(pos) + '</div>'
-      ).join('');
+      ).join('')
+      // [수정] 위치별로 따로 있던 다운로드 버튼을 하나로 통합. 적용된 위치(가슴/손 등)의
+      // 보정값을 모두 같은 파일에 함께 반영해서 한 번에 다운로드한다 — 각 위치는 자기
+      // 자리(DEVICE_PROFILES 표의 해당 pos 줄)에만 patch되므로 서로 섞이지 않는다.
+      + '<button style="margin-top:14px; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:12px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.downloadPatchedHtml()">' + (isKo ? '수정된 HTML 다운로드 (적용된 위치 전체 반영)' : 'DOWNLOAD PATCHED HTML (ALL APPLIED POSITIONS)') + '</button>';
   }
 
   // [추가] 스니펫을 클립보드로 복사(가능한 환경에서). 실패하면 조용히 무시 —
@@ -11970,52 +11973,61 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
   // 주의: fetch(location.href)는 현재 서버(GitHub Pages)에 실제로 올라가 있는 버전을 가져오는
   // 것이므로, 그 사이 소스가 로컬에서만 따로 수정돼있고 아직 배포 전이라면 그 로컬 수정은
   // 반영되지 않는다 — 어디까지나 "지금 배포된 버전 + 이번 캘리브레이션 값"만 합쳐주는 기능.
-  function buildPatchedHtml(rawHtml, ov, curProf) {
+  // [수정] pos 하나만 받던 것을, "patches" 배열(여러 위치를 한 번에)을 받도록 변경.
+  // patches: [{ pos, ov, curProf }, ...] — 각 위치는 DEVICE_PROFILES 표의 자기 줄에만
+  // patch되므로 여러 위치를 같이 넣어도 서로 섞이지 않는다.
+  // 단, defaultProfile 쪽은 소스에 위치 구분 없이 한 블록뿐이라 여러 위치를 같이 넘기면
+  // 배열의 마지막 위치 값이 최종적으로 반영된다 (기존부터 있던 구조적 특성).
+  function buildPatchedHtml(rawHtml, patches) {
     let html = rawHtml;
 
-    // 1) DEVICE_PROFILES 표 안, 해당 착용위치 줄만 치환
-    const devAnchorTag = 'CALIB_ANCHOR:DEVICE_PROFILES';
-    const devAnchorIdx = html.indexOf(devAnchorTag);
-    if (devAnchorIdx !== -1 && ov && ov.devicePos) {
-      const base = DEVICE_PROFILE_DEFAULTS[ov.devicePos] || DEVICE_PROFILE_DEFAULTS.chest;
-      const finalGct = ov.gctFallbackRatio != null ? ov.gctFallbackRatio : base.gctFallbackRatio;
-      const finalVert = ov.vertScale != null ? ov.vertScale : base.vertScale;
-      const finalRot = ov.rotRejectThreshold != null ? ov.rotRejectThreshold : base.rotRejectThreshold;
-      const newObj = '{ groundThreshold: ' + base.groundThreshold + ', impactThreshold: ' + base.impactThreshold
-        + ', gctFallbackRatio: ' + finalGct + ', vertScale: ' + finalVert + ', minStepInterval: ' + base.minStepInterval
-        + ', vertEnabled: ' + base.vertEnabled + ', rotRejectThreshold: ' + finalRot + ' }';
-      const slice = html.slice(devAnchorIdx);
-      const re = new RegExp('(' + ov.devicePos + ':\\s*)\\{[^}]*\\}');
-      const m = slice.match(re);
-      if (m) {
-        const start = devAnchorIdx + m.index;
-        const end = start + m[0].length;
-        html = html.slice(0, start) + m[1] + newObj + html.slice(end);
-      }
-    }
+    patches.forEach(function (patch) {
+      const ov = patch.ov, curProf = patch.curProf, pos = patch.pos;
 
-    // 2) defaultProfile 줄의 strideCorrectionFactor / gpsDistCorrectionFactor만 치환
-    // (앵커 주석 바로 다음 한 줄 범위로 한정 — 소스 안 다른 곳의 동일 키와 안 섞이게)
-    const defAnchorTag = 'CALIB_ANCHOR:DEFAULT_PROFILE';
-    const defAnchorIdx = html.indexOf(defAnchorTag);
-    if (defAnchorIdx !== -1 && curProf) {
-      const windowLen = 500; // 앵커 주석 + 다음 줄이 들어가기 충분한 여유
-      const win = html.slice(defAnchorIdx, defAnchorIdx + windowLen);
-      let patchedWin = win;
-      if (typeof curProf.strideCorrectionFactor === 'number' && curProf.strideCorrectionFactor > 0) {
-        patchedWin = patchedWin.replace(/strideCorrectionFactor:\s*[0-9.]+/, 'strideCorrectionFactor: ' + curProf.strideCorrectionFactor.toFixed(3));
+      // 1) DEVICE_PROFILES 표 안, 해당 착용위치 줄만 치환
+      const devAnchorTag = 'CALIB_ANCHOR:DEVICE_PROFILES';
+      const devAnchorIdx = html.indexOf(devAnchorTag);
+      if (devAnchorIdx !== -1 && ov && pos) {
+        const base = DEVICE_PROFILE_DEFAULTS[pos] || DEVICE_PROFILE_DEFAULTS.chest;
+        const finalGct = ov.gctFallbackRatio != null ? ov.gctFallbackRatio : base.gctFallbackRatio;
+        const finalVert = ov.vertScale != null ? ov.vertScale : base.vertScale;
+        const finalRot = ov.rotRejectThreshold != null ? ov.rotRejectThreshold : base.rotRejectThreshold;
+        const newObj = '{ groundThreshold: ' + base.groundThreshold + ', impactThreshold: ' + base.impactThreshold
+          + ', gctFallbackRatio: ' + finalGct + ', vertScale: ' + finalVert + ', minStepInterval: ' + base.minStepInterval
+          + ', vertEnabled: ' + base.vertEnabled + ', rotRejectThreshold: ' + finalRot + ' }';
+        const slice = html.slice(devAnchorIdx);
+        const re = new RegExp('(' + pos + ':\\s*)\\{[^}]*\\}');
+        const m = slice.match(re);
+        if (m) {
+          const start = devAnchorIdx + m.index;
+          const end = start + m[0].length;
+          html = html.slice(0, start) + m[1] + newObj + html.slice(end);
+        }
       }
-      if (typeof curProf.gpsDistCorrectionFactor === 'number' && curProf.gpsDistCorrectionFactor > 0) {
-        patchedWin = patchedWin.replace(/gpsDistCorrectionFactor:\s*[0-9.]+/, 'gpsDistCorrectionFactor: ' + curProf.gpsDistCorrectionFactor.toFixed(3));
+
+      // 2) defaultProfile 줄의 strideCorrectionFactor / gpsDistCorrectionFactor만 치환
+      // (앵커 주석 바로 다음 한 줄 범위로 한정 — 소스 안 다른 곳의 동일 키와 안 섞이게)
+      const defAnchorTag = 'CALIB_ANCHOR:DEFAULT_PROFILE';
+      const defAnchorIdx = html.indexOf(defAnchorTag);
+      if (defAnchorIdx !== -1 && curProf) {
+        const windowLen = 500; // 앵커 주석 + 다음 줄이 들어가기 충분한 여유
+        const win = html.slice(defAnchorIdx, defAnchorIdx + windowLen);
+        let patchedWin = win;
+        if (typeof curProf.strideCorrectionFactor === 'number' && curProf.strideCorrectionFactor > 0) {
+          patchedWin = patchedWin.replace(/strideCorrectionFactor:\s*[0-9.]+/, 'strideCorrectionFactor: ' + curProf.strideCorrectionFactor.toFixed(3));
+        }
+        if (typeof curProf.gpsDistCorrectionFactor === 'number' && curProf.gpsDistCorrectionFactor > 0) {
+          patchedWin = patchedWin.replace(/gpsDistCorrectionFactor:\s*[0-9.]+/, 'gpsDistCorrectionFactor: ' + curProf.gpsDistCorrectionFactor.toFixed(3));
+        }
+        if (typeof curProf.cadCorrectionFactor === 'number' && curProf.cadCorrectionFactor > 0) {
+          patchedWin = patchedWin.replace(/cadCorrectionFactor:\s*[0-9.]+/, 'cadCorrectionFactor: ' + curProf.cadCorrectionFactor.toFixed(3));
+        }
+        if (typeof curProf.paceCorrectionFactor === 'number' && curProf.paceCorrectionFactor > 0) {
+          patchedWin = patchedWin.replace(/paceCorrectionFactor:\s*[0-9.]+/, 'paceCorrectionFactor: ' + curProf.paceCorrectionFactor.toFixed(3));
+        }
+        html = html.slice(0, defAnchorIdx) + patchedWin + html.slice(defAnchorIdx + win.length);
       }
-      if (typeof curProf.cadCorrectionFactor === 'number' && curProf.cadCorrectionFactor > 0) {
-        patchedWin = patchedWin.replace(/cadCorrectionFactor:\s*[0-9.]+/, 'cadCorrectionFactor: ' + curProf.cadCorrectionFactor.toFixed(3));
-      }
-      if (typeof curProf.paceCorrectionFactor === 'number' && curProf.paceCorrectionFactor > 0) {
-        patchedWin = patchedWin.replace(/paceCorrectionFactor:\s*[0-9.]+/, 'paceCorrectionFactor: ' + curProf.paceCorrectionFactor.toFixed(3));
-      }
-      html = html.slice(0, defAnchorIdx) + patchedWin + html.slice(defAnchorIdx + win.length);
-    }
+    });
 
     return html;
   }
@@ -12023,32 +12035,41 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
   // [추가] 위에서 만든 패치된 HTML 전체를 실제로 폰에 파일로 저장.
   // 네이티브 다운로드 브릿지(AndroidDownload)가 있으면 그걸 우선 쓰고,
   // 없으면 Blob + <a download>로 폴백.
-  async function downloadPatchedHtml(pos) {
+  async function downloadPatchedHtml() {
     const isKo = isKoLang();
     try {
       const resp = await fetch(location.href, { cache: 'no-store' });
       if (!resp.ok) throw new Error('fetch failed: ' + resp.status);
       const rawHtml = await resp.text();
       const prof = storage.loadProfile();
-      const ov = (prof.motionCalibOverrides || {})[pos];
-      const strideVal = (prof.strideCorrectionFactorByPos || {})[pos];
-      const gpsVal = (prof.gpsDistCorrectionFactorByPos || {})[pos];
-      const cadValDl = (prof.cadCorrectionFactorByPos || {})[pos];
-      const paceValDl = (prof.paceCorrectionFactorByPos || {})[pos]; // [추가]
-      const hasStrideFactor = typeof strideVal === 'number' && strideVal !== 1.0;
-      const hasGpsFactor = typeof gpsVal === 'number' && gpsVal !== 1.0;
-      const hasCadFactor = typeof cadValDl === 'number' && cadValDl !== 1.0;
-      const hasPaceFactor = typeof paceValDl === 'number' && paceValDl !== 1.0; // [추가]
-      if (!ov && !hasStrideFactor && !hasGpsFactor && !hasCadFactor && !hasPaceFactor) {
+      const overridesMap = prof.motionCalibOverrides || {};
+      // [수정] 위치별 버튼 두 개 → 버튼 하나로 통합. 가슴/손 등 보정값이 적용된 위치를
+      // 전부 모아서 patches 배열로 만들고, 한 번의 다운로드로 같은 파일에 함께 반영한다.
+      const positions = ['chest', 'waist', 'armband', 'hand'];
+      const patches = [];
+      const patchedPositions = [];
+      positions.forEach(function (pos) {
+        const ov = overridesMap[pos];
+        const strideVal = (prof.strideCorrectionFactorByPos || {})[pos];
+        const gpsVal = (prof.gpsDistCorrectionFactorByPos || {})[pos];
+        const cadValDl = (prof.cadCorrectionFactorByPos || {})[pos];
+        const paceValDl = (prof.paceCorrectionFactorByPos || {})[pos];
+        const hasStrideFactor = typeof strideVal === 'number' && strideVal !== 1.0;
+        const hasGpsFactor = typeof gpsVal === 'number' && gpsVal !== 1.0;
+        const hasCadFactor = typeof cadValDl === 'number' && cadValDl !== 1.0;
+        const hasPaceFactor = typeof paceValDl === 'number' && paceValDl !== 1.0;
+        if (!ov && !hasStrideFactor && !hasGpsFactor && !hasCadFactor && !hasPaceFactor) return;
+        const posProf = { strideCorrectionFactor: hasStrideFactor ? strideVal : 1.0, gpsDistCorrectionFactor: hasGpsFactor ? gpsVal : 1.0, cadCorrectionFactor: hasCadFactor ? cadValDl : 1.0, paceCorrectionFactor: hasPaceFactor ? paceValDl : 1.0 };
+        patches.push({ pos: pos, ov: ov, curProf: posProf });
+        patchedPositions.push(pos);
+      });
+      if (!patches.length) {
         alert(isKo ? '적용된 캘리브레이션 값이 없습니다.' : 'No calibration override is currently applied.');
         return;
       }
-      // [수정] buildPatchedHtml의 curProf는 이제 "지금 위치의 stride/gps/cad/pace 값"만 담아서 넘긴다
-      // (프로필 전체의 플랫 필드가 아니라, 리셋 대상 pos에 맞는 값이어야 하므로).
-      const posProf = { strideCorrectionFactor: hasStrideFactor ? strideVal : 1.0, gpsDistCorrectionFactor: hasGpsFactor ? gpsVal : 1.0, cadCorrectionFactor: hasCadFactor ? cadValDl : 1.0, paceCorrectionFactor: hasPaceFactor ? paceValDl : 1.0 };
-      const patched = buildPatchedHtml(rawHtml, ov, posProf);
+      const patched = buildPatchedHtml(rawHtml, patches);
       const dateStr = new Date().toISOString().slice(0, 10);
-      const fileName = 'jennyrun-patched-' + pos + '-' + dateStr + '.html';
+      const fileName = 'jennyrun-patched-' + patchedPositions.join('-') + '-' + dateStr + '.html';
       if (window.AndroidDownload && typeof window.AndroidDownload.saveFileAs === 'function') {
         window.AndroidDownload.saveFileAs(patched, fileName);
       } else if (window.AndroidDownload && typeof window.AndroidDownload.saveFile === 'function') {
