@@ -11995,6 +11995,19 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     }
   }
 
+  // [추가 2026-08-08] DEVICE_PROFILES 표 한 줄(위치별 객체 리터럴)의 텍스트를 만드는 공용 헬퍼.
+  // applyDevicePos()의 profiles 표와 DEVICE_PROFILE_DEFAULTS 표 둘 다 같은 필드 구성이라
+  // 여기서 한 번만 만들어서 재사용 — nativeRescueEnabled/stepTrigger를 빠뜨리면 다운로드한
+  // 파일을 커밋하는 순간 그 위치의 네이티브 걸음감지 설정이 통째로 사라지는 버그가 생기므로
+  // (2026-08-08 발견/수정) 반드시 base의 모든 필드를 포함해야 한다.
+  function buildDeviceProfileLineText(base, finalGct, finalVert, finalRot) {
+    return '{ groundThreshold: ' + base.groundThreshold + ', impactThreshold: ' + base.impactThreshold
+      + ', gctFallbackRatio: ' + finalGct + ', vertScale: ' + finalVert + ', minStepInterval: ' + base.minStepInterval
+      + ', vertEnabled: ' + base.vertEnabled + ', rotRejectThreshold: ' + finalRot
+      + ', nativeRescueEnabled: ' + (!!base.nativeRescueEnabled)
+      + ', stepTrigger: \'' + (base.stepTrigger || 'native') + '\' }';
+  }
+
   // [추가] 현재 배포된(GitHub Pages) 페이지 자신의 원본 HTML을 fetch로 그대로 읽어와서,
   // CALIB_ANCHOR:DEVICE_PROFILES / CALIB_ANCHOR:DEFAULT_PROFILE 앵커 근처의 값만
   // 지금 적용된 캘리브레이션(motionCalibOverride, strideCorrectionFactor, gpsDistCorrectionFactor)
@@ -12005,6 +12018,10 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
   // [수정] pos 하나만 받던 것을, "patches" 배열(여러 위치를 한 번에)을 받도록 변경.
   // patches: [{ pos, ov, curProf }, ...] — 각 위치는 DEVICE_PROFILES 표의 자기 줄에만
   // patch되므로 여러 위치를 같이 넣어도 서로 섞이지 않는다.
+  // [수정 2026-08-08] 이제 applyDevicePos()의 profiles 표뿐 아니라 DEVICE_PROFILE_DEFAULTS
+  // 표(화면 표시용)와, chest에 한해 DEFAULT_PROFILE_FACTORS_BY_POS(RESET 기본계수 표)까지
+  // 같이 patch한다 — 커밋 한 번으로 4곳(profiles / defaultProfile / DEVICE_PROFILE_DEFAULTS /
+  // DEFAULT_PROFILE_FACTORS_BY_POS)이 전부 자동으로 맞춰지게.
   // 단, defaultProfile 쪽은 devicePos:"chest" 전용 단일 블록이라, chest 패치가 있을 때만
   // 반영한다(다른 위치의 값으로 덮어써서 "chest인데 다른 위치 값"이 되는 불일치 방지,
   // [수정 2026-08-08]). waist/armband/hand 보정계수는 localStorage 위치별 맵에 이미
@@ -12016,6 +12033,10 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       const ov = patch.ov, curProf = patch.curProf, pos = patch.pos;
 
       // 1) DEVICE_PROFILES 표 안, 해당 착용위치 줄만 치환
+      // [수정 2026-08-08 — 중요 버그 수정] newObj가 nativeRescueEnabled/stepTrigger 필드를
+      // 안 넣고 있어서, 다운로드해서 커밋하면 그 위치의 stepTrigger:'native'가 통째로
+      // 사라지는 심각한 버그가 있었음(=커밋한 순간 그 위치가 다시 자체 알고리즘으로
+      // 돌아가버림). 이제 base(DEVICE_PROFILE_DEFAULTS)의 두 필드까지 그대로 채워 넣는다.
       const devAnchorTag = 'CALIB_ANCHOR:DEVICE_PROFILES';
       const devAnchorIdx = html.indexOf(devAnchorTag);
       if (devAnchorIdx !== -1 && ov && pos) {
@@ -12023,9 +12044,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         const finalGct = ov.gctFallbackRatio != null ? ov.gctFallbackRatio : base.gctFallbackRatio;
         const finalVert = ov.vertScale != null ? ov.vertScale : base.vertScale;
         const finalRot = ov.rotRejectThreshold != null ? ov.rotRejectThreshold : base.rotRejectThreshold;
-        const newObj = '{ groundThreshold: ' + base.groundThreshold + ', impactThreshold: ' + base.impactThreshold
-          + ', gctFallbackRatio: ' + finalGct + ', vertScale: ' + finalVert + ', minStepInterval: ' + base.minStepInterval
-          + ', vertEnabled: ' + base.vertEnabled + ', rotRejectThreshold: ' + finalRot + ' }';
+        const newObj = buildDeviceProfileLineText(base, finalGct, finalVert, finalRot);
         const slice = html.slice(devAnchorIdx);
         const re = new RegExp('(' + pos + ':\\s*)\\{[^}]*\\}');
         const m = slice.match(re);
@@ -12033,6 +12052,49 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
           const start = devAnchorIdx + m.index;
           const end = start + m[0].length;
           html = html.slice(0, start) + m[1] + newObj + html.slice(end);
+        }
+      }
+
+      // 1-b) [추가 2026-08-08] DEVICE_PROFILE_DEFAULTS 표(가민 분석실 화면 표시/스니펫용)의
+      // 같은 위치 줄도 동일하게 patch. 이걸 안 하면 applyDevicePos()는 새 값으로 바뀌는데
+      // 화면에 보이는 "기본값" 표시와 RESET이 참조하는 표는 옛날 값으로 남아 다시 어긋남.
+      if (ov && pos) {
+        const defaultsVarIdx = html.indexOf('const DEVICE_PROFILE_DEFAULTS = {');
+        if (defaultsVarIdx !== -1) {
+          const base3 = DEVICE_PROFILE_DEFAULTS[pos] || DEVICE_PROFILE_DEFAULTS.chest;
+          const finalGct3 = ov.gctFallbackRatio != null ? ov.gctFallbackRatio : base3.gctFallbackRatio;
+          const finalVert3 = ov.vertScale != null ? ov.vertScale : base3.vertScale;
+          const finalRot3 = ov.rotRejectThreshold != null ? ov.rotRejectThreshold : base3.rotRejectThreshold;
+          const newObj3 = buildDeviceProfileLineText(base3, finalGct3, finalVert3, finalRot3);
+          const slice3 = html.slice(defaultsVarIdx);
+          const re3 = new RegExp('(' + pos + ':\\s*)\\{[^}]*\\}');
+          const m3 = slice3.match(re3);
+          if (m3) {
+            const start3 = defaultsVarIdx + m3.index;
+            const end3 = start3 + m3[0].length;
+            html = html.slice(0, start3) + m3[1] + newObj3 + html.slice(end3);
+          }
+        }
+      }
+
+      // 1-c) [추가 2026-08-08] 가슴 보정계수(stride/gps/cad/pace)가 바뀌었으면
+      // DEFAULT_PROFILE_FACTORS_BY_POS.chest(전역, RESET/UNDO가 참조하는 표)도 같이 patch.
+      // 이걸 안 하면 defaultProfile은 새 값으로 바뀌는데 RESET 버튼은 옛날 기본값으로 감.
+      if (pos === 'chest' && curProf) {
+        const factorsVarIdx = html.indexOf('const DEFAULT_PROFILE_FACTORS_BY_POS = {');
+        if (factorsVarIdx !== -1) {
+          const newFactorsObj = '{ stride: ' + curProf.strideCorrectionFactor.toFixed(3)
+            + ', gps: ' + curProf.gpsDistCorrectionFactor.toFixed(3)
+            + ', cad: ' + curProf.cadCorrectionFactor.toFixed(3)
+            + ', pace: ' + curProf.paceCorrectionFactor.toFixed(3) + ' }';
+          const slice4 = html.slice(factorsVarIdx);
+          const re4 = new RegExp('(chest:\\s*)\\{[^}]*\\}');
+          const m4 = slice4.match(re4);
+          if (m4) {
+            const start4 = factorsVarIdx + m4.index;
+            const end4 = start4 + m4[0].length;
+            html = html.slice(0, start4) + m4[1] + newFactorsObj + html.slice(end4);
+          }
         }
       }
 
