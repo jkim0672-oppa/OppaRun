@@ -9660,7 +9660,11 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
         photo_url: photoUrl,
         message: message || null,
         // [수정] 공유 모달의 HR 체크박스를 끄면 null로 업로드(비공개)
+        // [수정] 최고 심박수(maxHr)는 원래도 개인 기록엔 저장돼 있었지만 크루 업로드
+        // payload에서 빠져있어서 피드 카드에 평균만 나오고 있었음 — max_hr 추가.
+        // ⚠️ Supabase 'records' 테이블에 max_hr(numeric/int, nullable) 컬럼이 없다면 먼저 추가해야 함.
         avg_hr: shareHr ? (record.avgHr || null) : null,
+        max_hr: shareHr ? (record.maxHr || null) : null,
         hr_zone: shareHr ? (record.hrZone || null) : null
       };
       const { error } = await _sb.from('records').insert(payload);
@@ -9677,7 +9681,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
     try {
       const { data, error } = await _sb
         .from('records')
-        .select('id, nickname, avatar_url, location_name, title, activity_mode, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, photo_url, message, avg_hr, hr_zone, steps, walk_spm, stride_m, kcal, avg_lean_angle_deg, avg_lean_forward_deg, avg_lean_lateral_deg')
+        .select('id, nickname, avatar_url, location_name, title, activity_mode, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, photo_url, message, avg_hr, max_hr, hr_zone, steps, walk_spm, stride_m, kcal, avg_lean_angle_deg, avg_lean_forward_deg, avg_lean_lateral_deg')
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) throw error;
@@ -10052,7 +10056,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
           </div>
           <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
             <div style="font-size:var(--fs-xxs); color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.hrAvgMax||'HR'}</div>
-            <div style="font-size:var(--fs-card-stat); font-weight:900; color:#e53935; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.avg_hr !== undefined && r.avg_hr !== null) ? r.avg_hr : '--'}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> ${(r.hr_zone !== undefined && r.hr_zone !== null) ? r.hr_zone : 'bpm'}</span></div>
+            <div style="font-size:var(--fs-card-stat); font-weight:900; color:#e53935; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.avg_hr !== undefined && r.avg_hr !== null) ? (r.avg_hr + ' / ' + ((r.max_hr !== undefined && r.max_hr !== null) ? r.max_hr : r.avg_hr)) : '--'}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> bpm</span></div>
           </div>
           <div style="flex:1; text-align:center; padding:2px; min-width:0;">
             <div style="font-size:var(--fs-xxs); color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.cal||'KCAL'}</div>
@@ -10065,7 +10069,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
           <div style="display:flex; border-top:1px solid #f5f5f5; padding-top:6px; margin-top:6px;">
           <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
             <div style="font-size:var(--fs-xxs); color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.hrAvgMax||'HR'}</div>
-            <div style="font-size:var(--fs-card-stat); font-weight:900; color:#e53935; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.avg_hr !== undefined && r.avg_hr !== null) ? r.avg_hr : '--'}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> ${(r.hr_zone !== undefined && r.hr_zone !== null) ? r.hr_zone : 'bpm'}</span></div>
+            <div style="font-size:var(--fs-card-stat); font-weight:900; color:#e53935; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.avg_hr !== undefined && r.avg_hr !== null) ? (r.avg_hr + ' / ' + ((r.max_hr !== undefined && r.max_hr !== null) ? r.max_hr : r.avg_hr)) : '--'}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> bpm</span></div>
           </div>
           <div style="flex:1; text-align:center; padding:2px; min-width:0;">
             <div style="font-size:var(--fs-xxs); color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.cal||'KCAL'}</div>
@@ -11924,7 +11928,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       const snippetLine = '// 찾기: CALIB_ANCHOR:DEVICE_PROFILES\n'
         + pos + ':   { groundThreshold: ' + base.groundThreshold + ', impactThreshold: ' + base.impactThreshold
         + ', gctFallbackRatio: ' + finalGct + ', vertScale: ' + finalVert + ', minStepInterval: ' + base.minStepInterval
-        + ', vertEnabled: ' + base.vertEnabled + ', rotRejectThreshold: ' + finalRot + ' },';
+        + ', vertEnabled: ' + base.vertEnabled + ', rotRejectThreshold: ' + finalRot
+        + ', nativeRescueEnabled: ' + base.nativeRescueEnabled + ', stepTrigger: \'' + base.stepTrigger + '\' },'; // [수정] 재조립 시 이 두 필드가 통째로 빠지던 버그 수정
       // [추가] gpsDistCorrectionFactor / strideCorrectionFactor는 위치별 스니펫 한 줄로 —
       // 참고: 소스코드 쪽 defaultProfile은 위치 구분 없이 하나뿐이라, 이 스니펫은 그 위치를
       // "기본 착용위치"로 삼아 배포할 때만 그대로 대입하면 되는 참고용 값이다.
@@ -12007,7 +12012,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         const finalRot = ov.rotRejectThreshold != null ? ov.rotRejectThreshold : base.rotRejectThreshold;
         const newObj = '{ groundThreshold: ' + base.groundThreshold + ', impactThreshold: ' + base.impactThreshold
           + ', gctFallbackRatio: ' + finalGct + ', vertScale: ' + finalVert + ', minStepInterval: ' + base.minStepInterval
-          + ', vertEnabled: ' + base.vertEnabled + ', rotRejectThreshold: ' + finalRot + ' }';
+          + ', vertEnabled: ' + base.vertEnabled + ', rotRejectThreshold: ' + finalRot
+          + ', nativeRescueEnabled: ' + base.nativeRescueEnabled + ', stepTrigger: \'' + base.stepTrigger + '\' }'; // [수정] nativeRescueEnabled/stepTrigger가 재조립 과정에서 통째로 사라지던 버그 수정
         const slice = html.slice(devAnchorIdx);
         const re = new RegExp('(' + pos + ':\\s*)\\{[^}]*\\}');
         const m = slice.match(re);
