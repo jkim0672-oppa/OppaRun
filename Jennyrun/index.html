@@ -11912,7 +11912,23 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // 보정값이 적용돼 있을 수 있다. 각 위치마다 카드를 따로 그리고, RESET/스니펫/다운로드
     // 버튼도 그 위치(pos)를 명시해서 그 위치의 슬롯에만 영향을 준다.
     const positions = ['chest', 'waist', 'armband', 'hand'];
-    const activePositions = positions.filter(p => overridesMap[p]);
+    // [수정 2026-08-08 — 버그 수정] 예전엔 motionCalibOverrides[pos](GCT/수직진동 보정)가
+    // 있는 위치만 카드를 그렸는데, 그러면 "트랙 캘리브레이션으로 stride만 보정한 위치"는
+    // 카드 자체가 안 뜨고 RESET 버튼도 안 보여서 되돌릴 방법이 없었음. override든
+    // stride/gps/cad/pace 보정계수든 기본값과 다른 게 하나라도 있으면 카드를 그리도록 확장.
+    let _statusProf = null;
+    try { _statusProf = storage.loadProfile(); } catch (e) {}
+    const hasFactorDiffFor = (pos) => {
+      if (!_statusProf) return false;
+      const def = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || { stride: 1.0, gps: 1.0, cad: 1.0, pace: 1.0 };
+      const s = _statusProf.strideCorrectionFactorByPos ? _statusProf.strideCorrectionFactorByPos[pos] : null;
+      const g = _statusProf.gpsDistCorrectionFactorByPos ? _statusProf.gpsDistCorrectionFactorByPos[pos] : null;
+      const c = _statusProf.cadCorrectionFactorByPos ? _statusProf.cadCorrectionFactorByPos[pos] : null;
+      const pc = _statusProf.paceCorrectionFactorByPos ? _statusProf.paceCorrectionFactorByPos[pos] : null;
+      return (typeof s === 'number' && s !== def.stride) || (typeof g === 'number' && g !== def.gps)
+        || (typeof c === 'number' && c !== def.cad) || (typeof pc === 'number' && pc !== def.pace);
+    };
+    const activePositions = positions.filter(p => overridesMap[p] || hasFactorDiffFor(p));
 
     const undoOnlyPositions = positions.filter(p => hasUndoFor(p)); // [수정] 위치별로 남아있는 되돌리기 스냅샷 전부 표시
     if (!activePositions.length) {
@@ -11931,7 +11947,9 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     try { curProf = storage.loadProfile(); } catch (e) {}
 
     box.innerHTML = activePositions.map(pos => {
-      const ov = overridesMap[pos];
+      // [수정 2026-08-08] override 없이 stride 등 factor만 있는 위치도 activePositions에
+      // 들어올 수 있으므로, ov가 undefined일 때 아래 ov.xxx 접근에서 TypeError 나지 않게 방어.
+      const ov = overridesMap[pos] || {};
       const posLabel = isKo ? (POS_LABEL_KO[pos] || pos) : (POS_LABEL_EN[pos] || pos.toUpperCase());
       const strideVal = curProf && curProf.strideCorrectionFactorByPos ? curProf.strideCorrectionFactorByPos[pos] : null;
       const gpsVal = curProf && curProf.gpsDistCorrectionFactorByPos ? curProf.gpsDistCorrectionFactorByPos[pos] : null;
@@ -12274,18 +12292,33 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     const isKo = isKoLang();
     try {
       const prof = storage.loadProfile();
-      if (!prof.motionCalibOverrides || !prof.motionCalibOverrides[pos]) return;
+      // [수정 2026-08-08 — 버그 수정] 예전엔 motionCalibOverrides[pos](GCT/수직진동 보정)가
+      // 없으면 무조건 여기서 종료했는데, 그러면 "트랙 캘리브레이션으로 stride만 보정하고
+      // Garmin GCT 보정은 한 적 없는 위치"는 RESET을 눌러도 아무 반응 없이 끝나버렸음
+      // (stride/gps/cad/pace가 기본값이 아닌데도 안 지워짐). override든 보정계수든
+      // 둘 중 하나라도 기본값과 다르면 리셋을 진행하도록 조건을 넓힘.
+      const _defCheck = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || { stride: 1.0, gps: 1.0, cad: 1.0, pace: 1.0 };
+      const _curStride = (prof.strideCorrectionFactorByPos || {})[pos];
+      const _curGps = (prof.gpsDistCorrectionFactorByPos || {})[pos];
+      const _curCad = (prof.cadCorrectionFactorByPos || {})[pos];
+      const _curPace = (prof.paceCorrectionFactorByPos || {})[pos];
+      const hasOverride = !!(prof.motionCalibOverrides && prof.motionCalibOverrides[pos]);
+      const hasFactorDiff = (typeof _curStride === 'number' && _curStride !== _defCheck.stride)
+        || (typeof _curGps === 'number' && _curGps !== _defCheck.gps)
+        || (typeof _curCad === 'number' && _curCad !== _defCheck.cad)
+        || (typeof _curPace === 'number' && _curPace !== _defCheck.pace);
+      if (!hasOverride && !hasFactorDiff) return;
       // [수정] 직전 값으로 되돌리면 APPLY를 여러 번 반복했을 때 진짜 원본까지 못
       // 돌아가고 "마지막 직전값"까지만 되돌아가는 문제가 있었음. RESET은 "되돌리기(UNDO,
       // 1단계 전)"와 다르게 항상 코드 기본값으로 가야 한다. [수정 2026-08-08] 무조건 1.0이
       // 아니라 DEFAULT_PROFILE_FACTORS_BY_POS[pos] 기준으로 되돌린다 — chest는 실측 반영된
-      // 진짜 코드 기본값(1.090/0.976/1.031)이 있어서 1.0으로 리셋하면 틀린 값이 됨.
+      // 진짜 코드 기본값이 있어서 1.0으로 리셋하면 틀린 값이 됨.
       // 위치별 슬롯이므로 이 pos에 대해서만 초기화하고 다른 위치는 그대로 둔다.
       if (!prof.strideCorrectionFactorByPos) prof.strideCorrectionFactorByPos = {};
       if (!prof.gpsDistCorrectionFactorByPos) prof.gpsDistCorrectionFactorByPos = {};
       if (!prof.cadCorrectionFactorByPos) prof.cadCorrectionFactorByPos = {};
       if (!prof.paceCorrectionFactorByPos) prof.paceCorrectionFactorByPos = {}; // [추가]
-      const defFactors = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || { stride: 1.0, gps: 1.0, cad: 1.0, pace: 1.0 };
+      const defFactors = _defCheck;
       prof.strideCorrectionFactorByPos[pos] = defFactors.stride;
       prof.gpsDistCorrectionFactorByPos[pos] = defFactors.gps;
       prof.cadCorrectionFactorByPos[pos] = defFactors.cad;
@@ -12296,7 +12329,12 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         prof.cadCorrectionFactor = defFactors.cad;
         prof.paceCorrectionFactor = defFactors.pace; // [추가]
       }
-      delete prof.motionCalibOverrides[pos];
+      // [수정 2026-08-08] hasOverride가 false(override 자체가 없는 케이스)일 수도 있으므로
+      // delete 전에 존재 여부를 반드시 확인 — 안 그러면 motionCalibOverrides가 undefined일 때
+      // TypeError로 리셋 자체가 중간에 실패할 수 있음.
+      if (prof.motionCalibOverrides && prof.motionCalibOverrides[pos]) {
+        delete prof.motionCalibOverrides[pos];
+      }
       storage.saveProfile(prof);
 
       if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
