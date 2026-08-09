@@ -6760,6 +6760,16 @@ if (this.sessionCountForward === 0) return null;
 return this.sessionSumLateral / this.sessionCountForward;
 }
 }
+// [추가] 크루 카드 전용 케이던스/GCT/체공시간 2단계(좋음/나쁨) 색상 판정.
+// 기존 3단계(good/warning/danger) 판정 로직(UIManager.getCadenceLevel 등)은 그대로 재사용하되,
+// warning과 danger를 합쳐 "나쁨" 한 단계로 취급해 크루 카드에서는 좋음/나쁨 2색만 쓴다.
+const CrewStatColor = {
+GOOD: '#00aa55', // 크루카드 "나" 닉네임과 동일한 초록
+BAD: '#e53935',
+cadence(v) { if (v == null || v === '') return '#111'; return (typeof ui !== 'undefined' && ui.getCadenceLevel(Number(v)) === 'good') ? this.GOOD : this.BAD; },
+gct(v) { if (v == null || v === '') return '#111'; return (typeof ui !== 'undefined' && ui.getGctLevel(Number(v)) === 'good') ? this.GOOD : this.BAD; },
+flight(v) { if (v == null || v === '') return '#111'; return (typeof ui !== 'undefined' && ui.getFlightLevel(Number(v)) === 'good') ? this.GOOD : this.BAD; }
+};
 // ========== [신규] LeanAngleUI: 린각도 "표시" 로직 전용 모듈 ==========
 // 위 LeanAngleTracker가 "계산"을 담당한다면, 이 객체는 리스트/통계/루트맵/가민 분석실/
 // 크루카드 등 화면에 "어떻게 보여줄지"만 전담한다. 각 화면은 반드시 이 객체의 함수만
@@ -6792,6 +6802,13 @@ colorForPrimary(totalDeg, fwdDeg) {
 const p = this.primary(totalDeg, fwdDeg);
 if (!p || !p.signed) return null;
 return this.colorFor(this.levelForward(p.deg));
+},
+// [추가] 크루 카드 전용 2단계(좋음/나쁨) 색상 — warning+danger를 "나쁨"(빨강) 한 단계로 합침.
+// "나" 닉네임과 같은 초록(#00aa55)을 좋음 색으로 써서 형광녹색(--good) 대비 시인성을 높인다.
+colorForPrimaryCrew(totalDeg, fwdDeg) {
+const p = this.primary(totalDeg, fwdDeg);
+if (!p || !p.signed) return null;
+return (this.levelForward(p.deg) === 'good') ? '#00aa55' : '#e53935';
 },
 // [추가] 전방 성분은 부호가 의미있음(+숙임/−반대) → +기호를 명시적으로 붙여서 표시
 fmtSigned(deg) {
@@ -6938,7 +6955,7 @@ feedStatBoxHtml(r, lang) {
 if (!this.ENABLED || (r.avg_lean_angle_deg == null && r.avg_lean_forward_deg == null)) return '';
 return '<div style="flex:1; text-align:center; padding:2px; min-width:0;">'
 + '<div style="font-size:var(--fs-xxs); color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">' + this.label(lang) + '</div>'
-+ '<div style="font-size:var(--fs-card-stat); font-weight:900; color:' + (this.colorForPrimary(r.avg_lean_angle_deg, r.avg_lean_forward_deg) || '#111') + '; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + this.fmtPrimary(r.avg_lean_angle_deg, r.avg_lean_forward_deg) + '</div>'
++ '<div style="font-size:var(--fs-card-stat); font-weight:900; color:' + (this.colorForPrimaryCrew(r.avg_lean_angle_deg, r.avg_lean_forward_deg) || '#111') + '; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + this.fmtPrimary(r.avg_lean_angle_deg, r.avg_lean_forward_deg) + '</div>'
 + this.primarySubHtml(r.avg_lean_angle_deg, r.avg_lean_lateral_deg, r.avg_lean_forward_deg, lang, 'var(--fs-xxs)')
 + '</div>';
 }
@@ -10058,15 +10075,15 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
           <div style="display:flex; border-bottom:1px solid #f5f5f5; padding-bottom:6px; margin-bottom:6px;">
           <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
             <div style="font-size:var(--fs-xxs); color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.cadence||'CADENCE'}</div>
-            <div style="font-size:var(--fs-card-stat); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.cadence || '--'}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> spm</span></div>
+            <div style="font-size:var(--fs-card-stat); font-weight:900; color:${CrewStatColor.cadence(r.cadence)}; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.cadence || '--'}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> spm</span></div>
           </div>
           <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
             <div style="font-size:var(--fs-xxs); color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.gct||'GCT'}</div>
-            <div style="font-size:var(--fs-card-stat); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.gct_ms || '--'}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> ms</span></div>
+            <div style="font-size:var(--fs-card-stat); font-weight:900; color:${CrewStatColor.gct(r.gct_ms)}; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${r.gct_ms || '--'}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> ms</span></div>
           </div>
           <div style="flex:1; text-align:center; border-right:1px solid #f0f0f0; padding:2px; min-width:0;">
             <div style="font-size:var(--fs-xxs); color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.flight||'FLIGHT'}</div>
-            <div style="font-size:var(--fs-card-stat); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.flight_pct !== undefined && r.flight_pct !== null) ? r.flight_pct : '--'}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> %</span></div>
+            <div style="font-size:var(--fs-card-stat); font-weight:900; color:${CrewStatColor.flight(r.flight_pct)}; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${(r.flight_pct !== undefined && r.flight_pct !== null) ? r.flight_pct : '--'}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> %</span></div>
           </div>
           <div style="flex:1; text-align:center; padding:2px; min-width:0;">
             <div style="font-size:var(--fs-xxs); color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${t.stride||'STRIDE'}</div>
