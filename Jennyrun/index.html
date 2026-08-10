@@ -1051,8 +1051,6 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 }
 
 </style>
-<!-- [추가] SNS 공유 카드를 피드 카드와 동일한 실제 DOM으로 캡처하기 위한 라이브러리 -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 <body>
 <!-- [추가] 최초 실행 온보딩 화면: 메인화면 진입 전 활동모드/기기 착용위치를 먼저 선택하게 함 -->
@@ -1704,180 +1702,329 @@ window.onAndroidSaveResult = function(success, fileName) {
     alert(isKo ? ('저장되었습니다' + (fileName ? (': ' + fileName) : '.')) : ('Saved' + (fileName ? (': ' + fileName) : '.')));
   }
 };
-// [수정] SNS 공유 카드를 크루 피드에 실제로 표시되는 카드와 동일한 마크업으로 구성.
-// 캔버스에 직접 그리는 대신, 피드 카드와 같은 HTML/CSS를 오프스크린에 렌더링한 뒤
-// html2canvas로 그대로 캡처해서 완전히 동일한 모양의 이미지를 만든다.
-function buildShareCardHtml(data, t, isKo) {
-  const activityMode = data.activityMode || 'run';
-  const modeBadge = activityMode === 'walk'
-    ? { label: isKo ? '걷기' : 'WALK', bg: '#eef2ff', color: '#4338ca' }
-    : activityMode === 'trail'
-      ? { label: isKo ? '트레일' : 'TRAIL', bg: '#fff7ed', color: '#c2410c' }
-      : { label: isKo ? '러닝' : 'RUN', bg: '#e8f5e9', color: '#2e7d32' };
-  const nickname = data.nickname || (isKo ? '러너' : 'Runner');
-  const initial = escapeHtml((nickname || 'R').trim().charAt(0).toUpperCase() || 'R');
-  const avatarBg = data.avatarUrl ? '#eee' : 'linear-gradient(135deg,#00c853,#00ff88)';
-  const distUnitLower = (data.distUnit || 'KM').toLowerCase();
-  const speedVal = (() => {
-    const p = data.pace;
-    if (p && p.includes("'")) {
-      const parts = p.replace('"', '').split("'");
-      const min = parseInt(parts[0]) || 0, sec = parseInt(parts[1]) || 0;
-      const totalMin = min + sec / 60;
-      if (totalMin <= 0) return '--';
-      const kmh = 60 / totalMin;
-      return (data.distUnit || 'KM').toUpperCase() === 'MI' ? (kmh * 0.621371).toFixed(1) : kmh.toFixed(1);
-    }
-    return '--';
-  })();
-  const speedUnit = (data.distUnit || 'KM').toUpperCase() === 'MI' ? 'mi/h' : 'km/h';
-  const cadColor = (typeof CrewStatColor !== 'undefined' && CrewStatColor.cadence) ? CrewStatColor.cadence(data.cadence) : '#111';
-  const gctColor = (typeof CrewStatColor !== 'undefined' && CrewStatColor.gct) ? CrewStatColor.gct(data.gct) : '#111';
-  const flightColor = (typeof CrewStatColor !== 'undefined' && CrewStatColor.flight) ? CrewStatColor.flight(data.flight) : '#111';
+// [추가] SNS 공유카드용 이미지 안전 로더 — CORS 미지원 이미지는 조용히 null 반환(캔버스 오염 방지)
+function loadImageSafe(url) {
+  return new Promise((resolve) => {
+    if (!url) { resolve(null); return; }
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+// [추가] SNS 공유카드용 러닝 경로(GPS path) 스케치 — 실제 지도 타일 대신 좌표를 박스에 맞춰
+// 정규화해서 그린다(외부 타일 이미지의 CORS 오염 문제를 피하면서도 실제 뛴 경로 모양을 보여줌).
+function drawRoutePath(ctx, path, x, y, w, h) {
+  if (!path || path.length < 2) return;
+  const pts = path.map(p => Array.isArray(p) ? [p[0], p[1]] : [p.lat, p.lng]).filter(p => p[0] != null && p[1] != null);
+  if (pts.length < 2) return;
+  const lats = pts.map(p => p[0]), lngs = pts.map(p => p[1]);
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+  const latRange = Math.max(maxLat - minLat, 0.0006);
+  const lngRange = Math.max(maxLng - minLng, 0.0006);
+  const INNER_PAD = 22;
+  const availW = w - INNER_PAD * 2, availH = h - INNER_PAD * 2;
+  // 위도가 올라갈수록 경도 1도의 실거리가 줄어드는 것을 cos(lat) 보정으로 반영해 경로 비율이 찌그러지지 않게 함
+  const latMid = (minLat + maxLat) / 2;
+  const lngCorrection = Math.cos(latMid * Math.PI / 180) || 1;
+  const scale = Math.min(availW / (lngRange * lngCorrection), availH / latRange);
+  const drawW = lngRange * lngCorrection * scale, drawH = latRange * scale;
+  const offX = x + INNER_PAD + (availW - drawW) / 2;
+  const offY = y + INNER_PAD + (availH - drawH) / 2;
+  const toXY = (p) => [offX + (p[1] - minLng) * lngCorrection * scale, offY + (maxLat - p[0]) * scale];
 
-  const statCell = (label, valueHtml, borderRight) => `
-    <div style="flex:1; text-align:center; ${borderRight ? 'border-right:1px solid #f0f0f0;' : ''} padding:2px; min-width:0;">
-      <div style="font-size:var(--fs-xxs); color:#888; font-weight:800; text-transform:uppercase; margin-bottom:2px;">${label}</div>
-      <div style="font-size:var(--fs-card-stat); font-weight:900; color:#111; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${valueHtml}</div>
-    </div>`;
+  ctx.save();
+  ctx.beginPath();
+  pts.forEach((p, i) => {
+    const [px, py] = toXY(p);
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  });
+  ctx.strokeStyle = '#ff3333';
+  ctx.lineWidth = 6;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+  ctx.restore();
 
-  const secondaryGridHtml = activityMode === 'walk' ? `
-    <div style="display:flex; border-bottom:1px solid #f5f5f5; padding-bottom:6px; margin-bottom:6px;">
-      ${statCell(t.stepsLabel || 'STEPS', `${data.steps != null ? data.steps : '--'}`, true)}
-      ${statCell(t.spmLabel || 'SPM', `${data.walkSpm != null ? data.walkSpm : '--'}`, true)}
-      ${statCell(t.stride || 'STRIDE', `${data.stride != null ? data.stride : '--'}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> m</span>`, false)}
-    </div>
-    <div style="display:flex;">
-      ${statCell(t.hrAvgMax || 'HR', `${data.avgHr != null ? (data.avgHr + ' / ' + (data.maxHr != null ? data.maxHr : data.avgHr)) : '--'}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> BPM</span>`, true)}
-      ${statCell('ALT', `${data.alt != null ? data.alt : '--'}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> m</span>`, true)}
-      ${statCell(t.cal || 'KCAL', `${data.kcal != null ? data.kcal : '--'}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> kcal</span>`, false)}
-    </div>` : `
-    <div style="display:flex; border-bottom:1px solid #f5f5f5; padding-bottom:6px; margin-bottom:6px;">
-      ${statCell(t.cadence || 'CADENCE', `<span style="color:${cadColor};">${data.cadence != null ? data.cadence : '--'}</span><span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> spm</span>`, true)}
-      ${statCell(t.gct || 'GCT', `<span style="color:${gctColor};">${data.gct != null ? data.gct : '--'}</span><span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> ms</span>`, true)}
-      ${statCell(t.flight || 'FLIGHT', `<span style="color:${flightColor};">${data.flight != null ? data.flight : '--'}</span><span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> %</span>`, true)}
-      ${statCell(t.stride || 'STRIDE', `${data.stride != null ? data.stride : '--'}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> m</span>`, false)}
-    </div>
-    <div style="display:flex;">
-      ${statCell('ALT', `${data.alt != null ? data.alt : '--'}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> m</span>`, true)}
-      ${statCell(t.hrAvgMax || 'HR', `<span style="color:#e53935;">${data.avgHr != null ? (data.avgHr + ' / ' + (data.maxHr != null ? data.maxHr : data.avgHr)) : '--'}</span><span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> BPM</span>`, true)}
-      ${statCell(t.cal || 'KCAL', `${data.kcal != null ? data.kcal : '--'}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> kcal</span>`, false)}
-    </div>`;
-
-  const hasPath = data.path && data.path.length > 1;
-
-  return `
-    <div style="background:#fff; padding:16px; box-sizing:border-box;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <div style="display:flex; align-items:flex-start; gap:10px;">
-          <div style="width:52px; height:52px; border-radius:50%; background:${avatarBg}; display:flex; align-items:center; justify-content:center; font-size:var(--fs-xl); font-weight:900; color:#fff; flex-shrink:0; overflow:hidden;">${data.avatarUrl ? `<img src="${data.avatarUrl}" crossorigin="anonymous" style="width:100%; height:100%; object-fit:cover; display:block;">` : initial}</div>
-          <div>
-            <div style="font-size:var(--fs-md); font-weight:900; color:#111;">${escapeHtml(nickname)}</div>
-            <div style="font-size:var(--fs-xs); color:#666; margin-top:1px;">${data.dateStr ? escapeHtml(data.dateStr) : ''}</div>
-            ${data.location ? `<div style="font-size:var(--fs-xs); color:#888; margin-top:2px;">📍 ${escapeHtml(data.location)}</div>` : ''}
-          </div>
-        </div>
-      </div>
-
-      <div style="display:flex; align-items:center; gap:6px; margin-bottom:${data.message ? '4px' : '12px'};">
-        <div style="font-size:var(--fs-lg); font-weight:900; color:#111;">${escapeHtml(data.title || '')}</div>
-        <span style="font-size:var(--fs-xxs); font-weight:800; padding:3px 7px; border-radius:6px; background:${modeBadge.bg}; color:${modeBadge.color}; flex-shrink:0;">${modeBadge.label}</span>
-      </div>
-      ${data.message ? `<div style="font-size:var(--fs-base); color:#555; margin-bottom:12px;">${escapeHtml(data.message)}</div>` : ''}
-
-      <div style="display:flex; border-top:1px solid #f5f5f5; border-bottom:1px solid #f5f5f5; padding:6px 0;">
-        ${statCell(t.crewDist || 'DIST', `${data.dist}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> ${distUnitLower}</span>`, true)}
-        ${statCell(t.crewTime || 'TIME', `${data.time || '--'}`, true)}
-        ${statCell(t.crewPace || 'PACE', `${data.pace || '--'}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> /${distUnitLower}</span>`, true)}
-        ${statCell(t.speed || 'SPEED', `${speedVal}<span style="font-size:var(--fs-xxs); color:#999; font-weight:700;"> ${speedUnit}</span>`, false)}
-      </div>
-
-      <div style="border-bottom:1px solid #f5f5f5; padding:6px 0; margin-bottom:14px;">
-        ${secondaryGridHtml}
-      </div>
-
-      ${data.photoUrl ? `<div style="margin-bottom:12px; border-radius:10px; overflow:hidden;"><img src="${data.photoUrl}" crossorigin="anonymous" style="width:100%; max-height:280px; object-fit:cover; display:block;"></div>` : ''}
-      ${hasPath ? `<div id="share-card-minimap" style="margin-bottom:12px; border-radius:10px; overflow:hidden; height:180px; background:#eee; width:100%;"></div>` : ''}
-
-      <div style="display:flex; border-top:1px solid #f0f0f0; padding-top:12px;">
-        <div style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; color:${data.iLiked ? '#e53935' : '#999'}; font-size:var(--fs-base); font-weight:700; padding:6px 0;">
-          ${data.likeCount > 0 ? data.likeCount + ' ' : ''}${t.crewLike || 'Like'}
-        </div>
-        <div style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; border-left:1px solid #f0f0f0; color:#666; font-size:var(--fs-base); font-weight:800; padding:6px 0;">
-          ${data.commentCount > 0 ? data.commentCount + ' ' : ''}${t.crewComment || 'Comment'}
-        </div>
-      </div>
-    </div>`;
+  const [sx, sy] = toXY(pts[0]);
+  const [ex, ey] = toXY(pts[pts.length - 1]);
+  ctx.fillStyle = '#00aa55';
+  ctx.beginPath(); ctx.arc(sx, sy, 7, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = '#111111';
+  ctx.beginPath(); ctx.arc(ex, ey, 7, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
 }
 
-function generateFeedStyleCardBlob(data, isKo) {
+async function generateRunCardBlob(data, isKo) {
+  // [추가] 아바타 이미지 로드 — 실패해도 카드 생성은 계속 진행(아바타 없이)
+  const avatarImg = await loadImageSafe(data.avatarUrl);
   return new Promise((resolve) => {
-    const lang = isKo ? 'ko' : 'en';
-    const t = translations[lang] || translations['en'];
-    const wrap = document.createElement('div');
-    wrap.id = 'share-card-render-wrap';
-    wrap.style.cssText = 'position:fixed; left:-9999px; top:0; width:420px; z-index:-1; background:#fff;';
-    wrap.innerHTML = buildShareCardHtml(data, t, isKo);
-    document.body.appendChild(wrap);
+    const PAD = 40;
+    const GREEN = '#00aa55';
+    const BLACK = '#111111';
+    const GRAY = '#888888';
+    const LIGHTGRAY = '#f2f2f2';
+    const DIVIDER = '#e0e0e0';
 
-    let mapInstance = null;
-    const hasPath = data.path && data.path.length > 1;
+    // ── [추가] 상단 정보 블록(닉네임/시간/위치) 높이 계산 — 카드 위에 있던 외부 캡션 문구를
+    // 대체해 카드 안에 크루 피드 헤더 스타일로 자체 포함시킨다.
+    const hasHeader = !!(data.headerName || data.headerTimeLine || data.headerLocation);
+    let HEADER_H = 0;
+    if (hasHeader) {
+      HEADER_H = 40;
+      if (data.headerName) HEADER_H += 34;
+      if (data.headerTimeLine) HEADER_H += 26;
+      if (data.headerLocation) HEADER_H += 26;
+      HEADER_H += 10;
+    }
 
-    const cleanup = () => {
-      try { if (mapInstance) mapInstance.remove(); } catch (e) {}
-      try { document.body.removeChild(wrap); } catch (e) {}
-    };
+    // [추가] 크루 피드처럼 러닝 경로(GPS path)가 있으면 지도 스케치 박스만큼 카드 높이를 늘림
+    const hasMapPath = !!(data.path && data.path.length > 1);
+    const MAP_H = hasMapPath ? 200 : 0;
+    const MAP_GAP = hasMapPath ? 20 : 0;
 
-    const capture = () => {
-      if (typeof html2canvas === 'undefined') { console.warn('html2canvas not loaded'); cleanup(); resolve(null); return; }
-      html2canvas(wrap, { useCORS: true, backgroundColor: '#ffffff', scale: 2 }).then((canvas) => {
-        canvas.toBlob((blob) => { cleanup(); resolve(blob); }, 'image/png');
-      }).catch((e) => { console.warn('share card capture failed', e); cleanup(); resolve(null); });
-    };
+    const W = 750, H = 804 + HEADER_H + MAP_H + MAP_GAP;
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
 
-    // 아바타/사진 등 카드 안의 이미지 로드를 먼저 기다린 뒤 캡처 (미로드 시 빈 이미지로 캡처되는 것 방지)
-    const imgs = Array.from(wrap.querySelectorAll('img'));
-    const imgPromises = imgs.map((img) => new Promise((res) => {
-      if (img.complete) { res(); return; }
-      img.onload = () => res();
-      img.onerror = () => res();
-      setTimeout(res, 2500);
-    }));
+    function roundRect(c, x, y, w, h, r) {
+      c.beginPath();
+      c.moveTo(x+r, y); c.lineTo(x+w-r, y); c.quadraticCurveTo(x+w, y, x+w, y+r);
+      c.lineTo(x+w, y+h-r); c.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+      c.lineTo(x+r, y+h); c.quadraticCurveTo(x, y+h, x, y+h-r);
+      c.lineTo(x, y+r); c.quadraticCurveTo(x, y, x+r, y); c.closePath();
+    }
 
-    Promise.all(imgPromises).then(() => {
-      if (!hasPath) { setTimeout(capture, 80); return; }
-      const mapEl = document.getElementById('share-card-minimap');
-      if (!mapEl) { capture(); return; }
-      try {
-        const latlngs = data.path.map(p => Array.isArray(p) ? [p[0], p[1]] : [p.lat, p.lng]).filter(p => p[0] != null && p[1] != null);
-        if (latlngs.length < 2) { capture(); return; }
-        mapInstance = L.map(mapEl, {
-          zoomControl: false, attributionControl: false, dragging: false,
-          scrollWheelZoom: false, doubleClickZoom: false, touchZoom: false,
-          boxZoom: false, keyboard: false, tap: false, fadeAnimation: false
-        });
-        const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, crossOrigin: true });
-        let finished = false;
-        const finish = () => { if (finished) return; finished = true; setTimeout(capture, 150); };
-        tileLayer.on('load', finish);
-        tileLayer.addTo(mapInstance);
-        const line = L.polyline(latlngs, { color: '#ff3333', weight: 3 }).addTo(mapInstance);
-        mapInstance.fitBounds(line.getBounds(), { padding: [14, 14], maxZoom: 17 });
-        // 타일 로드 이벤트가 오지 않는 경우를 대비한 안전장치
-        setTimeout(finish, 3000);
-      } catch (e) {
-        console.warn('share card minimap failed', e);
-        capture();
+    // ── 배경 흰색 ──
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, W, H);
+
+    // ── [추가] 상단 정보 블록 (닉네임 / 시간 / 위치) ──
+    if (hasHeader) {
+      let cursorY = 40;
+      if (data.headerName) {
+        ctx.font = 'bold 28px Arial, sans-serif';
+        ctx.fillStyle = BLACK;
+        ctx.fillText(data.headerName, PAD, cursorY);
+        cursorY += 34;
       }
-    });
+      if (data.headerTimeLine) {
+        ctx.font = '16px Arial, sans-serif';
+        ctx.fillStyle = GRAY;
+        ctx.fillText(data.headerTimeLine, PAD, cursorY);
+        cursorY += 26;
+      }
+      if (data.headerLocation) {
+        ctx.font = '16px Arial, sans-serif';
+        ctx.fillStyle = GRAY;
+        ctx.fillText('📍 ' + data.headerLocation, PAD, cursorY);
+      }
+    }
+
+    // 아래부터는 기존 카드 그리기 로직 그대로 — 헤더 블록 높이만큼 통째로 밀어서 그림
+    ctx.translate(0, HEADER_H);
+
+    // ── 상단 로고 헤더 (검정 배경) ──
+    const LOGO_H = 100;
+    ctx.fillStyle = '#111111';
+    ctx.fillRect(0, 0, W, LOGO_H);
+
+    // RUN LAB 큰 로고
+    ctx.font = 'bold 68px Arial Black, Arial, sans-serif';
+    ctx.fillStyle = '#00aa55';
+    ctx.fillText('RUN LAB', PAD, LOGO_H - 22);
+
+    // 우측 슬로건
+    ctx.font = '16px Arial, sans-serif';
+    ctx.fillStyle = '#555555';
+    ctx.textAlign = 'right';
+    ctx.fillText('Track smarter, Run better', W - PAD, LOGO_H - 22);
+    ctx.textAlign = 'left';
+
+    // ── 닉네임 / 제목 ──
+    const nameY = LOGO_H + 44;
+    // [추가] 아바타 원형 이미지 — 있으면 닉네임 왼쪽에 그리고 텍스트 시작 위치를 오른쪽으로 밀어줌
+    const AVATAR_SIZE = 56;
+    let nameTextX = PAD;
+    if (avatarImg) {
+      const avX = PAD, avY = LOGO_H + 16;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(avX + AVATAR_SIZE / 2, avY + AVATAR_SIZE / 2, AVATAR_SIZE / 2, 0, Math.PI * 2);
+      ctx.closePath();
+      ctx.clip();
+      ctx.drawImage(avatarImg, avX, avY, AVATAR_SIZE, AVATAR_SIZE);
+      ctx.restore();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(avX + AVATAR_SIZE / 2, avY + AVATAR_SIZE / 2, AVATAR_SIZE / 2, 0, Math.PI * 2); ctx.stroke();
+      nameTextX = avX + AVATAR_SIZE + 16;
+    }
+    ctx.font = 'bold 36px Arial, sans-serif';
+    ctx.fillStyle = BLACK;
+    // [수정] 활동모드에 따라 카드 제목 문구를 구분 (러닝/걷기/트레일러닝)
+    const activityModeCard = data.activityMode || 'run';
+    const activityNounKo = activityModeCard === 'walk' ? '걷기' : activityModeCard === 'trail' ? '트레일러닝' : '러닝';
+    const activityNounEn = activityModeCard === 'walk' ? 'Walk' : activityModeCard === 'trail' ? 'Trail Run' : 'Run';
+    const name = data.nickname
+      ? (isKo ? data.nickname + '님의 ' + activityNounKo : data.nickname + "'s " + activityNounEn)
+      : 'Run Lab';
+    ctx.fillText(name, nameTextX, nameY);
+
+    ctx.font = '19px Arial, sans-serif';
+    ctx.fillStyle = GRAY;
+    const recordNounKo = activityModeCard === 'walk' ? '걷기 기록' : activityModeCard === 'trail' ? '트레일러닝 기록' : '러닝 기록';
+    const recordNounEn = activityModeCard === 'walk' ? 'Walk Record' : activityModeCard === 'trail' ? 'Trail Run Record' : 'Running Record';
+    const subLabel = (isKo ? recordNounKo : recordNounEn) + (data.dateStr ? '  ·  ' + data.dateStr : '') + (data.location ? '  ·  📍 ' + data.location : '');
+    ctx.fillText(subLabel, nameTextX, nameY + 28);
+
+    // 구분선
+    ctx.strokeStyle = DIVIDER; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(PAD, nameY + 46); ctx.lineTo(W - PAD, nameY + 46); ctx.stroke();
+
+    // ── 메인 4대 지표 (DISTANCE / TIME / PACE / SPEED) ──
+    const mainY = nameY + 66;
+    const tw = (W - PAD*2 - 3) / 4;
+
+    const mainTile = (x, y, w, label, val, unit) => {
+      ctx.font = 'bold 12px Arial, sans-serif';
+      ctx.fillStyle = GRAY;
+      ctx.fillText(label, x, y);
+      ctx.font = 'bold 36px Arial, sans-serif';
+      ctx.fillStyle = BLACK;
+      ctx.fillText(val, x, y + 48);
+      ctx.font = 'bold 13px Arial, sans-serif';
+      ctx.fillStyle = GREEN;
+      ctx.fillText(unit, x, y + 68);
+    };
+
+    const speedKmhCard = (() => { const p=data.pace; if(p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60); return isKo||(data.distUnit||'KM')==='KM'?(kmh).toFixed(1):(kmh*0.621371).toFixed(1);} return '--'; })();
+    const speedUnitCard = (data.distUnit||'KM')==='MI' ? 'MI/H' : 'KM/H';
+
+    mainTile(PAD,            mainY, tw, isKo?'거리':'DISTANCE', data.dist, data.distUnit||'KM');
+    mainTile(PAD+tw+1,       mainY, tw, isKo?'시간':'TIME',     data.time||'--', 'MM:SS');
+    mainTile(PAD+tw*2+2,     mainY, tw, isKo?'페이스':'PACE',   data.pace||'--', '/'+(data.distUnit||'KM'));
+    mainTile(PAD+tw*3+3,     mainY, tw, isKo?'속도':'SPEED',    speedKmhCard, speedUnitCard);
+
+    // 가로 구분선
+    ctx.strokeStyle = DIVIDER; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(PAD, mainY + 86); ctx.lineTo(W - PAD, mainY + 86); ctx.stroke();
+    // 세로 구분선
+    ctx.beginPath(); ctx.moveTo(PAD+tw,   mainY - 4); ctx.lineTo(PAD+tw,   mainY + 82); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(PAD+tw*2+2, mainY - 4); ctx.lineTo(PAD+tw*2+2, mainY + 82); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(PAD+tw*3+3, mainY - 4); ctx.lineTo(PAD+tw*3+3, mainY + 82); ctx.stroke();
+
+    // ── [추가] 러닝 경로(지도) 스케치 박스 — 크루 피드의 미니맵처럼 실제 뛴 경로 모양을 보여줌 ──
+    if (hasMapPath) {
+      const mapBoxX = PAD, mapBoxY = mainY + 100, mapBoxW = W - PAD * 2, mapBoxH = MAP_H;
+      ctx.fillStyle = LIGHTGRAY;
+      roundRect(ctx, mapBoxX, mapBoxY, mapBoxW, mapBoxH, 14); ctx.fill();
+      drawRoutePath(ctx, data.path, mapBoxX, mapBoxY, mapBoxW, mapBoxH);
+    }
+
+    // ── 6개 지표 그리드 ──
+    const effScore = data.effScore != null ? data.effScore : 0;
+    const gridY = mainY + 116 + MAP_H + MAP_GAP;
+    const sw = (W - PAD*2 - 20) / 3, sh = 110;
+    const row2y = gridY;
+    const row3y = gridY + sh + 10;
+
+    const statTile = (x, y, w, h, label, val, unit) => {
+      ctx.fillStyle = LIGHTGRAY;
+      roundRect(ctx, x, y, w, h, 14); ctx.fill();
+      ctx.font = 'bold 13px Arial, sans-serif';
+      ctx.fillStyle = GRAY;
+      ctx.fillText(label, x + 16, y + 26);
+      ctx.font = 'bold 32px Arial, sans-serif';
+      ctx.fillStyle = BLACK;
+      ctx.fillText(String(val), x + 16, y + 66);
+      ctx.font = 'bold 13px Arial, sans-serif';
+      ctx.fillStyle = GREEN;
+      ctx.fillText(unit, x + 16, y + 88);
+    };
+
+    // [수정] 걷기 모드는 케이던스/GCT/체공/밸런스 대신 걸음수·SPM·스트라이드 중심으로 표시
+    if (activityModeCard === 'walk') {
+      statTile(PAD,         row2y, sw, sh, isKo?'걸음수':'STEPS',      data.steps||'--', '');
+      statTile(PAD+sw+10,   row2y, sw, sh, isKo?'분당걸음':'SPM',       data.walkSpm||'--', '');
+      statTile(PAD+sw*2+20, row2y, sw, sh, isKo?'평균심박':'AVG HR',  data.avgHr||'--',  'BPM');
+      statTile(PAD,         row3y, sw, sh, 'ALT',                         (data.alt != null ? data.alt : '--'), 'm');
+      statTile(PAD+sw+10,   row3y, sw, sh, isKo?'보폭':'STRIDE',      data.stride||'--',  'm');
+      statTile(PAD+sw*2+20, row3y, sw, sh, isKo?'칼로리':'KCAL',    data.kcal||'--', '');
+    } else {
+      statTile(PAD,         row2y, sw, sh, isKo?'케이던스':'CADENCE',    data.cadence||'--', 'SPM');
+      statTile(PAD+sw+10,   row2y, sw, sh, isKo?'지면접촉':'GCT',       data.gct||'--',     'ms');
+      statTile(PAD+sw*2+20, row2y, sw, sh, isKo?'효율점수':'EFFICIENCY',  effScore,           '/ 100');
+      statTile(PAD,         row3y, sw, sh, 'ALT',                         (data.alt != null ? data.alt : '--'), 'm');
+      statTile(PAD+sw+10,   row3y, sw, sh, isKo?'체공시간':'FLIGHT',      data.flight||'--',  '%');
+      statTile(PAD+sw*2+20, row3y, sw, sh, isKo?'케이던스 밸런스':'CAD BAL',   data.cadenceBal||'50:50', '');
+    }
+
+    // ── 효율 점수 바 (걷기 모드는 의미가 없으므로 응원 문구 바로 대체) ──
+    const barY = row3y + sh + 24;
+    ctx.fillStyle = LIGHTGRAY;
+    roundRect(ctx, PAD, barY, W - PAD*2, 62, 14); ctx.fill();
+
+    if (activityModeCard === 'walk') {
+      ctx.font = 'bold 13px Arial, sans-serif';
+      ctx.fillStyle = GRAY;
+      ctx.fillText(isKo ? '오늘의 걷기' : "TODAY'S WALK", PAD + 16, barY + 22);
+      ctx.font = 'bold 22px Arial, sans-serif';
+      ctx.fillStyle = GREEN;
+      const walkMsg = isKo ? '오늘도 걸었어요! 👣' : 'Great walk today! 👣';
+      ctx.fillText(walkMsg, PAD + 16, barY + 48);
+    } else {
+      const effC = effScore >= 75 ? '#00aa55' : effScore >= 50 ? '#f5a623' : '#e03e3e';
+      ctx.font = 'bold 13px Arial, sans-serif';
+      ctx.fillStyle = GRAY;
+      ctx.fillText(isKo ? '효율 점수' : 'EFFICIENCY SCORE', PAD + 16, barY + 22);
+
+      const bx = PAD + 16, by2 = barY + 30, bw = W - PAD*2 - 130, bh = 14;
+      ctx.fillStyle = DIVIDER;
+      roundRect(ctx, bx, by2, bw, bh, 7); ctx.fill();
+      const filled = Math.round(bw * effScore / 100);
+      if (filled > 0) {
+        ctx.fillStyle = effC;
+        roundRect(ctx, bx, by2, filled, bh, 7); ctx.fill();
+      }
+      ctx.font = 'bold 22px Arial, sans-serif';
+      ctx.fillStyle = effC;
+      ctx.textAlign = 'right';
+      ctx.fillText(effScore + ' pts', W - PAD - 16, barY + 48);
+      ctx.textAlign = 'left';
+    }
+
+    // ── 하단 브랜드 바 (검정) ──
+    const footY = H - 56;
+    ctx.fillStyle = '#111111';
+    ctx.fillRect(0, footY, W, 56);
+    // 상단 그린 라인
+    ctx.fillStyle = GREEN;
+    ctx.fillRect(0, footY, W, 3);
+
+    ctx.font = 'bold 18px Arial, sans-serif';
+    ctx.fillStyle = GREEN;
+    ctx.fillText('⚡ Run Lab', PAD, footY + 34);
+    ctx.font = '14px Arial, sans-serif';
+    ctx.fillStyle = '#555555';
+    ctx.textAlign = 'right';
+    ctx.fillText('AI Running Dynamics Tracker', W - PAD, footY + 34);
+    ctx.textAlign = 'left';
+
+    try {
+      canvas.toBlob((blob) => resolve(blob), 'image/png');
+    } catch (e) {
+      console.warn('run card blob generation failed', e);
+      resolve(null);
+    }
   });
 }
 async function shareRunCardImage(data, isKo, shareTextFallback) {
-  const blob = await generateFeedStyleCardBlob(data, isKo);
-  if (!blob) {
-    appAlert(isKo ? '카드 이미지를 생성하지 못했습니다. 다시 시도해주세요.' : 'Failed to generate the share card. Please try again.');
-    return;
-  }
+  const blob = await generateRunCardBlob(data, isKo);
+  if (!blob) { appAlert(isKo ? '카드 이미지를 만들지 못했어요. 다시 시도해주세요.' : 'Could not create the share card. Please try again.'); return; }
   const shareText = shareTextFallback || '';
 
   // 1순위: AndroidBridge 이미지 공유 (카카오톡 등 직접 공유)
@@ -1957,6 +2104,115 @@ function appConfirm(msg) {
 }
 window.__nativeAlert = window.alert;
 window.alert = function(msg) { appAlert(msg); };
+
+// ========== [추가] 핀치줌 + 팬 + 더블탭 확대 지원 이미지 뷰어 (아바타 원본사진용) ==========
+// 터치(핀치)/휠(데스크톱)로 확대·축소하고, 확대된 상태에서는 드래그로 이동할 수 있게 해주는
+// 범용 모듈. 특정 DOM 엘리먼트(예: #photo-viewer-img)에 attach()하면 바로 동작한다.
+const pinchZoom = {
+  scale: 1, minScale: 1, maxScale: 4,
+  originX: 0, originY: 0,
+  startX: 0, startY: 0,
+  lastDist: 0,
+  lastTapTime: 0,
+  el: null,
+  _bound: false,
+  attach(el) {
+    this.el = el;
+    this.reset();
+    if (this._bound) return; // 리스너 중복 등록 방지 (동일 엘리먼트에 재사용)
+    this._bound = true;
+    el.style.touchAction = 'none';
+    el.style.transformOrigin = 'center center';
+    el.style.willChange = 'transform';
+    el.addEventListener('touchstart', this.onTouchStart.bind(this), { passive: false });
+    el.addEventListener('touchmove', this.onTouchMove.bind(this), { passive: false });
+    el.addEventListener('touchend', this.onTouchEnd.bind(this), { passive: false });
+    // 데스크톱(마우스) 지원: 휠 줌 + 드래그 팬 + 더블클릭 줌
+    el.addEventListener('wheel', this.onWheel.bind(this), { passive: false });
+    el.addEventListener('mousedown', this.onMouseDown.bind(this));
+    el.addEventListener('dblclick', this.onDblClick.bind(this));
+  },
+  reset() {
+    this.scale = 1; this.originX = 0; this.originY = 0; this.lastDist = 0;
+    this.apply();
+  },
+  apply() {
+    if (this.el) this.el.style.transform = `translate(${this.originX}px, ${this.originY}px) scale(${this.scale})`;
+  },
+  dist(touches) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  },
+  onTouchStart(e) {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      this.lastDist = this.dist(e.touches);
+    } else if (e.touches.length === 1) {
+      const now = Date.now();
+      if (now - this.lastTapTime < 300) {
+        // 더블탭: 확대/원복 토글
+        this.scale = this.scale > 1 ? 1 : 2.5;
+        this.originX = 0; this.originY = 0;
+        this.apply();
+      }
+      this.lastTapTime = now;
+      this.startX = e.touches[0].clientX - this.originX;
+      this.startY = e.touches[0].clientY - this.originY;
+    }
+  },
+  onTouchMove(e) {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      const newDist = this.dist(e.touches);
+      if (this.lastDist > 0) {
+        const delta = newDist / this.lastDist;
+        this.scale = Math.min(this.maxScale, Math.max(this.minScale, this.scale * delta));
+        this.apply();
+      }
+      this.lastDist = newDist;
+    } else if (e.touches.length === 1 && this.scale > 1) {
+      e.preventDefault();
+      this.originX = e.touches[0].clientX - this.startX;
+      this.originY = e.touches[0].clientY - this.startY;
+      this.apply();
+    }
+  },
+  onTouchEnd(e) {
+    if (e.touches.length < 2) this.lastDist = 0;
+    if (this.scale <= 1) { this.scale = 1; this.originX = 0; this.originY = 0; this.apply(); }
+  },
+  onWheel(e) {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 1.15 : 0.87;
+    this.scale = Math.min(this.maxScale, Math.max(this.minScale, this.scale * delta));
+    if (this.scale <= 1) { this.scale = 1; this.originX = 0; this.originY = 0; }
+    this.apply();
+  },
+  onMouseDown(e) {
+    if (this.scale <= 1) return;
+    e.preventDefault();
+    const startMouseX = e.clientX - this.originX;
+    const startMouseY = e.clientY - this.originY;
+    const onMove = (ev) => {
+      this.originX = ev.clientX - startMouseX;
+      this.originY = ev.clientY - startMouseY;
+      this.apply();
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  },
+  onDblClick(e) {
+    e.preventDefault();
+    this.scale = this.scale > 1 ? 1 : 2.5;
+    this.originX = 0; this.originY = 0;
+    this.apply();
+  }
+};
 
 // ========== 전역 상수 (문자열 오류 방지) ==========
 const INVALID_PACE = "--'--\"";
@@ -5511,9 +5767,6 @@ const vertRatioVal = record.vertRatio ? record.vertRatio : (7.5 - (cadence - 160
 const effScore = calcEffScore(record) ?? 0;
 const dateStr = record.date ? record.date.split(' ')[0] : '';
 
-// [수정] 공유 카드를 피드 카드와 동일한 모양으로 그리기 위해 아바타/제목/경로 등 추가 정보 전달
-const shareNickname = (typeof community !== 'undefined' && community.getNickname) ? community.getNickname() : null;
-const shareAvatarUrl = (typeof community !== 'undefined' && community.getAvatarUrl) ? community.getAvatarUrl() : null;
 shareRunCardImage({
   dist: displayDist.toFixed(2), distUnit: unitText, time: record.time, pace: displayPace,
   cadence: record.cadence, gct: record.gct, flight: record.flight, vertRatio: vertRatioVal,
@@ -5521,11 +5774,7 @@ shareRunCardImage({
   // [추가] 활동모드에 따라 카드 레이아웃(걷기용 STEPS/SPM 등)이 분기되도록 전달
   activityMode: record.activityMode || 'run',
   steps: record.steps, walkSpm: record.walkSpm, stride: record.stride,
-  kcal: record.kcal, alt: record.alt, avgHr: record.avgHr,
-  nickname: shareNickname || null, avatarUrl: shareAvatarUrl || null,
-  title: record.title || null, message: null, photoUrl: null,
-  path: (record.path && record.path.length > 1) ? record.path : null,
-  likeCount: 0, commentCount: 0, iLiked: false
+  kcal: record.kcal, alt: record.alt, avgHr: record.avgHr, nickname: null
 }, isKo, null);
 }
 openDiag(id) {
@@ -9312,13 +9561,15 @@ class CommunityManager {
     await this.unfollowUser(userId);
   }
 
-  // ===== [신규] 원본 사진 보기 =====
+  // ===== [신규] 원본 사진 보기 (핀치줌/팬/더블탭 확대 지원) =====
   openPhotoViewer(url) {
     if (!url) return;
     const img = document.getElementById('photo-viewer-img');
     if (img) img.src = url;
     const modal = document.getElementById('photo-viewer-modal');
     if (modal) modal.style.display = 'flex';
+    // [추가] 열 때마다 확대 상태 초기화 후 핀치줌 연결
+    if (img) { pinchZoom.attach(img); pinchZoom.reset(); }
   }
 
   closePhotoViewer() {
@@ -9326,6 +9577,48 @@ class CommunityManager {
     if (modal) modal.style.display = 'none';
     const img = document.getElementById('photo-viewer-img');
     if (img) img.src = '';
+    pinchZoom.reset();
+  }
+
+  // ===== [신규] 지도 확대 보기 — 피드 썸네일 지도를 탭하면 인터랙티브(핀치줌/드래그) 풀스크린 지도로 확대 =====
+  openMapViewer(recordId) {
+    const r = this.lastFeedById && this.lastFeedById[recordId];
+    if (!r || !r.path || r.path.length < 2) return;
+    const modal = document.getElementById('map-viewer-modal');
+    const mapEl = document.getElementById('map-viewer-el');
+    if (!modal || !mapEl) return;
+    modal.style.display = 'flex';
+    // 모달이 화면에 실제로 표시된 뒤(레이아웃 확정 후) 지도를 생성해야 크기가 0으로 잡히는 문제가 없음
+    requestAnimationFrame(() => {
+      if (this._mapViewerInstance) { this._mapViewerInstance.remove(); this._mapViewerInstance = null; }
+      const latlngs = r.path.map(p => Array.isArray(p) ? [p[0], p[1]] : [p.lat, p.lng]).filter(p => p[0] != null && p[1] != null);
+      if (latlngs.length < 2) return;
+      const map = L.map(mapEl, {
+        zoomControl: true,
+        attributionControl: false,
+        dragging: true,
+        scrollWheelZoom: true,
+        doubleClickZoom: true,
+        touchZoom: true,
+        boxZoom: true,
+        keyboard: true,
+        tap: true
+      });
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+      const line = L.polyline(latlngs, { color: '#ff3333', weight: 4 }).addTo(map);
+      map.fitBounds(line.getBounds(), { padding: [24, 24] });
+      setTimeout(() => {
+        map.invalidateSize();
+        map.fitBounds(line.getBounds(), { padding: [24, 24] });
+      }, 60);
+      this._mapViewerInstance = map;
+    });
+  }
+
+  closeMapViewer() {
+    const modal = document.getElementById('map-viewer-modal');
+    if (modal) modal.style.display = 'none';
+    if (this._mapViewerInstance) { this._mapViewerInstance.remove(); this._mapViewerInstance = null; }
   }
 
   closeActionSheet() {
@@ -9761,20 +10054,12 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
       : `${r.nickname}'s ${activityNounEn}: ${distText}km in ${durText} @ ${paceText}/km${r.message ? '\n' + r.message : ''}`;
     const effScore = r.eff_score || 0;
     const headerDateStr = new Date(r.created_at).toLocaleString(isKo?'ko-KR':'en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-    // [수정] 공유 카드를 피드에 실제 표시되는 카드와 동일하게 만들기 위해
-    // 좋아요/댓글 수와 내 좋아요 여부를 미리 조회해서 함께 전달
-    const uid = await this.ensureUserId();
-    const [shareLikes, shareComments] = await Promise.all([this.loadLikes([recordId]), this.loadComments([recordId])]);
-    const likeCount = shareLikes.length;
-    const iLiked = shareLikes.some(l => l.user_id === uid);
-    const commentCount = shareComments.filter(c => !this.blockedIds || !this.blockedIds.has(c.user_id)).length;
     shareRunCardImage({
       nickname: r.nickname,
-      avatarUrl: r.avatar_url || null,
       dist: distText, distUnit: 'km',
       time: durText, pace: paceText,
       cadence: r.cadence, gct: r.gct_ms, flight: r.flight_pct, effScore,
-      avgHr: r.avg_hr || null, maxHr: r.max_hr || null, hrZone: r.hr_zone || null,
+      avgHr: r.avg_hr || null, hrZone: r.hr_zone || null,
       // [추가] 활동모드에 따라 카드 레이아웃이 분기되도록 전달
       activityMode: activityMode,
       steps: r.steps, walkSpm: r.walk_spm, stride: r.stride_m,
@@ -9782,12 +10067,9 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
       // [수정] 상단 별도 헤더 박스 대신 "Running Record" 줄에 날짜·위치를 합쳐서 표시
       dateStr: headerDateStr,
       location: r.location_name || null,
-      // [추가] 피드 카드와 동일하게 타이틀/메시지/사진/경로/좋아요·댓글 수까지 포함
-      title: r.title || null,
-      message: r.message || null,
-      photoUrl: r.photo_url || null,
-      path: (r.path && r.path.length > 1) ? r.path : null,
-      likeCount, commentCount, iLiked
+      // [추가] 크루 피드카드와 동일하게 아바타 이미지 + 실제 뛴 경로(GPS path)를 공유카드에도 그려줌
+      avatarUrl: r.avatar_url || null,
+      path: (r.path && r.path.length > 1) ? r.path : null
     }, isKo, text);
   }
   async toggleLike(recordId) {
@@ -9983,6 +10265,10 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
     if (loading) loading.style.display = 'none';
     if (!container) return;
 
+    // [추가] 지도 확대 뷰어(openMapViewer)에서 id로 경로 데이터를 바로 찾을 수 있도록 캐시
+    this.lastFeedById = {};
+    records.forEach(r => { this.lastFeedById[r.id] = r; });
+
     container.innerHTML = records.map(r => {
       const isMine = r.user_id === uid;
       const isFollowing = this.followingIds && this.followingIds.has(r.user_id);
@@ -10139,7 +10425,10 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
 
         <!-- 이미지/지도 -->
         ${r.photo_url ? `<div style="margin-bottom:12px; border-radius:10px; overflow:hidden;"><img src="${r.photo_url}" loading="lazy" style="width:100%; max-height:280px; object-fit:cover; display:block;"></div>` : ''}
-        ${(r.path && r.path.length > 1) ? `<div id="feed-map-${r.id}" style="margin-bottom:12px; border-radius:10px; overflow:hidden; height:180px; background:#eee; position:relative; left:0; width:100%;"></div>` : ''}
+        ${(r.path && r.path.length > 1) ? `<div style="margin-bottom:12px; border-radius:10px; overflow:hidden; position:relative;">
+          <div id="feed-map-${r.id}" onclick="community.openMapViewer('${r.id}')" style="height:180px; background:#eee; position:relative; left:0; width:100%; cursor:pointer;"></div>
+          <div onclick="community.openMapViewer('${r.id}')" style="position:absolute; top:8px; right:8px; width:26px; height:26px; border-radius:50%; background:rgba(0,0,0,0.45); display:flex; align-items:center; justify-content:center; pointer-events:none;"><span style="color:#fff; font-size:13px;">⤢</span></div>
+        </div>` : ''}
 
         <!-- 액션 버튼 -->
         <div style="display:flex; border-top:1px solid #f0f0f0; padding-top:12px;">
@@ -12988,6 +13277,12 @@ if (btn) { btn.textContent = '▶ PLAY'; btn.classList.remove('playing'); }
       history.pushState({ exitGuard: true }, '');
       return;
     }
+    const mapViewerModal = document.getElementById('map-viewer-modal');
+    if (mapViewerModal && mapViewerModal.style.display === 'flex') {
+      if (typeof community !== 'undefined') community.closeMapViewer();
+      history.pushState({ exitGuard: true }, '');
+      return;
+    }
     const likersModal = document.getElementById('likers-modal');
     if (likersModal && likersModal.style.display === 'flex') {
       if (typeof community !== 'undefined') community.closeLikers();
@@ -13047,9 +13342,15 @@ if (btn) { btn.textContent = '▶ PLAY'; btn.classList.remove('playing'); }
 </script>
 <!-- 신고/차단 액션시트 -->
 <!-- 원본 사진 보기 -->
-<div id="photo-viewer-modal" onclick="community.closePhotoViewer()" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:999999; align-items:center; justify-content:center; padding:20px; box-sizing:border-box;">
-  <img id="photo-viewer-img" src="" style="max-width:100%; max-height:100%; object-fit:contain; border-radius:8px;">
+<div id="photo-viewer-modal" onclick="if(event.target.id==='photo-viewer-modal') community.closePhotoViewer()" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:999999; align-items:center; justify-content:center; padding:20px; box-sizing:border-box; overflow:hidden;">
+  <img id="photo-viewer-img" src="" style="max-width:100%; max-height:100%; object-fit:contain; border-radius:8px; touch-action:none;">
+  <div style="position:absolute; bottom:24px; left:0; right:0; text-align:center; color:rgba(255,255,255,0.55); font-size:var(--fs-xs); font-weight:700; pointer-events:none;">핀치 또는 더블탭으로 확대</div>
   <button onclick="event.stopPropagation(); community.closePhotoViewer()" style="position:absolute; top:20px; right:20px; background:rgba(255,255,255,0.15); border:none; color:#fff; width:36px; height:36px; border-radius:50%; font-size:var(--fs-xl); cursor:pointer; line-height:1;">✕</button>
+</div>
+<!-- [신규] 지도 확대(핀치줌/드래그 가능한 풀스크린 인터랙티브 지도) 보기 -->
+<div id="map-viewer-modal" style="display:none; position:fixed; inset:0; background:#000; z-index:999999; align-items:center; justify-content:center;">
+  <div id="map-viewer-el" style="width:100%; height:100%;"></div>
+  <button onclick="community.closeMapViewer()" style="position:absolute; top:20px; right:20px; background:rgba(255,255,255,0.15); border:none; color:#fff; width:36px; height:36px; border-radius:50%; font-size:var(--fs-xl); cursor:pointer; line-height:1; z-index:10;">✕</button>
 </div>
 <!-- 좋아요 누른 사람 목록 -->
 <div id="likers-modal" class="custom-confirm-overlay" onclick="if(event.target.id==='likers-modal') community.closeLikers()">
