@@ -1930,9 +1930,12 @@ function generateRunCardBlob(data, isKo) {
     canvas.toBlob((blob) => resolve(blob), 'image/png');
   });
 }
-async function shareRunCardImage(data, isKo, shareTextFallback) {
+async function shareRunCardImage(data, isKo, shareTextFallback, onReady) {
   const blob = await generateRunCardBlob(data, isKo);
   const shareText = shareTextFallback || '';
+  // [추가] 카드 이미지 생성이 끝나 공유창을 띄우기 직전 시점 — 호출부에서 이 콜백으로
+  // "준비 중..." 버튼을 원래 상태로 되돌릴 수 있게 함(공유창 사용자 상호작용 완료를 기다리지 않음).
+  if (onReady) onReady();
 
   // 1순위: AndroidBridge 이미지 공유 (카카오톡 등 직접 공유)
   if (window.AndroidShare && window.AndroidShare.shareImage) {
@@ -9795,12 +9798,21 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
     // 그동안 아무 반응이 없어 보이지 않도록 버튼을 즉시 로딩 상태로 바꿔준다.
     const btn = btnEl || document.getElementById('share-btn-' + recordId);
     const btnOriginalHTML = btn ? btn.innerHTML : null;
+    const resetBtn = () => {
+      if (!btn) return;
+      btn.style.pointerEvents = '';
+      btn.style.opacity = '';
+      if (btnOriginalHTML !== null) btn.innerHTML = btnOriginalHTML;
+    };
     if (btn) {
       btn.style.pointerEvents = 'none';
       btn.style.opacity = '0.5';
       const t0 = this._t();
       btn.innerHTML = (t0.crewShareLoading || (((storage.getLang && storage.getLang()) === 'ko') ? '준비 중...' : 'Preparing...'));
     }
+    // 카드 생성 실패 등 예외가 나도 버튼이 로딩 상태로 멈춰있지 않도록 안전장치
+    let readyFired = false;
+    const onReady = () => { readyFired = true; resetBtn(); };
     try {
     // [수정] 매번 loadFeed()로 네트워크 재요청하면 반응이 느려서,
     // 이미 화면에 렌더링된 캐시(feedRecords)를 먼저 찾아보고 없을 때만 네트워크로 폴백
@@ -9824,7 +9836,9 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
       : `${r.nickname}'s ${activityNounEn}: ${distText}km in ${durText} @ ${paceText}/km${r.message ? '\n' + r.message : ''}`;
     const effScore = r.eff_score || 0;
     const headerDateStr = new Date(r.created_at).toLocaleString(isKo?'ko-KR':'en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-    shareRunCardImage({
+    // [수정] await 없이 호출하면 finally가 이미지 생성이 끝나기도 전에 실행돼서
+    // 로딩 상태가 바로 풀려버리는 문제가 있어 반드시 await로 완료를 기다림
+    await shareRunCardImage({
       nickname: r.nickname,
       dist: distText, distUnit: 'km',
       time: durText, pace: paceText,
@@ -9837,14 +9851,10 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
       // [수정] 상단 별도 헤더 박스 대신 "Running Record" 줄에 날짜·위치를 합쳐서 표시
       dateStr: headerDateStr,
       location: r.location_name || null
-    }, isKo, text);
+    }, isKo, text, onReady);
     } finally {
-      // [추가] 성공/실패/취소 어떤 경우든 버튼을 원래 상태로 복구
-      if (btn) {
-        btn.style.pointerEvents = '';
-        btn.style.opacity = '';
-        if (btnOriginalHTML !== null) btn.innerHTML = btnOriginalHTML;
-      }
+      // [추가] onReady가 못 불린 채로(예: r을 못 찾아 중간 return) 함수가 끝나는 경우를 대비한 안전망
+      if (!readyFired) resetBtn();
     }
   }
   async toggleLike(recordId) {
