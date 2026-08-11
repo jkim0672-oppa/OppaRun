@@ -12988,9 +12988,12 @@ if (btn) { btn.textContent = '▶ PLAY'; btn.classList.remove('playing'); }
   function reArmExitGuard() {
     setTimeout(function() { history.pushState({ exitGuard: true }, ''); }, 50);
   }
-  window.addEventListener('popstate', function(e) {
-    if (_jrSkipNextPopstate) { _jrSkipNextPopstate = false; return; }
-    reArmExitGuard();
+  // [추가] 코틀린이 더 이상 뒤로가기를 자체 처리하지 않고(webView.canGoBack()/goBack() 미사용),
+  // 물리 백버튼을 누를 때마다 JS의 window.handleAndroidBack()을 직접 호출하는 방식으로 변경됨.
+  // 기존 popstate/pushState 히스토리 가로채기 로직은 브라우저·PWA 환경(그리고 혹시 모를
+  // 폴백)을 위해 그대로 남겨두고, 실제 "우선순위별로 하나씩 닫는다" 로직은 아래 함수 하나로
+  // 통합해서 popstate 핸들러와 handleAndroidBack이 동일한 로직을 공유하도록 함.
+  function processBackAction() {
     // 검은 종료 화면이 떠있으면 → 앱으로 복귀
     const es = document.getElementById('exit-screen');
     if (es && es.style.display === 'flex') {
@@ -13106,9 +13109,23 @@ if (btn) { btn.textContent = '▶ PLAY'; btn.classList.remove('playing'); }
       if (ui) ui.showTab('run');
       return;
     }
-    // 그 외 → 종료 다이얼로그 표시 (히스토리 재적재는 핸들러 맨 위에서 이미 예약됨)
+    // 그 외 → 종료 다이얼로그 표시
     showExitDialog();
+  }
+  // PWA/브라우저 환경 등에서 실제 브라우저 뒤로가기(popstate)가 발생하는 경우를 위한 폴백.
+  // 안드로이드 앱에서는 코틀린이 history를 조작하지 않으므로 이 리스너는 보통 트리거되지 않음.
+  window.addEventListener('popstate', function(e) {
+    if (_jrSkipNextPopstate) { _jrSkipNextPopstate = false; return; }
+    reArmExitGuard();
+    processBackAction();
   });
+  // [추가] 코틀린이 물리 백버튼을 누를 때마다 직접 호출하는 진입점.
+  // 우선순위: 모달 닫기 → 오버레이/전체화면 닫기 → detail/diag 등 서브 화면 닫기
+  // → CREW/HISTORY 탭이면 RUN 탭으로 전환 → 그 외(RUN탭에 아무것도 안 열려있음)면 종료 컨펌.
+  // 종료 컨펌에서 사용자가 Close를 누르면 performExit() → AndroidBridge.exitApp() 호출로 이어짐.
+  window.handleAndroidBack = function() {
+    processBackAction();
+  };
 })();
 </script>
 <!-- 신고/차단 액션시트 -->
