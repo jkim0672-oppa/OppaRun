@@ -1702,6 +1702,8 @@ window.onAndroidSaveResult = function(success, fileName) {
     alert(isKo ? ('저장되었습니다' + (fileName ? (': ' + fileName) : '.')) : ('Saved' + (fileName ? (': ' + fileName) : '.')));
   }
 };
+// [추가] 공유카드에 그려 넣을 아바타 이미지를 비동기로 로드. CORS 문제 등으로 실패하면
+// null을 반환해서 호출부가 이니셜 원형 아바타로 폴백할 수 있게 함(카드 생성 자체가 깨지지 않도록).
 function loadImageAsync(url) {
   return new Promise((resolve) => {
     if (!url) { resolve(null); return; }
@@ -1712,8 +1714,9 @@ function loadImageAsync(url) {
     img.src = url;
   });
 }
-async function generateRunCardBlob(data, isKo) {
-  {
+
+function generateRunCardBlob(data, isKo) {
+  return new Promise(async (resolve) => {
     const PAD = 40;
     const GREEN = '#00aa55';
     const BLACK = '#111111';
@@ -1733,12 +1736,14 @@ async function generateRunCardBlob(data, isKo) {
       HEADER_H += 10;
     }
 
-    // ── [추가] 경로맵 블록 높이 및 아바타 이미지 사전 로드 ──
-    const hasRoute = Array.isArray(data.path) && data.path.length > 1;
-    const MAP_H = 260;
-    const avatarImg = data.avatarUrl ? await loadImageAsync(data.avatarUrl) : null;
+    // [추가] 아바타 이미지 미리 로드 (실패 시 null → 이니셜 원형으로 대체)
+    const avatarImg = await loadImageAsync(data.avatarUrl);
 
-    const W = 750, H = 804 + HEADER_H + (hasRoute ? MAP_H + 24 : 0);
+    // [추가] 경로맵을 카드 하단에 넣기 위한 높이 계산 (좌표가 2개 이상 있을 때만)
+    const hasPath = !!(data.path && data.path.length >= 2);
+    const MAP_H = hasPath ? 240 : 0;
+
+    const W = 750, H = 804 + HEADER_H + MAP_H;
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
@@ -1759,33 +1764,9 @@ async function generateRunCardBlob(data, isKo) {
     if (hasHeader) {
       let cursorY = 40;
       if (data.headerName) {
-        // [추가] 이름 앞 아바타(원형) — 이미지가 있으면 사진, 없으면 이니셜 원으로 대체
-        const AV_D = 40;
-        const avCenterY = cursorY - 10;
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(PAD + AV_D / 2, avCenterY, AV_D / 2, 0, Math.PI * 2);
-        ctx.closePath();
-        if (avatarImg) {
-          ctx.clip();
-          ctx.drawImage(avatarImg, PAD, avCenterY - AV_D / 2, AV_D, AV_D);
-        } else {
-          ctx.fillStyle = GREEN;
-          ctx.fill();
-          ctx.font = 'bold 18px Arial, sans-serif';
-          ctx.fillStyle = '#ffffff';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText((data.headerName[0] || '').toUpperCase(), PAD + AV_D / 2, avCenterY + 1);
-          ctx.textAlign = 'left';
-          ctx.textBaseline = 'alphabetic';
-        }
-        ctx.restore();
-        const nameX = PAD + AV_D + 12;
-
         ctx.font = 'bold 28px Arial, sans-serif';
         ctx.fillStyle = BLACK;
-        ctx.fillText(data.headerName, nameX, cursorY);
+        ctx.fillText(data.headerName, PAD, cursorY);
         cursorY += 34;
       }
       if (data.headerTimeLine) {
@@ -1821,6 +1802,35 @@ async function generateRunCardBlob(data, isKo) {
     ctx.fillText('Track smarter, Run better', W - PAD, LOGO_H - 22);
     ctx.textAlign = 'left';
 
+    // ── [추가] 아바타 (이름 왼쪽) ──
+    const AV_D = 56; // 아바타 지름
+    const avX = PAD, avY = LOGO_H + 22;
+    const avCx = avX + AV_D/2, avCy = avY + AV_D/2;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(avCx, avCy, AV_D/2, 0, Math.PI*2);
+    ctx.closePath();
+    ctx.clip();
+    if (avatarImg) {
+      // 원본 비율 무시하고 정사각형으로 크롭해서 채움
+      const s = Math.min(avatarImg.width, avatarImg.height);
+      const sx = (avatarImg.width - s)/2, sy = (avatarImg.height - s)/2;
+      ctx.drawImage(avatarImg, sx, sy, s, s, avX, avY, AV_D, AV_D);
+    } else {
+      ctx.fillStyle = GREEN;
+      ctx.fillRect(avX, avY, AV_D, AV_D);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 26px Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const initial = ((data.nickname || data.title || 'R')[0] || 'R').toUpperCase();
+      ctx.fillText(initial, avCx, avCy + 2);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
+    }
+    ctx.restore();
+    const textX = avX + AV_D + 16;
+
     // ── 닉네임 / 제목 ──
     const nameY = LOGO_H + 44;
     ctx.font = 'bold 36px Arial, sans-serif';
@@ -1829,17 +1839,20 @@ async function generateRunCardBlob(data, isKo) {
     const activityModeCard = data.activityMode || 'run';
     const activityNounKo = activityModeCard === 'walk' ? '걷기' : activityModeCard === 'trail' ? '트레일러닝' : '러닝';
     const activityNounEn = activityModeCard === 'walk' ? 'Walk' : activityModeCard === 'trail' ? 'Trail Run' : 'Run';
+    // [수정] "닉네임님의 러닝" 대신, 기록 자체의 title(시간대별 자동 제목 또는 사용자가 수정한 제목)을
+    // 그대로 쓰고 닉네임이 있으면 "닉네임's " 만 붙임 (예: "JK's Night Run", "JK's 러닝", 닉네임 없으면 "야간 러닝")
+    const cardBaseTitle = data.title || (isKo ? activityNounKo : activityNounEn);
     const name = data.nickname
-      ? (isKo ? data.nickname + '님의 ' + activityNounKo : data.nickname + "'s " + activityNounEn)
-      : 'Run Lab';
-    ctx.fillText(name, PAD, nameY);
+      ? data.nickname + "'s " + cardBaseTitle
+      : cardBaseTitle;
+    ctx.fillText(name, textX, nameY);
 
     ctx.font = '19px Arial, sans-serif';
     ctx.fillStyle = GRAY;
     const recordNounKo = activityModeCard === 'walk' ? '걷기 기록' : activityModeCard === 'trail' ? '트레일러닝 기록' : '러닝 기록';
     const recordNounEn = activityModeCard === 'walk' ? 'Walk Record' : activityModeCard === 'trail' ? 'Trail Run Record' : 'Running Record';
     const subLabel = (isKo ? recordNounKo : recordNounEn) + (data.dateStr ? '  ·  ' + data.dateStr : '') + (data.location ? '  ·  📍 ' + data.location : '');
-    ctx.fillText(subLabel, PAD, nameY + 28);
+    ctx.fillText(subLabel, textX, nameY + 28);
 
     // 구분선
     ctx.strokeStyle = DIVIDER; ctx.lineWidth = 1.5;
@@ -1949,77 +1962,58 @@ async function generateRunCardBlob(data, isKo) {
       ctx.textAlign = 'left';
     }
 
-    // ── [추가] 경로맵 (path 데이터가 있을 때만) ──
-    let mapRect = null;
-    if (hasRoute) {
+    // ── [추가] 경로맵 (좌표 2개 이상 있을 때만) ──
+    if (hasPath) {
       const mapY = barY + 62 + 24;
-      const mapH = MAP_H;
+      const mapBoxH = MAP_H - 24; // 아래쪽 여백만큼 제외
       ctx.fillStyle = LIGHTGRAY;
-      roundRect(ctx, PAD, mapY, W - PAD * 2, mapH, 14); ctx.fill();
-
-      ctx.save();
-      roundRect(ctx, PAD, mapY, W - PAD * 2, mapH, 14); ctx.clip();
+      roundRect(ctx, PAD, mapY, W - PAD*2, mapBoxH, 14); ctx.fill();
 
       ctx.font = 'bold 13px Arial, sans-serif';
       ctx.fillStyle = GRAY;
       ctx.fillText(isKo ? '경로' : 'ROUTE', PAD + 16, mapY + 24);
 
-      const pts = data.path.map(p => Array.isArray(p) ? [p[0], p[1]] : [p.lat, p.lng]);
-      let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
-      pts.forEach(([lat, lng]) => {
-        if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat;
-        if (lng < minLng) minLng = lng; if (lng > maxLng) maxLng = lng;
-      });
-      const inset = 44;
-      const areaX = PAD + inset, areaY = mapY + 38;
-      const areaW = (W - PAD * 2) - inset * 2, areaH = mapH - 38 - 22;
-      const latMid = (minLat + maxLat) / 2;
-      const lngScaleFix = Math.cos(latMid * Math.PI / 180) || 1;
-      const spanX = Math.max((maxLng - minLng) * lngScaleFix, 0.00001);
-      const spanY = Math.max(maxLat - minLat, 0.00001);
-      const scale = Math.min(areaW / spanX, areaH / spanY);
-      const drawW = spanX * scale, drawH = spanY * scale;
-      const offX = areaX + (areaW - drawW) / 2;
-      const offY = areaY + (areaH - drawH) / 2;
-      const project = ([lat, lng]) => [
-        offX + (lng - minLng) * lngScaleFix * scale,
-        offY + (maxLat - lat) * scale
-      ];
+      const inset = 24;
+      const plotX = PAD + inset, plotY = mapY + 40, plotW = (W - PAD*2) - inset*2, plotH = mapBoxH - 40 - inset;
 
-      ctx.beginPath();
-      pts.forEach((p, i) => {
-        const [x, y] = project(p);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      });
-      ctx.strokeStyle = GREEN;
-      ctx.lineWidth = 6;
+      const lats = data.path.map(p => p[0]);
+      const lngs = data.path.map(p => p[1]);
+      const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+      const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+      const avgLat = (minLat + maxLat) / 2;
+      const lngScale = Math.cos(avgLat * Math.PI / 180); // 위도에 따른 경도 폭 보정
+      const latRange = Math.max(maxLat - minLat, 0.0001);
+      const lngRange = Math.max((maxLng - minLng) * lngScale, 0.0001);
+      const scale = Math.min(plotW / lngRange, plotH / latRange);
+      const drawW = lngRange * scale, drawH = latRange * scale;
+      const offX = plotX + (plotW - drawW) / 2, offY = plotY + (plotH - drawH) / 2;
+
+      const toXY = (p) => {
+        const x = offX + (p[1] - minLng) * lngScale * scale;
+        const y = offY + (maxLat - p[0]) * scale; // 위도는 위로 갈수록 커지므로 y 반전
+        return [x, y];
+      };
+
+      ctx.strokeStyle = '#ff3333';
+      ctx.lineWidth = 4;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
+      ctx.beginPath();
+      data.path.forEach((p, i) => {
+        const [x, y] = toXY(p);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
       ctx.stroke();
 
-      const [sx, sy] = project(pts[0]);
-      const [ex, ey] = project(pts[pts.length - 1]);
-      ctx.fillStyle = '#666666';
-      ctx.beginPath(); ctx.arc(sx, sy, 8, 0, Math.PI * 2); ctx.fill();
+      // 시작점(초록) / 종료점(빨강) 마커
+      const [sx, sy] = toXY(data.path[0]);
+      const [ex, ey] = toXY(data.path[data.path.length - 1]);
       ctx.fillStyle = GREEN;
-      ctx.beginPath(); ctx.arc(ex, ey, 9, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(ex, ey, 9, 0, Math.PI * 2); ctx.stroke();
-
-      ctx.restore();
-
-      // 미리보기에서 탭하면 확대됨을 알리는 힌트 배지
-      const hintText = isKo ? '🔍 탭하여 확대' : '🔍 Tap to zoom';
-      ctx.font = 'bold 12px Arial, sans-serif';
-      const hintW = ctx.measureText(hintText).width + 20;
-      const hintX = PAD + (W - PAD * 2) - hintW - 12, hintY = mapY + mapH - 34;
-      ctx.fillStyle = 'rgba(0,0,0,0.55)';
-      roundRect(ctx, hintX, hintY, hintW, 24, 12); ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(hintText, hintX + 10, hintY + 17);
-
-      // 미리보기 화면에서 탭 판정에 쓸 절대 좌표(헤더 오프셋 포함)
-      mapRect = { x: PAD, y: mapY + HEADER_H, w: W - PAD * 2, h: mapH };
+      ctx.beginPath(); ctx.arc(sx, sy, 7, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = '#ff3333';
+      ctx.beginPath(); ctx.arc(ex, ey, 7, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
     }
 
     // ── 하단 브랜드 바 (검정) ──
@@ -2039,13 +2033,13 @@ async function generateRunCardBlob(data, isKo) {
     ctx.fillText('AI Running Dynamics Tracker', W - PAD, footY + 34);
     ctx.textAlign = 'left';
 
-    const blob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b), 'image/png'));
-    return { blob, mapRect, path: hasRoute ? data.path : null, W, H };
-  }
+    canvas.toBlob((blob) => resolve(blob), 'image/png');
+  });
 }
-// [추가] 실제 공유(카카오톡/네이티브 공유시트/다운로드)를 수행하는 부분만 분리 —
-// 미리보기에서 "보내기"를 눌렀을 때 호출된다.
-async function performRunCardShare(blob, shareText, isKo) {
+async function shareRunCardImage(data, isKo, shareTextFallback) {
+  const blob = await generateRunCardBlob(data, isKo);
+  const shareText = shareTextFallback || '';
+
   // 1순위: AndroidBridge 이미지 공유 (카카오톡 등 직접 공유)
   if (window.AndroidShare && window.AndroidShare.shareImage) {
     const reader = new FileReader();
@@ -2071,90 +2065,6 @@ async function performRunCardShare(blob, shareText, isKo) {
   a.download = 'runlab_record.png';
   a.click();
   appAlert(isKo ? '이미지가 저장되었습니다! SNS에 공유해보세요' : 'Image saved! Share it on SNS');
-}
-// [수정] 카드 생성 후 곧바로 공유하지 않고, 먼저 미리보기 창을 띄운다.
-// 미리보기 안에서 지도를 탭하면 인터랙티브 지도를 풀스크린으로 볼 수 있고,
-// "보내기"를 눌러야 실제 공유(SNS/메시지 등)가 진행된다.
-async function shareRunCardImage(data, isKo, shareTextFallback) {
-  const { blob, mapRect, path, W, H } = await generateRunCardBlob(data, isKo);
-  const shareText = shareTextFallback || '';
-  showShareCardPreview({ blob, mapRect, path, W, H, isKo, shareText });
-}
-
-// ── [추가] 공유 카드 미리보기 + 지도 탭 확대 기능 ──
-let _shareCardPreviewState = null;
-function showShareCardPreview({ blob, mapRect, path, W, H, isKo, shareText }) {
-  const modal = document.getElementById('share-card-preview-modal');
-  const img = document.getElementById('share-card-preview-img');
-  if (!modal || !img) { performRunCardShare(blob, shareText, isKo); return; }
-  const url = URL.createObjectURL(blob);
-  img.src = url;
-  _shareCardPreviewState = { blob, mapRect, path, W, H, isKo, shareText, url };
-  const cancelBtn = document.getElementById('share-card-cancel-btn');
-  const sendBtn = document.getElementById('share-card-send-btn');
-  if (cancelBtn) cancelBtn.textContent = isKo ? '취소' : 'Cancel';
-  if (sendBtn) sendBtn.textContent = isKo ? '보내기' : 'Send';
-  modal.style.display = 'flex';
-}
-function closeShareCardPreview() {
-  const modal = document.getElementById('share-card-preview-modal');
-  if (modal) modal.style.display = 'none';
-  if (_shareCardPreviewState && _shareCardPreviewState.url) URL.revokeObjectURL(_shareCardPreviewState.url);
-  _shareCardPreviewState = null;
-}
-async function confirmShareCardSend() {
-  if (!_shareCardPreviewState) return;
-  const { blob, shareText, isKo } = _shareCardPreviewState;
-  closeShareCardPreview();
-  await performRunCardShare(blob, shareText, isKo);
-}
-// 미리보기 이미지에서 지도가 그려진 영역을 탭했는지 판정(object-fit:contain 기준 좌표 환산) 후 풀스크린 지도를 연다.
-function handleShareCardPreviewTap(evt) {
-  if (!_shareCardPreviewState || !_shareCardPreviewState.mapRect) return;
-  const img = evt.currentTarget;
-  const rect = img.getBoundingClientRect();
-  const { mapRect, W, H, path, isKo } = _shareCardPreviewState;
-  const naturalRatio = W / H;
-  const boxRatio = rect.width / rect.height;
-  let renderW, renderH, offsetX, offsetY;
-  if (boxRatio > naturalRatio) {
-    renderH = rect.height; renderW = renderH * naturalRatio;
-    offsetX = (rect.width - renderW) / 2; offsetY = 0;
-  } else {
-    renderW = rect.width; renderH = renderW / naturalRatio;
-    offsetX = 0; offsetY = (rect.height - renderH) / 2;
-  }
-  const tapX = evt.clientX - rect.left - offsetX;
-  const tapY = evt.clientY - rect.top - offsetY;
-  const scale = renderW / W;
-  const canvasX = tapX / scale, canvasY = tapY / scale;
-  if (canvasX >= mapRect.x && canvasX <= mapRect.x + mapRect.w &&
-      canvasY >= mapRect.y && canvasY <= mapRect.y + mapRect.h) {
-    openShareCardRouteMap(path, isKo);
-  }
-}
-let _shareCardFullMap = null;
-function openShareCardRouteMap(path, isKo) {
-  if (!path || path.length < 2) return;
-  const modal = document.getElementById('share-card-route-fullmap-modal');
-  if (!modal) return;
-  modal.style.display = 'block';
-  setTimeout(() => {
-    if (_shareCardFullMap) { _shareCardFullMap.remove(); _shareCardFullMap = null; }
-    _shareCardFullMap = L.map('share-card-route-fullmap', { zoomControl: true, attributionControl: false });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(_shareCardFullMap);
-    const latlngs = path.map(p => Array.isArray(p) ? [p[0], p[1]] : [p.lat, p.lng]);
-    const poly = L.polyline(latlngs, { color: '#00aa55', weight: 5 }).addTo(_shareCardFullMap);
-    _shareCardFullMap.fitBounds(poly.getBounds(), { padding: [30, 30] });
-    L.circleMarker(latlngs[0], { radius: 7, color: '#fff', weight: 2, fillColor: '#666666', fillOpacity: 1 }).addTo(_shareCardFullMap);
-    L.circleMarker(latlngs[latlngs.length - 1], { radius: 8, color: '#fff', weight: 2, fillColor: '#00aa55', fillOpacity: 1 }).addTo(_shareCardFullMap);
-    _shareCardFullMap.invalidateSize();
-  }, 50);
-}
-function closeShareCardRouteMap() {
-  const modal = document.getElementById('share-card-route-fullmap-modal');
-  if (modal) modal.style.display = 'none';
-  if (_shareCardFullMap) { _shareCardFullMap.remove(); _shareCardFullMap = null; }
 }
 
 function appAlert(msg) {
@@ -5760,9 +5670,6 @@ const cadence = record.cadence || 170;
 const vertRatioVal = record.vertRatio ? record.vertRatio : (7.5 - (cadence - 160) * 0.05).toFixed(1);
 const effScore = calcEffScore(record) ?? 0;
 const dateStr = record.date ? record.date.split(' ')[0] : '';
-// [추가] 내 기록 공유에도 내 아바타/닉네임과 경로맵을 함께 실어 보낸다.
-const myNickname = (typeof community !== 'undefined' && community.getNickname) ? community.getNickname() : null;
-const myAvatarUrl = (typeof community !== 'undefined' && community.getAvatarUrl) ? community.getAvatarUrl() : null;
 
 shareRunCardImage({
   dist: displayDist.toFixed(2), distUnit: unitText, time: record.time, pace: displayPace,
@@ -5772,10 +5679,8 @@ shareRunCardImage({
   activityMode: record.activityMode || 'run',
   steps: record.steps, walkSpm: record.walkSpm, stride: record.stride,
   kcal: record.kcal, alt: record.alt, avgHr: record.avgHr, nickname: null,
-  // [추가] 이름 앞 아바타 + 상단 헤더 + 경로맵
-  avatarUrl: myAvatarUrl,
-  headerName: myNickname,
-  headerTimeLine: dateStr || null,
+  title: record.title,
+  avatarUrl: (typeof community !== 'undefined' ? community.getAvatarUrl() : '') || null,
   path: record.path || null
 }, isKo, null);
 }
@@ -10007,13 +9912,18 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
     const distText = parseFloat(r.distance_km||0).toFixed(2);
     const durText = this.formatDuration(r.duration_sec);
     const paceText = this.formatPaceSec(r.pace_sec_per_km);
+    // [수정] "닉네임님의 러닝" 대신 기록의 title(시간대별 자동 제목/사용자 수정 제목)을 그대로 쓰고
+    // 닉네임이 있으면 "닉네임's " 만 붙임 (예: "JK's Night Run", "JK's 러닝")
+    const cardBaseTitle = r.title || (isKo ? activityNounKo : activityNounEn);
+    const displayTitle = r.nickname ? (r.nickname + "'s " + cardBaseTitle) : cardBaseTitle;
     const text = isKo
-      ? `${r.nickname}님의 ${activityNounKo}: ${distText}km · ${durText} · 페이스 ${paceText}/km${r.message ? '\n' + r.message : ''}`
-      : `${r.nickname}'s ${activityNounEn}: ${distText}km in ${durText} @ ${paceText}/km${r.message ? '\n' + r.message : ''}`;
+      ? `${displayTitle}: ${distText}km · ${durText} · 페이스 ${paceText}/km${r.message ? '\n' + r.message : ''}`
+      : `${displayTitle}: ${distText}km in ${durText} @ ${paceText}/km${r.message ? '\n' + r.message : ''}`;
     const effScore = r.eff_score || 0;
     const headerDateStr = new Date(r.created_at).toLocaleString(isKo?'ko-KR':'en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
     shareRunCardImage({
       nickname: r.nickname,
+      title: cardBaseTitle,
       dist: distText, distUnit: 'km',
       time: durText, pace: paceText,
       cadence: r.cadence, gct: r.gct_ms, flight: r.flight_pct, effScore,
@@ -10025,11 +9935,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
       // [수정] 상단 별도 헤더 박스 대신 "Running Record" 줄에 날짜·위치를 합쳐서 표시
       dateStr: headerDateStr,
       location: r.location_name || null,
-      // [추가] 이름 앞 아바타 + 상단 헤더(닉네임/경과시간·날짜/위치) + 경로맵
       avatarUrl: r.avatar_url || null,
-      headerName: r.nickname,
-      headerTimeLine: this.timeAgo(r.created_at) + ' · ' + headerDateStr,
-      headerLocation: r.location_name || null,
       path: r.path || null
     }, isKo, text);
   }
@@ -13293,21 +13199,6 @@ if (btn) { btn.textContent = '▶ PLAY'; btn.classList.remove('playing'); }
 <div id="photo-viewer-modal" onclick="community.closePhotoViewer()" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:999999; align-items:center; justify-content:center; padding:20px; box-sizing:border-box;">
   <img id="photo-viewer-img" src="" style="max-width:100%; max-height:100%; object-fit:contain; border-radius:8px;">
   <button onclick="event.stopPropagation(); community.closePhotoViewer()" style="position:absolute; top:20px; right:20px; background:rgba(255,255,255,0.15); border:none; color:#fff; width:36px; height:36px; border-radius:50%; font-size:var(--fs-xl); cursor:pointer; line-height:1;">✕</button>
-</div>
-<!-- [추가] 공유 카드 미리보기 (보내기 전 확인 + 지도를 탭하면 확대) -->
-<div id="share-card-preview-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:999998; flex-direction:column; align-items:center; justify-content:center; padding:20px; box-sizing:border-box;">
-  <div style="position:relative; max-width:100%; max-height:calc(100% - 80px); display:flex; align-items:center; justify-content:center;">
-    <img id="share-card-preview-img" src="" style="max-width:100%; max-height:100%; object-fit:contain; border-radius:12px; cursor:pointer;" onclick="handleShareCardPreviewTap(event)">
-  </div>
-  <div style="width:100%; max-width:420px; display:flex; gap:10px; margin-top:18px;">
-    <button id="share-card-cancel-btn" onclick="closeShareCardPreview()" style="flex:1; padding:14px; border-radius:14px; border:1.5px solid #444; background:transparent; color:#eee; font-weight:800; font-size:var(--fs-base); cursor:pointer;">취소</button>
-    <button id="share-card-send-btn" onclick="confirmShareCardSend()" style="flex:2; padding:14px; border-radius:14px; border:none; background:#00aa55; color:#fff; font-weight:900; font-size:var(--fs-base); cursor:pointer;">보내기</button>
-  </div>
-</div>
-<!-- [추가] 공유 카드의 경로맵을 탭했을 때 여는 인터랙티브(핀치줌 가능) 풀스크린 지도 -->
-<div id="share-card-route-fullmap-modal" style="display:none; position:fixed; inset:0; background:#000; z-index:999999;">
-  <div id="share-card-route-fullmap" style="position:absolute; inset:0;"></div>
-  <button onclick="closeShareCardRouteMap()" style="position:absolute; top:20px; right:20px; z-index:10; background:rgba(0,0,0,0.55); border:none; color:#fff; width:36px; height:36px; border-radius:50%; font-size:var(--fs-xl); cursor:pointer; line-height:1;">✕</button>
 </div>
 <!-- 좋아요 누른 사람 목록 -->
 <div id="likers-modal" class="custom-confirm-overlay" onclick="if(event.target.id==='likers-modal') community.closeLikers()">
