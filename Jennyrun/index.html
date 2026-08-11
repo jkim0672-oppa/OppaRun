@@ -2481,7 +2481,7 @@ calibResultMsg: "Calibration complete! Personal correction factor: {f} (stride r
 calibOutOfRange: "The result was far outside a normal range, so it wasn't applied — please check GPS signal and device placement, then try again.",
 crewTitle: "RUN LAB CREW", crewSub: "Latest runs from the crew",
 crewLoading: "Loading...", crewEmpty: "No runs yet", crewEmptySub: "Be the first runner!",
-crewLike: "Like", crewComment: "Comment", crewDelete: "Delete",
+crewLike: "Like", crewComment: "Comment", crewDelete: "Delete", crewShare: "Share", crewShareLoading: "Preparing...",
 crewCommentPlaceholder: "Leave a comment...", crewSend: "Send",
 crewNoComments: "No comments yet", crewConfirmDelete: "Delete this record from community?",
 crewLikersTitle: "Likes", crewNoLikes: "No likes yet",
@@ -2578,7 +2578,7 @@ calibResultMsg: "보정 완료! 개인 보정계수: {f} (보폭 값이 {p}% 조
 calibOutOfRange: "결과가 정상 범위를 크게 벗어나 적용하지 않았어요. GPS 신호와 기기 착용 위치를 확인한 뒤 다시 시도해주세요.",
 crewTitle: "RUN LAB CREW", crewSub: "러너들의 최신 기록",
 crewLoading: "불러오는 중...", crewEmpty: "아직 기록이 없어요", crewEmptySub: "첫 번째 러너가 되어보세요!",
-crewLike: "좋아요", crewComment: "댓글", crewDelete: "삭제",
+crewLike: "좋아요", crewComment: "댓글", crewDelete: "삭제", crewShare: "공유", crewShareLoading: "준비 중...",
 crewCommentPlaceholder: "댓글 남기기...", crewSend: "전송",
 crewNoComments: "아직 댓글이 없어요", crewConfirmDelete: "이 커뮤니티 기록을 삭제할까요?",
 crewLikersTitle: "좋아요", crewNoLikes: "아직 좋아요가 없어요",
@@ -9790,7 +9790,18 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
     } catch(e) { return []; }
   }
 
-  async shareRecord(recordId) {
+  async shareRecord(recordId, btnEl) {
+    // [추가] 카드 이미지를 캔버스로 그리고 인코딩하는 데 시간이 좀 걸려서,
+    // 그동안 아무 반응이 없어 보이지 않도록 버튼을 즉시 로딩 상태로 바꿔준다.
+    const btn = btnEl || document.getElementById('share-btn-' + recordId);
+    const btnOriginalHTML = btn ? btn.innerHTML : null;
+    if (btn) {
+      btn.style.pointerEvents = 'none';
+      btn.style.opacity = '0.5';
+      const t0 = this._t();
+      btn.innerHTML = (t0.crewShareLoading || (((storage.getLang && storage.getLang()) === 'ko') ? '준비 중...' : 'Preparing...'));
+    }
+    try {
     // [수정] 매번 loadFeed()로 네트워크 재요청하면 반응이 느려서,
     // 이미 화면에 렌더링된 캐시(feedRecords)를 먼저 찾아보고 없을 때만 네트워크로 폴백
     let r = this.feedRecords && this.feedRecords.find(x => x.id === recordId);
@@ -9827,6 +9838,14 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
       dateStr: headerDateStr,
       location: r.location_name || null
     }, isKo, text);
+    } finally {
+      // [추가] 성공/실패/취소 어떤 경우든 버튼을 원래 상태로 복구
+      if (btn) {
+        btn.style.pointerEvents = '';
+        btn.style.opacity = '';
+        if (btnOriginalHTML !== null) btn.innerHTML = btnOriginalHTML;
+      }
+    }
   }
   async toggleLike(recordId) {
     const uid = await this.ensureUserId();
@@ -10189,7 +10208,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
           <button onclick="community.toggleComments('${r.id}')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:none; border:none; border-left:1px solid #f0f0f0; color:#666; font-size:var(--fs-base); font-weight:800; padding:6px 0; cursor:pointer;">
             ${commentCount > 0 ? commentCount + ' ' : ''}${t.crewComment}
           </button>
-          <button onclick="community.shareRecord('${r.id}')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:none; border:none; border-left:1px solid #f0f0f0; color:#666; font-size:var(--fs-base); font-weight:800; padding:6px 0; cursor:pointer;">
+          <button id="share-btn-${r.id}" onclick="community.shareRecord('${r.id}', this)" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:none; border:none; border-left:1px solid #f0f0f0; color:#666; font-size:var(--fs-base); font-weight:800; padding:6px 0; cursor:pointer;">
             ${t.crewShare||'Share'}
           </button>
         </div>
