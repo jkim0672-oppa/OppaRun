@@ -1702,21 +1702,8 @@ window.onAndroidSaveResult = function(success, fileName) {
     alert(isKo ? ('저장되었습니다' + (fileName ? (': ' + fileName) : '.')) : ('Saved' + (fileName ? (': ' + fileName) : '.')));
   }
 };
-// [추가] 공유카드에 그려 넣을 아바타 이미지를 비동기로 로드. CORS 문제 등으로 실패하면
-// null을 반환해서 호출부가 이니셜 원형 아바타로 폴백할 수 있게 함(카드 생성 자체가 깨지지 않도록).
-function loadImageAsync(url) {
-  return new Promise((resolve) => {
-    if (!url) { resolve(null); return; }
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => resolve(img);
-    img.onerror = () => resolve(null);
-    img.src = url;
-  });
-}
-
 function generateRunCardBlob(data, isKo) {
-  return new Promise(async (resolve) => {
+  return new Promise((resolve) => {
     const PAD = 40;
     const GREEN = '#00aa55';
     const BLACK = '#111111';
@@ -1736,14 +1723,7 @@ function generateRunCardBlob(data, isKo) {
       HEADER_H += 10;
     }
 
-    // [추가] 아바타 이미지 미리 로드 (실패 시 null → 이니셜 원형으로 대체)
-    const avatarImg = await loadImageAsync(data.avatarUrl);
-
-    // [추가] 경로맵을 카드 하단에 넣기 위한 높이 계산 (좌표가 2개 이상 있을 때만)
-    const hasPath = !!(data.path && data.path.length >= 2);
-    const MAP_H = hasPath ? 240 : 0;
-
-    const W = 750, H = 804 + HEADER_H + MAP_H;
+    const W = 750, H = 804 + HEADER_H;
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
@@ -1802,35 +1782,6 @@ function generateRunCardBlob(data, isKo) {
     ctx.fillText('Track smarter, Run better', W - PAD, LOGO_H - 22);
     ctx.textAlign = 'left';
 
-    // ── [추가] 아바타 (이름 왼쪽) ──
-    const AV_D = 56; // 아바타 지름
-    const avX = PAD, avY = LOGO_H + 22;
-    const avCx = avX + AV_D/2, avCy = avY + AV_D/2;
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(avCx, avCy, AV_D/2, 0, Math.PI*2);
-    ctx.closePath();
-    ctx.clip();
-    if (avatarImg) {
-      // 원본 비율 무시하고 정사각형으로 크롭해서 채움
-      const s = Math.min(avatarImg.width, avatarImg.height);
-      const sx = (avatarImg.width - s)/2, sy = (avatarImg.height - s)/2;
-      ctx.drawImage(avatarImg, sx, sy, s, s, avX, avY, AV_D, AV_D);
-    } else {
-      ctx.fillStyle = GREEN;
-      ctx.fillRect(avX, avY, AV_D, AV_D);
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 26px Arial, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      const initial = ((data.nickname || data.title || 'R')[0] || 'R').toUpperCase();
-      ctx.fillText(initial, avCx, avCy + 2);
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'alphabetic';
-    }
-    ctx.restore();
-    const textX = avX + AV_D + 16;
-
     // ── 닉네임 / 제목 ──
     const nameY = LOGO_H + 44;
     ctx.font = 'bold 36px Arial, sans-serif';
@@ -1845,14 +1796,14 @@ function generateRunCardBlob(data, isKo) {
     const name = data.nickname
       ? data.nickname + "'s " + cardBaseTitle
       : cardBaseTitle;
-    ctx.fillText(name, textX, nameY);
+    ctx.fillText(name, PAD, nameY);
 
     ctx.font = '19px Arial, sans-serif';
     ctx.fillStyle = GRAY;
     const recordNounKo = activityModeCard === 'walk' ? '걷기 기록' : activityModeCard === 'trail' ? '트레일러닝 기록' : '러닝 기록';
     const recordNounEn = activityModeCard === 'walk' ? 'Walk Record' : activityModeCard === 'trail' ? 'Trail Run Record' : 'Running Record';
     const subLabel = (isKo ? recordNounKo : recordNounEn) + (data.dateStr ? '  ·  ' + data.dateStr : '') + (data.location ? '  ·  📍 ' + data.location : '');
-    ctx.fillText(subLabel, textX, nameY + 28);
+    ctx.fillText(subLabel, PAD, nameY + 28);
 
     // 구분선
     ctx.strokeStyle = DIVIDER; ctx.lineWidth = 1.5;
@@ -1960,60 +1911,6 @@ function generateRunCardBlob(data, isKo) {
       ctx.textAlign = 'right';
       ctx.fillText(effScore + ' pts', W - PAD - 16, barY + 48);
       ctx.textAlign = 'left';
-    }
-
-    // ── [추가] 경로맵 (좌표 2개 이상 있을 때만) ──
-    if (hasPath) {
-      const mapY = barY + 62 + 24;
-      const mapBoxH = MAP_H - 24; // 아래쪽 여백만큼 제외
-      ctx.fillStyle = LIGHTGRAY;
-      roundRect(ctx, PAD, mapY, W - PAD*2, mapBoxH, 14); ctx.fill();
-
-      ctx.font = 'bold 13px Arial, sans-serif';
-      ctx.fillStyle = GRAY;
-      ctx.fillText(isKo ? '경로' : 'ROUTE', PAD + 16, mapY + 24);
-
-      const inset = 24;
-      const plotX = PAD + inset, plotY = mapY + 40, plotW = (W - PAD*2) - inset*2, plotH = mapBoxH - 40 - inset;
-
-      const lats = data.path.map(p => p[0]);
-      const lngs = data.path.map(p => p[1]);
-      const minLat = Math.min(...lats), maxLat = Math.max(...lats);
-      const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
-      const avgLat = (minLat + maxLat) / 2;
-      const lngScale = Math.cos(avgLat * Math.PI / 180); // 위도에 따른 경도 폭 보정
-      const latRange = Math.max(maxLat - minLat, 0.0001);
-      const lngRange = Math.max((maxLng - minLng) * lngScale, 0.0001);
-      const scale = Math.min(plotW / lngRange, plotH / latRange);
-      const drawW = lngRange * scale, drawH = latRange * scale;
-      const offX = plotX + (plotW - drawW) / 2, offY = plotY + (plotH - drawH) / 2;
-
-      const toXY = (p) => {
-        const x = offX + (p[1] - minLng) * lngScale * scale;
-        const y = offY + (maxLat - p[0]) * scale; // 위도는 위로 갈수록 커지므로 y 반전
-        return [x, y];
-      };
-
-      ctx.strokeStyle = '#ff3333';
-      ctx.lineWidth = 4;
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      data.path.forEach((p, i) => {
-        const [x, y] = toXY(p);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      });
-      ctx.stroke();
-
-      // 시작점(초록) / 종료점(빨강) 마커
-      const [sx, sy] = toXY(data.path[0]);
-      const [ex, ey] = toXY(data.path[data.path.length - 1]);
-      ctx.fillStyle = GREEN;
-      ctx.beginPath(); ctx.arc(sx, sy, 7, 0, Math.PI*2); ctx.fill();
-      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
-      ctx.fillStyle = '#ff3333';
-      ctx.beginPath(); ctx.arc(ex, ey, 7, 0, Math.PI*2); ctx.fill();
-      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
     }
 
     // ── 하단 브랜드 바 (검정) ──
@@ -5679,9 +5576,7 @@ shareRunCardImage({
   activityMode: record.activityMode || 'run',
   steps: record.steps, walkSpm: record.walkSpm, stride: record.stride,
   kcal: record.kcal, alt: record.alt, avgHr: record.avgHr, nickname: null,
-  title: record.title,
-  avatarUrl: (typeof community !== 'undefined' ? community.getAvatarUrl() : '') || null,
-  path: record.path || null
+  title: record.title
 }, isKo, null);
 }
 openDiag(id) {
@@ -9934,9 +9829,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
       kcal: r.kcal, alt: r.alt,
       // [수정] 상단 별도 헤더 박스 대신 "Running Record" 줄에 날짜·위치를 합쳐서 표시
       dateStr: headerDateStr,
-      location: r.location_name || null,
-      avatarUrl: r.avatar_url || null,
-      path: r.path || null
+      location: r.location_name || null
     }, isKo, text);
   }
   async toggleLike(recordId) {
