@@ -10276,48 +10276,60 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
     }).join('');
 
     // 경로가 있는 카드마다 실제 Leaflet 미니맵 생성 (정적 외부 API 대신 자체 렌더링)
+    // [수정] 예전엔 화면에 보이든 안 보이든 피드의 모든 카드 지도를 한꺼번에 만들고
+    // 타일까지 즉시 로딩해서, 크루 탭을 열자마자 공유 버튼을 누르면 그 지도 로딩들과
+    // toBlob 인코딩이 브라우저 이미지 처리 리소스를 두고 경합해 몇 초씩 밀렸다.
+    // IntersectionObserver로 "실제로 화면에 스크롤되어 보이는 카드"만 그때 지도를
+    // 생성하도록 지연시켜서, 첫 진입 시 동시 로딩되는 지도 개수를 최소화한다.
     records.forEach(r => {
       if (!(r.path && r.path.length > 1)) return;
       const mapEl = document.getElementById('feed-map-' + r.id);
       if (!mapEl) return;
-      // 강제 리플로우로 컨테이너 크기 확정
-      mapEl.style.display = 'none';
-      mapEl.offsetHeight;
-      mapEl.style.display = 'block';
-      try {
-        const latlngs = r.path.map(p => {
-          if (Array.isArray(p)) return [p[0], p[1]];
-          return [p.lat, p.lng];
-        }).filter(p => p[0] != null && p[1] != null);
-        if (latlngs.length < 2) return;
-        const feedMap = L.map(mapEl, {
-          zoomControl: false,
-          attributionControl: false,
-          dragging: false,
-          scrollWheelZoom: false,
-          doubleClickZoom: false,
-          touchZoom: false,
-          boxZoom: false,
-          keyboard: false,
-          tap: false
-        });
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(feedMap);
-        const line = L.polyline(latlngs, { color: '#ff3333', weight: 3 }).addTo(feedMap);
-        feedMap.fitBounds(line.getBounds(), { padding: [14, 14], maxZoom: 17 });
-        // 화면에 보일 때 정확히 재렌더링
-        const observer = new IntersectionObserver((entries) => {
-          entries.forEach(entry => {
-            if (entry.isIntersecting) {
-              feedMap.invalidateSize();
-              feedMap.fitBounds(line.getBounds(), { padding: [14, 14], maxZoom: 17 });
-              observer.disconnect();
-            }
+
+      const initFeedMap = () => {
+        // 강제 리플로우로 컨테이너 크기 확정
+        mapEl.style.display = 'none';
+        mapEl.offsetHeight;
+        mapEl.style.display = 'block';
+        try {
+          const latlngs = r.path.map(p => {
+            if (Array.isArray(p)) return [p[0], p[1]];
+            return [p.lat, p.lng];
+          }).filter(p => p[0] != null && p[1] != null);
+          if (latlngs.length < 2) return;
+          const feedMap = L.map(mapEl, {
+            zoomControl: false,
+            attributionControl: false,
+            dragging: false,
+            scrollWheelZoom: false,
+            doubleClickZoom: false,
+            touchZoom: false,
+            boxZoom: false,
+            keyboard: false,
+            tap: false
           });
-        }, { threshold: 0.1 });
-        observer.observe(mapEl);
-      } catch (e) {
-        console.warn('feed map render failed', e);
-      }
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(feedMap);
+          const line = L.polyline(latlngs, { color: '#ff3333', weight: 3 }).addTo(feedMap);
+          feedMap.fitBounds(line.getBounds(), { padding: [14, 14], maxZoom: 17 });
+          // 뷰포트에 들어온 직후엔 컨테이너 크기가 아직 불안정할 수 있어 한 번 더 보정
+          requestAnimationFrame(() => {
+            feedMap.invalidateSize();
+            feedMap.fitBounds(line.getBounds(), { padding: [14, 14], maxZoom: 17 });
+          });
+        } catch (e) {
+          console.warn('feed map render failed', e);
+        }
+      };
+
+      const lazyObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            initFeedMap();
+            lazyObserver.disconnect();
+          }
+        });
+      }, { threshold: 0.1, rootMargin: '200px 0px' });
+      lazyObserver.observe(mapEl);
     });
   }
 
