@@ -10247,10 +10247,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
 
         <!-- 이미지/지도 -->
         ${r.photo_url ? `<div style="margin-bottom:12px; border-radius:10px; overflow:hidden;"><img src="${r.photo_url}" loading="lazy" style="width:100%; max-height:280px; object-fit:cover; display:block;"></div>` : ''}
-        <!-- [수정] 피드 지도 미니맵 제거 — 카드마다 Leaflet+OpenStreetMap 타일을 로딩하는
-             비용이 커서, 크루 탭 진입 직후 공유 버튼을 누르면 그 로딩과 경합해 반응이
-             몇 초씩 밀리는 문제가 있었음. 지도 없이도 거리/시간/페이스 정보로 충분하다고
-             판단해 완전히 제거함. -->
+        ${(r.path && r.path.length > 1) ? `<div id="feed-map-${r.id}" style="margin-bottom:12px; border-radius:10px; overflow:hidden; height:180px; background:#eee; position:relative; left:0; width:100%;"></div>` : ''}
 
         <!-- 액션 버튼 -->
         <div style="display:flex; border-top:1px solid #f0f0f0; padding-top:12px;">
@@ -10278,6 +10275,59 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
       </div>`;
     }).join('');
 
+    // 경로가 있는 카드마다 실제 Leaflet 미니맵 생성 (정적 외부 API 대신 자체 렌더링)
+    // [수정] 화면에 스크롤되어 실제로 보이는 카드만 그 시점에 지도를 생성하도록 지연시켜서,
+    // 크루 탭 진입 직후 여러 지도가 한꺼번에 로딩되며 공유 버튼(toBlob 인코딩)과
+    // 이미지 처리 리소스를 두고 경합하던 문제를 줄인다.
+    records.forEach(r => {
+      if (!(r.path && r.path.length > 1)) return;
+      const mapEl = document.getElementById('feed-map-' + r.id);
+      if (!mapEl) return;
+
+      const initFeedMap = () => {
+        // 강제 리플로우로 컨테이너 크기 확정
+        mapEl.style.display = 'none';
+        mapEl.offsetHeight;
+        mapEl.style.display = 'block';
+        try {
+          const latlngs = r.path.map(p => {
+            if (Array.isArray(p)) return [p[0], p[1]];
+            return [p.lat, p.lng];
+          }).filter(p => p[0] != null && p[1] != null);
+          if (latlngs.length < 2) return;
+          const feedMap = L.map(mapEl, {
+            zoomControl: false,
+            attributionControl: false,
+            dragging: false,
+            scrollWheelZoom: false,
+            doubleClickZoom: false,
+            touchZoom: false,
+            boxZoom: false,
+            keyboard: false,
+            tap: false
+          });
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(feedMap);
+          const line = L.polyline(latlngs, { color: '#ff3333', weight: 3 }).addTo(feedMap);
+          feedMap.fitBounds(line.getBounds(), { padding: [14, 14], maxZoom: 17 });
+          requestAnimationFrame(() => {
+            feedMap.invalidateSize();
+            feedMap.fitBounds(line.getBounds(), { padding: [14, 14], maxZoom: 17 });
+          });
+        } catch (e) {
+          console.warn('feed map render failed', e);
+        }
+      };
+
+      const lazyObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            initFeedMap();
+            lazyObserver.disconnect();
+          }
+        });
+      }, { threshold: 0.1, rootMargin: '200px 0px' });
+      lazyObserver.observe(mapEl);
+    });
   }
 
   async confirmDelete(recordId) {
