@@ -1728,6 +1728,9 @@ function generateRunCardBlob(data, isKo) {
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
 
+    // [추가] 세부 구간 측정 — 그리기(동기) vs toBlob 인코딩(비동기) 중 어디가 느린지 구분
+    const _drawStart = performance.now();
+
     function roundRect(c, x, y, w, h, r) {
       c.beginPath();
       c.moveTo(x+r, y); c.lineTo(x+w-r, y); c.quadraticCurveTo(x+w, y, x+w, y+r);
@@ -1930,7 +1933,13 @@ function generateRunCardBlob(data, isKo) {
     // [수정] PNG → JPEG(품질 0.85)로 변경. 배경이 항상 불투명 흰색이라 알파 채널이
     // 필요 없고, 파일 용량이 크게 줄어 JS→Kotlin 브릿지로 넘어가는 base64 문자열도
     // 짧아져 공유 버튼 반응 속도가 빨라진다.
-    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.85);
+    const _drawEnd = performance.now();
+    console.log('[SHARE_TIMING] 그리기(동기, fillText 등): ' + (_drawEnd - _drawStart).toFixed(0) + 'ms');
+    canvas.toBlob((blob) => {
+      const _blobEnd = performance.now();
+      console.log('[SHARE_TIMING] toBlob 인코딩(비동기): ' + (_blobEnd - _drawEnd).toFixed(0) + 'ms');
+      resolve(blob);
+    }, 'image/jpeg', 0.85);
   });
 }
 
