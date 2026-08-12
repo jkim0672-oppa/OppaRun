@@ -1936,12 +1936,23 @@ async function shareRunCardImage(data, isKo, shareTextFallback) {
 
   // 1순위: AndroidBridge 이미지 공유 (카카오톡 등 직접 공유)
   if (window.AndroidShare && window.AndroidShare.shareImage) {
-    const reader = new FileReader();
-    reader.onload = function() {
-      const base64 = reader.result.split(',')[1];
-      window.AndroidShare.shareImage(base64, shareText);
-    };
-    reader.readAsDataURL(blob);
+    // [수정] 예전엔 reader.onload를 기다리지 않고 바로 return해서, 이 함수를 호출하는
+    // 쪽(await shareRunCardImage(...))이 실제 base64 인코딩·브릿지 전달이 끝나기도 전에
+    // 이미 끝난 것으로 착각했음(예: 공유 버튼 로딩 상태가 실제 공유창보다 먼저 풀림).
+    // Promise로 감싸서 onload(브릿지 호출까지) 끝날 때까지 정확히 기다리도록 수정.
+    await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = function() {
+        try {
+          const base64 = reader.result.split(',')[1];
+          window.AndroidShare.shareImage(base64, shareText);
+        } finally {
+          resolve();
+        }
+      };
+      reader.onerror = function() { reject(reader.error); };
+      reader.readAsDataURL(blob);
+    });
     return;
   }
 
@@ -9791,42 +9802,62 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
   }
 
   async shareRecord(recordId) {
-    // [수정] 매번 loadFeed()로 네트워크 재요청하면 반응이 느려서,
-    // 이미 화면에 렌더링된 캐시(feedRecords)를 먼저 찾아보고 없을 때만 네트워크로 폴백
-    let r = this.feedRecords && this.feedRecords.find(x => x.id === recordId);
-    if (!r) {
-      const records = await this.loadFeed();
-      r = records.find(x => x.id === recordId);
+    // [추가] 이미지 생성(canvas→blob→base64)~브릿지 전달까지 여러 비동기 단계를 거치는 동안
+    // 아무 시각적 반응이 없으면 "탭이 안 먹힌다"고 느껴지므로, 누르자마자 버튼을 즉시
+    // 비활성화 + 로딩 텍스트로 바꿔서 탭이 인식됐다는 피드백을 바로 준다.
+    const btn = document.getElementById('share-btn-' + recordId);
+    const btnOrigHTML = btn ? btn.innerHTML : null;
+    if (btn) {
+      btn.disabled = true;
+      btn.style.opacity = '0.5';
+      const lang0 = (storage.getLang && storage.getLang()) || 'ko';
+      btn.innerHTML = lang0 === 'ko' ? '준비 중...' : 'Preparing...';
     }
-    if (!r) return;
-    const lang = (storage.getLang && storage.getLang()) || 'ko';
-    const isKo = lang === 'ko';
-    const activityMode = r.activity_mode || 'run';
-    // [수정] 언어설정(한/영) + 활동모드(러닝/걷기/트레일)를 함께 반영해 공유 캡션 문구 생성
-    const activityNounKo = activityMode === 'walk' ? '걷기' : activityMode === 'trail' ? '트레일러닝' : '러닝';
-    const activityNounEn = activityMode === 'walk' ? 'Walk' : activityMode === 'trail' ? 'Trail Run' : 'Run';
-    const distText = parseFloat(r.distance_km||0).toFixed(2);
-    const durText = this.formatDuration(r.duration_sec);
-    const paceText = this.formatPaceSec(r.pace_sec_per_km);
-    const text = isKo
-      ? `${r.nickname}님의 ${activityNounKo}: ${distText}km · ${durText} · 페이스 ${paceText}/km${r.message ? '\n' + r.message : ''}`
-      : `${r.nickname}'s ${activityNounEn}: ${distText}km in ${durText} @ ${paceText}/km${r.message ? '\n' + r.message : ''}`;
-    const effScore = r.eff_score || 0;
-    const headerDateStr = new Date(r.created_at).toLocaleString(isKo?'ko-KR':'en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-    shareRunCardImage({
-      nickname: r.nickname,
-      dist: distText, distUnit: 'km',
-      time: durText, pace: paceText,
-      cadence: r.cadence, gct: r.gct_ms, flight: r.flight_pct, effScore,
-      avgHr: r.avg_hr || null, hrZone: r.hr_zone || null,
-      // [추가] 활동모드에 따라 카드 레이아웃이 분기되도록 전달
-      activityMode: activityMode,
-      steps: r.steps, walkSpm: r.walk_spm, stride: r.stride_m,
-      kcal: r.kcal, alt: r.alt,
-      // [수정] 상단 별도 헤더 박스 대신 "Running Record" 줄에 날짜·위치를 합쳐서 표시
-      dateStr: headerDateStr,
-      location: r.location_name || null
-    }, isKo, text);
+    try {
+      // [수정] 매번 loadFeed()로 네트워크 재요청하면 반응이 느려서,
+      // 이미 화면에 렌더링된 캐시(feedRecords)를 먼저 찾아보고 없을 때만 네트워크로 폴백
+      let r = this.feedRecords && this.feedRecords.find(x => x.id === recordId);
+      if (!r) {
+        const records = await this.loadFeed();
+        r = records.find(x => x.id === recordId);
+      }
+      if (!r) return;
+      const lang = (storage.getLang && storage.getLang()) || 'ko';
+      const isKo = lang === 'ko';
+      const activityMode = r.activity_mode || 'run';
+      // [수정] 언어설정(한/영) + 활동모드(러닝/걷기/트레일)를 함께 반영해 공유 캡션 문구 생성
+      const activityNounKo = activityMode === 'walk' ? '걷기' : activityMode === 'trail' ? '트레일러닝' : '러닝';
+      const activityNounEn = activityMode === 'walk' ? 'Walk' : activityMode === 'trail' ? 'Trail Run' : 'Run';
+      const distText = parseFloat(r.distance_km||0).toFixed(2);
+      const durText = this.formatDuration(r.duration_sec);
+      const paceText = this.formatPaceSec(r.pace_sec_per_km);
+      const text = isKo
+        ? `${r.nickname}님의 ${activityNounKo}: ${distText}km · ${durText} · 페이스 ${paceText}/km${r.message ? '\n' + r.message : ''}`
+        : `${r.nickname}'s ${activityNounEn}: ${distText}km in ${durText} @ ${paceText}/km${r.message ? '\n' + r.message : ''}`;
+      const effScore = r.eff_score || 0;
+      const headerDateStr = new Date(r.created_at).toLocaleString(isKo?'ko-KR':'en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+      await shareRunCardImage({
+        nickname: r.nickname,
+        dist: distText, distUnit: 'km',
+        time: durText, pace: paceText,
+        cadence: r.cadence, gct: r.gct_ms, flight: r.flight_pct, effScore,
+        avgHr: r.avg_hr || null, hrZone: r.hr_zone || null,
+        // [추가] 활동모드에 따라 카드 레이아웃이 분기되도록 전달
+        activityMode: activityMode,
+        steps: r.steps, walkSpm: r.walk_spm, stride: r.stride_m,
+        kcal: r.kcal, alt: r.alt,
+        // [수정] 상단 별도 헤더 박스 대신 "Running Record" 줄에 날짜·위치를 합쳐서 표시
+        dateStr: headerDateStr,
+        location: r.location_name || null
+      }, isKo, text);
+    } finally {
+      // [추가] 성공/실패/중도 return(레코드 못찾음 등) 모든 경우에 버튼 상태를 원래대로 복구
+      if (btn) {
+        btn.disabled = false;
+        btn.style.opacity = '';
+        if (btnOrigHTML !== null) btn.innerHTML = btnOrigHTML;
+      }
+    }
   }
   async toggleLike(recordId) {
     const uid = await this.ensureUserId();
@@ -10189,7 +10220,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
           <button onclick="community.toggleComments('${r.id}')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:none; border:none; border-left:1px solid #f0f0f0; color:#666; font-size:var(--fs-base); font-weight:800; padding:6px 0; cursor:pointer;">
             ${commentCount > 0 ? commentCount + ' ' : ''}${t.crewComment}
           </button>
-          <button onclick="community.shareRecord('${r.id}')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:none; border:none; border-left:1px solid #f0f0f0; color:#666; font-size:var(--fs-base); font-weight:800; padding:6px 0; cursor:pointer;">
+          <button id="share-btn-${r.id}" onclick="community.shareRecord('${r.id}')" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:none; border:none; border-left:1px solid #f0f0f0; color:#666; font-size:var(--fs-base); font-weight:800; padding:6px 0; cursor:pointer;">
             ${t.crewShare||'Share'}
           </button>
         </div>
