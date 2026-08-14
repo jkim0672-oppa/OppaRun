@@ -809,6 +809,13 @@ z-index: 50000; background: #000; flex-direction: column;
 #feed-map-fullscreen-overlay.active { display: flex; }
 #feed-map-fullscreen-inner { flex: 1; width: 100%; position: relative; padding-top: var(--top-inset); box-sizing: border-box; background: #000; }
 #feed-map-fullscreen-el { width: 100%; height: 100%; }
+#btn-feed-route-play {
+position: absolute; bottom: 70px; left: 50%; transform: translateX(-50%); z-index: 51000;
+background: #1a1a1a; color: var(--primary); border: 1.5px solid var(--primary);
+padding: 10px 22px; border-radius: 24px; font-weight: 900; font-size:var(--fs-base); cursor: pointer;
+box-shadow: 0 2px 12px rgba(0,255,136,0.25);
+}
+#btn-feed-route-play.playing { background: var(--primary); color: #000; }
 #btn-feed-map-fullscreen-close {
 position: absolute; top: calc(var(--top-inset) + 5px); right: 18px; z-index: 51000;
 background: var(--primary); color: #000; border: none;
@@ -1268,6 +1275,7 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 <div id="feed-map-fullscreen-overlay">
 <div id="feed-map-fullscreen-inner">
 <div id="feed-map-fullscreen-el"></div>
+<button id="btn-feed-route-play" onclick="community.toggleFeedRoutePlayback()">▶ PLAY</button>
 <button id="btn-feed-map-fullscreen-close" onclick="history.back()">✕ CLOSE</button>
 </div>
 </div>
@@ -5497,34 +5505,8 @@ setTimeout(() => { if(this.detailMap) this.detailMap.invalidateSize(); }, 200);
 if (record.path && record.path.length > 0 && this.detailMap) {
 let poly = L.polyline(record.path, {color: '#ff3333', weight: 2}).addTo(this.detailMap);
 this.detailMap.fitBounds(poly.getBounds());
-// [수정] 방향 화살표는 제거하고, 시작 지점/종료 지점만 표시
-const coords = record.path;
-const startPoint = coords[0];
-const endPoint = coords[coords.length - 1];
-L.marker(startPoint, {
-icon: L.divIcon({
-className: '',
-html: `<div style="position:relative;width:28px;height:38px;">
-<div style="position:absolute;top:0;left:0;width:28px;height:28px;background:#00c853;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 2px 5px rgba(0,0,0,0.5);"></div>
-<div style="position:absolute;top:7px;left:9px;width:0;height:0;border-style:solid;border-width:6px 0 6px 10px;border-color:transparent transparent transparent #fff;"></div>
-</div>`,
-iconSize: [28, 38], iconAnchor: [14, 38]
-}),
-interactive: false
-}).addTo(this.detailMap);
-if (coords.length > 1) {
-L.marker(endPoint, {
-icon: L.divIcon({
-className: '',
-html: `<div style="position:relative;width:28px;height:38px;">
-<div style="position:absolute;top:0;left:0;width:28px;height:28px;background:#ff3333;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 2px 5px rgba(0,0,0,0.5);"></div>
-<div style="position:absolute;top:9px;left:9px;width:10px;height:10px;background:#fff;"></div>
-</div>`,
-iconSize: [28, 38], iconAnchor: [14, 38]
-}),
-interactive: false
-}).addTo(this.detailMap);
-}
+// [수정] 방향 화살표는 제거하고, 시작 지점/종료 지점만 표시 (작은 삼각형/사각형 마커)
+addRouteEndpointMarkers(this.detailMap, record.path);
 }
 if (record.splits && record.splits.length > 0 && this.detailMap) {
 record.splits.forEach(split => {
@@ -8897,7 +8879,9 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // 경로 시작/종료 지점 마커를 만들어 지정된 Leaflet 지도에 추가.
-// (히스토리 상세 맵의 시작/종료 마커와 동일한 스타일 — 크루 피드 지도에서도 재사용)
+// [수정] 기존 핀(물방울) 모양은 두 지점이 가까우면 서로 겹쳐서 어디가 시작/끝인지
+// 구분이 안 됐음. 좌표 정중앙에 정확히 앵커링되는 작은 도형(시작=삼각형, 끝=사각형)으로
+// 바꿔서 크기를 줄이고 겹침 문제를 최소화함. (히스토리 상세 맵 / 크루 피드 지도 공용)
 function addRouteEndpointMarkers(map, coords) {
   if (!map || !coords || coords.length === 0 || typeof L === 'undefined') return;
   const startPoint = coords[0];
@@ -8905,25 +8889,19 @@ function addRouteEndpointMarkers(map, coords) {
   L.marker(startPoint, {
     icon: L.divIcon({
       className: '',
-      html: `<div style="position:relative;width:28px;height:38px;">
-<div style="position:absolute;top:0;left:0;width:28px;height:28px;background:#00c853;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 2px 5px rgba(0,0,0,0.5);"></div>
-<div style="position:absolute;top:7px;left:9px;width:0;height:0;border-style:solid;border-width:6px 0 6px 10px;border-color:transparent transparent transparent #fff;"></div>
-</div>`,
-      iconSize: [28, 38], iconAnchor: [14, 38]
+      html: `<div style="width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-bottom:13px solid #00c853;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.7));"></div>`,
+      iconSize: [14, 13], iconAnchor: [7, 7]
     }),
-    interactive: false
+    interactive: false, zIndexOffset: 500
   }).addTo(map);
   if (coords.length > 1) {
     L.marker(endPoint, {
       icon: L.divIcon({
         className: '',
-        html: `<div style="position:relative;width:28px;height:38px;">
-<div style="position:absolute;top:0;left:0;width:28px;height:28px;background:#ff3333;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 2px 5px rgba(0,0,0,0.5);"></div>
-<div style="position:absolute;top:9px;left:9px;width:10px;height:10px;background:#fff;"></div>
-</div>`,
-        iconSize: [28, 38], iconAnchor: [14, 38]
+        html: `<div style="width:12px;height:12px;background:#ff3333;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.7);"></div>`,
+        iconSize: [12, 12], iconAnchor: [6, 6]
       }),
-      interactive: false
+      interactive: false, zIndexOffset: 600
     }).addTo(map);
   }
 }
@@ -10360,6 +10338,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
 
     // 이전에 열려있던 지도 인스턴스가 있으면 정리하고 새로 생성
     if (this._feedMapFull) { try { this._feedMapFull.remove(); } catch(e) {} this._feedMapFull = null; }
+    this._currentFeedPath = latlngs;
     this._feedMapFull = L.map(container, { zoomControl: true, attributionControl: false });
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(this._feedMapFull);
     const line = L.polyline(latlngs, { color: '#ff3333', weight: 3 }).addTo(this._feedMapFull);
@@ -10373,10 +10352,16 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
     }, 200);
   }
 
+  toggleFeedRoutePlayback() {
+    RoutePlayback.toggle(this._feedMapFull, this._currentFeedPath, document.getElementById('btn-feed-route-play'));
+  }
+
   closeFeedMapFullscreen() {
     const overlay = document.getElementById('feed-map-fullscreen-overlay');
     if (overlay) overlay.classList.remove('active');
+    RoutePlayback.stop();
     if (this._feedMapFull) { try { this._feedMapFull.remove(); } catch(e) {} this._feedMapFull = null; }
+    this._currentFeedPath = null;
   }
 
   async confirmDelete(recordId) {
@@ -12716,13 +12701,6 @@ app.startLiveTimer();
 // ========== 맵 전체화면 ==========
 let _mainMapFull = null;
 let _detailMapFull = null;
-let _routePlaybackMarker = null;
-let _routePlaybackRAF = null;
-let _routePlaybackCum = null; // 누적 거리 배열
-let _routePlaybackTotal = 0;
-let _routePlaybackStartTs = 0;
-let _routePlaybackElapsedAtPause = 0;
-let _routePlaybackPlaying = false;
 let _jrSkipNextPopstate = false;
 let _mainMapFullLocMarker = null;
 let _mainMapFullPolyline = null;
@@ -12849,86 +12827,100 @@ this.stopRoutePlayback();
 // 다음번 열 때 갱신 위해 초기화
 if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
 };
-// ========== 히스토리 경로 재생 (전체화면 지도) ==========
-UIManager.prototype._buildRouteCumulative = function(path) {
-let cum = [0];
-for (let i = 1; i < path.length; i++) {
-const d = L.latLng(path[i - 1]).distanceTo(L.latLng(path[i]));
-cum.push(cum[i - 1] + d);
-}
-return cum;
+// ========== 경로 재생 (전체화면 지도) ==========
+// [수정] 기존에는 히스토리 상세 맵(_detailMapFull) 전용으로만 짜여 있었음.
+// 크루 피드의 전체화면 지도에서도 동일한 재생 기능을 쓸 수 있도록, 재생 대상
+// 지도(map)/경로(path)/버튼(btn)을 인자로 받는 범용 모듈로 분리함.
+const RoutePlayback = {
+  map: null, btn: null, marker: null, cum: null, total: 0,
+  startTs: 0, elapsedAtPause: 0, playing: false, raf: null,
+  buildCumulative(path) {
+    let cum = [0];
+    for (let i = 1; i < path.length; i++) {
+      const d = L.latLng(path[i - 1]).distanceTo(L.latLng(path[i]));
+      cum.push(cum[i - 1] + d);
+    }
+    return cum;
+  },
+  toggle(map, path, btn) {
+    if (!map || !path || path.length < 2) return;
+    // 재생 대상이 바뀌면(예: 상세맵 → 피드맵) 이전 상태를 정리하고 새로 시작
+    if (this.map !== map) this.stop();
+    this.map = map; this.path = path; this.btn = btn;
+    if (this.playing) this.pause(); else this.start();
+  },
+  start() {
+    const path = this.path;
+    if (!path || path.length < 2 || !this.map) return;
+    if (!this.marker) {
+      this.cum = this.buildCumulative(path);
+      this.total = this.cum[this.cum.length - 1];
+      this.marker = L.marker(path[0], {
+        icon: L.divIcon({
+          className: '',
+          html: '<div style="width:16px;height:16px;border-radius:50%;background:#e53935;border:2px solid #fff;box-shadow:0 0 8px rgba(0,0,0,0.6);"></div>',
+          iconSize: [16, 16], iconAnchor: [8, 8]
+        }),
+        interactive: false, zIndexOffset: 1000
+      }).addTo(this.map);
+      this.elapsedAtPause = 0;
+    }
+    // 경로 길이에 비례하되 8~30초 사이로 제한된 재생 시간
+    const duration = Math.min(30000, Math.max(8000, path.length * 60));
+    this.startTs = performance.now() - this.elapsedAtPause;
+    this.playing = true;
+    if (this.btn) { this.btn.textContent = '⏸ PAUSE'; this.btn.classList.add('playing'); }
+    const step = (now) => {
+      if (!this.playing) return;
+      const elapsed = now - this.startTs;
+      let frac = duration > 0 ? (elapsed / duration) : 1;
+      if (frac >= 1) {
+        frac = 1;
+        this.setPosition(frac);
+        this.stop();
+        return;
+      }
+      this.setPosition(frac);
+      this.elapsedAtPause = elapsed;
+      this.raf = requestAnimationFrame(step);
+    };
+    this.raf = requestAnimationFrame(step);
+  },
+  setPosition(frac) {
+    if (!this.marker) return;
+    const path = this.path, cum = this.cum;
+    const targetDist = this.total * frac;
+    let i = 0;
+    while (i < cum.length - 1 && cum[i + 1] < targetDist) i++;
+    if (i >= path.length - 1) { this.marker.setLatLng(path[path.length - 1]); return; }
+    const segStart = cum[i], segEnd = cum[i + 1];
+    const segFrac = segEnd > segStart ? (targetDist - segStart) / (segEnd - segStart) : 0;
+    const p1 = path[i], p2 = path[i + 1];
+    const lat = p1[0] + (p2[0] - p1[0]) * segFrac;
+    const lng = p1[1] + (p2[1] - p1[1]) * segFrac;
+    this.marker.setLatLng([lat, lng]);
+  },
+  pause() {
+    this.playing = false;
+    if (this.raf) { cancelAnimationFrame(this.raf); this.raf = null; }
+    if (this.btn) { this.btn.textContent = '▶ PLAY'; this.btn.classList.remove('playing'); }
+  },
+  stop() {
+    this.playing = false;
+    if (this.raf) { cancelAnimationFrame(this.raf); this.raf = null; }
+    this.elapsedAtPause = 0;
+    this.cum = null;
+    this.total = 0;
+    if (this.marker) { try { this.marker.remove(); } catch(e) {} this.marker = null; }
+    if (this.btn) { this.btn.textContent = '▶ PLAY'; this.btn.classList.remove('playing'); }
+    this.map = null; this.path = null; this.btn = null;
+  }
 };
 UIManager.prototype.toggleRoutePlayback = function() {
-if (!_detailMapFull || !this._currentDetailPath) return;
-if (_routePlaybackPlaying) { this.pauseRoutePlayback(); }
-else { this.startRoutePlayback(); }
-};
-UIManager.prototype.startRoutePlayback = function() {
-const path = this._currentDetailPath;
-if (!path || path.length < 2 || !_detailMapFull) return;
-const btn = document.getElementById('btn-detail-route-play');
-if (!_routePlaybackMarker) {
-_routePlaybackCum = this._buildRouteCumulative(path);
-_routePlaybackTotal = _routePlaybackCum[_routePlaybackCum.length - 1];
-_routePlaybackMarker = L.marker(path[0], {
-icon: L.divIcon({
-className: '',
-html: '<div style="width:16px;height:16px;border-radius:50%;background:#e53935;border:2px solid #fff;box-shadow:0 0 8px rgba(0,0,0,0.6);"></div>',
-iconSize: [16, 16], iconAnchor: [8, 8]
-}),
-interactive: false, zIndexOffset: 1000
-}).addTo(_detailMapFull);
-_routePlaybackElapsedAtPause = 0;
-}
-// 경로 길이에 비례하되 8~30초 사이로 제한된 재생 시간
-const duration = Math.min(30000, Math.max(8000, path.length * 60));
-_routePlaybackStartTs = performance.now() - _routePlaybackElapsedAtPause;
-_routePlaybackPlaying = true;
-if (btn) { btn.textContent = '⏸ PAUSE'; btn.classList.add('playing'); }
-const step = (now) => {
-if (!_routePlaybackPlaying) return;
-const elapsed = now - _routePlaybackStartTs;
-let frac = duration > 0 ? (elapsed / duration) : 1;
-if (frac >= 1) {
-frac = 1;
-this._setRoutePlaybackPosition(path, _routePlaybackCum, frac);
-this.stopRoutePlayback();
-return;
-}
-this._setRoutePlaybackPosition(path, _routePlaybackCum, frac);
-_routePlaybackElapsedAtPause = elapsed;
-_routePlaybackRAF = requestAnimationFrame(step);
-};
-_routePlaybackRAF = requestAnimationFrame(step);
-};
-UIManager.prototype._setRoutePlaybackPosition = function(path, cum, frac) {
-if (!_routePlaybackMarker) return;
-const targetDist = _routePlaybackTotal * frac;
-let i = 0;
-while (i < cum.length - 1 && cum[i + 1] < targetDist) i++;
-if (i >= path.length - 1) { _routePlaybackMarker.setLatLng(path[path.length - 1]); return; }
-const segStart = cum[i], segEnd = cum[i + 1];
-const segFrac = segEnd > segStart ? (targetDist - segStart) / (segEnd - segStart) : 0;
-const p1 = path[i], p2 = path[i + 1];
-const lat = p1[0] + (p2[0] - p1[0]) * segFrac;
-const lng = p1[1] + (p2[1] - p1[1]) * segFrac;
-_routePlaybackMarker.setLatLng([lat, lng]);
-};
-UIManager.prototype.pauseRoutePlayback = function() {
-_routePlaybackPlaying = false;
-if (_routePlaybackRAF) { cancelAnimationFrame(_routePlaybackRAF); _routePlaybackRAF = null; }
-const btn = document.getElementById('btn-detail-route-play');
-if (btn) { btn.textContent = '▶ PLAY'; btn.classList.remove('playing'); }
+  RoutePlayback.toggle(_detailMapFull, this._currentDetailPath, document.getElementById('btn-detail-route-play'));
 };
 UIManager.prototype.stopRoutePlayback = function() {
-_routePlaybackPlaying = false;
-if (_routePlaybackRAF) { cancelAnimationFrame(_routePlaybackRAF); _routePlaybackRAF = null; }
-_routePlaybackElapsedAtPause = 0;
-_routePlaybackCum = null;
-_routePlaybackTotal = 0;
-if (_routePlaybackMarker) { _routePlaybackMarker.remove(); _routePlaybackMarker = null; }
-const btn = document.getElementById('btn-detail-route-play');
-if (btn) { btn.textContent = '▶ PLAY'; btn.classList.remove('playing'); }
+  RoutePlayback.stop();
 };
 // ========== 뒤로가기 종료 확인 다이얼로그 ==========
 (function() {
