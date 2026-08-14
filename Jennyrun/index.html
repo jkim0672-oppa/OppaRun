@@ -800,6 +800,21 @@ background: var(--primary); color: #000; border: none;
 padding: 9px 18px; border-radius: 20px; font-weight: 900; font-size:var(--fs-base); cursor: pointer;
 box-shadow: 0 2px 12px rgba(0,255,136,0.4);
 }
+/* 크루 피드 경로맵 전체화면 */
+#feed-map-fullscreen-overlay {
+display: none;
+position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+z-index: 50000; background: #000; flex-direction: column;
+}
+#feed-map-fullscreen-overlay.active { display: flex; }
+#feed-map-fullscreen-inner { flex: 1; width: 100%; position: relative; padding-top: var(--top-inset); box-sizing: border-box; background: #000; }
+#feed-map-fullscreen-el { width: 100%; height: 100%; }
+#btn-feed-map-fullscreen-close {
+position: absolute; top: calc(var(--top-inset) + 5px); right: 18px; z-index: 51000;
+background: var(--primary); color: #000; border: none;
+padding: 9px 18px; border-radius: 20px; font-weight: 900; font-size:var(--fs-base); cursor: pointer;
+box-shadow: 0 2px 12px rgba(0,255,136,0.4);
+}
 /* ===== 지도 테마(라이트/다크) 토글 버튼 ===== */
 .btn-map-theme {
 position: absolute; bottom: 10px; right: 10px; z-index: 1000;
@@ -1247,6 +1262,13 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 <div id="detail-map-fullscreen-el"></div>
 <button id="btn-detail-route-play" onclick="ui.toggleRoutePlayback()">▶ PLAY</button>
 <button id="btn-detail-map-fullscreen-close" onclick="history.back()">✕ CLOSE</button>
+</div>
+</div>
+<!-- 크루 피드 경로맵 전체화면 오버레이 -->
+<div id="feed-map-fullscreen-overlay">
+<div id="feed-map-fullscreen-inner">
+<div id="feed-map-fullscreen-el"></div>
+<button id="btn-feed-map-fullscreen-close" onclick="history.back()">✕ CLOSE</button>
 </div>
 </div>
 <!-- ===== 러닝 진단(RUN DIAGNOSIS) 화면 ===== -->
@@ -10212,7 +10234,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
 
         <!-- 이미지/지도 -->
         ${r.photo_url ? `<div style="margin-bottom:12px; border-radius:10px; overflow:hidden;"><img src="${r.photo_url}" loading="lazy" style="width:100%; max-height:280px; object-fit:cover; display:block;"></div>` : ''}
-        ${(r.path && r.path.length > 1) ? `<div id="feed-map-${r.id}" style="margin-bottom:12px; border-radius:10px; overflow:hidden; height:180px; background:#eee; position:relative; left:0; width:100%;"></div>` : ''}
+        ${(r.path && r.path.length > 1) ? `<div onclick="community.openFeedMapFullscreen('${r.id}')" style="margin-bottom:12px; border-radius:10px; overflow:hidden; height:180px; background:#eee; position:relative; left:0; width:100%; cursor:pointer;"><div id="feed-map-${r.id}" style="position:absolute; inset:0;"></div><div style="position:absolute; bottom:10px; left:10px; z-index:1000; background:rgba(0,0,0,0.65); border:1px solid #555; border-radius:6px; color:#aaa; font-size:var(--fs-xxs); font-weight:900; padding:4px 8px; pointer-events:none; letter-spacing:0.5px;">⛶ TAP TO EXPAND</div></div>` : ''}
 
         <!-- 액션 버튼 -->
         <div style="display:flex; border-top:1px solid #f0f0f0; padding-top:12px;">
@@ -10284,6 +10306,43 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
         console.warn('feed map render failed', e);
       }
     });
+  }
+
+  // ===== [신규] 크루 피드 경로맵 탭 → 전체화면 확대 =====
+  openFeedMapFullscreen(recordId) {
+    if (typeof L === 'undefined') return;
+    const record = (this.feedRecords || []).find(r => r.id === recordId);
+    if (!record || !record.path || record.path.length < 2) return;
+    const latlngs = record.path.map(p => {
+      if (Array.isArray(p)) return [p[0], p[1]];
+      return [p.lat, p.lng];
+    }).filter(p => p[0] != null && p[1] != null);
+    if (latlngs.length < 2) return;
+
+    const overlay = document.getElementById('feed-map-fullscreen-overlay');
+    const container = document.getElementById('feed-map-fullscreen-el');
+    if (!overlay || !container) return;
+    overlay.classList.add('active');
+    try { history.pushState({ jrPage: 'feedMapFull' }, ''); } catch(e) {}
+
+    // 이전에 열려있던 지도 인스턴스가 있으면 정리하고 새로 생성
+    if (this._feedMapFull) { try { this._feedMapFull.remove(); } catch(e) {} this._feedMapFull = null; }
+    this._feedMapFull = L.map(container, { zoomControl: true, attributionControl: false });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(this._feedMapFull);
+    const line = L.polyline(latlngs, { color: '#ff3333', weight: 3 }).addTo(this._feedMapFull);
+    if (storage.getMapTheme() === 'dark') container.classList.add('dark-map-layer');
+    else container.classList.remove('dark-map-layer');
+    setTimeout(() => {
+      if (!this._feedMapFull) return;
+      this._feedMapFull.invalidateSize();
+      this._feedMapFull.fitBounds(line.getBounds(), { padding: [20, 20] });
+    }, 200);
+  }
+
+  closeFeedMapFullscreen() {
+    const overlay = document.getElementById('feed-map-fullscreen-overlay');
+    if (overlay) overlay.classList.remove('active');
+    if (this._feedMapFull) { try { this._feedMapFull.remove(); } catch(e) {} this._feedMapFull = null; }
   }
 
   async confirmDelete(recordId) {
@@ -13042,6 +13101,11 @@ if (btn) { btn.textContent = '▶ PLAY'; btn.classList.remove('playing'); }
     }
     if (detailFull && detailFull.classList.contains('active')) {
       if (ui) ui.closeDetailMapFullscreen();
+      return;
+    }
+    const feedMapFull = document.getElementById('feed-map-fullscreen-overlay');
+    if (feedMapFull && feedMapFull.classList.contains('active')) {
+      if (typeof community !== 'undefined') community.closeFeedMapFullscreen();
       return;
     }
     // [추가] 기록 상세(경로 맵) 페이지가 열려있으면 → 메인 RUN 화면으로 복귀
