@@ -8896,6 +8896,38 @@ const SUPABASE_URL = 'https://ujodpspxsisoycniswwl.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVqb2Rwc3B4c2lzb3ljbmlzd3dsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0NDg4OTUsImV4cCI6MjA5NzAyNDg5NX0.KWyli79Llmr5VA027BfF9d76-05IFkjylII3Wj_F7Vc';
 const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// 경로 시작/종료 지점 마커를 만들어 지정된 Leaflet 지도에 추가.
+// (히스토리 상세 맵의 시작/종료 마커와 동일한 스타일 — 크루 피드 지도에서도 재사용)
+function addRouteEndpointMarkers(map, coords) {
+  if (!map || !coords || coords.length === 0 || typeof L === 'undefined') return;
+  const startPoint = coords[0];
+  const endPoint = coords[coords.length - 1];
+  L.marker(startPoint, {
+    icon: L.divIcon({
+      className: '',
+      html: `<div style="position:relative;width:28px;height:38px;">
+<div style="position:absolute;top:0;left:0;width:28px;height:28px;background:#00c853;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 2px 5px rgba(0,0,0,0.5);"></div>
+<div style="position:absolute;top:7px;left:9px;width:0;height:0;border-style:solid;border-width:6px 0 6px 10px;border-color:transparent transparent transparent #fff;"></div>
+</div>`,
+      iconSize: [28, 38], iconAnchor: [14, 38]
+    }),
+    interactive: false
+  }).addTo(map);
+  if (coords.length > 1) {
+    L.marker(endPoint, {
+      icon: L.divIcon({
+        className: '',
+        html: `<div style="position:relative;width:28px;height:38px;">
+<div style="position:absolute;top:0;left:0;width:28px;height:28px;background:#ff3333;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 2px 5px rgba(0,0,0,0.5);"></div>
+<div style="position:absolute;top:9px;left:9px;width:10px;height:10px;background:#fff;"></div>
+</div>`,
+        iconSize: [28, 38], iconAnchor: [14, 38]
+      }),
+      interactive: false
+    }).addTo(map);
+  }
+}
+
 class CommunityManager {
   constructor() {
     this.NICKNAME_KEY = 'jennyRunNickname';
@@ -10234,7 +10266,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
 
         <!-- 이미지/지도 -->
         ${r.photo_url ? `<div style="margin-bottom:12px; border-radius:10px; overflow:hidden;"><img src="${r.photo_url}" loading="lazy" style="width:100%; max-height:280px; object-fit:cover; display:block;"></div>` : ''}
-        ${(r.path && r.path.length > 1) ? `<div onclick="community.openFeedMapFullscreen('${r.id}')" style="margin-bottom:12px; border-radius:10px; overflow:hidden; height:180px; background:#eee; position:relative; left:0; width:100%; cursor:pointer;"><div id="feed-map-${r.id}" style="position:absolute; inset:0;"></div><div style="position:absolute; bottom:10px; left:10px; z-index:1000; background:rgba(0,0,0,0.65); border:1px solid #555; border-radius:6px; color:#aaa; font-size:var(--fs-xxs); font-weight:900; padding:4px 8px; pointer-events:none; letter-spacing:0.5px;">⛶ TAP TO EXPAND</div></div>` : ''}
+        ${(r.path && r.path.length > 1) ? `<div onclick="community.openFeedMapFullscreen('${r.id}')" style="margin-bottom:12px; border-radius:10px; overflow:hidden; height:180px; background:#eee; position:relative; left:0; width:100%; cursor:pointer;"><div id="feed-map-${r.id}" style="position:absolute; inset:0;"></div></div>` : ''}
 
         <!-- 액션 버튼 -->
         <div style="display:flex; border-top:1px solid #f0f0f0; padding-top:12px;">
@@ -10290,6 +10322,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
         });
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(feedMap);
         const line = L.polyline(latlngs, { color: '#ff3333', weight: 3 }).addTo(feedMap);
+        addRouteEndpointMarkers(feedMap, latlngs);
         feedMap.fitBounds(line.getBounds(), { padding: [14, 14], maxZoom: 17 });
         // 화면에 보일 때 정확히 재렌더링
         const observer = new IntersectionObserver((entries) => {
@@ -10330,6 +10363,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
     this._feedMapFull = L.map(container, { zoomControl: true, attributionControl: false });
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(this._feedMapFull);
     const line = L.polyline(latlngs, { color: '#ff3333', weight: 3 }).addTo(this._feedMapFull);
+    addRouteEndpointMarkers(this._feedMapFull, latlngs);
     if (storage.getMapTheme() === 'dark') container.classList.add('dark-map-layer');
     else container.classList.remove('dark-map-layer');
     setTimeout(() => {
@@ -12775,23 +12809,38 @@ if (!overlay || !container) return;
 overlay.classList.add('active');
 try { history.pushState({ jrPage: 'detailFull' }, ''); } catch(e) {}
 if (!_detailMapFull) {
-_detailMapFull = L.map(container, { zoomControl: true, attributionControl: false })
-.setView(this.detailMap.getCenter(), this.detailMap.getZoom());
+_detailMapFull = L.map(container, { zoomControl: true, attributionControl: false });
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(_detailMapFull);
-// 기존 레이어 복사
+if (storage.getMapTheme() === 'dark') container.classList.add('dark-map-layer');
+}
+// [수정] 미니맵(this.detailMap)이 화면에 나타나자마자(레이아웃이 아직 안 잡힌 상태에서)
+// fitBounds가 호출되면 getZoom()이 Infinity 등 비정상 값이 되는 경우가 있었음.
+// 그 상태를 그대로 setView에 넘기면 전체화면 지도가 타일을 하나도 못 그려 빈 화면이 됨.
+// → 미니맵의 zoom/center를 복사하는 대신, 레이어를 복제한 뒤 그 실제 좌표 범위(bounds)로
+// 항상 다시 맞춰서(fitBounds) 전체화면 지도를 연다. 이렇게 하면 미니맵 상태와 무관하게
+// 매번 정상적으로 경로 전체가 보이도록 보장됨.
+_detailMapFull.eachLayer(layer => { if (!(layer instanceof L.TileLayer)) _detailMapFull.removeLayer(layer); });
+const boundsList = [];
 this.detailMap.eachLayer(layer => {
-if (layer instanceof L.Polyline || layer instanceof L.Marker) {
-const cloned = layer instanceof L.Polyline
-? L.polyline(layer.getLatLngs(), layer.options)
-: L.marker(layer.getLatLng(), layer.options);
-cloned.addTo(_detailMapFull);
+if (layer instanceof L.Polyline) {
+const cloned = L.polyline(layer.getLatLngs(), layer.options).addTo(_detailMapFull);
+boundsList.push(cloned.getBounds());
+} else if (layer instanceof L.Marker) {
+const cloned = L.marker(layer.getLatLng(), layer.options).addTo(_detailMapFull);
+boundsList.push(L.latLngBounds([cloned.getLatLng()]));
 }
 });
-if (storage.getMapTheme() === 'dark') container.classList.add('dark-map-layer');
+setTimeout(() => {
+if (!_detailMapFull) return;
+_detailMapFull.invalidateSize();
+if (boundsList.length > 0) {
+let combined = boundsList[0];
+for (let i = 1; i < boundsList.length; i++) combined = combined.extend(boundsList[i]);
+_detailMapFull.fitBounds(combined, { padding: [20, 20] });
 } else {
 _detailMapFull.setView(this.detailMap.getCenter(), this.detailMap.getZoom());
 }
-setTimeout(() => { if (_detailMapFull) _detailMapFull.invalidateSize(); }, 200);
+}, 200);
 };
 UIManager.prototype.closeDetailMapFullscreen = function() {
 const overlay = document.getElementById('detail-map-fullscreen-overlay');
