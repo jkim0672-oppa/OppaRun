@@ -35,30 +35,29 @@ a{ color:var(--primary); }
   height:64px; /* [수정] 구형 WebView 폴백 고정값, 여유 있게 상향 */
   height:var(--inset-bottom); background:var(--bg); z-index:1000;
 }
-/* [추가] 닫기 버튼: 탭하면 이전 화면(앱의 설정 페이지)으로 복귀 */
+/* [수정] 닫기 버튼: 앱의 다른 CLOSE 버튼들과 동일한 스타일(초록 알약형, 텍스트 CLOSE)로 통일 */
 .close-btn{
   position:fixed;
-  top:16px; top:calc(16px + var(--inset-top));
-  right:16px;
-  width:34px; height:34px;
-  border-radius:50%;
-  background:var(--card);
-  border:1px solid #333;
-  color:#fff;
-  font-size:18px;
-  line-height:1;
-  display:flex; align-items:center; justify-content:center;
+  top:5px; top:calc(5px + var(--inset-top));
+  right:20px;
+  background:var(--primary);
+  color:#000;
+  border:none;
+  padding:8px 16px;
+  border-radius:20px;
+  font-weight:900;
+  font-size:13px;
   z-index:1100;
   cursor:pointer;
 }
-.close-btn:active{ background:#2a2a2a; }
+.close-btn:active{ opacity:0.85; }
 </style>
 </head>
 <body>
 
 <div class="safe-top"></div>
 <div class="safe-bottom"></div>
-<button type="button" class="close-btn" onclick="window.jrClosePrivacyPage()" aria-label="Close">&#215;</button>
+<button type="button" class="close-btn" onclick="window.jrClosePrivacyPage()" aria-label="Close" data-ko="닫기" data-en="CLOSE">닫기</button>
 
 <h1 data-ko="개인정보처리방침" data-en="Privacy Policy">개인정보처리방침</h1>
 <div class="subtitle" data-ko="JennyRun (Jenny Run Pro)" data-en="JennyRun (Jenny Run Pro)">JennyRun (Jenny Run Pro)</div>
@@ -161,22 +160,33 @@ function setLang(lang){
   setLang(saved);
 })();
 
-// [추가] 닫기 버튼 및 안드로이드 물리 뒤로가기 버튼 처리.
-// 이 페이지는 앱(SPA)에서 설정 화면의 링크(target="_blank")를 통해 열리므로,
-// 닫을 때는 그 이전 화면(설정 페이지)으로 돌아가는 것이 자연스러움.
-// 우선순위: 1) 브라우저/WebView 히스토리가 있으면 뒤로가기
-//          2) 없으면(예: 새 탭으로 열려 히스토리가 비어있는 경우) referrer로 이동
-//          3) 그것도 없으면 탭/창 닫기 시도
+// [수정] 닫기 버튼 및 안드로이드 물리 뒤로가기 버튼 처리.
+// 이 페이지는 앱(SPA)에서 설정 화면의 링크(target="_blank")를 통해 열림.
+// 기존에는 history.back()을 우선 시도했는데, 안드로이드 WebView에서 뒤로가기 시
+// 앱 문서가 새로 로드되면서 초기화 로직이 그대로 실행돼 항상 기본 RUN 화면으로
+// 돌아가버리는 문제가 있었음(설정 화면이 아니라 메인 화면으로 감).
+// → referrer 주소에 '?openTab=settings'를 붙여서 메인 앱으로 이동시키고,
+//   메인 앱 쪽(jennyrun*.html)에서 이 파라미터를 보고 SETTINGS 화면으로 바로
+//   전환하도록 함. referrer가 없는 예외적인 경우에만 기존 히스토리 뒤로가기로 폴백.
+function jrBuildSettingsReturnUrl(base) {
+  try {
+    const url = new URL(base);
+    url.searchParams.set('openTab', 'settings');
+    return url.href;
+  } catch (e) {
+    return base;
+  }
+}
 window.jrClosePrivacyPage = function() {
   try {
-    if (window.history.length > 1) {
-      window.history.back();
+    if (document.referrer) {
+      window.location.href = jrBuildSettingsReturnUrl(document.referrer);
       return;
     }
   } catch (e) {}
   try {
-    if (document.referrer) {
-      window.location.href = document.referrer;
+    if (window.history.length > 1) {
+      window.history.back();
       return;
     }
   } catch (e) {}
