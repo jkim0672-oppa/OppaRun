@@ -35,12 +35,22 @@ a{ color:var(--primary); }
   height:64px; /* [수정] 구형 WebView 폴백 고정값, 여유 있게 상향 */
   height:var(--inset-bottom); background:var(--bg); z-index:1000;
 }
+.close-btn{
+  position:fixed; z-index:1001;
+  top:calc(8px + var(--inset-top)); right:16px;
+  width:36px; height:36px; border-radius:50%;
+  background:var(--card); color:var(--text);
+  display:flex; align-items:center; justify-content:center;
+  font-size:18px; line-height:1; border:none; cursor:pointer;
+}
+.close-btn:active{ background:#2a2a2a; }
 </style>
 </head>
 <body>
 
 <div class="safe-top"></div>
 <div class="safe-bottom"></div>
+<button class="close-btn" onclick="closePrivacyPolicy()" aria-label="Close">✕</button>
 
 <h1 data-ko="개인정보처리방침" data-en="Privacy Policy">개인정보처리방침</h1>
 <div class="subtitle" data-ko="JennyRun (Jenny Run Pro)" data-en="JennyRun (Jenny Run Pro)">JennyRun (Jenny Run Pro)</div>
@@ -121,6 +131,34 @@ function setLang(lang){
   document.documentElement.lang = lang;
   try{ localStorage.setItem('privacyPolicyLang', lang); }catch(e){}
 }
+// [추가] 닫기 버튼 + 폰 뒤로가기 버튼 → 항상 설정 페이지로 복귀
+// 우선순위: 1) 메인 앱이 저장해둔 복귀용 URL(oppaRunReturnUrl)
+//          2) document.referrer (설정 화면에서 이 페이지로 들어온 원래 주소)
+//          3) 그래도 없으면 history.back()
+function closePrivacyPolicy(){
+  var target = null;
+  try { target = sessionStorage.getItem('oppaRunReturnUrl') || localStorage.getItem('oppaRunReturnUrl'); } catch(e){}
+  if (!target && document.referrer && document.referrer.length > 0) {
+    target = document.referrer;
+  }
+  if (target) {
+    location.replace(target);
+  } else if (history.length > 1) {
+    history.back();
+  } else {
+    // 돌아갈 곳이 전혀 없으면 마지막 수단으로 창 닫기 시도
+    try { window.close(); } catch(e){}
+  }
+}
+// 하드웨어 뒤로가기가 WebView의 history.back()으로 전달되는 구조를 가정,
+// 진입 시 더미 state를 하나 쌓아서 첫 뒤로가기를 여기서 가로챈 뒤 설정 페이지로 보냄
+try {
+  history.pushState({ jrPrivacyGuard: true }, '', location.href);
+  window.addEventListener('popstate', function(){
+    closePrivacyPolicy();
+  });
+} catch(e){}
+
 (function(){
   // [수정] 기존엔 이 페이지 자체 저장값(privacyPolicyLang)이나 브라우저 언어만 봤는데,
   // 그러면 앱에서 한국어로 쓰다가 여기 들어오면 영어로 뜨는 등 앱 언어 설정과 따로 놀았음.
