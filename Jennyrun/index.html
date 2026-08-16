@@ -1231,6 +1231,15 @@ transform: scale(0.98); background: rgba(0, 255, 136, 0.15); box-shadow: 0 2px 6
 <div id="quick-devpos-armband" class="gender-btn" onclick="ui.quickSetDevicePos('armband')">ARMBAND</div>
 <div id="quick-devpos-hand" class="gender-btn" onclick="ui.quickSetDevicePos('hand')">HAND</div>
 </div>
+<!-- [신규] 가슴 착용 선택 시에만 노출되는 린각도 ON/OFF 버튼. 다른 위치 버튼처럼 선택 즉시
+     팝업이 닫히도록 토글 스위치 대신 ON/OFF 버튼 2개로 구성 (quickSetLeanAngle 참고). -->
+<div id="quick-lean-angle-section" style="display:none; margin-top:14px;">
+<div id="quick-lean-angle-title" class="custom-confirm-msg" style="margin-bottom:14px;">LEAN ANGLE</div>
+<div class="gender-toggle-row" id="quick-lean-angle-row">
+<div id="quick-lean-angle-on" class="gender-btn" onclick="ui.quickSetLeanAngle(true)">ON</div>
+<div id="quick-lean-angle-off" class="gender-btn" onclick="ui.quickSetLeanAngle(false)">OFF</div>
+</div>
+</div>
 </div>
 </div>
 </div>
@@ -3282,11 +3291,49 @@ const step1 = document.getElementById('quick-mode-step1');
 const step2 = document.getElementById('quick-mode-step2');
 if (step1) step1.style.display = 'none';
 if (step2) step2.style.display = 'block';
+this.hideQuickLeanAngleToggle(); // [추가] 팝업을 새로 열 때는 항상 숨긴 상태로 시작
 }
 // [신규] 퀵 팝업 2단계에서 위치 선택 - 기존 setDevicePos()를 그대로 재사용해
 // 설정 페이지 하이라이트/린각도 가용성/실행 중인 MotionManager까지 한번에 동기화
 quickSetDevicePos(pos) {
 this.setDevicePos(pos);
+const chestBtn = document.getElementById('quick-devpos-chest');
+const waistBtn = document.getElementById('quick-devpos-waist');
+const armbandBtn = document.getElementById('quick-devpos-armband');
+const handBtn = document.getElementById('quick-devpos-hand');
+if (chestBtn) chestBtn.classList.toggle('active', pos === 'chest');
+if (waistBtn) waistBtn.classList.toggle('active', pos === 'waist');
+if (armbandBtn) armbandBtn.classList.toggle('active', pos === 'armband');
+if (handBtn) handBtn.classList.toggle('active', pos === 'hand');
+// [추가] 러닝 모드 + 가슴 착용일 때만 린각도 박스를 보여주고 팝업을 바로 닫지 않는다.
+// 다른 위치(허리/암밴드/손)나 트레일 모드에서는 기존처럼 선택 즉시 닫힌다.
+if (this._isLeanAngleGated(this.currentActivityMode, pos)) {
+this.showQuickLeanAngleToggle();
+} else {
+this.hideQuickLeanAngleToggle();
+this.closeQuickModeSwitch();
+}
+}
+// [신규] 퀵 팝업의 린각도 ON/OFF 버튼 노출 - 라벨 다국어 처리 + 현재 저장된 값으로 버튼 하이라이트
+showQuickLeanAngleToggle() {
+const t = translations[storage.getLang()] || translations['en'];
+const title = document.getElementById('quick-lean-angle-title');
+if (title) title.textContent = t.onbLeanAngleLabel;
+const onBtn = document.getElementById('quick-lean-angle-on');
+const offBtn = document.getElementById('quick-lean-angle-off');
+if (onBtn) onBtn.classList.toggle('active', this.currentLeanAngleEnabled === true);
+if (offBtn) offBtn.classList.toggle('active', this.currentLeanAngleEnabled !== true);
+const section = document.getElementById('quick-lean-angle-section');
+if (section) section.style.display = 'block';
+}
+// [신규] 퀵 팝업의 린각도 섹션 숨김 - 팝업을 다시 열 때/가슴이 아닌 위치를 고를 때 정리
+hideQuickLeanAngleToggle() {
+const section = document.getElementById('quick-lean-angle-section');
+if (section) section.style.display = 'none';
+}
+// [신규] 퀵 팝업의 린각도 ON/OFF 버튼 선택 - 다른 위치 버튼과 동일하게 선택 즉시 팝업을 닫는다.
+quickSetLeanAngle(enabled) {
+this.setLeanAngleEnabled(enabled);
 this.closeQuickModeSwitch();
 }
 updateWalkDisplay(data) {
@@ -3638,6 +3685,11 @@ const box = document.getElementById('lean-angle-switch');
 const status = document.getElementById('lean-angle-status');
 if (box) box.classList.toggle('active', enabled === true);
 if (status) status.textContent = enabled ? 'ON' : 'OFF';
+// [추가] 퀵 모드 팝업(가슴 선택 시 노출)의 린각도 ON/OFF 버튼도 함께 동기화
+const quickOnBtn = document.getElementById('quick-lean-angle-on');
+const quickOffBtn = document.getElementById('quick-lean-angle-off');
+if (quickOnBtn) quickOnBtn.classList.toggle('active', enabled === true);
+if (quickOffBtn) quickOffBtn.classList.toggle('active', enabled !== true);
 }
 // [추가] 캘리브레이션 완료 알림음 종류 선택 (beep/whistle/chime 중 하나, pill 버튼 방식)
 // 고르자마자 바로 소리를 들려줘서 어떤 소리인지 바로 알 수 있게 함
@@ -4239,6 +4291,9 @@ const precisionLogRecordLabel = document.getElementById('label-precision-log-rec
 if(precisionLogRecordLabel) precisionLogRecordLabel.textContent = t.precisionLogRecordLabel;
 const leanAngleToggleLabel = document.getElementById('label-lean-angle-toggle');
 if(leanAngleToggleLabel) leanAngleToggleLabel.textContent = t.leanAngleToggleLabel;
+// [추가] 퀵 모드 팝업(가슴 선택 시 노출)의 린각도 타이틀도 언어 변경 시 함께 갱신
+const quickLeanAngleTitle = document.getElementById('quick-lean-angle-title');
+if(quickLeanAngleTitle) quickLeanAngleTitle.textContent = t.onbLeanAngleLabel;
 // [추가] 캘리브레이션 알림음 라벨/버튼 텍스트 번역 적용
 const calibSoundLabel = document.getElementById('label-calib-sound');
 if(calibSoundLabel) calibSoundLabel.textContent = t.calibSoundLabel;
