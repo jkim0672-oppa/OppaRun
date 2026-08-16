@@ -1496,6 +1496,9 @@ alt="runner"/>
 <!-- [추가] 자동저장된 최근 로그(최대 3개)를 임포트 로그와 분리해서 보여주고,
      각 항목마다 COMPARE 버튼으로 바로 1개씩 비교할 수 있게 한다.
      (기존엔 자동저장 로그와 임포트 로그가 드롭다운 하나에 섞여 있어서 구분이 어려웠음) -->
+<!-- [수정] 이 섹션엔 CLEAR ALL 버튼을 따로 두지 않음: 아래 "CLEAR LOGS ONLY" 버튼이
+     이미 자동저장 로그를 포함해 더 넓은 범위(로그성 기록 전체)를 한 번에 지우므로,
+     여기 별도 CLEAR ALL을 추가하면 기능이 중복됨. 개별 삭제는 각 카드의 DELETE 버튼으로. -->
 <div id="label-preclog-auto" style="font-size:var(--fs-xs); color:#888; font-weight:800; margin-bottom:8px;">AUTO-SAVED LOGS (0/10)</div>
 <div id="calib-autolog-list" style="margin-bottom:14px;"></div>
 <!-- [추가] 캘리브레이션 비교 전용 "지난 로그 불러오기". 가민 가져오기와 동일하게
@@ -1513,6 +1516,9 @@ alt="runner"/>
   </div>
   <div id="calib-preclog-dropdown-options" class="precision-dropdown-options" style="width:100%; position:static;"></div>
 </div>
+<!-- [추가] 자동저장 로그 카드와 동일한 스타일로, 불러온 지난 로그도 항목별 DELETE 버튼과 함께
+     카드로 보여준다 (가민 FIT 가져오기 목록과 동일한 패턴: 드롭다운은 빠른 선택용, 카드는 개별 관리용). -->
+<div id="calib-preclog-import-list" style="margin-top:10px;"></div>
 <button id="btn-run-calib-compare" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-sm); margin-top:10px;" onclick="garmin.runCalibrationCompare()">COMPARE SELECTED</button>
 <div id="garmin-calib-result" style="margin-top:12px;"></div>
 <!-- [추가] 여러 번(다른 페이스로) 비교한 결과를 바로 적용하지 않고 모아뒀다가,
@@ -2813,6 +2819,10 @@ deletePrecisionLog(id) {
 const list = this.loadPrecisionLogs().filter(item => item.id !== id);
 this.savePrecisionLogsList(list);
 if (typeof ui !== 'undefined') ui.renderPrecisionLogList();
+// [추가] 설정 탭(PRECISION LOGS)과 가민 분석실(AUTO-SAVED LOGS)은 같은 데이터를
+// 화면만 다르게 보여주는 것이므로, 한쪽에서 삭제해도 다른 쪽이 바로 갱신되도록
+// 기존 garmin.render()를 재사용 (새 갱신 로직 만들지 않음).
+if (typeof garmin !== 'undefined' && garmin.render) garmin.render();
 }
 async clearAllPrecisionLogs() {
 const isKo = this.getLang() === 'ko';
@@ -2820,6 +2830,7 @@ if (!this.loadPrecisionLogs().length) return;
 if (await appConfirm(isKo ? '저장된 정밀 로그를 전부 삭제할까요? 이 작업은 되돌릴 수 없습니다.' : 'Delete all saved precision logs? This cannot be undone.')) {
 this.savePrecisionLogsList([]);
 if (typeof ui !== 'undefined') ui.renderPrecisionLogList();
+if (typeof garmin !== 'undefined' && garmin.render) garmin.render(); // [추가] 가민 분석실도 함께 갱신
 }
 }
 // [추가] "CLEAR ALL LOGS" 버튼: 폰에 저장된 정밀 로그(oppaRunPrecisionLogs)와
@@ -11027,6 +11038,7 @@ const garmin = (function () {
   function renderPrecLogDropdown(isKo) {
     const dropdown = document.getElementById('calib-preclog-dropdown-options');
     const currentText = document.getElementById('current-calib-preclog-text');
+    const cardWrap = document.getElementById('calib-preclog-import-list'); // [추가] 개별 삭제용 카드 목록
     if (!dropdown || !currentText) return;
     // [추가] 불러온 지난 로그 개수 표시 + CLEAR ALL 버튼 노출 여부 갱신
     const importedList = loadPrecLogImports();
@@ -11041,6 +11053,7 @@ const garmin = (function () {
     if (!logs.length) {
       currentText.textContent = isKo ? '불러온 로그 없음' : 'NO IMPORTED LOGS';
       dropdown.innerHTML = '<div class="dropdown-option precision-option" style="color:#999; text-align:center;">' + (isKo ? '불러온 로그가 없습니다' : 'No imported logs') + '</div>';
+      if (cardWrap) cardWrap.innerHTML = '';
       return;
     }
     // [수정] 위치 뱃지가 줄바꿈 여부에 따라 첫 줄/둘째 줄에 들쭉날쭉하게 붙던 문제 —
@@ -11058,6 +11071,41 @@ const garmin = (function () {
     }).join('');
     const selCount = logs.filter(l => selectedPrecLogIds.indexOf(l.id) >= 0).length;
     currentText.textContent = selCount ? (selCount + (isKo ? '개 선택됨' : ' selected')) : (isKo ? '선택 안 함' : 'NONE SELECTED');
+
+    // [추가] 자동저장 로그 카드와 동일한 스타일로 카드 목록 렌더링 + 항목별 DELETE 버튼.
+    // 드롭다운은 빠른 단일 선택용으로 남겨두고, 카드는 개별 삭제/다중선택 관리용 (가민 FIT 가져오기와 동일한 이중 구조).
+    if (cardWrap) {
+      const posShortCard = { chest:'C', waist:'W', armband:'A', hand:'H' };
+      cardWrap.innerHTML = logs.map((l, idx) => {
+        const isSelected = selectedPrecLogIds.indexOf(l.id) >= 0;
+        const dateTimeStr = fmtDate(new Date(l.savedAt).getTime());
+        const rowsStr = l.log.length + (isKo ? '개' : ' rows');
+        const posBadge = l.devicePos ? ' <span style="color:#7fd3ff; font-weight:700;">· ' + (posShortCard[l.devicePos] || l.devicePos) + '</span>' : '';
+        const fileBadge = l.fileName ? ' <span style="color:#888; font-weight:700;">· ' + l.fileName + '</span>' : '';
+        const orderBadge = '<span style="color:#666; font-weight:700;">#' + (idx + 1) + '</span> ';
+        return '<div style="display:flex; justify-content:space-between; align-items:center; background:#1a1a1a; border:1.5px solid ' + (isSelected ? 'var(--primary)' : '#333') + '; border-radius:10px; padding:12px; margin-bottom:8px;">'
+          + '<div style="font-size:var(--fs-sm); color:#ccc; line-height:1.5;">'
+          + '<div>' + orderBadge + dateTimeStr + '</div>'
+          + '<div style="color:#999;">' + rowsStr + posBadge + fileBadge + '</div>'
+          + '</div>'
+          + '<div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px;">'
+          + '<label style="display:flex; align-items:center; gap:5px; font-size:var(--fs-xxs); color:var(--primary); font-weight:800; cursor:pointer;">'
+          + '<input type="checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="garmin.togglePrecLogSelect(\'' + l.id + '\')" style="width:16px; height:16px; accent-color: var(--primary);">'
+          + (isKo ? '비교 선택' : 'COMPARE') + '</label>'
+          + '<div class="garmin-import-item-del" onclick="garmin.deletePrecLogImport(\'' + l.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</div>'
+          + '</div>'
+          + '</div>';
+      }).join('');
+    }
+  }
+
+  // [추가] 불러온 지난 로그(비교용) 항목별 삭제. clearPrecLogImports()와 같은 저장소를 다루되
+  // 개별 카드 DELETE 버튼에서 확인창 없이 바로 삭제 (자동저장 로그 DELETE와 동일한 방식).
+  function deletePrecLogImport(id) {
+    const list = loadPrecLogImports().filter(item => item.id !== id);
+    savePrecLogImportsList(list);
+    selectedPrecLogIds = selectedPrecLogIds.filter(x => x !== id);
+    render();
   }
 
   // [수정] 자동저장 로그(최대 3개)를 개별 카드로 렌더링. 각 카드의 체크박스로 selectedPrecLogIds에
@@ -11090,9 +11138,15 @@ const garmin = (function () {
         + '<div>' + orderBadge + dateTimeStr + '</div>'
         + '<div style="color:#999;">' + rowsStr + posBadge + '</div>'
         + '</div>'
+        // [추가] 항목별 삭제 버튼. 설정(SETTINGS) 탭의 PRECISION LOGS 목록과 동일한
+        // storage.deletePrecisionLog()를 그대로 재사용 — 데이터가 같으므로 로직 중복 없음.
+        // (COMPARE 체크박스 위에 세로로 쌓아서, 좁은 카드 폭에서도 줄바꿈 없이 깔끔하게 배치)
+        + '<div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px;">'
         + '<label style="display:flex; align-items:center; gap:5px; font-size:var(--fs-xxs); color:var(--primary); font-weight:800; cursor:pointer;">'
         + '<input type="checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="garmin.togglePrecLogSelect(\'' + l.id + '\')" style="width:16px; height:16px; accent-color: var(--primary);">'
         + (isKo ? '비교 선택' : 'COMPARE') + '</label>'
+        + '<div class="garmin-import-item-del" onclick="storage.deletePrecisionLog(\'' + l.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</div>'
+        + '</div>'
         + '</div>';
     }).join('');
   }
@@ -12826,7 +12880,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     }
   }
 
-  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, togglePrecLogSelect, importPrecLogCsv, clearPrecLogImports, runCalibrationCompare, applyCalibration, resetCalibration, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render };
+  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, togglePrecLogSelect, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
