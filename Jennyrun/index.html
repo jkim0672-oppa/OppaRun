@@ -12635,29 +12635,6 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
 
 const app = new OppaRunApp();
 const community = new CommunityManager();
-// [수정] privacy-policy.html에서 돌아왔을 때 설정 화면으로 전환하는 체크를
-// window.onload에서 DOMContentLoaded로 이동. window.onload는 이미지, 외부 CDN
-// 스크립트(supabase-js 등) 등 모든 리소스가 완전히 로드될 때까지 기다린 뒤에야
-// 실행되는데, 브라우저는 그보다 훨씬 먼저(HTML 파싱만 끝나면) 기본 상태인 RUN
-// 화면을 먼저 페인트해버림 → "RUN 화면이 잠깐 보였다가 SETTINGS로 전환"되는
-// 깜빡임의 실제 원인이었음. DOMContentLoaded는 리소스 로딩을 기다리지 않고 HTML
-// 파싱 완료 직후 실행되므로 브라우저의 첫 페인트 시점과 훨씬 가깝게(사실상 그
-// 전에) 탭 전환이 반영되어 깜빡임이 사실상 사라짐. ui/app/community 등은 모두
-// 이 시점 이전에 동기적으로 이미 정의되어 있으므로 안전하게 참조 가능.
-document.addEventListener('DOMContentLoaded', () => {
-try {
-  const cameFromPrivacyUrl = new URLSearchParams(window.location.search).get('openTab') === 'settings';
-  let cameFromPrivacyFlag = false;
-  try {
-    cameFromPrivacyFlag = localStorage.getItem('jrReturnToSettings') === '1';
-    if (cameFromPrivacyFlag) localStorage.removeItem('jrReturnToSettings'); // 한 번만 소비
-  } catch (e) {}
-  if (cameFromPrivacyUrl || cameFromPrivacyFlag) {
-    ui.showTab('history');
-    ui.showSubTab('settings');
-  }
-} catch (e) {}
-});
 window.onload = () => {
 app.init();
 ui.applyDevModeVisibility(); // [추가] 개발자 모드가 아니면 GARMIN 탭 숨김
@@ -12669,6 +12646,14 @@ ui.setAutoPause(storage.getAutoPause());
 ui.setPrecisionLogRecording(storage.getPrecisionLogEnabled());
 ui.setActivityMode(storage.getActivityMode());
 ui.showOnboardingIfNeeded(); // [추가] 최초 실행이면 활동모드/기기위치 선택 화면을 먼저 보여줌
+// [추가] privacy-policy.html 등 외부 페이지에서 '?openTab=settings'를 달고 돌아온 경우,
+// 기본 RUN 화면 대신 설정(REC·SET > SETTINGS) 화면으로 바로 이동시킴.
+try {
+  if (new URLSearchParams(window.location.search).get('openTab') === 'settings') {
+    ui.showTab('history');
+    ui.showSubTab('settings');
+  }
+} catch (e) {}
 // 닉네임 불러오기
 const nicknameInput = document.getElementById('nickname-input');
 if (nicknameInput) nicknameInput.value = community.getNickname();
