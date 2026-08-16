@@ -1519,10 +1519,14 @@ alt="runner"/>
      평균값으로 한 번만 적용할 수 있게 하는 대기목록. runCalibrationCompare()가
      매번 여기에 결과를 쌓고, garmin.applyAveragedCalibration()이 평균 내서 적용한다. -->
 <div id="garmin-calib-pending" style="margin-top:12px;"></div>
+<!-- [추가] 로그 기록만 삭제: 가민 FIT 가져오기 목록은 그대로 두고,
+     폰 정밀 로그 / 지난 로그 불러오기 / 되돌리기·대기목록 등 "로그성" 기록만 지운다.
+     가민 데이터는 건드리지 않는다는 점에서 아래 RESET ALL LOG(전체 삭제)와 다르다. -->
+<button id="btn-clear-garmin-logs-only" style="background:#2a2a1a; color:var(--warning); border:1.5px solid #665533; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-sm); margin-top:14px;" onclick="garmin.clearLogsOnly()"><span id="btn-clear-garmin-logs-only-label">CLEAR LOGS ONLY</span></button>
 <!-- [추가] 전체 초기화: 가민 FIT/지난 로그/폰 정밀 로그 + 위치별 적용된 캘리브레이션
      수정 기록(오버라이드/되돌리기 스냅샷)까지 한 번에 모두 지우고 빈 상태로 시작.
      아래 위치별 RESET TO DEFAULT 버튼들보다 항상 위에 고정 노출된다. -->
-<button id="btn-reset-everything" style="background:#2a1414; color:var(--danger); border:1.5px solid #663333; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-sm); margin-top:14px;" onclick="garmin.resetEverything()">🗑️ <span id="btn-reset-everything-label">RESET ALL LOG</span></button>
+<button id="btn-reset-everything" style="background:#2a1414; color:var(--danger); border:1.5px solid #663333; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-sm); margin-top:10px;" onclick="garmin.resetEverything()"><span id="btn-reset-everything-label">RESET ALL LOG</span></button>
 <!-- [추가] 현재 적용된 보정값 상태 표시 + 초기화 버튼. 비교를 다시 하지 않아도
      언제든 코드 기본값으로 되돌릴 수 있도록 항상 표시됨(적용된 값이 있을 때만 보임). -->
 <div id="garmin-calib-status" style="margin-top:10px;"></div>
@@ -1925,7 +1929,7 @@ function generateRunCardCanvas(data, isKo) {
       ctx.fillText(isKo ? '오늘의 걷기' : "TODAY'S WALK", PAD + 16, barY + 22);
       ctx.font = 'bold 22px Arial, sans-serif';
       ctx.fillStyle = GREEN;
-      const walkMsg = isKo ? '오늘도 걸었어요! 👣' : 'Great walk today! 👣';
+      const walkMsg = isKo ? '오늘도 걸었어요!' : 'Great walk today!';
       ctx.fillText(walkMsg, PAD + 16, barY + 48);
     } else {
       const effC = effScore >= 75 ? '#00aa55' : effScore >= 50 ? '#f5a623' : '#e03e3e';
@@ -1958,7 +1962,7 @@ function generateRunCardCanvas(data, isKo) {
 
     ctx.font = 'bold 18px Arial, sans-serif';
     ctx.fillStyle = GREEN;
-    ctx.fillText('⚡ Run Lab', PAD, footY + 34);
+    ctx.fillText('Run Lab', PAD, footY + 34);
     ctx.font = '14px Arial, sans-serif';
     ctx.fillStyle = '#555555';
     ctx.textAlign = 'right';
@@ -10890,6 +10894,8 @@ const garmin = (function () {
     setText('preclog-import-clear-all-btn', isKo ? '전체삭제' : 'CLEAR ALL');
     // [추가] 전체 초기화 버튼 다국어 처리
     setText('btn-reset-everything-label', isKo ? '전체 로그 초기화' : 'RESET ALL LOG');
+    // [추가] 로그 기록만 삭제 버튼 다국어 처리 (가민 데이터는 유지)
+    setText('btn-clear-garmin-logs-only-label', isKo ? '로그 기록만 삭제' : 'CLEAR LOGS ONLY');
   }
 
   function render() {
@@ -11682,8 +11688,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         const closest = candidates.reduce((a, b) => Math.abs(a.diff) < Math.abs(b.diff) ? a : b);
         html += '<div style="margin-top:8px; font-size:var(--fs-xxs); color:#7fd3ff; font-weight:700; line-height:1.5;">'
           + (isKo
-            ? '💡 이번 러닝은 <b>' + closest.name + '</b>이(가) 가민과 가장 가까웠어요(오차 ' + closest.diff.toFixed(1) + '%). 계속 이런 경향이면 해당 방식 쪽으로 재조정을 고려해보세요.'
-            : '💡 <b>' + closest.name + '</b> was closest to Garmin this run (' + closest.diff.toFixed(1) + '% off). If this pattern repeats, consider tuning toward that source.')
+            ? '이번 러닝은 <b>' + closest.name + '</b>이(가) 가민과 가장 가까웠어요(오차 ' + closest.diff.toFixed(1) + '%). 계속 이런 경향이면 해당 방식 쪽으로 재조정을 고려해보세요.'
+            : '<b>' + closest.name + '</b> was closest to Garmin this run (' + closest.diff.toFixed(1) + '% off). If this pattern repeats, consider tuning toward that source.')
           + '</div>';
       }
     }
@@ -12699,6 +12705,47 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     }
   }
 
+  // [추가] "CLEAR LOGS ONLY" 버튼: 가민 FIT 가져오기 목록은 그대로 두고,
+  // 로그성 기록(폰 정밀 로그, 캘리브레이션용 지난 로그 불러오기, 되돌리기 스냅샷,
+  // 평균 적용 대기목록)만 지운다. resetEverything()과 동일한 정리 로직이되
+  // 1단계의 saveImports([]) 호출(가민 FIT 삭제)만 건너뛴다는 점이 유일한 차이.
+  // [중요] 이 버튼 역시 폰이 지금 실제로 쓰고 있는 보정수치(motionCalibOverrides 등)는 건드리지 않는다.
+  async function clearLogsOnly() {
+    const isKo = isKoLang();
+    const msg = isKo
+      ? '폰 정밀 로그, 지난 로그 불러오기, 되돌리기/대기목록 등 로그 기록만 삭제할까요?\n\n(주의) 가져온 가민 FIT 데이터와 지금 폰에 적용되어 있는 보정수치는 그대로 유지됩니다. 이 작업은 되돌릴 수 없습니다.'
+      : 'Delete phone precision logs, imported past logs, and calibration history (undo snapshots, pending list) — logs only?\n\nNote: imported Garmin FIT data and the correction values currently applied on your phone will NOT be changed. This cannot be undone.';
+    if (!(await appConfirm(msg))) return;
+    try {
+      // 1) 캘리브레이션용 지난 로그 불러오기 + 폰 자동저장 정밀 로그 (가민 FIT 목록은 유지)
+      savePrecLogImportsList([]);
+      selectedPrecLogIds = [];
+      try { storage.savePrecisionLogsList([]); } catch (e) {}
+      if (typeof ui !== 'undefined' && ui.renderPrecisionLogList) ui.renderPrecisionLogList();
+
+      // 2) 화면에 남는 "기록"만 삭제: 되돌리기 스냅샷 + 평균 적용 대기목록.
+      savePendingCalibList([]);
+      try {
+        const prof = storage.loadProfile();
+        prof.motionCalibUndos = {};
+        storage.saveProfile(prof);
+      } catch (e) {}
+
+      // 3) 화면 상태(마지막 비교결과/제안값) 및 관련 UI 초기화
+      lastSuggestion = null;
+      lastCompareData = null;
+      const resultBox = document.getElementById('garmin-calib-result');
+      if (resultBox) resultBox.innerHTML = '';
+      render();
+      renderCalibStatus(isKo);
+      renderPendingCalibList(isKo);
+
+      alert(isKo ? '로그 기록이 삭제되었습니다. 가민 데이터와 현재 적용된 보정수치는 그대로 유지돼요.' : 'Log records cleared. Garmin data and currently applied calibration values are unchanged.');
+    } catch (err) {
+      alert((isKo ? '로그 삭제 중 오류: ' : 'Clear-logs error: ') + err.message);
+    }
+  }
+
   // [추가] 비교 결과 + (있다면) 실제로 적용된 보정값을 사람이 읽기 쉬운 텍스트 리포트로
   // 만들어 다운로드 폴더에 저장. exportData()/downloadCsvFile()과 동일한
   // AndroidDownload 브릿지를 재사용하고, 브릿지가 없으면 data URI 링크로 대체한다.
@@ -12779,7 +12826,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     }
   }
 
-  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, selectImport, selectPrecLog, toggleGarminSelect, togglePrecLogSelect, importPrecLogCsv, clearPrecLogImports, runCalibrationCompare, applyCalibration, resetCalibration, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render };
+  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, togglePrecLogSelect, importPrecLogCsv, clearPrecLogImports, runCalibrationCompare, applyCalibration, resetCalibration, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
@@ -13221,7 +13268,6 @@ UIManager.prototype.stopRoutePlayback = function() {
     justify-content: center;
   `;
   exitScreen.innerHTML = `
-    <div style="font-size:var(--fs-display); margin-bottom:20px;">🚪</div>
     <div id="exit-screen-title" style="color:#fff; font-size:var(--fs-xl); font-weight:900; margin-bottom:10px;">App Closed</div>
     <div id="exit-screen-msg" style="color:#666; font-size:var(--fs-base); font-weight:600; text-align:center; line-height:1.8;">
       Press the Home button<br>to return to your home screen
@@ -13447,9 +13493,9 @@ UIManager.prototype.stopRoutePlayback = function() {
   <div class="custom-confirm-box" style="max-width:340px; text-align:left;">
     <div id="user-action-target-label" style="font-size:var(--fs-base); font-weight:900; color:#fff; margin-bottom:14px; text-align:center;"></div>
     <div id="user-action-main" style="display:flex; flex-direction:column; gap:8px;">
-      <button id="user-action-report-btn" onclick="community.showReportReasons()" style="background:#2a2a2a; color:#fff; border:1.5px solid #444; padding:14px; border-radius:12px; font-weight:800; font-size:var(--fs-md); cursor:pointer;">🚩 <span id="user-action-report-label">Report</span></button>
-      <button id="user-action-block-btn" onclick="community.confirmBlockFromSheet()" style="background:#2a2a2a; color:#e57373; border:1.5px solid #663333; padding:14px; border-radius:12px; font-weight:800; font-size:var(--fs-md); cursor:pointer;">🚫 <span id="user-action-block-label">Block</span></button>
-      <button id="user-action-unfollow-btn" onclick="community.unfollowFromSheet()" style="display:none; background:#2a2a2a; color:#ccc; border:1.5px solid #444; padding:14px; border-radius:12px; font-weight:800; font-size:var(--fs-md); cursor:pointer;">👤 <span id="user-action-unfollow-label">Unfollow</span></button>
+      <button id="user-action-report-btn" onclick="community.showReportReasons()" style="background:#2a2a2a; color:#fff; border:1.5px solid #444; padding:14px; border-radius:12px; font-weight:800; font-size:var(--fs-md); cursor:pointer;"><span id="user-action-report-label">Report</span></button>
+      <button id="user-action-block-btn" onclick="community.confirmBlockFromSheet()" style="background:#2a2a2a; color:#e57373; border:1.5px solid #663333; padding:14px; border-radius:12px; font-weight:800; font-size:var(--fs-md); cursor:pointer;"><span id="user-action-block-label">Block</span></button>
+      <button id="user-action-unfollow-btn" onclick="community.unfollowFromSheet()" style="display:none; background:#2a2a2a; color:#ccc; border:1.5px solid #444; padding:14px; border-radius:12px; font-weight:800; font-size:var(--fs-md); cursor:pointer;"><span id="user-action-unfollow-label">Unfollow</span></button>
       <button onclick="community.closeActionSheet()" style="background:none; color:#888; border:none; padding:12px; font-weight:700; font-size:var(--fs-base); cursor:pointer;"><span id="user-action-cancel-label">Cancel</span></button>
     </div>
     <div id="user-action-reasons" style="display:none; flex-direction:column; gap:8px;">
