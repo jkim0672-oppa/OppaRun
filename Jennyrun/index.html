@@ -2317,6 +2317,11 @@ const override = { devicePos: pos, appliedAt: new Date().toISOString() };
 if (suggestion.gct != null) override.gctFallbackRatio = suggestion.gct;
 if (suggestion.rot != null) override.rotRejectThreshold = suggestion.rot;
 if (suggestion.vertScale != null) override.vertScale = suggestion.vertScale;
+// [추가 2026-08-15] GCT 실측 경로(impactTime→belowThresholdSince) 자체를 캘리브레이션
+// 대상에 포함 — gctFallbackRatio는 폴백 경로만 보정하고, 실측이 주로 쓰이는 위치/상황에서는
+// 이 두 값을 직접 조정해야 오차가 줄어든다 (근거: garmin.runCalibrationCompare의 measuredFrac 게이팅).
+if (suggestion.ground != null) override.groundThreshold = suggestion.ground;
+if (suggestion.impact != null) override.impactThreshold = suggestion.impact;
 
 const _defFactors = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || { stride: 1.0, gps: 1.0, cad: 1.0, pace: 1.0 }; // [추가 2026-08-08]
 const curStride = (typeof prof.strideCorrectionFactorByPos[pos] === 'number' && prof.strideCorrectionFactorByPos[pos] > 0) ? prof.strideCorrectionFactorByPos[pos] : _defFactors.stride;
@@ -5960,6 +5965,9 @@ try {
     if (typeof _calibOv.gctFallbackRatio === 'number') this.gctFallbackRatio = _calibOv.gctFallbackRatio;
     if (typeof _calibOv.rotRejectThreshold === 'number') this.rotRejectThreshold = _calibOv.rotRejectThreshold;
     if (typeof _calibOv.vertScale === 'number') this.vertScale = _calibOv.vertScale;
+    // [추가 2026-08-15] groundThreshold/impactThreshold 캘리브레이션 결과도 위치별 override로 반영.
+    if (typeof _calibOv.groundThreshold === 'number') this.groundThreshold = _calibOv.groundThreshold;
+    if (typeof _calibOv.impactThreshold === 'number') this.impactThreshold = _calibOv.impactThreshold;
   }
   // [추가] 보폭/GPS 거리 보정계수도 위치별 값으로 동기화. calcStride() 등 다른 곳에서는
   // 여전히 prof.strideCorrectionFactor를 그냥 읽기만 하므로, 여기서 "지금 위치의 값"을
@@ -5982,8 +5990,12 @@ try {
 } catch (e) {}
 // [추가] 적응형 보정의 기준(중심)이 되는 위치별 기본값을 별도 보관.
 // 보정된 threshold는 항상 이 기본값의 ±15% 이내로만 움직이게 해서 과보정을 방지.
-this.baseGroundThreshold = p.groundThreshold;
-this.baseImpactThreshold = p.impactThreshold;
+// [수정 2026-08-15] p.groundThreshold(위치별 원본 기본값)가 아니라 this.groundThreshold(위의
+// _calibOv 반영 후 값)를 앵커로 써야 한다 — 안 그러면 가민분석실에서 groundThreshold를
+// 캘리브레이션해도, 러닝 중 개인별 진폭 자동보정이 "원본 기본값" 기준 ±15%로 다시 잡아당겨서
+// 캘리브레이션 결과가 무시되는 문제가 있었음.
+this.baseGroundThreshold = this.groundThreshold;
+this.baseImpactThreshold = this.impactThreshold;
 // 착용 위치가 바뀌면 그 위치 기준으로 다시 캘리브레이션해야 하므로 초기화
 this.calibDone = false;
 this.calibStartTime = null;
@@ -11200,6 +11212,19 @@ const garmin = (function () {
     const sc = (dur && last && last.stepCounterSteps !== '' && last.stepCounterSteps != null) ? (parseFloat(last.stepCounterSteps) / dur * 60) : null;
     return { sd, sc };
   }
+  // [추가 2026-08-15] 정밀로그 마지막 행의 gctMeasuredCnt/gctFallbackCnt로 "이 러닝의 GCT가
+  // 실측(impactTime→belowThresholdSince) 기반인지 폴백(gctFallbackRatio) 기반인지" 비율을 구한다.
+  // groundThreshold/impactThreshold 제안값은 실측 비중이 낮은 로그(대부분 폴백으로 계산됨)로는
+  // 신뢰할 수 없으므로, 이 값으로 게이팅한다. 구버전 로그(이 컬럼이 없음)는 null 반환 → 게이팅 통과 취급.
+  function computeGctMeasuredFrac(log) {
+    const last = log.length ? log[log.length - 1] : null;
+    if (!last) return null;
+    const m = (last.gctMeasuredCnt !== '' && last.gctMeasuredCnt != null) ? parseFloat(last.gctMeasuredCnt) : null;
+    const fb = (last.gctFallbackCnt !== '' && last.gctFallbackCnt != null) ? parseFloat(last.gctFallbackCnt) : null;
+    if (m == null && fb == null) return null; // 구버전 로그: 컬럼 자체가 없음
+    const total = (m || 0) + (fb || 0);
+    return total > 0 ? (m || 0) / total : null;
+  }
   function precLastDistKm(log) {
     const last = log.length ? log[log.length - 1] : null;
     return (last && last.distKm != null) ? parseFloat(last.distKm) : null;
@@ -11293,6 +11318,8 @@ const garmin = (function () {
     const stepCounterCadence = avgArr(osVals.map(v => v.sc));
     const phoneAvgCadence = stepDetectorCadence;
     const phoneAvgGct = avgArr(precItems.map(p => avgFromPrecLog(p.log, 'gctMs')));
+    // [추가 2026-08-15] groundThreshold/impactThreshold 제안값 게이팅용.
+    const gctMeasuredFrac = avgArr(precItems.map(p => computeGctMeasuredFrac(p.log)));
 
     // [추가] 안드로이드 네이티브 걸음 센서 교차검증: 로그별로 각각 역산한 뒤 평균.
     const stepDetectorDiffPct = (stepDetectorCadence != null && garminAvgCadence) ? ((stepDetectorCadence - garminAvgCadence) / garminAvgCadence * 100) : null;
@@ -11380,10 +11407,11 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
 
     // 현재 MotionManager 설정값 (실행 중이 아니어도 OppaRunApp 생성 시 저장된
     // 착용 위치 프로파일이 이미 적용돼 있음)
-    let curGround = null, curGct = null, curRot = null, curVertScale = null;
+    let curGround = null, curImpact = null, curGct = null, curRot = null, curVertScale = null;
     try {
       if (typeof app !== 'undefined' && app && app.motion) {
         curGround = app.motion.groundThreshold;
+        curImpact = app.motion.impactThreshold;
         curGct = app.motion.gctFallbackRatio;
         curRot = app.motion.rotRejectThreshold;
         curVertScale = app.motion.vertScale;
@@ -11435,6 +11463,17 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // 점진적으로 좁혀감. 오차 임계값은 기존대로 1% 유지(작은 오차도 놓치지 않게).
     const suggestedGct = (curGct != null && phoneAvgGct && garminAvgGct && gctDiffPct != null && Math.abs(gctDiffPct) > 1)
       ? Math.round(curGct * stepRatio(garminAvgGct / phoneAvgGct, GENERAL_STEP_FRACTION) * 1000) / 1000 : null;
+    // [추가 2026-08-15] groundThreshold/impactThreshold 제안값. gctFallbackRatio는 폴백 경로만
+    // 보정하므로, 이 러닝의 GCT가 "대체로 실측(측정성공)"으로 계산됐을 때만(gctMeasuredFrac이
+    // null이거나 30% 이상 — null은 이 컬럼이 없는 구버전 로그라 게이팅 불가하므로 통과 취급) 의미가
+    // 있다. 방향: 폰 GCT가 가민보다 낮으면(garminAvgGct/phoneAvgGct > 1) 접지구간을 늘려야 하므로
+    // groundThreshold는 올리고(안정구간 재진입이 늦게 판정) impactThreshold는 낮춘다(충격 시작을
+    // 더 일찍 판정) — 반대 방향이면 그 반대로.
+    const gctThresholdTrustworthy = (gctMeasuredFrac == null || gctMeasuredFrac >= 0.3);
+    const suggestedGround = (curGround != null && phoneAvgGct && garminAvgGct && gctDiffPct != null && Math.abs(gctDiffPct) > 1 && gctThresholdTrustworthy)
+      ? Math.round(curGround * stepRatio(garminAvgGct / phoneAvgGct, GENERAL_STEP_FRACTION) * 100) / 100 : null;
+    const suggestedImpact = (curImpact != null && phoneAvgGct && garminAvgGct && gctDiffPct != null && Math.abs(gctDiffPct) > 1 && gctThresholdTrustworthy)
+      ? Math.round(curImpact * stepRatio(phoneAvgGct / garminAvgGct, GENERAL_STEP_FRACTION) * 100) / 100 : null;
     // [추가] 수직진동(vertScale)과 보폭(strideCorrectionFactor) 제안값. 동일하게 오차의
     // 20%만 이번 회차에 반영.
     const suggestedVertScale = (curVertScale != null && curVertScale > 0 && phoneAvgVertMm && garminAvgVertMm && vertDiffPct != null && Math.abs(vertDiffPct) > 1)
@@ -11514,8 +11553,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         pace: { phone: phoneAvgPaceSec, garmin: garminAvgPaceSec, diffPct: paceDiffPct, unit: 'sec/km' },
         hr: { phone: phoneAvgHr, garmin: garminAvgHr, diffPct: hrDiffPct, unit: 'bpm' }
       },
-      current: { gct: curGct, rot: curRot, vertScale: curVertScale, strideFactor: curStrideFactor, gpsDistFactor: curGpsDistFactor, cadFactor: curCadFactor, paceFactor: curPaceFactor },
-      suggested: { gct: suggestedGct, rot: suggestedRot, vertScale: suggestedVertScale, strideFactor: suggestedStrideFactor, gpsDistFactor: suggestedGpsDistFactor, cadFactor: suggestedCadFactor, paceFactor: suggestedPaceFactor, paceImpliedFactor: paceImpliedFactor },
+      current: { gct: curGct, rot: curRot, vertScale: curVertScale, ground: curGround, impact: curImpact, strideFactor: curStrideFactor, gpsDistFactor: curGpsDistFactor, cadFactor: curCadFactor, paceFactor: curPaceFactor },
+      suggested: { gct: suggestedGct, rot: suggestedRot, vertScale: suggestedVertScale, ground: suggestedGround, impact: suggestedImpact, strideFactor: suggestedStrideFactor, gpsDistFactor: suggestedGpsDistFactor, cadFactor: suggestedCadFactor, paceFactor: suggestedPaceFactor, paceImpliedFactor: paceImpliedFactor },
       appliedFields: null, // applyCalibration()/applyAveragedCalibration() 실행 시 채워짐
       appliedAt: null
     };
@@ -11666,6 +11705,27 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       if (suggestedGct != null) {
         html += checkRow('calib-sel-gct', 'gctFallbackRatio: ' + curGct + ' → <b>' + suggestedGct + '</b>', true, 'calib-input-gct', suggestedGct);
       }
+      if (suggestedGround != null) {
+        html += checkRow('calib-sel-ground', 'groundThreshold: ' + curGround + ' → <b>' + suggestedGround + '</b> '
+          + (isKo ? '<span style="color:#666;">(GCT 실측 경로 보정)</span>' : '<span style="color:#666;">(corrects the measured-GCT path)</span>'), true, 'calib-input-ground', suggestedGround);
+      }
+      if (suggestedImpact != null) {
+        html += checkRow('calib-sel-impact', 'impactThreshold: ' + curImpact + ' → <b>' + suggestedImpact + '</b>', true, 'calib-input-impact', suggestedImpact);
+      }
+      if ((suggestedGround != null || suggestedImpact != null) && gctMeasuredFrac != null) {
+        html += '<div style="font-size:var(--fs-xxs); color:#888; padding:2px 0 6px 23px; line-height:1.5;">'
+          + (isKo
+            ? '↳ 이번 로그의 GCT 중 ' + Math.round(gctMeasuredFrac * 100) + '%가 실측(폴백 아님) 기반이었어요.'
+            : '↳ ' + Math.round(gctMeasuredFrac * 100) + '% of this run\'s GCT came from direct measurement (not fallback).')
+          + '</div>';
+      }
+      if (suggestedGround == null && suggestedImpact == null && gctMeasuredFrac != null && gctMeasuredFrac < 0.3 && gctDiffPct != null && Math.abs(gctDiffPct) > 1) {
+        html += '<div style="font-size:var(--fs-xxs); color:#ffcc66; padding:2px 0 6px 0; line-height:1.5;">'
+          + (isKo
+            ? '⚠ 이번 로그는 GCT 대부분이 폴백(gctFallbackRatio)으로 계산돼서(실측 ' + Math.round(gctMeasuredFrac * 100) + '%) groundThreshold/impactThreshold 제안은 생략했어요. gctFallbackRatio 보정만 참고하세요.'
+            : '⚠ Most of this run\'s GCT came from the fallback path (only ' + Math.round(gctMeasuredFrac * 100) + '% measured), so groundThreshold/impactThreshold suggestions were skipped. Rely on the gctFallbackRatio correction only.')
+          + '</div>';
+      }
       if (suggestedVertScale != null) {
         html += checkRow('calib-sel-vert', 'vertScale: ' + curVertScale + ' → <b>' + suggestedVertScale + '</b>', true, 'calib-input-vert', suggestedVertScale);
       }
@@ -11710,6 +11770,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         rot: suggestedRot,
         rotOS: suggestedRotOS,
         vertScale: suggestedVertScale,
+        ground: suggestedGround,
+        impact: suggestedImpact,
         strideFactor: suggestedStrideFactor,
         gpsDistFactor: suggestedGpsDistFactor,
         cadFactor: suggestedCadFactor,
@@ -11778,6 +11840,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       gct: (lastSuggestion.gct != null && isChecked('calib-sel-gct')) ? inputVal('calib-input-gct', lastSuggestion.gct) : null,
       rot: rotVal,
       vertScale: (lastSuggestion.vertScale != null && isChecked('calib-sel-vert')) ? inputVal('calib-input-vert', lastSuggestion.vertScale) : null,
+      ground: (lastSuggestion.ground != null && isChecked('calib-sel-ground')) ? inputVal('calib-input-ground', lastSuggestion.ground) : null,
+      impact: (lastSuggestion.impact != null && isChecked('calib-sel-impact')) ? inputVal('calib-input-impact', lastSuggestion.impact) : null,
       strideFactor: (lastSuggestion.strideFactor != null && isChecked('calib-sel-stride')) ? inputVal('calib-input-stride', lastSuggestion.strideFactor) : null,
       gpsDistFactor: (lastSuggestion.gpsDistFactor != null && isChecked('calib-sel-gps')) ? inputVal('calib-input-gps', lastSuggestion.gpsDistFactor) : null,
       cadFactor: (lastSuggestion.cadFactor != null && isChecked('calib-sel-cad')) ? inputVal('calib-input-cad', lastSuggestion.cadFactor) : null,
@@ -11787,7 +11851,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
 
   // [추가] 아무 필드도 선택되지 않은 상태로 적용/저장을 누르면 알려주기 위한 체크.
   function hasAnySelectedField(sel) {
-    return !!sel && (sel.gct != null || sel.rot != null || sel.vertScale != null || sel.strideFactor != null || sel.gpsDistFactor != null || sel.cadFactor != null || sel.paceFactor != null);
+    return !!sel && (sel.gct != null || sel.rot != null || sel.vertScale != null || sel.ground != null || sel.impact != null || sel.strideFactor != null || sel.gpsDistFactor != null || sel.cadFactor != null || sel.paceFactor != null);
   }
 
   // [수정] 체크된 항목만 대기목록에 추가.
@@ -11811,6 +11875,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       gct: sel.gct,
       rot: sel.rot,
       vertScale: sel.vertScale,
+      ground: sel.ground,
+      impact: sel.impact,
       strideFactor: sel.strideFactor,
       gpsDistFactor: sel.gpsDistFactor,
       cadFactor: sel.cadFactor,
@@ -11845,6 +11911,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     const avgRot = avgPendingField(list, 'rot') != null ? Math.round(avgPendingField(list, 'rot')) : null;
     const avgGct = avgPendingField(list, 'gct') != null ? Math.round(avgPendingField(list, 'gct') * 1000) / 1000 : null;
     const avgVertScale = avgPendingField(list, 'vertScale') != null ? Math.round(avgPendingField(list, 'vertScale') * 1000) / 1000 : null;
+    const avgGround = avgPendingField(list, 'ground') != null ? Math.round(avgPendingField(list, 'ground') * 100) / 100 : null;
+    const avgImpact = avgPendingField(list, 'impact') != null ? Math.round(avgPendingField(list, 'impact') * 100) / 100 : null;
     const avgStrideFactor = avgPendingField(list, 'strideFactor') != null ? Math.round(avgPendingField(list, 'strideFactor') * 1000) / 1000 : null;
     const avgGpsDistFactor = avgPendingField(list, 'gpsDistFactor') != null ? Math.round(avgPendingField(list, 'gpsDistFactor') * 1000) / 1000 : null;
     const avgCadFactor = avgPendingField(list, 'cadFactor') != null ? Math.round(avgPendingField(list, 'cadFactor') * 1000) / 1000 : null;
@@ -11855,6 +11923,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       if (item.rot != null) parts.push('rot ' + item.rot);
       if (item.gct != null) parts.push('gct ' + item.gct);
       if (item.vertScale != null) parts.push('vert ' + item.vertScale);
+      if (item.ground != null) parts.push('ground ' + item.ground);
+      if (item.impact != null) parts.push('impact ' + item.impact);
       if (item.strideFactor != null) parts.push((isKo ? '보폭' : 'stride') + ' ' + item.strideFactor.toFixed(3));
       if (item.gpsDistFactor != null) parts.push((isKo ? '거리' : 'dist') + ' ' + item.gpsDistFactor.toFixed(3));
       if (item.cadFactor != null) parts.push((isKo ? '케이던스' : 'cad') + ' ' + item.cadFactor.toFixed(3));
@@ -11876,6 +11946,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     if (avgRot != null) html += 'rotRejectThreshold → <b>' + avgRot + '</b> (deg/s)<br>';
     if (avgGct != null) html += 'gctFallbackRatio → <b>' + avgGct + '</b><br>';
     if (avgVertScale != null) html += 'vertScale → <b>' + avgVertScale + '</b><br>';
+    if (avgGround != null) html += 'groundThreshold → <b>' + avgGround + '</b><br>';
+    if (avgImpact != null) html += 'impactThreshold → <b>' + avgImpact + '</b><br>';
     if (avgStrideFactor != null) html += (isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ' → <b>' + avgStrideFactor.toFixed(3) + '</b><br>';
     if (avgGpsDistFactor != null) html += (isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ' → <b>' + avgGpsDistFactor.toFixed(3) + '</b><br>';
     if (avgCadFactor != null) html += (isKo ? '케이던스 보정계수' : 'cadCorrectionFactor') + ' → <b>' + avgCadFactor.toFixed(3) + '</b><br>';
@@ -11907,6 +11979,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       rot: avgPendingField(list, 'rot') != null ? Math.round(avgPendingField(list, 'rot')) : null,
       gct: avgPendingField(list, 'gct') != null ? Math.round(avgPendingField(list, 'gct') * 1000) / 1000 : null,
       vertScale: avgPendingField(list, 'vertScale') != null ? Math.round(avgPendingField(list, 'vertScale') * 1000) / 1000 : null,
+      ground: avgPendingField(list, 'ground') != null ? Math.round(avgPendingField(list, 'ground') * 100) / 100 : null,
+      impact: avgPendingField(list, 'impact') != null ? Math.round(avgPendingField(list, 'impact') * 100) / 100 : null,
       strideFactor: avgPendingField(list, 'strideFactor') != null ? Math.round(avgPendingField(list, 'strideFactor') * 1000) / 1000 : null,
       gpsDistFactor: avgPendingField(list, 'gpsDistFactor') != null ? Math.round(avgPendingField(list, 'gpsDistFactor') * 1000) / 1000 : null,
       cadFactor: avgPendingField(list, 'cadFactor') != null ? Math.round(avgPendingField(list, 'cadFactor') * 1000) / 1000 : null,
@@ -11922,6 +11996,9 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         if (override.gctFallbackRatio != null) app.motion.gctFallbackRatio = override.gctFallbackRatio;
         if (override.rotRejectThreshold != null) app.motion.rotRejectThreshold = override.rotRejectThreshold;
         if (override.vertScale != null) app.motion.vertScale = override.vertScale;
+        // [추가 2026-08-15] groundThreshold/impactThreshold도 동일하게 즉시 라이브 반영.
+        if (override.groundThreshold != null) app.motion.groundThreshold = override.groundThreshold;
+        if (override.impactThreshold != null) app.motion.impactThreshold = override.impactThreshold;
         // [수정] applyCalibration()과 동일한 이유로 cad/pace 보정계수도 즉시 라이브 반영.
         if (avgSuggestion.cadFactor != null) app.motion.cadCorrectionFactor = avgSuggestion.cadFactor;
         if (avgSuggestion.paceFactor != null) app.motion.paceCorrectionFactor = avgSuggestion.paceFactor;
@@ -12038,6 +12115,9 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         if (override.gctFallbackRatio != null) app.motion.gctFallbackRatio = override.gctFallbackRatio;
         if (override.rotRejectThreshold != null) app.motion.rotRejectThreshold = override.rotRejectThreshold;
         if (override.vertScale != null) app.motion.vertScale = override.vertScale;
+        // [추가 2026-08-15] groundThreshold/impactThreshold도 동일하게 즉시 라이브 반영.
+        if (override.groundThreshold != null) app.motion.groundThreshold = override.groundThreshold;
+        if (override.impactThreshold != null) app.motion.impactThreshold = override.impactThreshold;
         // [수정] cad/pace 보정계수는 MotionManager 인스턴스에 캐싱되어 있고 applyDevicePos()에서만
         // 갱신되는데, 여기서는 그 함수를 다시 부르지 않아 "적용" 직후에도 옛 값으로 계산되는
         // 문제가 있었음. gct/rot/vertScale과 동일하게 즉시 라이브 반영한다(원시 걸음 신호인
