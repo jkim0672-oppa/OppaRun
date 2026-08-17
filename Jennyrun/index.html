@@ -6055,34 +6055,6 @@ try {
   // [추가] 예전 방식(단일 motionCalibOverride / 단일 strideCorrectionFactor)으로 저장된
   // 프로필이면, 그 값을 "저장 당시의 devicePos" 밑으로 한 번만 옮겨 담는다 (데이터 유실 방지).
   let _migrated = false;
-  // [추가 2026-08-16] 위 DEFAULT_PROFILE_FACTORS_BY_POS를 중립값(1.0)으로 리셋한 커밋이
-  // 코드 기본값만 바꿨을 뿐, 이미 폰에 저장돼 있던 프로필의 strideCorrectionFactorByPos/
-  // gpsDistCorrectionFactorByPos/cadCorrectionFactorByPos/paceCorrectionFactorByPos는
-  // 그대로 남아있어서(예: CHEST paceCorrectionFactor가 옛 캘리브레이션 값 0.85대로 남음),
-  // 사용자가 설정 화면에서 RESET 버튼을 직접 누르기 전까진 예전 보정값이 계속 적용되는
-  // 문제가 있었음. 버튼을 누르지 않아도 "이미 리셋된 걸로 안다"는 기대와 실제 동작이
-  // 일치하도록, 이 지점을 한 번만 지나가는 마이그레이션 플래그로 전체 위치의 4개 보정계수를
-  // 강제로 새 기본값(DEFAULT_PROFILE_FACTORS_BY_POS)으로 되돌린다. 이후 사용자가 새로
-  // 캘리브레이션을 적용하면 그 값이 다시 정상적으로 우선 적용된다(이 마이그레이션은 1회성).
-  if (!_prof._factorsResetV20260816) {
-    _prof.strideCorrectionFactorByPos = {};
-    _prof.gpsDistCorrectionFactorByPos = {};
-    _prof.cadCorrectionFactorByPos = {};
-    _prof.paceCorrectionFactorByPos = {};
-    Object.keys(DEFAULT_PROFILE_FACTORS_BY_POS).forEach(function (_pos) {
-      const _df = DEFAULT_PROFILE_FACTORS_BY_POS[_pos];
-      _prof.strideCorrectionFactorByPos[_pos] = _df.stride;
-      _prof.gpsDistCorrectionFactorByPos[_pos] = _df.gps;
-      _prof.cadCorrectionFactorByPos[_pos] = _df.cad;
-      _prof.paceCorrectionFactorByPos[_pos] = _df.pace;
-    });
-    _prof.strideCorrectionFactor = DEFAULT_PROFILE_FACTORS_BY_POS[_prof.devicePos || 'chest'].stride;
-    _prof.gpsDistCorrectionFactor = DEFAULT_PROFILE_FACTORS_BY_POS[_prof.devicePos || 'chest'].gps;
-    _prof.cadCorrectionFactor = DEFAULT_PROFILE_FACTORS_BY_POS[_prof.devicePos || 'chest'].cad;
-    _prof.paceCorrectionFactor = DEFAULT_PROFILE_FACTORS_BY_POS[_prof.devicePos || 'chest'].pace;
-    _prof._factorsResetV20260816 = true;
-    _migrated = true;
-  }
   if (!_prof.motionCalibOverrides) {
     _prof.motionCalibOverrides = {};
     if (_prof.motionCalibOverride && _prof.motionCalibOverride.devicePos) {
@@ -7307,6 +7279,58 @@ if (this.recentPeaks.length > this.maxRecentPeaks) this.recentPeaks.shift();
 this.onStep({ stepCount: this.stepCount, time: now });
 }
 }
+}
+// ========== [리팩터 2026-08-16] 정밀 로그 기반 평균 계산 공용 유틸 ==========
+// 리스트 카드(러닝 종료 시 저장되는 record)와 DIAG/캘리브레이션 비교 화면(garmin
+// 모듈)이 "같은 러닝인데 다른 숫자"를 보여주던 문제 — 두 곳이 평균 계산 로직을
+// 각자 따로 구현하고 있어서 한쪽만 고치면 어긋나는 게 원인이었음. 정밀 로그로부터
+// 평균을 내는 계산은 이제 이 함수들로만 하고, 리스트 카드/DIAG 양쪽 모두 여기서
+// 가져다 쓴다. 새로 계산식을 손볼 일이 생기면 반드시 여기만 고칠 것 — 다른 곳에
+// 같은 계산을 복제하지 말 것.
+function avgArr(vals) {
+  const v = vals.filter(x => x != null && !isNaN(x));
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+}
+function avgFromPrecLog(log, field) {
+  let sum = 0, count = 0;
+  log.forEach(r => {
+    const v = parseFloat(r[field]);
+    if (!isNaN(v) && v > 0) { sum += v; count++; }
+  });
+  return count ? (sum / count) : null;
+}
+// [복원] 로그는 매 스텝이 아니라 일정 간격(GPS 갱신 등)으로만 찍히기 때문에, 로그
+// 행을 단순 평균하면 스텝이 몰린/뜸한 구간이 왜곡을 준다. 행 사이 실측 걸음수
+// (stepDetectorCnt 증가분)로 가중 평균해 이를 보정 — GCT처럼 "스텝 1회당 값"의
+// 대표 평균은 이 함수를 우선 사용한다.
+function avgFromPrecLogStepWeighted(log, field) {
+  let sum = 0, weightSum = 0, prevSteps = null, hasStepData = false;
+  log.forEach(r => {
+    const stepsNow = parseFloat(r.stepDetectorCnt);
+    const v = parseFloat(r[field]);
+    if (!isNaN(stepsNow)) {
+      hasStepData = true;
+      if (prevSteps != null) {
+        const w = Math.max(0, stepsNow - prevSteps);
+        if (!isNaN(v) && v > 0 && w > 0) { sum += v * w; weightSum += w; }
+      }
+      prevSteps = stepsNow;
+    }
+  });
+  if (!hasStepData) return avgFromPrecLog(log, field); // 구버전 로그(스텝 카운터 컬럼 없음) 폴백
+  return weightSum ? (sum / weightSum) : avgFromPrecLog(log, field);
+}
+// [추가] 정밀로그 한 개의 마지막 행 stepDetectorCnt/stepCounterSteps로 OS 걸음센서
+// 케이던스를 역산(총 실측 걸음수 ÷ 총 시간) — 리스트 카드의 avgCadence(steps/seconds*60)와
+// 동일한 "실측값 우선" 원칙. 여러 로그면 로그별로 계산한 뒤 평균한다(원본 행을
+// 이어붙이면 첫/끝 행 기준 계산이 깨지므로 로그를 합치지 않음).
+function computeOsCadence(log) {
+  const first = log.length ? log[0] : null;
+  const last = log.length ? log[log.length - 1] : null;
+  const dur = (first && last) ? Math.max(1, (parseFloat(last.t) - parseFloat(first.t))) : null;
+  const sd = (dur && last && last.stepDetectorCnt !== '' && last.stepDetectorCnt != null) ? (parseFloat(last.stepDetectorCnt) / dur * 60) : null;
+  const sc = (dur && last && last.stepCounterSteps !== '' && last.stepCounterSteps != null) ? (parseFloat(last.stepCounterSteps) / dur * 60) : null;
+  return { sd, sc };
 }
 // ========== OppaRunApp (수정: 타이머 관리, auto-pause시 시간 정지, 중복 모션 리스너 제거) ==========
 class OppaRunApp {
@@ -8651,7 +8675,18 @@ const avgCadence = (this.state.seconds > 0 && this.state.steps > 0)
   : (this.state.cadenceSamples && this.state.cadenceSamples.length > 0)
     ? trimmedMeanCadence(this.state.cadenceSamples)
     : 0;
-const avgGct = this.state.stepCount > 0 ? Math.round(this.state.totalGct / this.state.stepCount) : 0;
+// [수정 2026-08-16] 기존엔 raw per-step 값(totalGct/stepCount, 스무딩 이전)을 그대로
+// 평균 냈는데, DIAG/캘리브레이션 화면은 정밀 로그(화면에 스무딩되어 찍힌 값)를 스텝
+// 가중평균한 값을 보여줘서 같은 러닝인데도 리스트 카드와 DIAG 숫자가 어긋났음. 이제
+// 둘 다 avgFromPrecLogStepWeighted() 공용 함수 하나로 통일 — 정밀 로그가 있으면
+// (설정에서 "러닝 중 정밀 로그 기록"이 켜져 있으면) 그 값을 쓰고, 로그가 없는
+// 경우(정밀 로그 기록 꺼짐 등)에만 예전 raw 누적 방식으로 폴백한다.
+const _precLogForFinish = this.state.precisionLog;
+const _hasPrecLogForFinish = _precLogForFinish && _precLogForFinish.length > 0;
+const _precLogGct = _hasPrecLogForFinish ? avgFromPrecLogStepWeighted(_precLogForFinish, 'gctMs') : null;
+const avgGct = _precLogGct != null
+  ? Math.round(_precLogGct)
+  : (this.state.stepCount > 0 ? Math.round(this.state.totalGct / this.state.stepCount) : 0);
 const avgFlight = this.state.stepCount > 0 ? Math.round(this.state.totalFlight / this.state.stepCount) : 0;
 // [추가] 좌/우 케이던스 밸런스 및 GCT 밸런스 (실측값, 더미 50:50 제거)
 const balance = this.motion ? this.motion.getBalance() : { cadenceBal: '50:50', gctBal: '50:50', gyroBal: '50:50' };
@@ -11462,39 +11497,9 @@ const garmin = (function () {
   // 주의: 이건 자동 보정이 아니라 진단/제안 도구임 — 실제 값 변경은 코드에서
   // 수동으로 하고, 반드시 다시 뛰어서 재검증해야 함.
   // ── 평균값 / 차트 데이터 계산 ──
-  function avgFromPrecLog(log, field) {
-    let sum = 0, count = 0;
-    log.forEach(r => {
-      const v = parseFloat(r[field]);
-      if (!isNaN(v) && v > 0) { sum += v; count++; }
-    });
-    return count ? (sum / count) : null;
-  }
-  // [추가 2026-08-16] GCT는 실측 데이터로 재확인해보니, 로그의 행(row)을 그냥 단순평균한
-  // avgFromPrecLog보다 러닝화면 종료 시 저장하는 "총GCT÷총걸음수"(스텝 가중평균)가 가민
-  // 실측치에 일관되게 더 가까웠다(예: 체스트 러닝 -20.9%p vs -24.1%p, 손 러닝 -6.0%p vs
-  // -25.9%p, 2회 연속 재현). 원인은 로그가 걸음마다가 아니라 일정 시간 간격(4초 안팎)으로
-  // 찍혀서, 단순평균은 "그 구간에 걸음이 몇 번 있었는지"를 무시하고 모든 행을 똑같은
-  // 비중으로 섞기 때문. 리스트 화면과 같은 방식으로 맞추기 위해, 각 로그 행 사이의
-  // stepDetectorCnt 증가분(그 구간에 실제로 발생한 걸음 수)을 가중치로 써서 평균낸다.
-  // stepDetectorCnt가 없는 구버전 로그는 자동으로 기존 단순평균(avgFromPrecLog)에 폴백된다.
-  function avgFromPrecLogStepWeighted(log, field) {
-    let sum = 0, weightSum = 0, prevSteps = null, hasStepData = false;
-    log.forEach(r => {
-      const stepsNow = parseFloat(r.stepDetectorCnt);
-      const v = parseFloat(r[field]);
-      if (!isNaN(stepsNow)) {
-        hasStepData = true;
-        if (prevSteps != null) {
-          const w = Math.max(0, stepsNow - prevSteps);
-          if (!isNaN(v) && v > 0 && w > 0) { sum += v * w; weightSum += w; }
-        }
-        prevSteps = stepsNow;
-      }
-    });
-    if (!hasStepData) return avgFromPrecLog(log, field); // 구버전 로그 폴백
-    return weightSum ? (sum / weightSum) : avgFromPrecLog(log, field);
-  }
+  // [이동 2026-08-16] avgFromPrecLog/avgFromPrecLogStepWeighted/avgArr/computeOsCadence는
+  // 리스트 카드와 값을 통일하기 위해 파일 상단(OppaRunApp 클래스 앞)의 공용 유틸로 옮김.
+  // 여기서는 그 전역 함수를 그대로 가져다 쓴다(재정의하지 말 것).
   // [추가] 전방 린각도(leanForwardDeg)는 음수도 유효한 값(반대쪽으로 기울었다는 뜻)이라
   // 위 avgFromPrecLog의 "v > 0만 인정" 조건을 그대로 쓰면 음수 샘플이 전부 제외되어
   // 평균이 실제보다 전방쪽으로 왜곡됨. 0이 아닌 모든 숫자를 인정하는 버전을 별도로 둔다.
@@ -11561,25 +11566,9 @@ const garmin = (function () {
       + '</div>';
   }
 
-  // [추가] null/NaN을 걸러내고 평균을 낸다. 값이 1개뿐이면 그 값 자체를 반환하므로
-  // 기존 "1:1 단일 비교" 동작은 그대로 보존된다 (평균 로직이 별도 분기 없이 자연스럽게 커버).
-  function avgArr(vals) {
-    const v = vals.filter(x => x != null && !isNaN(x));
-    return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
-  }
+  // avgArr/computeOsCadence는 리스트 카드와 값을 통일하기 위해 파일 상단(OppaRunApp
+  // 클래스 앞)의 공용 유틸로 이동함 — 여기서는 재정의하지 않고 그대로 가져다 쓴다.
   function avgField(items, field) { return avgArr(items.map(x => x[field])); }
-  // [추가] 정밀로그 한 개의 마지막 행 stepDetectorCnt/stepCounterSteps로 OS 걸음센서 케이던스를
-  // 역산 (기존 로직과 동일, 다만 로그 1개 단위 함수로 분리 — 여러 로그일 때 로그별로 각각
-  // 계산한 뒤 평균 낸다. 서로 다른 러닝의 원본 행을 이어붙이면 첫/끝 행 기준 계산이
-  // 깨지므로 로그를 합치지 않고 로그별 결과만 평균한다).
-  function computeOsCadence(log) {
-    const first = log.length ? log[0] : null;
-    const last = log.length ? log[log.length - 1] : null;
-    const dur = (first && last) ? Math.max(1, (parseFloat(last.t) - parseFloat(first.t))) : null;
-    const sd = (dur && last && last.stepDetectorCnt !== '' && last.stepDetectorCnt != null) ? (parseFloat(last.stepDetectorCnt) / dur * 60) : null;
-    const sc = (dur && last && last.stepCounterSteps !== '' && last.stepCounterSteps != null) ? (parseFloat(last.stepCounterSteps) / dur * 60) : null;
-    return { sd, sc };
-  }
   // [추가 2026-08-15] 정밀로그 마지막 행의 gctMeasuredCnt/gctFallbackCnt로 "이 러닝의 GCT가
   // 실측(impactTime→belowThresholdSince) 기반인지 폴백(gctFallbackRatio) 기반인지" 비율을 구한다.
   // groundThreshold/impactThreshold 제안값은 실측 비중이 낮은 로그(대부분 폴백으로 계산됨)로는
@@ -11685,6 +11674,10 @@ const garmin = (function () {
     const stepDetectorCadence = avgArr(osVals.map(v => v.sd));
     const stepCounterCadence = avgArr(osVals.map(v => v.sc));
     const phoneAvgCadence = stepDetectorCadence;
+    // [수정 2026-08-16] 단순평균(avgFromPrecLog) → 스텝-가중평균(avgFromPrecLogStepWeighted)으로
+    // 되돌림. 로그가 매 스텝이 아니라 일정 간격으로만 찍히기 때문에, 리스트 카드(record.gct)와
+    // 동일한 계산식(공용 유틸)을 쓰려면 이쪽도 실측 걸음수 가중이 필요함 — 아래 finishRun()의
+    // avgGct도 같은 함수를 쓰도록 맞춰뒀다(두 값이 항상 일치하는 게 목표).
     const phoneAvgGct = avgArr(precItems.map(p => avgFromPrecLogStepWeighted(p.log, 'gctMs')));
     // [추가 2026-08-15] groundThreshold/impactThreshold 제안값 게이팅용.
     const gctMeasuredFrac = avgArr(precItems.map(p => computeGctMeasuredFrac(p.log)));
