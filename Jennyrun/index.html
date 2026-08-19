@@ -11313,8 +11313,8 @@ const garmin = (function () {
   let selfCalibLogId = null;
   let selfCalibLastDist = null; // { pos, factor } — CHECK 후 APPLY 전까지 보관
   let selfCalibLastCad = null;
-  const SELF_CALIB_GPS_FRACTION = 0.08;   // gpsDistCorrectionFactor와 동일한 보수적 비율(8%)
-  const SELF_CALIB_CAD_FRACTION = 0.20;   // cadCorrectionFactor와 동일한 일반 비율(20%)
+  const SELF_CALIB_GPS_FRACTION = 0.10;   // gpsDistCorrectionFactor와 동일한 보수적 비율(10%)
+  const SELF_CALIB_CAD_FRACTION = 0.30;   // cadCorrectionFactor와 동일한 일반 비율(30%)
   const selfCalibStepRatio = (refOverMeasured, fraction) => 1 + fraction * (refOverMeasured - 1);
   function selfCalibWarnHtml(msg) {
     return '<div style="font-size:var(--fs-xs); color:var(--warning); font-weight:700;">⚠ ' + msg + '</div>';
@@ -11812,8 +11812,9 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     //  - GPS 거리 보정계수: 8% — 화면에 찍히는 실제 거리·페이스에 바로 반영되는 값이라
     //    더 보수적으로 (기존에도 다른 항목보다 좁게 클램프했던 항목).
     const stepRatio = (garminOverPhone, fraction) => 1 + fraction * (garminOverPhone - 1);
-    const GENERAL_STEP_FRACTION = 0.20;
-    const GPS_STEP_FRACTION = 0.08;
+    const GENERAL_STEP_FRACTION = 0.30;
+    const GCT_VERT_STEP_FRACTION = 0.50; // [수정] GCT/VERT OSC만 더 빠르게 수렴시키기 위해 분리한 전용 비율
+    const GPS_STEP_FRACTION = 0.10;
     // [수정 2026-07-30] hand는 네이티브 걸음센서가 걸음판정을 직접 하므로
 // rotRejectThreshold가 이제 걸음 판정에 전혀 쓰이지 않는다(no-op). 회색으로
 // 보여주며 헷갈리게 하는 대신, hand에서는 이 제안 자체를 계산/표시하지 않는다.
@@ -11834,7 +11835,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // stepRatio로 교체 — 오차의 20%만 이번 한 번에 반영하고 나머지는 다음 비교에서
     // 점진적으로 좁혀감. 오차 임계값은 기존대로 1% 유지(작은 오차도 놓치지 않게).
     const suggestedGct = (curGct != null && phoneAvgGct && garminAvgGct && gctDiffPct != null && Math.abs(gctDiffPct) > 1)
-      ? Math.round(curGct * stepRatio(garminAvgGct / phoneAvgGct, GENERAL_STEP_FRACTION) * 1000) / 1000 : null;
+      ? Math.round(curGct * stepRatio(garminAvgGct / phoneAvgGct, GCT_VERT_STEP_FRACTION) * 1000) / 1000 : null;
     // [추가 2026-08-15] groundThreshold/impactThreshold 제안값. gctFallbackRatio는 폴백 경로만
     // 보정하므로, 이 러닝의 GCT가 "대체로 실측(측정성공)"으로 계산됐을 때만(gctMeasuredFrac이
     // null이거나 30% 이상 — null은 이 컬럼이 없는 구버전 로그라 게이팅 불가하므로 통과 취급) 의미가
@@ -11843,13 +11844,13 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // 더 일찍 판정) — 반대 방향이면 그 반대로.
     const gctThresholdTrustworthy = (gctMeasuredFrac == null || gctMeasuredFrac >= 0.3);
     const suggestedGround = (curGround != null && phoneAvgGct && garminAvgGct && gctDiffPct != null && Math.abs(gctDiffPct) > 1 && gctThresholdTrustworthy)
-      ? Math.round(curGround * stepRatio(garminAvgGct / phoneAvgGct, GENERAL_STEP_FRACTION) * 100) / 100 : null;
+      ? Math.round(curGround * stepRatio(garminAvgGct / phoneAvgGct, GCT_VERT_STEP_FRACTION) * 100) / 100 : null;
     const suggestedImpact = (curImpact != null && phoneAvgGct && garminAvgGct && gctDiffPct != null && Math.abs(gctDiffPct) > 1 && gctThresholdTrustworthy)
-      ? Math.round(curImpact * stepRatio(phoneAvgGct / garminAvgGct, GENERAL_STEP_FRACTION) * 100) / 100 : null;
-    // [추가] 수직진동(vertScale)과 보폭(strideCorrectionFactor) 제안값. 동일하게 오차의
-    // 20%만 이번 회차에 반영.
+      ? Math.round(curImpact * stepRatio(phoneAvgGct / garminAvgGct, GCT_VERT_STEP_FRACTION) * 100) / 100 : null;
+    // [추가] 수직진동(vertScale)과 보폭(strideCorrectionFactor) 제안값. VERT는 GCT와 동일하게
+    // GCT_VERT_STEP_FRACTION(50%)을, 보폭은 기존 일반 비율(20%)을 유지.
     const suggestedVertScale = (curVertScale != null && curVertScale > 0 && phoneAvgVertMm && garminAvgVertMm && vertDiffPct != null && Math.abs(vertDiffPct) > 1)
-      ? Math.round(curVertScale * stepRatio(garminAvgVertMm / phoneAvgVertMm, GENERAL_STEP_FRACTION) * 1000) / 1000 : null;
+      ? Math.round(curVertScale * stepRatio(garminAvgVertMm / phoneAvgVertMm, GCT_VERT_STEP_FRACTION) * 1000) / 1000 : null;
     const suggestedStrideFactor = (phoneAvgStepMm && garminAvgStepMm && stepDiffPct != null && Math.abs(stepDiffPct) > 1)
       ? Math.round(curStrideFactor * stepRatio(garminAvgStepMm / phoneAvgStepMm, GENERAL_STEP_FRACTION) * 1000) / 1000 : null;
     // [추가] GPS 거리 보정계수 제안값. 화면에 찍히는 실제 거리·페이스에 직접 반영되는
@@ -11876,9 +11877,9 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // 실측 평균값에 그대로 적용 — 보정계수가 해당 실측값에 선형으로 반영된다는 전제(다른
     // 보정계수들과 동일한 가정)로 근사한다. 제안값이 없는 항목(오차 1% 이내 등)은 실측값 그대로.
     const correctedPhoneCadence = suggestedCadFactor != null ? phoneAvgCadence * stepRatio(garminAvgCadence / phoneAvgCadence, GENERAL_STEP_FRACTION) : phoneAvgCadence;
-    const correctedPhoneGct = suggestedGct != null ? phoneAvgGct * stepRatio(garminAvgGct / phoneAvgGct, GENERAL_STEP_FRACTION) : phoneAvgGct;
+    const correctedPhoneGct = suggestedGct != null ? phoneAvgGct * stepRatio(garminAvgGct / phoneAvgGct, GCT_VERT_STEP_FRACTION) : phoneAvgGct;
     const correctedPhoneStepMm = suggestedStrideFactor != null ? phoneAvgStepMm * stepRatio(garminAvgStepMm / phoneAvgStepMm, GENERAL_STEP_FRACTION) : phoneAvgStepMm;
-    const correctedPhoneVertMm = suggestedVertScale != null ? phoneAvgVertMm * stepRatio(garminAvgVertMm / phoneAvgVertMm, GENERAL_STEP_FRACTION) : phoneAvgVertMm;
+    const correctedPhoneVertMm = suggestedVertScale != null ? phoneAvgVertMm * stepRatio(garminAvgVertMm / phoneAvgVertMm, GCT_VERT_STEP_FRACTION) : phoneAvgVertMm;
     const correctedPhoneDistanceKm = suggestedGpsDistFactor != null ? phoneDistanceKm * stepRatio(garminDistanceKm / phoneDistanceKm, GPS_STEP_FRACTION) : phoneDistanceKm;
     // [수정] 페이스는 별도 보정계수가 없지만 무관하지 않다 — 실제 페이스는 totalDist에서
     // 계산되고, totalDist는 실시간으로 gpsDistCorrectionFactor가 곱해져 누적되므로
