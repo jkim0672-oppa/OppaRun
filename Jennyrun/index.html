@@ -1734,16 +1734,19 @@ alt="runner"/>
 </div>
 <div id="selfcalib-cad-result"></div>
 </div>
-<!-- [추가] 가민분석실의 위치별 캘리브레이션 리셋/되돌리기 기능을 설정 탭으로 통합.
-     현재 기기 착용 위치(devicePos)에 적용된 보정값을 보여주고, 그 아래 두 버튼으로
-     ① 공장 기본값(1.0, 보정없음)으로 초기화 ② 직전 적용 이전 상태로 되돌리기(UNDO)를
-     제공한다. 실제 저장/적용 로직은 가민 분석실과 동일한 garmin.resetCalibration() /
-     garmin.undoLastCalibration()을 그대로 재사용해서 INFO 탭 쪽 상태 표시와도 항상 일치한다.
-     기존의 "SHOW APP DEFAULTS"(디폴트값 1.0 표시용 버튼)는 이 섹션과 내용이 중복되어 제거. -->
-<div class="section-title" id="section-title-calib-status">CALIBRATION STATUS</div>
-<div class="settings-group" id="calib-status-group">
-<div id="calib-status-desc" style="font-size:var(--fs-xxs); color:#888; margin:2px 0 10px; line-height:1.5;">Check the calibration currently applied at each device position, compare it against the factory default, reset it, or undo the last apply.</div>
-<div id="calib-status-result" style="margin-bottom:12px;"></div>
+<!-- [추가] 앱 기본값 보기: 현재 러닝 로직이 실제로 쓰는 코드상의 기본 보정값
+     (gctFallbackRatio 40%, stride/gps/cad/pace factor 1.0 등)을 로컬에서도
+     바로 확인할 수 있게 하는 버튼. -->
+<div class="section-title" id="section-title-app-defaults">APP DEFAULTS</div>
+<div class="settings-group" id="app-defaults-group">
+<div id="app-defaults-desc" style="font-size:var(--fs-xxs); color:#888; margin:2px 0 10px; line-height:1.5;">Show the built-in default values the running logic currently uses (before any calibration is applied).</div>
+<button id="btn-show-app-defaults" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base);" onclick="ui.toggleAppDefaults()"><span id="btn-show-app-defaults-label">SHOW APP DEFAULTS</span></button>
+<div id="app-defaults-result" style="display:none; margin-top:12px;"></div>
+<!-- [추가] 위치별(가슴/허리/암밴드/손) 보정계수 4종을 한번에 다루는 통합 버튼 2개.
+     위: 최신 커밋된(다운로드된) 캘리브레이션 값으로 복원. 아래: 팩토리 기본값(1.0)으로 초기화.
+     팩토리 리셋으로 값을 날렸을 때 위 복원 버튼으로 되돌릴 수 있도록 순서를 위-아래로 배치. -->
+<button id="btn-restore-committed-calib-all" style="background:#14261a; color:#5fd18a; border:1.5px solid #2d5a3f; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:14px;" onclick="garmin.applyCommittedDefaultAllPos()"><span id="btn-restore-committed-calib-all-label">RESTORE CURRENT CALIBRATION (ALL POSITIONS)</span></button>
+<button id="btn-factory-reset-calib-all" style="background:#2a1414; color:var(--danger); border:1.5px solid #663333; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:8px;" onclick="garmin.resetCalibrationAllPos()"><span id="btn-factory-reset-calib-all-label">FACTORY RESET CALIBRATION (ALL POSITIONS)</span></button>
 </div>
 <!-- ===== [/CALIBRATION SETTINGS] ===== -->
 </div>
@@ -3969,8 +3972,6 @@ community.renderBlockedList();
 // [추가] 보정설정 탭: 트랙 캘리브레이션 현재값 + 자가보정(거리/케이던스) 로그 목록 갱신
 this.updateCalibFactorDisplay();
 if (typeof garmin !== 'undefined' && garmin.renderSelfCalib) garmin.renderSelfCalib();
-// [추가] 가민분석실 위치별 리셋/되돌리기 통합 섹션도 함께 갱신
-this.renderPositionCalibStatus();
 }
 }
 // [수정] 정밀 로그를 여러 개 저장/열람할 수 있게 리스트로 렌더링
@@ -4169,15 +4170,22 @@ const btnSelfCalibDistCheckEl = document.getElementById('btn-selfcalib-dist-chec
 if (btnSelfCalibDistCheckEl) btnSelfCalibDistCheckEl.textContent = isKoCalibTab ? '확인' : 'CHECK';
 const btnSelfCalibCadCheckEl = document.getElementById('btn-selfcalib-cad-check');
 if (btnSelfCalibCadCheckEl) btnSelfCalibCadCheckEl.textContent = isKoCalibTab ? '확인' : 'CHECK';
-// [추가] CALIBRATION STATUS 섹션(가민분석실 위치별 리셋/되돌리기 통합) 다국어 처리
-const sectionCalibStatusEl = document.getElementById('section-title-calib-status');
-if (sectionCalibStatusEl) sectionCalibStatusEl.textContent = isKoCalibTab ? '캘리브레이션 상태' : 'CALIBRATION STATUS';
-const calibStatusDescEl = document.getElementById('calib-status-desc');
-if (calibStatusDescEl) calibStatusDescEl.textContent = isKoCalibTab
-  ? '위치별로 적용된 캘리브레이션 값을 기본값과 비교해서 확인하고, 기본값으로 초기화하거나 직전 적용 이전으로 되돌릴 수 있습니다.'
-  : 'Check the calibration currently applied at each device position, compare it against the factory default, reset it, or undo the last apply.';
-// 언어를 바꿔도 라벨이 안 섞이도록 즉시 다시 렌더링
-this.renderPositionCalibStatus();
+// [추가] APP DEFAULTS 섹션 다국어 처리
+const sectionAppDefaultsEl = document.getElementById('section-title-app-defaults');
+if (sectionAppDefaultsEl) sectionAppDefaultsEl.textContent = isKoCalibTab ? '앱 기본값' : 'APP DEFAULTS';
+const appDefaultsDescEl = document.getElementById('app-defaults-desc');
+if (appDefaultsDescEl) appDefaultsDescEl.textContent = isKoCalibTab
+  ? '보정을 하나도 적용하지 않은 상태에서 러닝 로직이 지금 실제로 쓰는 기본값을 보여줍니다.'
+  : 'Show the built-in default values the running logic currently uses (before any calibration is applied).';
+// 결과창이 열려있는 상태로 언어를 바꿨다면 즉시 다시 렌더링해서 라벨이 안 섞이게 함
+const appDefaultsResultEl = document.getElementById('app-defaults-result');
+const btnShowAppDefaultsLabelEl = document.getElementById('btn-show-app-defaults-label');
+if (appDefaultsResultEl && appDefaultsResultEl.style.display !== 'none') {
+  this.toggleAppDefaults(); // 닫기
+  this.toggleAppDefaults(); // 새 언어로 다시 열기
+} else if (btnShowAppDefaultsLabelEl) {
+  btnShowAppDefaultsLabelEl.textContent = isKoCalibTab ? '앱 기본값 보기' : 'SHOW APP DEFAULTS';
+}
 const nickLabel = document.getElementById('label-crew-nickname');
 if(nickLabel) nickLabel.textContent = t.crewNicknameLabel;
 const delAccLabel = document.getElementById('label-delete-account');
@@ -4630,96 +4638,50 @@ el.textContent = label + ': 1.00 (' + (t.calibDefaultTag || 'default') + ')';
 el.textContent = label + ': ' + factor.toFixed(2);
 }
 }
-// [추가 2026-08-19] 가민분석실(INFO 탭)의 위치별 캘리브레이션 리셋/되돌리기를
-// 설정 탭의 CALIBRATION STATUS 섹션으로 통합. 4개 착용 위치(가슴/허리/암밴드/손)를
-// 전부 카드로 나열하고, 위치마다 ① 지금 적용된 값 ② 그 위치의 최초 기본값을 함께
-// 보여준 뒤 ③ RESET(최초 기본값으로) ④ UNDO(직전 적용 이전으로) 버튼을 둔다.
-// 실제 리셋/되돌리기 저장 로직은 가민 분석실과 완전히 동일한
-// garmin.resetCalibration(pos) / garmin.undoLastCalibration(pos)을 그대로 호출해서
-// INFO 탭 쪽 상태 표시와 항상 일치하도록 한다. 기존 "SHOW APP DEFAULTS"(순수 표시용
-// 버튼)는 이 섹션이 대체하므로 제거.
-renderPositionCalibStatus() {
-const box = document.getElementById('calib-status-result');
+// [추가] "APP DEFAULTS" 버튼: 현재 기기 위치(devicePos)를 강조 표시하면서 위치별
+// 코드 기본값(APP_DEFAULT_MOTION_PROFILES, DEFAULT_PROFILE_FACTORS_BY_POS)을 보여준다.
+// 다시 누르면 접힌다. storage/캘리브레이션 값을 읽거나 수정하지 않는 순수 표시 기능.
+toggleAppDefaults() {
+const box = document.getElementById('app-defaults-result');
+const btnLabel = document.getElementById('btn-show-app-defaults-label');
 if (!box) return;
-const isKo = storage.getLang() === 'ko';
+const willShow = box.style.display === 'none';
+if (!willShow) {
+box.style.display = 'none';
+if (btnLabel) btnLabel.textContent = (storage.getLang() === 'ko') ? '앱 기본값 보기' : 'SHOW APP DEFAULTS';
+return;
+}
+const lang = storage.getLang();
+const isKo = lang === 'ko';
+const prof = storage.loadProfile();
+const curPos = (prof && prof.devicePos) || 'chest';
 const POS_LABEL = isKo
   ? { chest: '가슴', waist: '허리', armband: '암밴드', hand: '손' }
   : { chest: 'CHEST', waist: 'WAIST', armband: 'ARMBAND', hand: 'HAND' };
-let prof = {};
-try { prof = storage.loadProfile(); } catch (e) { prof = {}; }
-const curPos = prof.devicePos || 'chest';
-const overridesMap = prof.motionCalibOverrides || {};
-const undosMap = prof.motionCalibUndos || {};
-const positions = ['chest', 'waist', 'armband', 'hand'];
-
-box.innerHTML = positions.map(pos => {
-  const posLabel = POS_LABEL[pos] || pos.toUpperCase();
-  const isCur = pos === curPos;
-  const ov = overridesMap[pos];
-  const hasUndo = !!undosMap[pos];
-
-  let html = '<div class="garmin-import-item" style="border-color:' + (isCur ? 'var(--primary)' : '#333') + '; margin-bottom:10px;">';
-  html += '<div style="font-weight:900; font-size:var(--fs-sm); margin-bottom:8px; color:' + (isCur ? 'var(--primary)' : '#ccc') + ';">' + posLabel + (isCur ? ('  ← ' + (isKo ? '현재 위치' : 'CURRENT')) : '') + '</div>';
-
-  // ① 지금 적용된 값 (있을 때만)
-  if (ov) {
-    const strideVal = prof.strideCorrectionFactorByPos ? prof.strideCorrectionFactorByPos[pos] : null;
-    const gpsVal = prof.gpsDistCorrectionFactorByPos ? prof.gpsDistCorrectionFactorByPos[pos] : null;
-    const cadVal = prof.cadCorrectionFactorByPos ? prof.cadCorrectionFactorByPos[pos] : null;
-    const paceVal = prof.paceCorrectionFactorByPos ? prof.paceCorrectionFactorByPos[pos] : null;
-    const parts = [];
-    if (ov.gctFallbackRatio != null) parts.push('gctFallbackRatio: <b style="color:#fff;">' + ov.gctFallbackRatio + '</b>');
-    if (ov.rotRejectThreshold != null) parts.push('rotRejectThreshold: <b style="color:#fff;">' + ov.rotRejectThreshold + '</b>');
-    if (ov.vertScale != null) parts.push('vertScale: <b style="color:#fff;">' + ov.vertScale + '</b>');
-    if (typeof strideVal === 'number' && strideVal !== 1.0) parts.push((isKo ? '보폭 보정계수' : 'stride factor') + ': <b style="color:#fff;">' + strideVal.toFixed(3) + '</b>');
-    if (typeof gpsVal === 'number' && gpsVal !== 1.0) parts.push((isKo ? 'GPS 거리 보정계수' : 'gps factor') + ': <b style="color:#fff;">' + gpsVal.toFixed(3) + '</b>');
-    if (typeof cadVal === 'number' && cadVal !== 1.0) parts.push((isKo ? '케이던스 보정계수' : 'cadence factor') + ': <b style="color:#fff;">' + cadVal.toFixed(3) + '</b>');
-    if (typeof paceVal === 'number' && paceVal !== 1.0) parts.push((isKo ? '페이스 보정계수' : 'pace factor') + ': <b style="color:#fff;">' + paceVal.toFixed(3) + '</b>');
-    const dateTxt = ov.appliedAt ? new Date(ov.appliedAt).toLocaleString() : '';
-    html += '<div style="font-size:var(--fs-xxs); color:#7fd3ff; font-weight:800; margin-bottom:4px;">' + (isKo ? '적용된 값' : 'APPLIED VALUES') + '</div>';
-    html += '<div style="font-size:var(--fs-xxs); color:#aaa; line-height:1.9; margin-bottom:8px;">' + (parts.length ? parts.join('<br>') : (isKo ? '적용된 값이 없습니다.' : 'No values applied.')) + '</div>';
-    if (dateTxt) html += '<div style="font-size:var(--fs-xxs); color:#666; margin-bottom:10px;">' + (isKo ? '적용일시: ' : 'Applied: ') + dateTxt + '</div>';
-  } else {
-    html += '<div style="font-size:var(--fs-xxs); color:#888; margin-bottom:10px;">' + (isKo ? '적용된 캘리브레이션이 없습니다 (기본값 사용 중).' : 'No calibration applied (using default).') + '</div>';
-  }
-
-  // ② 이 위치의 최초 기본값 (항상 표시 — 비교 기준)
-  const m = APP_DEFAULT_MOTION_PROFILES[pos] || APP_DEFAULT_MOTION_PROFILES.chest;
-  const f = FACTORY_DEFAULT_FACTORS;
-  html += '<div style="font-size:var(--fs-xxs); color:#888; font-weight:800; margin-bottom:4px;">' + (isKo ? '최초 기본값 (앱 다운로드 시점)' : 'FACTORY DEFAULT (AS DOWNLOADED)') + '</div>';
-  html += '<div style="font-size:var(--fs-xxs); color:#777; line-height:1.9; margin-bottom:10px;">';
-  html += 'gctFallbackRatio: ' + (m.gctFallbackRatio * 100).toFixed(0) + '% (' + m.gctFallbackRatio.toFixed(2) + ')<br>';
-  html += 'vertScale: ' + m.vertScale + '<br>';
-  html += 'groundThreshold: ' + m.groundThreshold + ' / impactThreshold: ' + m.impactThreshold + '<br>';
-  html += 'rotRejectThreshold: ' + m.rotRejectThreshold + '<br>';
-  html += (isKo ? '보정계수' : 'factors') + ' — stride: ' + f.stride.toFixed(2) + ', gps: ' + f.gps.toFixed(2) + ', cad: ' + f.cad.toFixed(2) + ', pace: ' + f.pace.toFixed(2);
-  html += '</div>';
-
-  // ③④ 버튼 (있을 때만 노출)
-  if (ov) {
-    html += '<button style="background:transparent; color:#e57373; border:1px solid #663333; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); cursor:pointer; margin-bottom:6px;" onclick="ui.resetPositionCalibToDefault(\'' + pos + '\')">'
-      + (isKo ? posLabel + ' 최초 기본값으로 초기화' : 'RESET ' + posLabel + ' TO DEFAULT') + '</button>';
-  }
-  if (hasUndo) {
-    html += '<button style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="ui.undoPositionCalib(\'' + pos + '\')">'
-      + (isKo ? '직전 적용 이전으로 되돌리기' : 'UNDO LAST APPLY') + '</button>';
-  }
-
-  html += '</div>';
-  return html;
-}).join('');
-}
-// [추가] CALIBRATION STATUS 카드의 "RESET TO DEFAULT" 버튼: 해당 위치를 가민 분석실과
-// 동일한 garmin.resetCalibration(pos)으로 최초 기본값(1.0, 보정없음)까지 초기화한다.
-resetPositionCalibToDefault(pos) {
-if (typeof garmin !== 'undefined' && garmin.resetCalibration) garmin.resetCalibration(pos);
-this.renderPositionCalibStatus();
-}
-// [추가] CALIBRATION STATUS 카드의 "UNDO LAST APPLY" 버튼: 해당 위치를 가민 분석실과
-// 동일한 garmin.undoLastCalibration(pos)으로 직전 적용 이전 상태로 되돌린다.
-undoPositionCalib(pos) {
-if (typeof garmin !== 'undefined' && garmin.undoLastCalibration) garmin.undoLastCalibration(pos);
-this.renderPositionCalibStatus();
+const order = ['chest', 'waist', 'armband', 'hand'];
+let html = '<div style="background:#1a1a1a; border:1.5px solid #333; border-radius:12px; padding:14px;">';
+html += '<div style="font-size:var(--fs-xxs); color:#888; margin-bottom:10px; line-height:1.5;">' +
+  (isKo ? '보정을 한 번도 적용하지 않았을 때 앱이 실제로 쓰는 기본값입니다.' : 'These are the raw defaults the app uses before any calibration is applied.') +
+  '</div>';
+order.forEach(function(pos) {
+const m = APP_DEFAULT_MOTION_PROFILES[pos];
+const f = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || { stride: 1.0, gps: 1.0, cad: 1.0, pace: 1.0 };
+const isCur = pos === curPos;
+html += '<div style="padding:10px 0; ' + (pos !== order[0] ? 'border-top:1px solid #2a2a2a;' : '') + '">';
+html += '<div style="font-weight:900; font-size:var(--fs-sm); margin-bottom:6px; color:' + (isCur ? 'var(--primary)' : '#ccc') + ';">' +
+  POS_LABEL[pos] + (isCur ? ('  ← ' + (isKo ? '현재 위치' : 'CURRENT')) : '') + '</div>';
+html += '<div style="font-size:var(--fs-xxs); color:#aaa; line-height:1.9;">';
+html += 'gctFallbackRatio: <b style="color:#fff;">' + (m.gctFallbackRatio * 100).toFixed(0) + '%</b> (' + m.gctFallbackRatio.toFixed(2) + ')<br>';
+html += 'vertScale: <b style="color:#fff;">' + m.vertScale + '</b><br>';
+html += 'groundThreshold: <b style="color:#fff;">' + m.groundThreshold + '</b> / impactThreshold: <b style="color:#fff;">' + m.impactThreshold + '</b><br>';
+html += 'rotRejectThreshold: <b style="color:#fff;">' + m.rotRejectThreshold + '</b> / minStepInterval: <b style="color:#fff;">' + m.minStepInterval + 'ms</b><br>';
+html += (isKo ? '보정계수' : 'factors') + ' — stride: <b style="color:#fff;">' + f.stride.toFixed(2) + '</b>, gps: <b style="color:#fff;">' + f.gps.toFixed(2) + '</b>, cad: <b style="color:#fff;">' + f.cad.toFixed(2) + '</b>, pace: <b style="color:#fff;">' + f.pace.toFixed(2) + '</b>';
+html += '</div></div>';
+});
+html += '</div>';
+box.innerHTML = html;
+box.style.display = 'block';
+if (btnLabel) btnLabel.textContent = (isKo ? '앱 기본값 숨기기' : 'HIDE APP DEFAULTS');
 }
 async startCalibrationRun() {
 const lang = storage.getLang();
@@ -11099,6 +11061,9 @@ const garmin = (function () {
     setText('btn-reset-everything-label', isKo ? '전체 로그 초기화' : 'RESET ALL LOG');
     // [추가] 로그 기록만 삭제 버튼 다국어 처리 (가민 데이터는 유지)
     setText('btn-clear-garmin-logs-only-label', isKo ? '로그 기록만 삭제' : 'CLEAR LOGS ONLY');
+    // [추가] 설정 CALIB 탭 맨 아래 통합 버튼 2개(복원/팩토리리셋) 다국어 처리
+    setText('btn-restore-committed-calib-all-label', isKo ? '현재 캘리브레이션으로 되돌아가기 (전체 위치)' : 'RESTORE CURRENT CALIBRATION (ALL POSITIONS)');
+    setText('btn-factory-reset-calib-all-label', isKo ? '팩토리 기본값으로 초기화 (전체 위치)' : 'FACTORY RESET CALIBRATION (ALL POSITIONS)');
   }
 
   function render() {
@@ -13068,6 +13033,96 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     }
   }
 
+  // [추가] 설정 페이지 CALIB 탭용: 위치별로 하나씩 누르지 않고 4개 위치(chest/waist/
+  // armband/hand)를 한 번에 처리하는 통합 버전. 로직은 resetCalibration/
+  // applyCommittedDefault와 동일 — override 존재 여부와 무관하게 항상 값을 채워
+  // 넣는다(설정 페이지에서는 가민분석실 override 여부를 신경 쓸 필요가 없으므로).
+  const ALL_DEVICE_POS = ['chest', 'waist', 'armband', 'hand'];
+
+  // "현재 캘리브레이션으로 되돌아가기": 4개 위치 모두 DEFAULT_PROFILE_FACTORS_BY_POS
+  // (마지막으로 다운로드/커밋된 캘리브레이션 값)로 스냅. 팩토리 리셋으로 날아간 값을
+  // 되돌리는 용도이므로 applyCommittedDefault(pos)를 위치별로 반복 실행하는 것과 동일하다.
+  function applyCommittedDefaultAllPos() {
+    const isKo = isKoLang();
+    try {
+      const prof = storage.loadProfile();
+      if (!prof.strideCorrectionFactorByPos) prof.strideCorrectionFactorByPos = {};
+      if (!prof.gpsDistCorrectionFactorByPos) prof.gpsDistCorrectionFactorByPos = {};
+      if (!prof.cadCorrectionFactorByPos) prof.cadCorrectionFactorByPos = {};
+      if (!prof.paceCorrectionFactorByPos) prof.paceCorrectionFactorByPos = {};
+      ALL_DEVICE_POS.forEach(pos => {
+        const defFactors = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || FACTORY_DEFAULT_FACTORS;
+        prof.strideCorrectionFactorByPos[pos] = defFactors.stride;
+        prof.gpsDistCorrectionFactorByPos[pos] = defFactors.gps;
+        prof.cadCorrectionFactorByPos[pos] = defFactors.cad;
+        prof.paceCorrectionFactorByPos[pos] = defFactors.pace;
+        if (prof.devicePos === pos) {
+          prof.strideCorrectionFactor = defFactors.stride;
+          prof.gpsDistCorrectionFactor = defFactors.gps;
+          prof.cadCorrectionFactor = defFactors.cad;
+          prof.paceCorrectionFactor = defFactors.pace;
+        }
+      });
+      // motionCalibOverrides(gctFallbackRatio 등 개별 오버라이드)는 여기서 건드리지 않는다 —
+      // 이 버튼은 stride/gps/cad/pace 보정계수 4종만 대상으로 한다.
+      storage.saveProfile(prof);
+
+      if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
+        app.motion.applyDevicePos(prof.devicePos || 'chest');
+      }
+
+      renderCalibStatus(isKo);
+      alert(isKo ? '4개 위치(가슴/허리/암밴드/손) 모두 최신 커밋된 캘리브레이션 값으로 되돌아갔습니다.' : 'All 4 positions (chest/waist/armband/hand) restored to the latest committed calibration values.');
+    } catch (err) {
+      alert((isKo ? '복원 중 오류: ' : 'Restore error: ') + err.message);
+    }
+  }
+
+  // "팩토리 원점 디폴트로 리셋": 4개 위치 모두 FACTORY_DEFAULT_FACTORS(항상 1.0,
+  // 보정 없음)로 초기화. 위치별 motionCalibOverrides도 함께 제거해 resetCalibration(pos)와
+  // 동일한 수준으로 완전히 원점으로 되돌린다.
+  async function resetCalibrationAllPos() {
+    const isKo = isKoLang();
+    const msg = isKo
+      ? '4개 위치(가슴/허리/암밴드/손) 보정계수를 모두 팩토리 기본값(1.0, 보정없음)으로 초기화할까요?\n\n필요하면 바로 위 "현재 캘리브레이션으로 되돌아가기" 버튼으로 다시 복원할 수 있습니다.'
+      : 'Reset the correction factors for all 4 positions (chest/waist/armband/hand) to factory defaults (1.0, no correction)?\n\nYou can restore them with the "RESTORE CURRENT CALIBRATION" button right above this if needed.';
+    if (!(await appConfirm(msg))) return;
+    try {
+      const prof = storage.loadProfile();
+      if (!prof.strideCorrectionFactorByPos) prof.strideCorrectionFactorByPos = {};
+      if (!prof.gpsDistCorrectionFactorByPos) prof.gpsDistCorrectionFactorByPos = {};
+      if (!prof.cadCorrectionFactorByPos) prof.cadCorrectionFactorByPos = {};
+      if (!prof.paceCorrectionFactorByPos) prof.paceCorrectionFactorByPos = {};
+      const defFactors = FACTORY_DEFAULT_FACTORS;
+      ALL_DEVICE_POS.forEach(pos => {
+        prof.strideCorrectionFactorByPos[pos] = defFactors.stride;
+        prof.gpsDistCorrectionFactorByPos[pos] = defFactors.gps;
+        prof.cadCorrectionFactorByPos[pos] = defFactors.cad;
+        prof.paceCorrectionFactorByPos[pos] = defFactors.pace;
+        if (prof.devicePos === pos) {
+          prof.strideCorrectionFactor = defFactors.stride;
+          prof.gpsDistCorrectionFactor = defFactors.gps;
+          prof.cadCorrectionFactor = defFactors.cad;
+          prof.paceCorrectionFactor = defFactors.pace;
+        }
+        if (prof.motionCalibOverrides) delete prof.motionCalibOverrides[pos];
+      });
+      storage.saveProfile(prof);
+
+      if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
+        app.motion.applyDevicePos(prof.devicePos || 'chest');
+      }
+
+      renderCalibStatus(isKo);
+      const resultBox = document.getElementById('garmin-calib-result');
+      if (resultBox) resultBox.innerHTML = '';
+      lastSuggestion = null;
+      alert(isKo ? '4개 위치(가슴/허리/암밴드/손) 모두 팩토리 기본값(보정없음)으로 초기화되었습니다.' : 'All 4 positions (chest/waist/armband/hand) reset to factory defaults (no correction).');
+    } catch (err) {
+      alert((isKo ? '초기화 중 오류: ' : 'Reset error: ') + err.message);
+    }
+  }
+
   // [수정] "RESET ALL LOG" 버튼: 가민 분석실 안에 쌓이는 "기록/로그성" 데이터만 지운다.
   // - 가민 FIT 가져오기 목록, 캘리브레이션용 지난 로그 불러오기, 폰 자동저장 정밀 로그
   // - 되돌리기(UNDO) 스냅샷, 평균 적용 대기목록(pending), 마지막 비교결과 화면
@@ -13236,7 +13291,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     }
   }
 
-  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, togglePrecLogSelect, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibComputeCadence, selfCalibApplyCadence };
+  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, togglePrecLogSelect, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibComputeCadence, selfCalibApplyCadence };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
