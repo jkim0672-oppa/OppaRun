@@ -1743,6 +1743,15 @@ alt="runner"/>
 <button id="btn-show-app-defaults" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base);" onclick="ui.toggleAppDefaults()"><span id="btn-show-app-defaults-label">SHOW APP DEFAULTS</span></button>
 <div id="app-defaults-result" style="display:none; margin-top:12px;"></div>
 </div>
+<!-- [추가] 가민분석실의 폰 위치별(가슴/허리/암밴드/손) 캘리브레이션 리셋 버튼들을 통합한
+     버튼 2종. 위 버튼은 "팩토리 기본값 리셋"으로 초기화해버렸을 경우 다시 다운로드(커밋)된
+     캘리브레이션 값으로 복원하는 용도라, 반드시 팩토리 리셋 버튼보다 위에 위치해야 한다. -->
+<div class="section-title" id="section-title-calib-reset">DEFAULT SETTINGS RESET</div>
+<div class="settings-group" id="calib-reset-group">
+<div id="calib-reset-desc" style="font-size:var(--fs-xxs); color:#888; margin:2px 0 10px; line-height:1.5;">Reset the calibration correction values for all wear positions (chest / waist / armband / hand) at once.</div>
+<button id="btn-restore-downloaded-calib" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #445544; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-bottom:10px; cursor:pointer;" onclick="garmin.restoreDownloadedCalibrationAll()"><span id="btn-restore-downloaded-calib-label">RESTORE DOWNLOADED CALIBRATION</span></button>
+<button id="btn-reset-all-calib-factory" style="background:#2a1414; color:var(--danger); border:1.5px solid #663333; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); cursor:pointer;" onclick="garmin.resetAllPositionsToFactory()"><span id="btn-reset-all-calib-factory-label">FACTORY DEFAULT RESET (ALL POSITIONS)</span></button>
+</div>
 <!-- ===== [/CALIBRATION SETTINGS] ===== -->
 </div>
 </div>
@@ -4181,6 +4190,17 @@ if (appDefaultsResultEl && appDefaultsResultEl.style.display !== 'none') {
 } else if (btnShowAppDefaultsLabelEl) {
   btnShowAppDefaultsLabelEl.textContent = isKoCalibTab ? '앱 기본값 보기' : 'SHOW APP DEFAULTS';
 }
+// [추가] 통합 캘리브레이션 리셋 섹션(DEFAULT SETTINGS RESET) 다국어 처리
+const sectionCalibResetEl = document.getElementById('section-title-calib-reset');
+if (sectionCalibResetEl) sectionCalibResetEl.textContent = isKoCalibTab ? '기본값 리셋' : 'DEFAULT SETTINGS RESET';
+const calibResetDescEl = document.getElementById('calib-reset-desc');
+if (calibResetDescEl) calibResetDescEl.textContent = isKoCalibTab
+  ? '모든 착용 위치(가슴 / 허리 / 암밴드 / 손)의 캘리브레이션 보정값을 한 번에 초기화합니다.'
+  : 'Reset the calibration correction values for all wear positions (chest / waist / armband / hand) at once.';
+const btnRestoreDownloadedCalibLabelEl = document.getElementById('btn-restore-downloaded-calib-label');
+if (btnRestoreDownloadedCalibLabelEl) btnRestoreDownloadedCalibLabelEl.textContent = isKoCalibTab ? '다운로드된 캘리브레이션으로 복원' : 'RESTORE DOWNLOADED CALIBRATION';
+const btnResetAllCalibFactoryLabelEl = document.getElementById('btn-reset-all-calib-factory-label');
+if (btnResetAllCalibFactoryLabelEl) btnResetAllCalibFactoryLabelEl.textContent = isKoCalibTab ? '팩토리 기본값 리셋 (전체 위치)' : 'FACTORY DEFAULT RESET (ALL POSITIONS)';
 const nickLabel = document.getElementById('label-crew-nickname');
 if(nickLabel) nickLabel.textContent = t.crewNicknameLabel;
 const delAccLabel = document.getElementById('label-delete-account');
@@ -13025,6 +13045,97 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     }
   }
 
+  // [추가] 설정 > 보정설정(CALIB) 탭 맨 아래에서 쓰는 통합 버튼 2종.
+  // 가민분석실(INFO 탭)의 위치별(가슴/허리/암밴드/손) 개별 RESET/SWITCH 버튼을 한 번에
+  // 4개 위치 전체에 적용하는 래퍼. 위치별 함수(resetCalibration/applyCommittedDefault)와
+  // 달리 motionCalibOverrides 존재 여부로 게이팅하지 않는다 — "전체 초기화/복원"은
+  // 사용자가 명시적으로 누른 버튼이므로 override가 없어도(factor만 커스텀된 경우 포함)
+  // 항상 4개 위치 모두 확실히 리셋/복원되어야 한다.
+  //
+  // 1) restoreDownloadedCalibrationAll(): 아래 "팩토리 기본값 리셋"으로 초기화해버린 뒤,
+  //    다시 다운로드(커밋)된 캘리브레이션 값(DEFAULT_PROFILE_FACTORS_BY_POS)으로 되돌린다.
+  //    개별 motionCalibOverrides(gctFallbackRatio/vertScale 등)는 건드리지 않는다 —
+  //    위치별 applyCommittedDefault()와 동일한 정책.
+  function restoreDownloadedCalibrationAll() {
+    const isKo = isKoLang();
+    try {
+      const prof = storage.loadProfile();
+      if (!prof.strideCorrectionFactorByPos) prof.strideCorrectionFactorByPos = {};
+      if (!prof.gpsDistCorrectionFactorByPos) prof.gpsDistCorrectionFactorByPos = {};
+      if (!prof.cadCorrectionFactorByPos) prof.cadCorrectionFactorByPos = {};
+      if (!prof.paceCorrectionFactorByPos) prof.paceCorrectionFactorByPos = {};
+      Object.keys(DEFAULT_PROFILE_FACTORS_BY_POS).forEach(function (pos) {
+        const defFactors = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || FACTORY_DEFAULT_FACTORS;
+        prof.strideCorrectionFactorByPos[pos] = defFactors.stride;
+        prof.gpsDistCorrectionFactorByPos[pos] = defFactors.gps;
+        prof.cadCorrectionFactorByPos[pos] = defFactors.cad;
+        prof.paceCorrectionFactorByPos[pos] = defFactors.pace;
+        if (prof.devicePos === pos) {
+          prof.strideCorrectionFactor = defFactors.stride;
+          prof.gpsDistCorrectionFactor = defFactors.gps;
+          prof.cadCorrectionFactor = defFactors.cad;
+          prof.paceCorrectionFactor = defFactors.pace;
+        }
+      });
+      storage.saveProfile(prof);
+
+      if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
+        app.motion.applyDevicePos(prof.devicePos || 'chest');
+      }
+
+      renderCalibStatus(isKo);
+      alert(isKo
+        ? '모든 착용 위치(가슴/허리/암밴드/손)가 다운로드된(최신 커밋) 캘리브레이션 값으로 복원되었습니다.'
+        : 'All wear positions (chest / waist / armband / hand) restored to the downloaded (latest committed) calibration values.');
+    } catch (err) {
+      alert((isKo ? '복원 중 오류: ' : 'Restore error: ') + err.message);
+    }
+  }
+
+  // 2) resetAllPositionsToFactory(): 4개 위치 전부를 진짜 출고값(FACTORY_DEFAULT_FACTORS,
+  //    항상 1.0=보정없음)으로 초기화한다. 위치별 resetCalibration()과 동일하게 개별
+  //    motionCalibOverrides도 함께 지운다.
+  function resetAllPositionsToFactory() {
+    const isKo = isKoLang();
+    try {
+      const prof = storage.loadProfile();
+      if (!prof.strideCorrectionFactorByPos) prof.strideCorrectionFactorByPos = {};
+      if (!prof.gpsDistCorrectionFactorByPos) prof.gpsDistCorrectionFactorByPos = {};
+      if (!prof.cadCorrectionFactorByPos) prof.cadCorrectionFactorByPos = {};
+      if (!prof.paceCorrectionFactorByPos) prof.paceCorrectionFactorByPos = {};
+      if (!prof.motionCalibOverrides) prof.motionCalibOverrides = {};
+      const defFactors = FACTORY_DEFAULT_FACTORS;
+      Object.keys(DEFAULT_PROFILE_FACTORS_BY_POS).forEach(function (pos) {
+        prof.strideCorrectionFactorByPos[pos] = defFactors.stride;
+        prof.gpsDistCorrectionFactorByPos[pos] = defFactors.gps;
+        prof.cadCorrectionFactorByPos[pos] = defFactors.cad;
+        prof.paceCorrectionFactorByPos[pos] = defFactors.pace;
+        delete prof.motionCalibOverrides[pos];
+        if (prof.devicePos === pos) {
+          prof.strideCorrectionFactor = defFactors.stride;
+          prof.gpsDistCorrectionFactor = defFactors.gps;
+          prof.cadCorrectionFactor = defFactors.cad;
+          prof.paceCorrectionFactor = defFactors.pace;
+        }
+      });
+      storage.saveProfile(prof);
+
+      if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
+        app.motion.applyDevicePos(prof.devicePos || 'chest');
+      }
+
+      renderCalibStatus(isKo);
+      const resultBox = document.getElementById('garmin-calib-result');
+      if (resultBox) resultBox.innerHTML = '';
+      lastSuggestion = null;
+      alert(isKo
+        ? '모든 착용 위치(가슴/허리/암밴드/손)가 팩토리(출고) 기본값으로 초기화되었습니다.'
+        : 'All wear positions (chest / waist / armband / hand) have been reset to factory default.');
+    } catch (err) {
+      alert((isKo ? '초기화 중 오류: ' : 'Reset error: ') + err.message);
+    }
+  }
+
   // [수정] "RESET ALL LOG" 버튼: 가민 분석실 안에 쌓이는 "기록/로그성" 데이터만 지운다.
   // - 가민 FIT 가져오기 목록, 캘리브레이션용 지난 로그 불러오기, 폰 자동저장 정밀 로그
   // - 되돌리기(UNDO) 스냅샷, 평균 적용 대기목록(pending), 마지막 비교결과 화면
@@ -13193,7 +13304,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     }
   }
 
-  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, togglePrecLogSelect, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibComputeCadence, selfCalibApplyCadence };
+  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, togglePrecLogSelect, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, undoLastCalibration, restoreDownloadedCalibrationAll, resetAllPositionsToFactory, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibComputeCadence, selfCalibApplyCadence };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
