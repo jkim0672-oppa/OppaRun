@@ -1742,9 +1742,11 @@ alt="runner"/>
 <div id="app-defaults-desc" style="font-size:var(--fs-xxs); color:#888; margin:2px 0 10px; line-height:1.5;">Show the built-in default values the running logic currently uses (before any calibration is applied).</div>
 <button id="btn-show-app-defaults" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base);" onclick="ui.toggleAppDefaults()"><span id="btn-show-app-defaults-label">SHOW APP DEFAULTS</span></button>
 <div id="app-defaults-result" style="display:none; margin-top:12px;"></div>
-<!-- [추가] 위치별(가슴/허리/암밴드/손) 보정계수 4종을 한번에 다루는 통합 버튼 2개.
-     위: 최신 커밋된(다운로드된) 캘리브레이션 값으로 복원. 아래: 팩토리 기본값(1.0)으로 초기화.
-     팩토리 리셋으로 값을 날렸을 때 위 복원 버튼으로 되돌릴 수 있도록 순서를 위-아래로 배치. -->
+<!-- [추가] "커밋+다운로드했을 때의 값(=코드에 박힌 기본값)" vs "지금 실제로 적용 중인 값"을
+     위치별로 나란히 비교해서, 뭐가 얼마나 바뀌었는지(=리셋/복원하면 뭐가 사라지는지)
+     한눈에 볼 수 있게 하는 버튼. 순수 표시 기능이며 값을 읽기만 하고 아무것도 저장하지 않는다. -->
+<button id="btn-show-current-data" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:8px;" onclick="ui.toggleCurrentData()"><span id="btn-show-current-data-label">SHOW CURRENT DATA</span></button>
+<div id="current-data-result" style="display:none; margin-top:12px;"></div>
 <button id="btn-restore-committed-calib-all" style="background:#14261a; color:#5fd18a; border:1.5px solid #2d5a3f; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:14px;" onclick="garmin.applyCommittedDefaultAllPos()"><span id="btn-restore-committed-calib-all-label">RESTORE CURRENT CALIBRATION (ALL POSITIONS)</span></button>
 <button id="btn-factory-reset-calib-all" style="background:#2a1414; color:var(--danger); border:1.5px solid #663333; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:8px;" onclick="garmin.resetCalibrationAllPos()"><span id="btn-factory-reset-calib-all-label">FACTORY RESET CALIBRATION (ALL POSITIONS)</span></button>
 </div>
@@ -4682,6 +4684,105 @@ html += '</div>';
 box.innerHTML = html;
 box.style.display = 'block';
 if (btnLabel) btnLabel.textContent = (isKo ? '앱 기본값 숨기기' : 'HIDE APP DEFAULTS');
+}
+// [추가] "SHOW CURRENT DATA": 위치별로 "커밋+다운로드했을 때 값(코드 기본값)"과
+// "지금 실제로 적용 중인 값(override + 보정계수)"을 나란히 비교해서 보여준다.
+// 다른 부분은 색을 다르게 표시해서 한눈에 "뭐가 바뀌었는지"를 알 수 있게 한다.
+// [복원]/[팩토리 리셋] 버튼을 누르기 전에 미리보기 용도로 쓰라고 만든 순수 표시 기능 —
+// 값을 읽기만 하고 저장은 하지 않는다.
+toggleCurrentData() {
+const box = document.getElementById('current-data-result');
+const btnLabel = document.getElementById('btn-show-current-data-label');
+if (!box) return;
+const willShow = box.style.display === 'none';
+if (!willShow) {
+box.style.display = 'none';
+if (btnLabel) btnLabel.textContent = (storage.getLang() === 'ko') ? '현재 데이터 보기' : 'SHOW CURRENT DATA';
+return;
+}
+const lang = storage.getLang();
+const isKo = lang === 'ko';
+const prof = storage.loadProfile();
+const curPos = (prof && prof.devicePos) || 'chest';
+const POS_LABEL = isKo
+  ? { chest: '가슴', waist: '허리', armband: '암밴드', hand: '손' }
+  : { chest: 'CHEST', waist: 'WAIST', armband: 'ARMBAND', hand: 'HAND' };
+const order = ['chest', 'waist', 'armband', 'hand'];
+const overridesMap = prof.motionCalibOverrides || {};
+const factorMapKeys = { stride: 'strideCorrectionFactorByPos', gps: 'gpsDistCorrectionFactorByPos', cad: 'cadCorrectionFactorByPos', pace: 'paceCorrectionFactorByPos' };
+
+// 한 항목(committed vs current)을 비교해서, 다르면 노란색으로 강조해 렌더링.
+function row(label, committedVal, currentVal, fmt) {
+  const cf = fmt ? fmt(committedVal) : committedVal;
+  const nf = fmt ? fmt(currentVal) : currentVal;
+  const changed = String(cf) !== String(nf);
+  const curColor = changed ? '#ffcc44' : '#fff';
+  return '<div style="display:flex; justify-content:space-between; gap:8px;">'
+    + '<span style="color:#888;">' + label + '</span>'
+    + '<span>' + '<span style="color:#666;">' + cf + '</span>'
+    + (changed ? ' → <b style="color:' + curColor + ';">' + nf + '</b>' : '')
+    + '</span></div>';
+}
+
+let html = '<div style="background:#1a1a1a; border:1.5px solid #333; border-radius:12px; padding:14px;">';
+html += '<div style="font-size:var(--fs-xxs); color:#888; margin-bottom:10px; line-height:1.5;">' +
+  (isKo ? '왼쪽 회색 = 커밋+다운로드했을 때 값. 오른쪽 노란색 = 지금 실제로 적용 중인 값(다른 경우만 표시).' : 'Grey (left) = value as of last commit/download. Yellow (right) = currently applied value (shown only where it differs).') +
+  '</div>';
+
+let anyChanged = false;
+
+order.forEach(function(pos) {
+  const committedMotion = APP_DEFAULT_MOTION_PROFILES[pos];
+  const committedFactors = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || { stride: 1.0, gps: 1.0, cad: 1.0, pace: 1.0 };
+  const ov = overridesMap[pos] || null;
+  const curMotion = {
+    gctFallbackRatio: (ov && ov.gctFallbackRatio != null) ? ov.gctFallbackRatio : committedMotion.gctFallbackRatio,
+    vertScale: (ov && ov.vertScale != null) ? ov.vertScale : committedMotion.vertScale,
+    rotRejectThreshold: (ov && ov.rotRejectThreshold != null) ? ov.rotRejectThreshold : committedMotion.rotRejectThreshold,
+    groundThreshold: (ov && ov.groundThreshold != null) ? ov.groundThreshold : committedMotion.groundThreshold,
+    impactThreshold: (ov && ov.impactThreshold != null) ? ov.impactThreshold : committedMotion.impactThreshold
+  };
+  const curFactors = {
+    stride: (prof.strideCorrectionFactorByPos && typeof prof.strideCorrectionFactorByPos[pos] === 'number') ? prof.strideCorrectionFactorByPos[pos] : committedFactors.stride,
+    gps: (prof.gpsDistCorrectionFactorByPos && typeof prof.gpsDistCorrectionFactorByPos[pos] === 'number') ? prof.gpsDistCorrectionFactorByPos[pos] : committedFactors.gps,
+    cad: (prof.cadCorrectionFactorByPos && typeof prof.cadCorrectionFactorByPos[pos] === 'number') ? prof.cadCorrectionFactorByPos[pos] : committedFactors.cad,
+    pace: (prof.paceCorrectionFactorByPos && typeof prof.paceCorrectionFactorByPos[pos] === 'number') ? prof.paceCorrectionFactorByPos[pos] : committedFactors.pace
+  };
+
+  const posChanged = ov != null
+    || curFactors.stride !== committedFactors.stride
+    || curFactors.gps !== committedFactors.gps
+    || curFactors.cad !== committedFactors.cad
+    || curFactors.pace !== committedFactors.pace;
+  if (posChanged) anyChanged = true;
+
+  const isCur = pos === curPos;
+  html += '<div style="padding:10px 0; ' + (pos !== order[0] ? 'border-top:1px solid #2a2a2a;' : '') + '">';
+  html += '<div style="font-weight:900; font-size:var(--fs-sm); margin-bottom:6px; color:' + (isCur ? 'var(--primary)' : '#ccc') + ';">' +
+    POS_LABEL[pos] + (isCur ? ('  ← ' + (isKo ? '현재 위치' : 'CURRENT')) : '') +
+    (posChanged ? '  <span style="color:#ffcc44; font-size:var(--fs-xxs);">● ' + (isKo ? '변경됨' : 'CHANGED') + '</span>' : '') +
+    '</div>';
+  html += '<div style="font-size:var(--fs-xxs); line-height:1.9;">';
+  html += row('gctFallbackRatio', committedMotion.gctFallbackRatio, curMotion.gctFallbackRatio, function(v){ return v.toFixed(2); });
+  html += row('vertScale', committedMotion.vertScale, curMotion.vertScale);
+  html += row('rotRejectThreshold', committedMotion.rotRejectThreshold, curMotion.rotRejectThreshold);
+  html += row('groundThreshold', committedMotion.groundThreshold, curMotion.groundThreshold);
+  html += row('impactThreshold', committedMotion.impactThreshold, curMotion.impactThreshold);
+  html += row((isKo ? '보폭계수 stride' : 'stride'), committedFactors.stride, curFactors.stride, function(v){ return v.toFixed(3); });
+  html += row('gps', committedFactors.gps, curFactors.gps, function(v){ return v.toFixed(3); });
+  html += row((isKo ? '케이던스 cad' : 'cad'), committedFactors.cad, curFactors.cad, function(v){ return v.toFixed(3); });
+  html += row('pace', committedFactors.pace, curFactors.pace, function(v){ return v.toFixed(3); });
+  html += '</div></div>';
+});
+
+if (!anyChanged) {
+  html += '<div style="color:#5fd18a; font-size:var(--fs-xxs); margin-top:6px;">' + (isKo ? '4개 위치 모두 커밋된 기본값과 동일합니다 (변경 없음).' : 'All 4 positions match the committed defaults (no changes).') + '</div>';
+}
+
+html += '</div>';
+box.innerHTML = html;
+box.style.display = 'block';
+if (btnLabel) btnLabel.textContent = (isKo ? '현재 데이터 숨기기' : 'HIDE CURRENT DATA');
 }
 async startCalibrationRun() {
 const lang = storage.getLang();
@@ -11407,8 +11508,19 @@ const garmin = (function () {
     resultBox.innerHTML = '<div style="background:rgba(0,255,136,0.06); border:1px solid #2a3a2f; border-radius:10px; padding:10px 12px; font-size:var(--fs-xs); color:#ccc; line-height:1.7;">'
       + (isKo ? '측정 ' : 'Measured ') + measuredKm.toFixed(3) + 'km vs ' + (isKo ? '실제 ' : 'actual ') + actualKm.toFixed(3) + 'km (' + (diffPct >= 0 ? '+' : '') + diffPct.toFixed(1) + '%)<br>'
       + 'gpsDistCorrectionFactor: ' + curFactor.toFixed(3) + ' → <b style="color:var(--primary);">' + suggested.toFixed(3) + '</b>'
-      + '<button style="margin-top:8px; background:var(--primary); color:#000; border:none; padding:10px; border-radius:8px; width:100%; font-weight:900; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.selfCalibApplyDistance()">' + (isKo ? '✓ [' + posLabel + '] 이 값으로 반영' : '✓ APPLY TO [' + posLabel + ']') + '</button>'
+      + '<div style="display:flex; gap:8px; margin-top:8px;">'
+      + '<button style="flex:1; background:var(--primary); color:#000; border:none; padding:10px; border-radius:8px; font-weight:900; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.selfCalibApplyDistance()">' + (isKo ? '✓ [' + posLabel + '] 이 값으로 반영' : '✓ APPLY TO [' + posLabel + ']') + '</button>'
+      + '<button style="flex:0.5; background:#2a2a2a; color:#999; border:1px solid #444; padding:10px; border-radius:8px; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.selfCalibCancelDistance()">' + (isKo ? '취소' : 'CANCEL') + '</button>'
+      + '</div>'
       + '</div>';
+  }
+  // [추가] CHECK 결과가 잘못됐을 때(예: 거리를 km 대신 m 단위로 입력해 계수가 폭주한 경우)
+  // 그대로 화면에 남아 실수로 APPLY를 누르는 걸 막기 위한 취소 버튼. 결과 박스를 지우고
+  // 대기 중이던 제안값(selfCalibLastDist)도 함께 폐기한다.
+  function selfCalibCancelDistance() {
+    selfCalibLastDist = null;
+    const resultBox = document.getElementById('selfcalib-dist-result');
+    if (resultBox) resultBox.innerHTML = '';
   }
   function selfCalibApplyDistance() {
     const isKo = isKoLang();
@@ -11440,8 +11552,17 @@ const garmin = (function () {
     resultBox.innerHTML = '<div style="background:rgba(0,255,136,0.06); border:1px solid #2a3a2f; border-radius:10px; padding:10px 12px; font-size:var(--fs-xs); color:#ccc; line-height:1.7;">'
       + (isKo ? '측정 ' : 'Measured ') + Math.round(measuredCad) + 'spm vs ' + (isKo ? '실제 ' : 'actual ') + Math.round(actualCad) + 'spm (' + (diffPct >= 0 ? '+' : '') + diffPct.toFixed(1) + '%)<br>'
       + 'cadCorrectionFactor: ' + curFactor.toFixed(3) + ' → <b style="color:var(--primary);">' + suggested.toFixed(3) + '</b>'
-      + '<button style="margin-top:8px; background:var(--primary); color:#000; border:none; padding:10px; border-radius:8px; width:100%; font-weight:900; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.selfCalibApplyCadence()">' + (isKo ? '✓ [' + posLabel + '] 이 값으로 반영' : '✓ APPLY TO [' + posLabel + ']') + '</button>'
+      + '<div style="display:flex; gap:8px; margin-top:8px;">'
+      + '<button style="flex:1; background:var(--primary); color:#000; border:none; padding:10px; border-radius:8px; font-weight:900; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.selfCalibApplyCadence()">' + (isKo ? '✓ [' + posLabel + '] 이 값으로 반영' : '✓ APPLY TO [' + posLabel + ']') + '</button>'
+      + '<button style="flex:0.5; background:#2a2a2a; color:#999; border:1px solid #444; padding:10px; border-radius:8px; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.selfCalibCancelCadence()">' + (isKo ? '취소' : 'CANCEL') + '</button>'
+      + '</div>'
       + '</div>';
+  }
+  // [추가] 위 selfCalibCancelDistance와 동일한 목적의 취소 버튼 — 케이던스 쪽.
+  function selfCalibCancelCadence() {
+    selfCalibLastCad = null;
+    const resultBox = document.getElementById('selfcalib-cad-result');
+    if (resultBox) resultBox.innerHTML = '';
   }
   function selfCalibApplyCadence() {
     const isKo = isKoLang();
@@ -13039,9 +13160,10 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
   // 넣는다(설정 페이지에서는 가민분석실 override 여부를 신경 쓸 필요가 없으므로).
   const ALL_DEVICE_POS = ['chest', 'waist', 'armband', 'hand'];
 
-  // "현재 캘리브레이션으로 되돌아가기": 4개 위치 모두 DEFAULT_PROFILE_FACTORS_BY_POS
-  // (마지막으로 다운로드/커밋된 캘리브레이션 값)로 스냅. 팩토리 리셋으로 날아간 값을
-  // 되돌리는 용도이므로 applyCommittedDefault(pos)를 위치별로 반복 실행하는 것과 동일하다.
+  // "현재 캘리브레이션으로 되돌아가기": 바로 직전에 [팩토리 리셋]을 눌렀던 적이 있으면
+  // 그 리셋 직전 스냅샷(prof._preFactoryResetBackup — stride/gps/cad/pace 4종 계수 +
+  // motionCalibOverrides 전부 포함)으로 완전히 되돌린다. 리셋한 적이 없으면(스냅샷이 없으면)
+  // DEFAULT_PROFILE_FACTORS_BY_POS(마지막으로 다운로드/커밋된 캘리브레이션 값)로 대신 복원한다.
   function applyCommittedDefaultAllPos() {
     const isKo = isKoLang();
     try {
@@ -13050,8 +13172,14 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       if (!prof.gpsDistCorrectionFactorByPos) prof.gpsDistCorrectionFactorByPos = {};
       if (!prof.cadCorrectionFactorByPos) prof.cadCorrectionFactorByPos = {};
       if (!prof.paceCorrectionFactorByPos) prof.paceCorrectionFactorByPos = {};
+      if (!prof.motionCalibOverrides) prof.motionCalibOverrides = {};
+
+      const backup = prof._preFactoryResetBackup;
+
       ALL_DEVICE_POS.forEach(pos => {
-        const defFactors = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || FACTORY_DEFAULT_FACTORS;
+        const defFactors = (backup && backup.factors && backup.factors[pos])
+          ? backup.factors[pos]
+          : (DEFAULT_PROFILE_FACTORS_BY_POS[pos] || FACTORY_DEFAULT_FACTORS);
         prof.strideCorrectionFactorByPos[pos] = defFactors.stride;
         prof.gpsDistCorrectionFactorByPos[pos] = defFactors.gps;
         prof.cadCorrectionFactorByPos[pos] = defFactors.cad;
@@ -13062,9 +13190,24 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
           prof.cadCorrectionFactor = defFactors.cad;
           prof.paceCorrectionFactor = defFactors.pace;
         }
+        // 백업이 있으면 그 스냅샷 그대로 motionCalibOverrides 복원(백업에 없던 위치는 제거).
+        // 백업이 없으면(=팩토리 리셋 없이 순수 "커밋된 기본값으로 복원"인 경우) override를
+        // 전부 지운다 — 커밋 시점엔 gct/vert/rot/ground/impact 값이 이미 profiles(런타임
+        // 원본)에 새 기본값으로 박혀 있으므로, override를 남겨두면 그 위에 얹혀서 "다운로드
+        // 시점 값"이 아니게 되어버린다. override를 지우면 모션 모듈이 profiles를 그대로
+        // 읽어 정확히 다운로드 시점 값이 된다.
+        if (backup) {
+          if (backup.overrides && backup.overrides[pos]) {
+            prof.motionCalibOverrides[pos] = backup.overrides[pos];
+          } else {
+            delete prof.motionCalibOverrides[pos];
+          }
+        } else {
+          delete prof.motionCalibOverrides[pos];
+        }
       });
-      // motionCalibOverrides(gctFallbackRatio 등 개별 오버라이드)는 여기서 건드리지 않는다 —
-      // 이 버튼은 stride/gps/cad/pace 보정계수 4종만 대상으로 한다.
+
+      if (backup) delete prof._preFactoryResetBackup; // 1회성 복원 — 사용 후 스냅샷 소모
       storage.saveProfile(prof);
 
       if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
@@ -13072,20 +13215,24 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       }
 
       renderCalibStatus(isKo);
-      alert(isKo ? '4개 위치(가슴/허리/암밴드/손) 모두 최신 커밋된 캘리브레이션 값으로 되돌아갔습니다.' : 'All 4 positions (chest/waist/armband/hand) restored to the latest committed calibration values.');
+      const msg = backup
+        ? (isKo ? '4개 위치 모두 팩토리 리셋 직전의 캘리브레이션 값(오버라이드 포함)으로 완전히 복원되었습니다.' : 'All 4 positions fully restored to the calibration values (including overrides) from right before the factory reset.')
+        : (isKo ? '4개 위치 모두 커밋+다운로드 시점의 캘리브레이션 값(보정계수 4종 + 모션 오버라이드 초기화)으로 복원되었습니다.' : 'All 4 positions restored to the calibration values as of commit/download (4 factors reset + motion overrides cleared).');
+      alert(msg);
     } catch (err) {
       alert((isKo ? '복원 중 오류: ' : 'Restore error: ') + err.message);
     }
   }
 
-  // "팩토리 원점 디폴트로 리셋": 4개 위치 모두 FACTORY_DEFAULT_FACTORS(항상 1.0,
-  // 보정 없음)로 초기화. 위치별 motionCalibOverrides도 함께 제거해 resetCalibration(pos)와
-  // 동일한 수준으로 완전히 원점으로 되돌린다.
+  // "팩토리 원점 디폴트로 리셋": 지우기 전에 현재 4개 위치의 계수 + motionCalibOverrides를
+  // prof._preFactoryResetBackup에 스냅샷으로 저장해둔다 — 바로 위 [복원] 버튼이 이 스냅샷을
+  // 읽어서 리셋 이전 상태로 정확히 되돌릴 수 있게 하기 위함. 그 다음 4개 위치 모두
+  // FACTORY_DEFAULT_FACTORS(1.0, 보정없음)로 초기화하고 motionCalibOverrides도 제거한다.
   async function resetCalibrationAllPos() {
     const isKo = isKoLang();
     const msg = isKo
-      ? '4개 위치(가슴/허리/암밴드/손) 보정계수를 모두 팩토리 기본값(1.0, 보정없음)으로 초기화할까요?\n\n필요하면 바로 위 "현재 캘리브레이션으로 되돌아가기" 버튼으로 다시 복원할 수 있습니다.'
-      : 'Reset the correction factors for all 4 positions (chest/waist/armband/hand) to factory defaults (1.0, no correction)?\n\nYou can restore them with the "RESTORE CURRENT CALIBRATION" button right above this if needed.';
+      ? '4개 위치(가슴/허리/암밴드/손) 보정계수를 모두 팩토리 기본값(1.0, 보정없음)으로 초기화할까요?\n\n필요하면 바로 위 "현재 캘리브레이션으로 되돌아가기" 버튼으로 지금 값 그대로(오버라이드 포함) 다시 복원할 수 있습니다.'
+      : 'Reset the correction factors for all 4 positions (chest/waist/armband/hand) to factory defaults (1.0, no correction)?\n\nYou can fully restore the current values (including overrides) with the "RESTORE CURRENT CALIBRATION" button right above this if needed.';
     if (!(await appConfirm(msg))) return;
     try {
       const prof = storage.loadProfile();
@@ -13093,6 +13240,23 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       if (!prof.gpsDistCorrectionFactorByPos) prof.gpsDistCorrectionFactorByPos = {};
       if (!prof.cadCorrectionFactorByPos) prof.cadCorrectionFactorByPos = {};
       if (!prof.paceCorrectionFactorByPos) prof.paceCorrectionFactorByPos = {};
+      if (!prof.motionCalibOverrides) prof.motionCalibOverrides = {};
+
+      // 리셋 직전 스냅샷 저장 (덮어쓰기: 항상 "마지막 팩토리 리셋 직전" 상태만 기억하면 됨)
+      const backup = { factors: {}, overrides: {} };
+      ALL_DEVICE_POS.forEach(pos => {
+        backup.factors[pos] = {
+          stride: prof.strideCorrectionFactorByPos[pos] != null ? prof.strideCorrectionFactorByPos[pos] : FACTORY_DEFAULT_FACTORS.stride,
+          gps: prof.gpsDistCorrectionFactorByPos[pos] != null ? prof.gpsDistCorrectionFactorByPos[pos] : FACTORY_DEFAULT_FACTORS.gps,
+          cad: prof.cadCorrectionFactorByPos[pos] != null ? prof.cadCorrectionFactorByPos[pos] : FACTORY_DEFAULT_FACTORS.cad,
+          pace: prof.paceCorrectionFactorByPos[pos] != null ? prof.paceCorrectionFactorByPos[pos] : FACTORY_DEFAULT_FACTORS.pace
+        };
+        if (prof.motionCalibOverrides[pos]) {
+          backup.overrides[pos] = JSON.parse(JSON.stringify(prof.motionCalibOverrides[pos]));
+        }
+      });
+      prof._preFactoryResetBackup = backup;
+
       const defFactors = FACTORY_DEFAULT_FACTORS;
       ALL_DEVICE_POS.forEach(pos => {
         prof.strideCorrectionFactorByPos[pos] = defFactors.stride;
@@ -13105,7 +13269,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
           prof.cadCorrectionFactor = defFactors.cad;
           prof.paceCorrectionFactor = defFactors.pace;
         }
-        if (prof.motionCalibOverrides) delete prof.motionCalibOverrides[pos];
+        delete prof.motionCalibOverrides[pos];
       });
       storage.saveProfile(prof);
 
@@ -13291,7 +13455,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     }
   }
 
-  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, togglePrecLogSelect, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibComputeCadence, selfCalibApplyCadence };
+  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, togglePrecLogSelect, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
