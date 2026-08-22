@@ -5810,8 +5810,11 @@ record.splits.forEach(split => {
 if (split.coord) {
 let splitDist = split.km;
 if(this.currentUnit === 'mile') splitDist = (splitDist * 0.621371).toFixed(2);
-let splitPace = split.pace;
-if(this.currentUnit === 'mile') splitPace = this.convertPaceToUnit(split.pace, 'mile');
+// [수정] 스플릿이 1개뿐인(1km 미만) 짧은 러닝은 리스트 카드와 항상 같은 값을 쓰도록
+// record.avgPace를 우선 사용. split.pace 단독 사용 시 예전 버전에서 저장된 옛 데이터가
+// 남아있으면 리스트(avgPace 기준)와 값이 어긋나 보일 수 있었음(0.63km 4'13" vs 6'41" 사례).
+let splitPace = (record.splits.length === 1 && (record.avgPace || record.pace)) ? (record.avgPace || record.pace) : split.pace;
+if(this.currentUnit === 'mile') splitPace = this.convertPaceToUnit(splitPace, 'mile');
 L.marker(split.coord, {
 icon: L.divIcon({ className: 'pace-marker', html: splitDist + (this.currentUnit === 'km' ? 'k' : 'm') + ': ' + splitPace, iconSize: [75, 16], iconAnchor: [37, 34] })
 }).addTo(this.detailMap);
@@ -5823,10 +5826,11 @@ let splitLogsHtml = '<div class="detail-log-box"><div class="detail-log-title">'
 '<div class="detail-log-item" id="detail-log-meta"><span>' + escapeHtml(this.formatRecordDateTimeLocalized(record.date)) + '</span><span id="detail-log-meta-place">' + ((record.location_name && record._locationLang === lang) ? ('📍 ' + escapeHtml(record.location_name)) : '') + '</span></div>';
 if (record.splits && record.splits.length > 0) { record.splits.forEach(split => {
 let splitDist = split.km;
-let splitPace = split.pace;
+// [수정] 위 지도 마커와 동일한 이유로, 스플릿 1개짜리 기록은 record.avgPace를 우선 사용
+let splitPace = (record.splits.length === 1 && (record.avgPace || record.pace)) ? (record.avgPace || record.pace) : split.pace;
 if(this.currentUnit === 'mile') {
 splitDist = (splitDist * 0.621371).toFixed(2);
-splitPace = this.convertPaceToUnit(split.pace, 'mile');
+splitPace = this.convertPaceToUnit(splitPace, 'mile');
 }
 splitLogsHtml += '<div class="detail-log-item"><span>■ ' + splitDist + (this.currentUnit === 'km' ? ' km' : ' mi') + ' :</span><span>' + (t.splitPace || "Pace") + ' ' + splitPace + ' | ' + (t.splitAlt || "Alt") + ' ' + (split.altFrom || 0) + 'm → ' + (split.altTo || 0) + 'm (' + (split.altDiff >= 0 ? '▲' : '▼') + Math.abs(split.altDiff || 0) + 'm).</span></div>';
 }); } else { let baseAlt = record.alt || 0;
