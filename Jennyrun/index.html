@@ -4532,6 +4532,12 @@ const btnMapFullClose = document.getElementById('btn-map-fullscreen-close');
 if(btnMapFullClose) btnMapFullClose.textContent = '✕ ' + t.close;
 const btnDetailMapFullClose = document.getElementById('btn-detail-map-fullscreen-close');
 if(btnDetailMapFullClose) btnDetailMapFullClose.textContent = '✕ ' + t.close;
+const btnFeedMapFullClose = document.getElementById('btn-feed-map-fullscreen-close');
+if(btnFeedMapFullClose) btnFeedMapFullClose.textContent = '✕ ' + t.close;
+const labelSpeedMini = document.getElementById('label-speed-mini');
+if(labelSpeedMini) labelSpeedMini.textContent = t.speed;
+const btnHrConnectEl = document.getElementById('btn-hr-connect');
+if(btnHrConnectEl && !btnHrConnectEl.disabled && (typeof hrManager === 'undefined' || !hrManager.device || !hrManager.device.gatt || !hrManager.device.gatt.connected)) btnHrConnectEl.textContent = isKo ? '연결하기' : 'CONNECT';
 // GPS 초기 상태바 (러닝 중이 아닐 때만)
 const statusEl = document.getElementById('status');
 if(statusEl && statusEl.textContent.indexOf('GPS') !== -1 && statusEl.textContent.indexOf('INIT') !== -1) {
@@ -10901,19 +10907,22 @@ const hrManager = {
   async connect() {
     const btn = document.getElementById('btn-hr-connect');
     const status = document.getElementById('hr-modal-status');
+    const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang()==='ko' : false;
+    const L = isKo ? { searching:'검색 중...', scanning:'심박 기기를 검색하는 중...', noBt:'블루투스를 지원하지 않는 기기입니다.', connectingTo:(n)=>'연결하는 중: '+n+'...', disconnected:'연결이 해제되었습니다.', connect:'연결하기', connected:(n)=>'연결됨: '+n, disconnect:'연결 해제', noDevice:'선택한 기기가 없습니다.', error:(m)=>'오류: '+m }
+                    : { searching:'Searching...', scanning:'Scanning for HR devices...', noBt:'Bluetooth not supported.', connectingTo:(n)=>'Connecting to '+n+'...', disconnected:'Disconnected.', connect:'CONNECT', connected:(n)=>'Connected: '+n, disconnect:'DISCONNECT', noDevice:'No device selected.', error:(m)=>'Error: '+m };
     // AndroidHrBridge 우선 사용 (WebView 환경)
     if (window.AndroidHrBridge) {
-      if(btn){btn.disabled=true;btn.textContent='Searching...';}
-      if(status) status.textContent='Scanning for HR devices...';
+      if(btn){btn.disabled=true;btn.textContent=L.searching;}
+      if(status) status.textContent=L.scanning;
       window.AndroidHrBridge.startScan();
       return;
     }
-    if (!navigator.bluetooth) { document.getElementById('hr-modal-status').textContent='Bluetooth not supported.'; return; }
+    if (!navigator.bluetooth) { if(status) status.textContent=L.noBt; return; }
     try {
-      if(btn){btn.disabled=true;btn.textContent='Searching...';}
-      if(status) status.textContent='Scanning for HR devices...';
+      if(btn){btn.disabled=true;btn.textContent=L.searching;}
+      if(status) status.textContent=L.scanning;
       this.device = await navigator.bluetooth.requestDevice({ filters:[{services:['heart_rate']}], optionalServices:['heart_rate'] });
-      if(status) status.textContent='Connecting to '+this.device.name+'...';
+      if(status) status.textContent=L.connectingTo(this.device.name);
       const server = await this.device.gatt.connect();
       const service = await server.getPrimaryService('heart_rate');
       this.char = await service.getCharacteristic('heart_rate_measurement');
@@ -10925,14 +10934,14 @@ const hrManager = {
       });
       this.device.addEventListener('gattserverdisconnected', () => {
         this.updateDisplay(0);
-        if(status) status.textContent='Disconnected.';
-        if(btn){btn.disabled=false;btn.textContent='CONNECT';btn.onclick=()=>hrManager.connect();}
+        if(status) status.textContent=L.disconnected;
+        if(btn){btn.disabled=false;btn.textContent=L.connect;btn.onclick=()=>hrManager.connect();}
       });
-      if(status) status.textContent='Connected: '+this.device.name;
-      if(btn){btn.disabled=false;btn.textContent='DISCONNECT';btn.onclick=()=>hrManager.disconnect();}
+      if(status) status.textContent=L.connected(this.device.name);
+      if(btn){btn.disabled=false;btn.textContent=L.disconnect;btn.onclick=()=>hrManager.disconnect();}
     } catch(e) {
-      if(status) status.textContent=e.name==='NotFoundError'?'No device selected.':'Error: '+e.message;
-      if(btn){btn.disabled=false;btn.textContent='CONNECT';btn.onclick=()=>hrManager.connect();}
+      if(status) status.textContent=e.name==='NotFoundError'?L.noDevice:L.error(e.message);
+      if(btn){btn.disabled=false;btn.textContent=L.connect;btn.onclick=()=>hrManager.connect();}
     }
   },
   disconnect() {
@@ -10946,17 +10955,20 @@ const hrManager = {
   // ── 네이티브 BLE 콜백 (AndroidHrBridge → JS) ──
   onNativeScanStart() {
     const status = document.getElementById('hr-modal-status');
-    if(status) status.textContent='Scanning for HR devices...';
+    const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang()==='ko' : false;
+    if(status) status.textContent= isKo ? '심박 기기를 검색하는 중...' : 'Scanning for HR devices...';
   },
   onNativeDeviceFound(name) {
     const status = document.getElementById('hr-modal-status');
-    if(status) status.textContent='Connecting to ' + name + '...';
+    const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang()==='ko' : false;
+    if(status) status.textContent= (isKo ? '연결하는 중: ' : 'Connecting to ') + name + '...';
   },
   onNativeConnected() {
     const btn = document.getElementById('btn-hr-connect');
     const status = document.getElementById('hr-modal-status');
-    if(status) status.textContent='Connected';
-    if(btn){btn.disabled=false;btn.textContent='DISCONNECT';btn.onclick=()=>hrManager.disconnect();}
+    const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang()==='ko' : false;
+    if(status) status.textContent= isKo ? '연결됨' : 'Connected';
+    if(btn){btn.disabled=false;btn.textContent= isKo ? '연결 해제' : 'DISCONNECT';btn.onclick=()=>hrManager.disconnect();}
   },
   onNativeHr(bpm) {
     this.updateDisplay(bpm);
@@ -10964,21 +10976,24 @@ const hrManager = {
   onNativeDisconnect() {
     const btn = document.getElementById('btn-hr-connect');
     const status = document.getElementById('hr-modal-status');
+    const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang()==='ko' : false;
     this.updateDisplay(0);
-    if(status) status.textContent='Disconnected.';
-    if(btn){btn.disabled=false;btn.textContent='CONNECT';btn.onclick=()=>hrManager.connect();}
+    if(status) status.textContent= isKo ? '연결이 해제되었습니다.' : 'Disconnected.';
+    if(btn){btn.disabled=false;btn.textContent= isKo ? '연결하기' : 'CONNECT';btn.onclick=()=>hrManager.connect();}
   },
   onNativeScanTimeout() {
     const btn = document.getElementById('btn-hr-connect');
     const status = document.getElementById('hr-modal-status');
-    if(status) status.textContent='No HR device found. Try again.';
-    if(btn){btn.disabled=false;btn.textContent='CONNECT';btn.onclick=()=>hrManager.connect();}
+    const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang()==='ko' : false;
+    if(status) status.textContent= isKo ? '심박 기기를 찾지 못했습니다. 다시 시도해주세요.' : 'No HR device found. Try again.';
+    if(btn){btn.disabled=false;btn.textContent= isKo ? '연결하기' : 'CONNECT';btn.onclick=()=>hrManager.connect();}
   },
   onNativeError(msg) {
     const btn = document.getElementById('btn-hr-connect');
     const status = document.getElementById('hr-modal-status');
-    if(status) status.textContent='Error: ' + msg;
-    if(btn){btn.disabled=false;btn.textContent='CONNECT';btn.onclick=()=>hrManager.connect();}
+    const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang()==='ko' : false;
+    if(status) status.textContent= (isKo ? '오류: ' : 'Error: ') + msg;
+    if(btn){btn.disabled=false;btn.textContent= isKo ? '연결하기' : 'CONNECT';btn.onclick=()=>hrManager.connect();}
   }
 };
 
