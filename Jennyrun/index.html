@@ -779,15 +779,6 @@ background: rgba(0,0,0,0.65); border: 1px solid #555; border-radius: 6px;
 color: #aaa; font-size:var(--fs-xxs); font-weight: 900; padding: 4px 8px;
 pointer-events: none; letter-spacing: 0.5px;
 }
-#detail-map-info {
-position: absolute; top: calc(var(--top-inset) + 10px); left: 10px; right: 10px; z-index: 1000;
-background: rgba(0,0,0,0.65); border: 1px solid #555; border-radius: 8px;
-color: #eee; font-size:var(--fs-xs); font-weight: 800; padding: 7px 12px;
-pointer-events: none; letter-spacing: 0.3px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-}
-#detail-map-info .dmi-date { color: var(--primary); font-weight: 900; }
-#detail-map-info .dmi-sep { color: #666; }
-#detail-map-info .dmi-place { color: #ddd; }
 #detail-map-fullscreen-overlay {
 display: none;
 position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -1279,7 +1270,6 @@ transform: scale(0.97); background: var(--primary); color: #111; border-color: v
 <div id="detail-map" style="height: 40%; border-bottom: 1px solid #222; background:#000; position:relative;" onclick="ui.openDetailMapFullscreen()">
 <div style="height: var(--top-inset); background:#000;"></div>
 <div id="detail-map-canvas" style="position:absolute; top:var(--top-inset); left:0; right:0; bottom:0;"></div>
-<div id="detail-map-info" style="display:none;"></div>
 <div id="detail-map-hint">⛶ TAP TO EXPAND</div>
 <!-- 초기값은 영어, applyLang에서 동적 교체됨 -->
 </div>
@@ -5778,8 +5768,6 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(this.det
 forceRouteMapBright(detailMapDiv);
 setTimeout(() => { if(this.detailMap) this.detailMap.invalidateSize(); }, 200);
 }
-// [추가] 경로맵 맨 위에 날짜/시간/장소 오버레이 표시
-this.renderDetailMapInfo(record);
 if (record.path && record.path.length > 0 && this.detailMap) {
 let poly = L.polyline(record.path, {color: '#ff3333', weight: 2}).addTo(this.detailMap);
 this.detailMap.fitBounds(poly.getBounds());
@@ -5799,7 +5787,9 @@ icon: L.divIcon({ className: 'pace-marker', html: splitDist + (this.currentUnit 
 }
 });
 }
-let splitLogsHtml = '<div class="detail-log-box"><div class="detail-log-title">' + (t.splitTitle || "SPLIT ANALYTICS") + '</div>';
+// [추가] SPLIT DISTANCE ANALYTICS 카드 첫 줄에 날짜/시간/장소 표시 (지도 위가 아닌 카드 안)
+let splitLogsHtml = '<div class="detail-log-box"><div class="detail-log-title">' + (t.splitTitle || "SPLIT ANALYTICS") + '</div>' +
+'<div class="detail-log-item" id="detail-log-meta"><span>' + escapeHtml(record.date || '') + '</span><span id="detail-log-meta-place">' + (record.location_name ? ('📍 ' + escapeHtml(record.location_name)) : '') + '</span></div>';
 if (record.splits && record.splits.length > 0) { record.splits.forEach(split => {
 let splitDist = split.km;
 let splitPace = split.pace;
@@ -5835,22 +5825,16 @@ LeanAngleUI.routeDetailRowHtml(record, lang)
 let buttonRowHtml = '<div class="detail-btn-row"><button class="btn-detail-act btn-detail-save" onclick="ui.saveDetailAction(' + record.id + ')">' + (t.saveBtn || "SAVE") + '</button><button class="btn-detail-act btn-detail-share" onclick="ui.shareDetailAction(' + record.id + ')">' + (t.shareBtn || "SHARE") + '</button></div>';
 const detailData = document.getElementById('detail-data');
 if(detailData) detailData.innerHTML = splitLogsHtml + dynamicsHtml + buttonRowHtml;
+this.renderDetailMapInfo(record);
 }
 closeDetail() { this.stopRoutePlayback(); const dv = document.getElementById('detail-view'); if(dv) dv.style.display = 'none'; }
-// [추가] 경로맵 상단에 날짜/시간/장소 정보를 표시. 장소는 좌표가 있으면 비동기로 역지오코딩해서 채워넣음.
+// [수정] SPLIT DISTANCE ANALYTICS 카드 첫 줄(날짜/시간/장소)에 표시. 장소는 좌표가 있으면 비동기로 역지오코딩해서 채워넣음.
 async renderDetailMapInfo(record) {
-const infoEl = document.getElementById('detail-map-info');
-if (!infoEl) return;
+if (record.location_name) return; // 이미 채워져 있으면(HTML에 이미 표시됨) 재조회 불필요
+const placeEl = document.getElementById('detail-log-meta-place');
+if (!placeEl) return;
 this._detailMapInfoToken = (this._detailMapInfoToken || 0) + 1;
 const myToken = this._detailMapInfoToken;
-const dateTimeStr = record.date || '';
-if (!dateTimeStr) { infoEl.style.display = 'none'; infoEl.innerHTML = ''; return; }
-infoEl.style.display = 'flex';
-infoEl.innerHTML = '<span class="dmi-date">' + escapeHtml(dateTimeStr) + '</span>';
-if (record.location_name) {
-infoEl.innerHTML += '<span class="dmi-sep">·</span><span class="dmi-place">📍 ' + escapeHtml(record.location_name) + '</span>';
-return;
-}
 if (record.path && record.path.length > 0) {
 const first = record.path[0];
 if (first && first.length >= 2) {
@@ -5859,7 +5843,7 @@ const place = await community.getLocationName(first[0], first[1]);
 if (myToken !== this._detailMapInfoToken) return; // 그 사이 다른 기록을 열었으면 무시
 if (place) {
 record.location_name = place;
-infoEl.innerHTML += '<span class="dmi-sep">·</span><span class="dmi-place">📍 ' + escapeHtml(place) + '</span>';
+placeEl.textContent = '📍 ' + place;
 }
 } catch(e) { /* 위치명 조회 실패는 무시 */ }
 }
