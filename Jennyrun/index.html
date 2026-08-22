@@ -5387,6 +5387,23 @@ d = new Date(parseInt(koMatch[1]), parseInt(koMatch[2])-1, parseInt(koMatch[3]),
 return d;
 }
 dayKey(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+// [추가] 기록 날짜/시간을 기기 로케일이 아닌 앱의 언어 설정(한/영)에 맞춰 일관되게 표시.
+formatRecordDateTimeLocalized(dateStr) {
+if (!dateStr) return '';
+const d = this.parseRecordDate(dateStr);
+if (isNaN(d.getTime())) return dateStr;
+const lang = storage.getLang();
+const y = d.getFullYear(), mo = d.getMonth()+1, day = d.getDate();
+const h24 = d.getHours(), mi = String(d.getMinutes()).padStart(2,'0'), se = String(d.getSeconds()).padStart(2,'0');
+const h12 = (h24 % 12) || 12;
+if (lang === 'ko') {
+const ampm = h24 < 12 ? '오전' : '오후';
+return y + '. ' + mo + '. ' + day + '. ' + ampm + ' ' + h12 + ':' + mi + ':' + se;
+}
+const monthsEn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const ampmEn = h24 < 12 ? 'AM' : 'PM';
+return monthsEn[mo-1] + ' ' + day + ', ' + y + ' ' + h12 + ':' + mi + ':' + se + ' ' + ampmEn;
+}
 // [추가] 전체 기록 기준 개인 기록(PR): 최고 페이스 / 최장 거리 / 최장 시간 / 최고 GCT.
 // 너무 짧은 테스트성 러닝(0.3km 미만)은 페이스 PR 집계에서 제외해 왜곡을 방지.
 computePersonalRecords(h) {
@@ -5789,7 +5806,7 @@ icon: L.divIcon({ className: 'pace-marker', html: splitDist + (this.currentUnit 
 }
 // [추가] SPLIT DISTANCE ANALYTICS 카드 첫 줄에 날짜/시간/장소 표시 (지도 위가 아닌 카드 안)
 let splitLogsHtml = '<div class="detail-log-box"><div class="detail-log-title">' + (t.splitTitle || "SPLIT ANALYTICS") + '</div>' +
-'<div class="detail-log-item" id="detail-log-meta"><span>' + escapeHtml(record.date || '') + '</span><span id="detail-log-meta-place">' + (record.location_name ? ('📍 ' + escapeHtml(record.location_name)) : '') + '</span></div>';
+'<div class="detail-log-item" id="detail-log-meta"><span>' + escapeHtml(this.formatRecordDateTimeLocalized(record.date)) + '</span><span id="detail-log-meta-place">' + ((record.location_name && record._locationLang === lang) ? ('📍 ' + escapeHtml(record.location_name)) : '') + '</span></div>';
 if (record.splits && record.splits.length > 0) { record.splits.forEach(split => {
 let splitDist = split.km;
 let splitPace = split.pace;
@@ -5830,7 +5847,8 @@ this.renderDetailMapInfo(record);
 closeDetail() { this.stopRoutePlayback(); const dv = document.getElementById('detail-view'); if(dv) dv.style.display = 'none'; }
 // [수정] SPLIT DISTANCE ANALYTICS 카드 첫 줄(날짜/시간/장소)에 표시. 장소는 좌표가 있으면 비동기로 역지오코딩해서 채워넣음.
 async renderDetailMapInfo(record) {
-if (record.location_name) return; // 이미 채워져 있으면(HTML에 이미 표시됨) 재조회 불필요
+const curLang = storage.getLang();
+if (record.location_name && record._locationLang === curLang) return; // 이미 현재 언어로 채워져 있으면 재조회 불필요
 const placeEl = document.getElementById('detail-log-meta-place');
 if (!placeEl) return;
 this._detailMapInfoToken = (this._detailMapInfoToken || 0) + 1;
@@ -5843,6 +5861,7 @@ const place = await community.getLocationName(first[0], first[1]);
 if (myToken !== this._detailMapInfoToken) return; // 그 사이 다른 기록을 열었으면 무시
 if (place) {
 record.location_name = place;
+record._locationLang = curLang;
 placeEl.textContent = '📍 ' + place;
 }
 } catch(e) { /* 위치명 조회 실패는 무시 */ }
