@@ -2362,15 +2362,40 @@ const DEFAULT_PROFILE_FACTORS_BY_POS = {
 // 4개 위치 모두 바뀌지만, 이 상수는 절대 코드로 자동 갱신되지 않는 고정 1.0이다.
 // RESET 버튼이 "커밋된 기본값이 마음에 안 들면 진짜 최초 상태(1.0)로" 되돌리는 용도로 이 상수를 참조한다.
 const FACTORY_DEFAULT_FACTORS = { stride: 1.0, gps: 1.0, cad: 1.0, pace: 1.0 };
-// [추가] "앱 기본값 보기" 버튼(설정 > 보정설정) 표시 전용 상수. 실제 러닝 로직이 쓰는 값은
-// CALIB_ANCHOR:DEVICE_PROFILES(약 line 6011)의 `profiles` 객체이며, 이 표는 그 값을 화면에
-// 보여주기 위한 사본이다. CALIB_ANCHOR:DEVICE_PROFILES 값을 고칠 때는 이 표도 반드시 같이 갱신할 것.
-const APP_DEFAULT_MOTION_PROFILES = {
-  chest:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.312, vertScale: 0.511, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
-  waist:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.312, vertScale: 0.511, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
-  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.312, vertScale: 0.511, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
-  hand:    { groundThreshold: 13.5, impactThreshold: 14, gctFallbackRatio: 0.322, vertScale: 0, minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: false, stepTrigger: 'native' },
+// [추가 2026-08-21] gctFallbackRatio만 예외적으로 "진짜 팩토리 원점"이 있다 — Malisoux 2019
+// (레크리에이션 러너 860명 평균 듀티팩터, 남 39%/여 41%)에 근거한 인구평균값 0.40으로,
+// 특정 폰/사용자 실측이 아닌 독립적 연구값이라 FACTORY_DEFAULT_FACTORS(1.0)와 같은 자격을 가짐.
+// groundThreshold/impactThreshold/vertScale/rotRejectThreshold는 대응하는 연구값이 없는
+// 순수 경험적 튜닝값이라 이런 팩토리 앵커를 두지 않는다(현재 커밋된 값이 유일한 기준점).
+// 이 상수는 FACTORY_DEFAULT_FACTORS와 마찬가지로 buildPatchedHtml()이 캘리브레이션을
+// 커밋해도 절대 자동 갱신되지 않는다 — DEVICE_MOTION_PROFILES.*.gctFallbackRatio(커밋될 때마다
+// 바뀔 수 있는 값)와는 별개로, "팩토리 리셋"이 항상 돌아갈 수 있는 고정된 바닥값 역할.
+const FACTORY_DEFAULT_GCT_RATIO = 0.40;
+// [리팩토링 2026-08-21] 위치별 모션 프로파일(gctFallbackRatio 등)이 이 파일 3곳
+// (여기 / applyDevicePos()의 profiles / DEVICE_PROFILE_DEFAULTS)에 각각 하드코딩
+// 복붙되어 있었고, 그 결과 수정 사이클마다 한두 곳씩 값이 어긋나는 사고가 반복됐음
+// (RESET이 옛 값으로 복원되거나, "앱 기본값 보기"가 실제와 다른 값을 표시).
+// 이제 이 표가 유일한 원본(single source of truth)이다. 값을 바꿀 땐 반드시
+// 여기만 고치면 되고, 나머지 두 곳은 이 객체를 그대로 참조하므로 항상 자동으로
+// 일치한다. buildPatchedHtml()의 캘리브레이션 커밋 패치도 이제 이 한 곳만 patch한다.
+// [CALIB_ANCHOR:DEVICE_PROFILES] 캘리브레이션 스니펫(코드 반영용)을 여기 표에 붙여넣으세요.
+const DEVICE_MOTION_PROFILES = {
+  chest:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0.511, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정 2026-08-08] gctFallbackRatio를 폰 1대 실측값(0.419) 대신 듀티팩터 인구평균(Malisoux 2019, 860명 레크리에이션 러너 남 39%/여 41%)인 0.40으로 통일 — 특정 폰에 편향되지 않은 보편적 시작값. vertScale은 원시 진폭→cm 환산용 앱 내부 계수라 대응하는 연구값이 없어 실측 그대로 유지.
+  waist:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0.511, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정 2026-08-21] 허리 위치의 신호 패턴이 가슴과 크게 다르지 않다는 판단 하에, 팩토리 기본값을 가슴과 완전히 통일
+  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0.511, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정 2026-08-21] 암밴드 위치의 신호 패턴이 가슴과 크게 다르지 않다는 판단 하에, 팩토리 기본값을 가슴과 완전히 통일
+  // [수정] 손에 들고 뛸 때는 자체 가속도/자이로 임계값 알고리즘으로 걸음을 "직접 판정"하지 않고
+  // 안드로이드 표준 방식(TYPE_STEP_DETECTOR)을 걸음 판정의 주(主) 신호로 쓴다. groundThreshold/
+  // impactThreshold/rotRejectThreshold는 이제 걸음을 세는 데 쓰이지 않고 GCT 추정 등 보조 계산에만
+  // 남아있다. [수정 2026-08-02] hand는 GCT가 과소측정(가민 대비 -35%, 1회 실측 기준)되는 경향이
+  // 나와 gctFallbackRatio를 올렸었음(0.35→0.42→duty factor 통일로 0.40). chest처럼 3회 평균이
+  // 아니라 1회 실측만 반영한 잠정치이므로, 손 위치로 2~3번 더 뛰어서 CALIBRATION CHECK로 재확인 권장.
+  // [확인 필요] nativeRescueEnabled: 원래 의도는 "손 위치에서만 true"(아래 applyDevicePos 참고)
+  // 였는데 실제 값은 false로 되어 있어 손에서 네이티브 구제가 꺼진 상태 — 의도된 값인지 재검토 필요.
+  hand:    { groundThreshold: 13.5, impactThreshold: 14, gctFallbackRatio: 0.40, vertScale: 0, minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: false, stepTrigger: 'native' },
 };
+// [리팩토링] 기존 코드 여러 곳에서 이 이름으로 참조하던 걸 그대로 두기 위한 별칭.
+// 값을 직접 갖지 않고 위 DEVICE_MOTION_PROFILES를 그대로 가리키므로 항상 동기화됨.
+const APP_DEFAULT_MOTION_PROFILES = DEVICE_MOTION_PROFILES;
 // [리팩토링] "가민 비교 → 보정 제안 적용" 로직이 두 곳(평균값 적용 / 개별 러닝 선택 적용)에
 // 변수명(avgSuggestion vs sel)만 다르고 완전히 동일하게 복붙돼 있던 것을 하나로 통합.
 // prof 객체를 직접 수정한다(호출부에서 storage.saveProfile(prof) 저장은 그대로 각자 담당).
@@ -6093,36 +6118,13 @@ this.applyDevicePos(savedPos);
 // hand   : 팔 스윙 크게 섞임 → 케이던스만 참고, vert 비활성화
 // ── 착용위치 적용 / 캘리브레이션 / 리셋 ──
 applyDevicePos(pos) {
-// [기본값 안내] 아래 표(위치별 gctFallbackRatio/vertScale 등)가 지금 이 코드의 "기본값"이며,
-// RESET 버튼이 되돌아가는 목표점이자 새로 설치했을 때의 초기값이다.
-// 가민분석실에서 보정 → "수정된 HTML 다운로드" → 그 파일을 커밋해서 배포하면, 그 시점에
-// 반영된 값이 곧 다음부터의 새 기본값이 된다(=이 표의 숫자가 자동으로 갱신됨).
-// 즉 "기본값을 고친다" = "보정 후 다운로드한 파일을 커밋한다"와 같은 뜻.
-// [CALIB_ANCHOR:DEVICE_PROFILES] 캘리브레이션 스니펫(코드 반영용)을 여기 표에 붙여넣으세요.
-const profiles = {
-// [수정 2026-07-31] 걸음판정(케이던스/페이스의 근간)을 위치 구분 없이 전부 안드로이드
-// 표준 걸음센서(TYPE_STEP_DETECTOR)로 통일. hand에서 먼저 검증했던 것과 같은 이유 —
-// 가속도/자이로로 걸음을 "직접 세려는" 시도 자체가 불안정의 근본 원인이었음. 이제 모든
-// 위치에서 groundThreshold/impactThreshold/rotRejectThreshold는 걸음을 세는 데는 쓰이지
-// 않고, GCT 추정·수직진동·좌우밸런스 등 보조 지표 계산에만 쓰인다(값 자체는 위치별
-// 신호 패턴이 달라 계속 따로 유지).
-chest:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0.511, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정 2026-08-08] gctFallbackRatio를 폰 1대 실측값(0.419) 대신 듀티팩터 인구평균(Malisoux 2019, 860명 레크리에이션 러너 남 39%/여 41%)인 0.40으로 통일 — 특정 폰에 편향되지 않은 보편적 시작값. vertScale은 원시 진폭→cm 환산용 앱 내부 계수라 대응하는 연구값이 없어 실측 그대로 유지. // [수정 2026-08-15] 위 커밋에서 주석만 고치고 실제 값(0.21, 옛날 값)은 안 바뀌어 있던 것을 바로잡음 — 실제로 0.40 적용.
-  waist:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0.511, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정 2026-08-21] 허리 위치의 신호 패턴이 가슴과 크게 다르지 않다는 판단 하에, 팩토리 기본값을 가슴과 완전히 통일
-  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0.511, minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정 2026-08-21] 암밴드 위치의 신호 패턴이 가슴과 크게 다르지 않다는 판단 하에, 팩토리 기본값을 가슴과 완전히 통일
-  // [수정] 손에 들고 뛸 때는 자체 가속도/자이로 임계값 알고리즘으로 걸음을 "직접 판정"하지 않고,
-  // 안드로이드 표준 방식(TYPE_STEP_DETECTOR 하드웨어 걸음 센서)을 걸음 판정의 주(主) 신호로 쓴다.
-  // 팔 스윙이 섞여 자체 알고리즘으로는 오감지/언더카운트가 심했던 문제의 근본 원인이 애초에
-  // "가속도/자이로로 걸음을 직접 세려던 것"이었으므로, 위치별 threshold를 조정하는 미봉책 대신
-  // 걸음 유무 판정 자체를 하드웨어 센서에 맡긴다. groundThreshold/impactThreshold/rotRejectThreshold는
-  // 이제 걸음을 세는 데는 쓰이지 않고, GCT 추정 등 보조 계산에만 남아있는 값이라 의미 없음(폴백용으로만 유지).
-  // stepTrigger: 'native'면 handleMotion()의 자체 판정 블록은 건너뛰고, onNativeStep()이 실제 트리거가 됨.
-  // [수정 2026-08-02] hand는 chest와 반대로 GCT가 과소측정(가민 대비 -35%, 1회 실측 기준)되는
-  // 경향이 나와서 gctFallbackRatio를 올림(0.35→0.42, ±20% clamp 적용). chest처럼 3회 평균이
-  // 아니라 1회 실측만 반영한 잠정치이므로, 손 위치로 2~3번 더 뛰어서 CALIBRATION CHECK로
-  // 재확인 후 다듬는 걸 권장. vertScale/vertEnabled는 그대로 유지(팔 스윙 때문에 수직진동
-  // 자체를 계산하지 않는 건 의도된 동작이라 이번 수정 대상이 아님).
-  hand:    { groundThreshold: 13.5, impactThreshold: 14, gctFallbackRatio: 0.40, vertScale: 0, minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정 2026-08-08] gctFallbackRatio 0.42→0.40, 듀티팩터 인구평균으로 통일 (근거는 chest 줄 주석 참고) // [수정 2026-08-15] 위 커밋에서 주석만 고치고 실제 값(0.33, 옛날 값)은 안 바뀌어 있던 것을 바로잡음 — 실제로 0.40 적용.
-};
+// [기본값 안내] 위치별 gctFallbackRatio/vertScale 등 기본값은 이제 이 파일에 하드코딩된
+// 리터럴이 아니라 전역 DEVICE_MOTION_PROFILES(파일 상단, [CALIB_ANCHOR:DEVICE_PROFILES])를
+// 그대로 참조한다. RESET 버튼과 "앱 기본값 보기" 화면도 전부 같은 객체를 참조하므로,
+// 값을 바꾸려면 DEVICE_MOTION_PROFILES 한 곳만 고치면 3곳 모두 자동으로 일치한다.
+// (리팩토링 전엔 이 자리에 profiles 리터럴이 별도로 복붙돼 있었고, DEVICE_PROFILE_DEFAULTS /
+// APP_DEFAULT_MOTION_PROFILES와 값이 어긋나는 사고가 반복됐음 — 2026-08-21 통합.)
+const profiles = DEVICE_MOTION_PROFILES;
 const p = profiles[pos] || profiles.chest;
 this.groundThreshold  = p.groundThreshold;
 this.impactThreshold  = p.impactThreshold;
@@ -12705,16 +12707,10 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
   // [추가] 현재 motionCalibOverride 적용 상태를 CALIBRATION CHECK 섹션에 표시.
   // 적용된 게 없으면 아무것도 보여주지 않고, 있으면 언제/무엇이 바뀌었는지 요약 +
   // 코드 기본값으로 되돌리는 RESET 버튼을 보여준다.
-  // [추가] applyDevicePos()의 위치별 기본값과 동일한 표(코드와 반드시 값이 같아야
-  // 정확한 스니펫이 나오므로, 코드 기본값을 고치면 이 표도 같이 고쳐야 함).
-  // [기본값 안내] 이 표 = 지금 이 코드의 기본값. 가민분석실에서 보정 후 "수정된 HTML
-  // 다운로드"→커밋하면 해당 위치 줄이 그 시점 값으로 자동 갱신된다(buildPatchedHtml 1-b단계).
-  const DEVICE_PROFILE_DEFAULTS = {
-    chest:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.312, vertScale: 0.511, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정 2026-08-08] applyDevicePos()와 동일하게 gctFallbackRatio 듀티팩터 인구평균 0.40으로 통일 — 이 값이 곧 "리셋 시 되돌아갈 원본값" // [수정 2026-08-15] 실제 값이 0.21로 안 바뀌어 있던 것을 바로잡음
-    waist:   { groundThreshold: 10.5, impactThreshold: 10.0, gctFallbackRatio: 0.40,  vertScale: 5.5,   minStepInterval: 230, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정 2026-08-08] gctFallbackRatio 0.38→0.40 통일
-    armband: { groundThreshold: 12.0, impactThreshold: 12.5, gctFallbackRatio: 0.40,  vertScale: 4.5,   minStepInterval: 240, vertEnabled: true,  rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정 2026-08-08] gctFallbackRatio 0.33→0.40 통일
-    hand:    { groundThreshold: 13.5, impactThreshold: 14, gctFallbackRatio: 0.322, vertScale: 0, minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정 2026-08-08] gctFallbackRatio 0.42→0.40 통일 // [수정 2026-08-15] 실제 값이 0.33으로 안 바뀌어 있던 것을 바로잡음
-  };
+  // [리팩토링 2026-08-21] 예전엔 여기 따로 리터럴 표가 있어서 applyDevicePos()의 profiles
+  // 표와 값이 어긋나는 사고(RESET이 옛 기본값으로 복원됨)가 있었음. 이제 전역 원본
+  // DEVICE_MOTION_PROFILES를 그대로 참조하므로 라이브 로직과 항상 동일한 값으로 RESET된다.
+  const DEVICE_PROFILE_DEFAULTS = DEVICE_MOTION_PROFILES;
   const DEFAULT_ROT_REJECT_THRESHOLD = 220;
 
   // [수정 2026-08-08] 위치별 보정계수 기본값 표는 전역(2219번 줄 근처)의
@@ -12885,7 +12881,11 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     patches.forEach(function (patch) {
       const ov = patch.ov, curProf = patch.curProf, pos = patch.pos;
 
-      // 1) DEVICE_PROFILES 표 안, 해당 착용위치 줄만 치환
+      // 1) [리팩토링 2026-08-21] 위치별 모션 프로파일은 이제 DEVICE_MOTION_PROFILES
+      // 한 곳에만 리터럴로 존재하고(anchor: CALIB_ANCHOR:DEVICE_PROFILES), applyDevicePos()의
+      // profiles와 DEVICE_PROFILE_DEFAULTS, APP_DEFAULT_MOTION_PROFILES는 전부 그걸 참조만
+      // 하므로, 이 한 곳만 patch하면 3곳 모두 자동으로 동일한 값이 된다(예전엔 3곳을 각각
+      // 따로 patch해야 했고, 그중 한 곳이라도 빠지면 RESET/화면표시가 라이브 값과 어긋났음).
       // [수정 2026-08-08 — 중요 버그 수정] newObj가 nativeRescueEnabled/stepTrigger 필드를
       // 안 넣고 있어서, 다운로드해서 커밋하면 그 위치의 stepTrigger:'native'가 통째로
       // 사라지는 심각한 버그가 있었음(=커밋한 순간 그 위치가 다시 자체 알고리즘으로
@@ -12905,28 +12905,6 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
           const start = devAnchorIdx + m.index;
           const end = start + m[0].length;
           html = html.slice(0, start) + m[1] + newObj + html.slice(end);
-        }
-      }
-
-      // 1-b) [추가 2026-08-08] DEVICE_PROFILE_DEFAULTS 표(가민 분석실 화면 표시/스니펫용)의
-      // 같은 위치 줄도 동일하게 patch. 이걸 안 하면 applyDevicePos()는 새 값으로 바뀌는데
-      // 화면에 보이는 "기본값" 표시와 RESET이 참조하는 표는 옛날 값으로 남아 다시 어긋남.
-      if (ov && pos) {
-        const defaultsVarIdx = html.indexOf('const DEVICE_PROFILE_DEFAULTS = {');
-        if (defaultsVarIdx !== -1) {
-          const base3 = DEVICE_PROFILE_DEFAULTS[pos] || DEVICE_PROFILE_DEFAULTS.chest;
-          const finalGct3 = ov.gctFallbackRatio != null ? ov.gctFallbackRatio : base3.gctFallbackRatio;
-          const finalVert3 = ov.vertScale != null ? ov.vertScale : base3.vertScale;
-          const finalRot3 = ov.rotRejectThreshold != null ? ov.rotRejectThreshold : base3.rotRejectThreshold;
-          const newObj3 = buildDeviceProfileLineText(base3, finalGct3, finalVert3, finalRot3);
-          const slice3 = html.slice(defaultsVarIdx);
-          const re3 = new RegExp('(' + pos + ':\\s*)\\{[^}]*\\}');
-          const m3 = slice3.match(re3);
-          if (m3) {
-            const start3 = defaultsVarIdx + m3.index;
-            const end3 = start3 + m3[0].length;
-            html = html.slice(0, start3) + m3[1] + newObj3 + html.slice(end3);
-          }
         }
       }
 
@@ -13136,7 +13114,13 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         prof.cadCorrectionFactor = defFactors.cad;
         prof.paceCorrectionFactor = defFactors.pace; // [추가]
       }
+      // [수정 2026-08-21] 완전히 지우면 gctFallbackRatio도 "지금 커밋된 DEVICE_MOTION_PROFILES
+      // 값"으로 폴백하게 되는데, 그 값은 캘리브레이션 커밋마다 바뀔 수 있어 진짜 "출고 기본값"이
+      // 아니다. gctFallbackRatio는 유일하게 객관적 팩토리 원점(인구평균 0.40)이 있으므로, 이것만
+      // 별도 override로 고정해서 남겨둔다. 나머지 필드는 override가 없으니 기존과 동일하게
+      // 커밋된 DEVICE_MOTION_PROFILES 값을 그대로 따른다(대응하는 팩토리 원점이 없으므로).
       delete prof.motionCalibOverrides[pos];
+      prof.motionCalibOverrides[pos] = { gctFallbackRatio: FACTORY_DEFAULT_GCT_RATIO };
       storage.saveProfile(prof);
 
       if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
@@ -13309,6 +13293,10 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
           prof.paceCorrectionFactor = defFactors.pace;
         }
         delete prof.motionCalibOverrides[pos];
+        // [수정 2026-08-21] factors(stride/gps/cad/pace)와 마찬가지로 gctFallbackRatio도
+        // 팩토리 원점(0.40, 인구평균)이 있으므로 여기서 고정. 나머지 모션 필드는 대응하는
+        // 팩토리 원점이 없어 override 없이 커밋된 DEVICE_MOTION_PROFILES 값을 그대로 따른다.
+        prof.motionCalibOverrides[pos] = { gctFallbackRatio: FACTORY_DEFAULT_GCT_RATIO };
       });
       storage.saveProfile(prof);
 
