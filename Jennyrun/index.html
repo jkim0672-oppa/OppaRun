@@ -3209,6 +3209,54 @@ setActivityMode(mode) { localStorage.setItem(this.ACTIVITY_MODE_KEY, mode); }
 getOnboardingDone() { return sessionStorage.getItem(this.ONBOARDING_DONE_KEY) === '1'; }
 setOnboardingDone(done) { sessionStorage.setItem(this.ONBOARDING_DONE_KEY, done ? '1' : '0'); }
 }
+// [추가] "MM:SS" 또는 "HH:MM:SS" 형태의 기록 시간 문자열 → 총 초
+function parseTimeStrToSeconds(str) {
+if (!str || typeof str !== 'string') return null;
+const parts = str.split(':').map(p => parseInt(p, 10));
+if (parts.some(isNaN)) return null;
+if (parts.length === 3) return parts[0]*3600 + parts[1]*60 + parts[2];
+if (parts.length === 2) return parts[0]*60 + parts[1];
+return null;
+}
+// [추가] 초 → "M'SS\"" 페이스 문자열
+function formatSecondsToPaceStr(sec) {
+if (!sec || sec <= 0 || !isFinite(sec)) return INVALID_PACE;
+const s = Math.round(sec);
+const m = Math.floor(s / 60);
+const r = s % 60;
+return m + "'" + String(r).padStart(2, '0') + '"';
+}
+// [수정] 예전 버전엔 마지막 1km 미만 자투리 구간의 페이스를 "그 구간에 걸린 초"를 그대로
+// 분'초로 표시해버리는 버그가 있었음(예: 0.35km를 107초에 뛰었는데 나누지 않고 그대로
+// 1'47"로 표시 — 정상이라면 107÷0.35=305초, 즉 5'05"가 맞음). pushKmSplitIfNeeded()는
+// 이미 고쳐졌지만, 그 전에 저장된 옛 기록엔 잘못된 값이 남아있을 수 있어 화면에 뿌리기
+// 직전에 마지막 자투리 구간만 "전체 기록시간 − 온전한 1km 구간들 시간"으로 재계산해
+// 항상 바로잡아서 보여준다(리스트 카드의 avgPace와도 자연히 일치하게 됨).
+function getDisplaySplits(record) {
+if (!record.splits || record.splits.length === 0) return record.splits;
+const totalSec = parseTimeStrToSeconds(record.time);
+if (!totalSec) return record.splits;
+const splits = record.splits;
+let prevKm = 0, sumFullSec = 0, allFullOk = true;
+for (let i = 0; i < splits.length - 1; i++) {
+const km = parseFloat(splits[i].km) || 0;
+const segKm = km - prevKm;
+const segSec = paceStrToSeconds(splits[i].pace);
+if (segSec == null || segKm < 0.9) { allFullOk = false; break; }
+sumFullSec += segSec * segKm;
+prevKm = km;
+}
+if (!allFullOk) return splits;
+const last = splits[splits.length - 1];
+const lastKm = (parseFloat(last.km) || 0) - prevKm;
+if (lastKm <= 0 || lastKm >= 0.99) return splits; // 마지막도 온전한 1km면 그대로 사용
+const lastSec = totalSec - sumFullSec;
+if (lastSec <= 0) return splits;
+const correctedPace = formatSecondsToPaceStr(lastSec / lastKm);
+const patched = splits.slice();
+patched[patched.length - 1] = Object.assign({}, last, { pace: correctedPace });
+return patched;
+}
 // ========== UIManager ==========
 class UIManager {
 constructor() {
@@ -5805,15 +5853,16 @@ this.detailMap.fitBounds(poly.getBounds());
 // [수정] 방향 화살표는 제거하고, 시작 지점/종료 지점만 표시 (작은 삼각형/사각형 마커)
 addRouteEndpointMarkers(this.detailMap, record.path);
 }
-if (record.splits && record.splits.length > 0 && this.detailMap) {
-record.splits.forEach(split => {
+// [수정] 지도 마커/SPLIT ANALYTICS 카드 둘 다 이 보정된 스플릿 배열을 사용
+const displaySplits = getDisplaySplits(record);
+if (displaySplits && displaySplits.length > 0 && this.detailMap) {
+displaySplits.forEach(split => {
 if (split.coord) {
 let splitDist = split.km;
 if(this.currentUnit === 'mile') splitDist = (splitDist * 0.621371).toFixed(2);
 // [수정] 스플릿이 1개뿐인(1km 미만) 짧은 러닝은 리스트 카드와 항상 같은 값을 쓰도록
-// record.avgPace를 우선 사용. split.pace 단독 사용 시 예전 버전에서 저장된 옛 데이터가
-// 남아있으면 리스트(avgPace 기준)와 값이 어긋나 보일 수 있었음(0.63km 4'13" vs 6'41" 사례).
-let splitPace = (record.splits.length === 1 && (record.avgPace || record.pace)) ? (record.avgPace || record.pace) : split.pace;
+// record.avgPace를 우선 사용.
+let splitPace = (displaySplits.length === 1 && (record.avgPace || record.pace)) ? (record.avgPace || record.pace) : split.pace;
 if(this.currentUnit === 'mile') splitPace = this.convertPaceToUnit(splitPace, 'mile');
 L.marker(split.coord, {
 icon: L.divIcon({ className: 'pace-marker', html: splitDist + (this.currentUnit === 'km' ? 'k' : 'm') + ': ' + splitPace, iconSize: [75, 16], iconAnchor: [37, 34] })
@@ -5824,10 +5873,10 @@ icon: L.divIcon({ className: 'pace-marker', html: splitDist + (this.currentUnit 
 // [추가] SPLIT DISTANCE ANALYTICS 카드 첫 줄에 날짜/시간/장소 표시 (지도 위가 아닌 카드 안)
 let splitLogsHtml = '<div class="detail-log-box"><div class="detail-log-title">' + (t.splitTitle || "SPLIT ANALYTICS") + '</div>' +
 '<div class="detail-log-item" id="detail-log-meta"><span>' + escapeHtml(this.formatRecordDateTimeLocalized(record.date)) + '</span><span id="detail-log-meta-place">' + ((record.location_name && record._locationLang === lang) ? ('📍 ' + escapeHtml(record.location_name)) : '') + '</span></div>';
-if (record.splits && record.splits.length > 0) { record.splits.forEach(split => {
+if (displaySplits && displaySplits.length > 0) { displaySplits.forEach(split => {
 let splitDist = split.km;
 // [수정] 위 지도 마커와 동일한 이유로, 스플릿 1개짜리 기록은 record.avgPace를 우선 사용
-let splitPace = (record.splits.length === 1 && (record.avgPace || record.pace)) ? (record.avgPace || record.pace) : split.pace;
+let splitPace = (displaySplits.length === 1 && (record.avgPace || record.pace)) ? (record.avgPace || record.pace) : split.pace;
 if(this.currentUnit === 'mile') {
 splitDist = (splitDist * 0.621371).toFixed(2);
 splitPace = this.convertPaceToUnit(splitPace, 'mile');
