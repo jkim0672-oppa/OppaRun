@@ -779,6 +779,15 @@ background: rgba(0,0,0,0.65); border: 1px solid #555; border-radius: 6px;
 color: #aaa; font-size:var(--fs-xxs); font-weight: 900; padding: 4px 8px;
 pointer-events: none; letter-spacing: 0.5px;
 }
+#detail-map-info {
+position: absolute; top: calc(var(--top-inset) + 10px); left: 10px; right: 10px; z-index: 1000;
+background: rgba(0,0,0,0.65); border: 1px solid #555; border-radius: 8px;
+color: #eee; font-size:var(--fs-xs); font-weight: 800; padding: 7px 12px;
+pointer-events: none; letter-spacing: 0.3px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+#detail-map-info .dmi-date { color: var(--primary); font-weight: 900; }
+#detail-map-info .dmi-sep { color: #666; }
+#detail-map-info .dmi-place { color: #ddd; }
 #detail-map-fullscreen-overlay {
 display: none;
 position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -1270,6 +1279,7 @@ transform: scale(0.97); background: var(--primary); color: #111; border-color: v
 <div id="detail-map" style="height: 40%; border-bottom: 1px solid #222; background:#000; position:relative;" onclick="ui.openDetailMapFullscreen()">
 <div style="height: var(--top-inset); background:#000;"></div>
 <div id="detail-map-canvas" style="position:absolute; top:var(--top-inset); left:0; right:0; bottom:0;"></div>
+<div id="detail-map-info" style="display:none;"></div>
 <div id="detail-map-hint">⛶ TAP TO EXPAND</div>
 <!-- 초기값은 영어, applyLang에서 동적 교체됨 -->
 </div>
@@ -5764,10 +5774,12 @@ const detailMapDiv = document.getElementById('detail-map');
 if(detailMapDiv && typeof L !== 'undefined') {
 this.detailMap = L.map('detail-map-canvas', {zoomControl: false, attributionControl: false});
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(this.detailMap);
-if (storage.getMapTheme() === 'dark') detailMapDiv.classList.add('dark-map-layer');
-else detailMapDiv.classList.remove('dark-map-layer');
+// [수정] 경로맵은 밤에 뛰었든 낮에 뛰었든, 다크모드 설정과 무관하게 항상 밝게 표시
+forceRouteMapBright(detailMapDiv);
 setTimeout(() => { if(this.detailMap) this.detailMap.invalidateSize(); }, 200);
 }
+// [추가] 경로맵 맨 위에 날짜/시간/장소 오버레이 표시
+this.renderDetailMapInfo(record);
 if (record.path && record.path.length > 0 && this.detailMap) {
 let poly = L.polyline(record.path, {color: '#ff3333', weight: 2}).addTo(this.detailMap);
 this.detailMap.fitBounds(poly.getBounds());
@@ -5825,6 +5837,34 @@ const detailData = document.getElementById('detail-data');
 if(detailData) detailData.innerHTML = splitLogsHtml + dynamicsHtml + buttonRowHtml;
 }
 closeDetail() { this.stopRoutePlayback(); const dv = document.getElementById('detail-view'); if(dv) dv.style.display = 'none'; }
+// [추가] 경로맵 상단에 날짜/시간/장소 정보를 표시. 장소는 좌표가 있으면 비동기로 역지오코딩해서 채워넣음.
+async renderDetailMapInfo(record) {
+const infoEl = document.getElementById('detail-map-info');
+if (!infoEl) return;
+this._detailMapInfoToken = (this._detailMapInfoToken || 0) + 1;
+const myToken = this._detailMapInfoToken;
+const dateTimeStr = record.date || '';
+if (!dateTimeStr) { infoEl.style.display = 'none'; infoEl.innerHTML = ''; return; }
+infoEl.style.display = 'flex';
+infoEl.innerHTML = '<span class="dmi-date">' + escapeHtml(dateTimeStr) + '</span>';
+if (record.location_name) {
+infoEl.innerHTML += '<span class="dmi-sep">·</span><span class="dmi-place">📍 ' + escapeHtml(record.location_name) + '</span>';
+return;
+}
+if (record.path && record.path.length > 0) {
+const first = record.path[0];
+if (first && first.length >= 2) {
+try {
+const place = await community.getLocationName(first[0], first[1]);
+if (myToken !== this._detailMapInfoToken) return; // 그 사이 다른 기록을 열었으면 무시
+if (place) {
+record.location_name = place;
+infoEl.innerHTML += '<span class="dmi-sep">·</span><span class="dmi-place">📍 ' + escapeHtml(place) + '</span>';
+}
+} catch(e) { /* 위치명 조회 실패는 무시 */ }
+}
+}
+}
 saveDetailAction(id) { this.openSaveConfirmModal(id); }
 shareDetailAction(id) {
 const h = storage.loadHistory();
@@ -9276,6 +9316,13 @@ const SUPABASE_URL = 'https://ujodpspxsisoycniswwl.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVqb2Rwc3B4c2lzb3ljbmlzd3dsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0NDg4OTUsImV4cCI6MjA5NzAyNDg5NX0.KWyli79Llmr5VA027BfF9d76-05IFkjylII3Wj_F7Vc';
 const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// 경로맵(리스트/상세/크루피드)은 다크모드 설정과 무관하게 항상 밝게 표시.
+// 라이브 러닝 화면(#map)만 다크모드 토글(applyMapTheme)을 따르고, 기록된 경로를 보여주는
+// 맵 컨테이너는 전부 이 함수로 통일해서 dark-map-layer 클래스를 제거함.
+function forceRouteMapBright(el) {
+  if (el) el.classList.remove('dark-map-layer');
+}
+
 // 경로 시작/종료 지점 마커를 만들어 지정된 Leaflet 지도에 추가.
 // [수정] 기존 핀(물방울) 모양은 두 지점이 가까우면 서로 겹쳐서 어디가 시작/끝인지
 // 구분이 안 됐음. 좌표 정중앙에 정확히 앵커링되는 작은 도형(시작=삼각형, 끝=사각형)으로
@@ -10760,7 +10807,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
     const line = L.polyline(latlngs, { color: '#ff3333', weight: 3 }).addTo(this._feedMapFull);
     addRouteEndpointMarkers(this._feedMapFull, latlngs);
     // 크루피드 경로맵 확대(전체화면)는 항상 밝게 표시 (다크모드 설정과 무관)
-    container.classList.remove('dark-map-layer');
+    forceRouteMapBright(container);
     setTimeout(() => {
       if (!this._feedMapFull) return;
       this._feedMapFull.invalidateSize();
@@ -13703,8 +13750,8 @@ if (!_detailMapFull) {
 _detailMapFull = L.map(container, { zoomControl: true, attributionControl: false });
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(_detailMapFull);
 }
-if (storage.getMapTheme() === 'dark') container.classList.add('dark-map-layer');
-else container.classList.remove('dark-map-layer');
+// [수정] 히스토리 경로맵 확대(전체화면)도 크루피드와 동일하게 항상 밝게 표시 (다크모드 설정과 무관)
+forceRouteMapBright(container);
 // [수정] 미니맵(this.detailMap)이 화면에 나타나자마자(레이아웃이 아직 안 잡힌 상태에서)
 // fitBounds가 호출되면 getZoom()이 Infinity 등 비정상 값이 되는 경우가 있었음.
 // 그 상태를 그대로 setView에 넘기면 전체화면 지도가 타일을 하나도 못 그려 빈 화면이 됨.
