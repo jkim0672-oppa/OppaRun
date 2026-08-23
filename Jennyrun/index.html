@@ -949,6 +949,9 @@ margin-top: 10px; font-family: -apple-system, system-ui;
 .btn-detail-save:active { background: #333; }
 .btn-detail-share { background: var(--primary); color: #000; }
 .btn-detail-share:active { opacity: 0.9; }
+.btn-detail-save-map { background: transparent; color: var(--text-dim); border: 1px dashed #333; height: 40px; font-size: var(--fs-sm); }
+.btn-detail-save-map:active { color: var(--primary); border-color: var(--primary); }
+.detail-btn-row-secondary { margin-top: -10px; }
 /* ===== 통계(TOTAL) 화면: 필터/대시보드/스트릭/히트맵 ===== */
 .stat-filter-nav { display: flex; gap: 5px; padding: 10px 0 5px 0; background: #000; flex-shrink: 0; }
 .stat-filter-btn { flex: 1; padding: 13px 0; border: 1px solid #333; background: #161616; color: #999; border-radius: 10px; font-size:var(--fs-sm); font-weight: 900; text-align: center; cursor: pointer; }
@@ -2012,7 +2015,239 @@ function generateRunCardCanvas(data, isKo) {
 
     return canvas;
 }
-// [수정] 기존 코드(navigator.share 파일 공유, 다운로드 폴백)는 Blob이 필요하므로
+// [추가] 경로맵 상세 페이지("SPLIT DISTANCE ANALYTICS" + "RUNNING DYNAMICS SUMMARY")를
+// 크루 피드 카드와는 다른, 앱 자체의 다크 테마 그대로의 느낌으로 캔버스에 그려서 공유 이미지로 만든다.
+// 실제 지도 타일(OSM)은 CORS 때문에 캔버스로 못 그리므로, 타일 대신 record.path 좌표로
+// 경로 모양만 순수 계산해서 그린다(스플릿 pill 라벨/시작·종료 마커 포함).
+function generateRouteCardCanvas(record, isKo, displaySplits, t) {
+  t = t || {};
+  const GREEN = '#00ff88';
+  const YELLOW = '#ffcc00';
+  const WHITE = '#ffffff';
+  const DIM = '#999999';
+  const CARD_BG = '#111111';
+  const CARD_BORDER = '#222222';
+  const BLACK = '#000000';
+  const RED = '#ff4444';
+
+  const PAD = 30;
+  const W = 750;
+  const MAP_H = 420;
+
+  function roundRect(c, x, y, w, h, r) {
+    c.beginPath();
+    c.moveTo(x+r, y); c.lineTo(x+w-r, y); c.quadraticCurveTo(x+w, y, x+w, y+r);
+    c.lineTo(x+w, y+h-r); c.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+    c.lineTo(x+r, y+h); c.quadraticCurveTo(x, y+h, x, y+h-r);
+    c.lineTo(x, y+r); c.quadraticCurveTo(x, y, x+r, y); c.closePath();
+  }
+
+  // ── 위경도 → 캔버스 좌표 (등장방형 근사, 지도 타일 없이 경로 모양만) ──
+  function projectPath(path, w, h, pad) {
+    let minLat=Infinity, maxLat=-Infinity, minLng=Infinity, maxLng=-Infinity;
+    path.forEach(p => { if(!p) return; minLat=Math.min(minLat,p[0]); maxLat=Math.max(maxLat,p[0]); minLng=Math.min(minLng,p[1]); maxLng=Math.max(maxLng,p[1]); });
+    const midLat = (minLat+maxLat)/2;
+    const lngScale = Math.cos(midLat*Math.PI/180) || 1;
+    const dataW = Math.max((maxLng-minLng)*lngScale, 0.00005);
+    const dataH = Math.max(maxLat-minLat, 0.00005);
+    const availW = w - pad*2, availH = h - pad*2;
+    const scale = Math.min(availW/dataW, availH/dataH);
+    const drawW = dataW*scale, drawH = dataH*scale;
+    const offX = pad + (availW-drawW)/2;
+    const offY = pad + (availH-drawH)/2;
+    return path.map(p => p ? [offX + (p[1]-minLng)*lngScale*scale, offY + (maxLat-p[0])*scale] : null);
+  }
+
+  // ── 스플릿/다이나믹스 로우 리스트를 미리 계산해서 캔버스 전체 높이를 정함 ──
+  const splitRows = [];
+  (displaySplits || []).forEach(split => {
+    let sd = split.km;
+    let sp = split.pace;
+    splitRows.push({
+      label: '■ ' + sd + ' km :',
+      value: (t.splitPace || 'Pace') + ' ' + sp + ' | ' + (t.splitAlt || 'Alt') + ' ' + (split.altFrom||0) + 'm → ' + (split.altTo||0) + 'm (' + (split.altDiff>=0 ? '▲' : '▼') + Math.abs(split.altDiff||0) + 'm).'
+    });
+  });
+  if (splitRows.length === 0) {
+    splitRows.push({
+      label: '■ ' + record.dist + ' km :',
+      value: (t.splitPace || 'Pace') + ' ' + (record.avgPace || record.pace || INVALID_PACE) + ' | ' + (t.splitAlt || 'Alt') + ' ' + (record.alt||0) + 'm → ' + (record.alt||0) + 'm (▲0m).'
+    });
+  }
+
+  const pace = record.avgPace || record.pace;
+  const kmh = paceStrToSpeedKmh(pace);
+  const dynRows = [];
+  dynRows.push([t.time || 'Time', record.time || '--']);
+  dynRows.push([t.speed || 'Speed', kmh ? kmh.toFixed(1) + ' km/h' : '--']);
+  if (record.activityMode === 'walk') {
+    dynRows.push([t.stepsLabel || 'Steps', String(record.steps || 0)]);
+    dynRows.push([t.spmLabel || 'SPM', String(record.walkSpm || 0)]);
+    dynRows.push([t.stride || 'Stride', record.stride ? parseFloat(record.stride).toFixed(2) + ' m' : '--']);
+  } else {
+    dynRows.push([t.avgGct || 'Average GCT', (record.gct || '--') + ' ms.']);
+    dynRows.push([t.avgFlight || 'Average Flight', (record.flight || '--') + ' %.']);
+    dynRows.push([t.avgCadence || 'Average Cadence', (record.cadence || 0) + ' SPM.']);
+    let strideVal = '--';
+    if (record.cadence && kmh) strideVal = ((kmh/3.6)/(record.cadence/60)).toFixed(2) + ' m';
+    dynRows.push([t.stride || 'Stride', strideVal]);
+    if (typeof LeanAngleUI !== 'undefined' && LeanAngleUI.has && LeanAngleUI.has(record)) {
+      dynRows.push([LeanAngleUI.label(isKo ? 'ko' : 'en'), LeanAngleUI.fmtPrimary(record.avgLeanAngleDeg, record.avgLeanForwardDeg)]);
+    }
+  }
+  dynRows.push(['ALT', (record.alt || 0) + ' m.']);
+
+  const ROW_H = 34;
+  const TITLE_H = 34;
+  const BOX_PAD = 14;
+  const META_H = 26;
+  const splitBoxH = BOX_PAD*2 + TITLE_H + META_H + splitRows.length*ROW_H;
+  const dynBoxH = BOX_PAD*2 + TITLE_H + dynRows.length*ROW_H;
+  const HEADER_H = 64;
+  const FOOTER_H = 56;
+  const GAP = 14;
+  const H = HEADER_H + MAP_H + GAP + splitBoxH + GAP + dynBoxH + GAP + FOOTER_H;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // ── 전체 배경 (앱과 동일한 검정) ──
+  ctx.fillStyle = BLACK;
+  ctx.fillRect(0, 0, W, H);
+
+  // ── 상단 헤더: 작은 로고 + 날짜/장소 ──
+  ctx.font = 'bold 22px Arial, sans-serif';
+  ctx.fillStyle = GREEN;
+  ctx.fillText('RUN LAB', PAD, 40);
+  ctx.font = '13px Arial, sans-serif';
+  ctx.fillStyle = DIM;
+  ctx.textAlign = 'right';
+  const dateLine = record.date || '';
+  ctx.fillText(dateLine, W - PAD, 30);
+  if (record.location_name) ctx.fillText('📍 ' + record.location_name, W - PAD, 48);
+  ctx.textAlign = 'left';
+
+  // ── 경로 영역 배경(살짝 다른 톤 + 은은한 그리드) ──
+  let mapY = HEADER_H;
+  ctx.fillStyle = '#141414';
+  ctx.fillRect(0, mapY, W, MAP_H);
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  for (let gx = 0; gx <= W; gx += 40) { ctx.beginPath(); ctx.moveTo(gx, mapY); ctx.lineTo(gx, mapY+MAP_H); ctx.stroke(); }
+  for (let gy = 0; gy <= MAP_H; gy += 40) { ctx.beginPath(); ctx.moveTo(0, mapY+gy); ctx.lineTo(W, mapY+gy); ctx.stroke(); }
+
+  // ── 경로선 + 시작/종료 마커 + 스플릿 pill ──
+  if (record.path && record.path.length > 1) {
+    const pts = projectPath(record.path, W, MAP_H, 36).map(p => p ? [p[0], p[1]+mapY] : null).filter(Boolean);
+    ctx.strokeStyle = RED;
+    ctx.lineWidth = 4;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.beginPath();
+    pts.forEach((p, i) => { if (i === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]); });
+    ctx.stroke();
+
+    // 시작(초록 삼각형) / 종료(빨강 사각형)
+    const startP = pts[0], endP = pts[pts.length - 1];
+    if (startP) {
+      ctx.fillStyle = GREEN;
+      ctx.beginPath();
+      ctx.moveTo(startP[0], startP[1]-8); ctx.lineTo(startP[0]-7, startP[1]+6); ctx.lineTo(startP[0]+7, startP[1]+6);
+      ctx.closePath(); ctx.fill();
+    }
+    if (endP) {
+      ctx.fillStyle = RED;
+      ctx.fillRect(endP[0]-6, endP[1]-6, 12, 12);
+    }
+
+    // 스플릿 pace pill 라벨
+    if (displaySplits && displaySplits.length > 0) {
+      const projSplitCoords = projectPath(displaySplits.map(s => s.coord), W, MAP_H, 36).map(p => p ? [p[0], p[1]+mapY] : null);
+      displaySplits.forEach((split, i) => {
+        const p = projSplitCoords[i];
+        if (!p) return;
+        const label = split.km + 'k: ' + split.pace;
+        ctx.font = 'bold 12px Arial, sans-serif';
+        const tw = ctx.measureText(label).width;
+        const pillW = tw + 16, pillH = 22;
+        const px = p[0] - pillW/2, py = p[1] + 10;
+        ctx.fillStyle = 'rgba(0,0,0,0.85)';
+        roundRect(ctx, px, py, pillW, pillH, 6);
+        ctx.fill();
+        ctx.strokeStyle = GREEN; ctx.lineWidth = 1;
+        roundRect(ctx, px, py, pillW, pillH, 6);
+        ctx.stroke();
+        ctx.fillStyle = WHITE;
+        ctx.textAlign = 'center';
+        ctx.fillText(label, p[0], py + 15);
+        ctx.textAlign = 'left';
+      });
+    }
+  } else {
+    ctx.font = '15px Arial, sans-serif';
+    ctx.fillStyle = DIM;
+    ctx.textAlign = 'center';
+    ctx.fillText(isKo ? '경로 데이터 없음' : 'No route data', W/2, mapY + MAP_H/2);
+    ctx.textAlign = 'left';
+  }
+
+  // ── 로우 렌더 헬퍼 (라벨 좌측 초록, 값 좌측 흰색, detail-log-item 느낌) ──
+  function drawBox(y, h, title, titleColor, rows, meta) {
+    ctx.fillStyle = CARD_BG;
+    roundRect(ctx, PAD, y, W - PAD*2, h, 10);
+    ctx.fill();
+    ctx.strokeStyle = CARD_BORDER; ctx.lineWidth = 1;
+    roundRect(ctx, PAD, y, W - PAD*2, h, 10);
+    ctx.stroke();
+
+    let cy = y + BOX_PAD;
+    ctx.font = 'bold 14px Arial, sans-serif';
+    ctx.fillStyle = titleColor;
+    ctx.fillText(title, PAD + BOX_PAD, cy + 14);
+    cy += TITLE_H;
+
+    if (meta) {
+      ctx.font = '13px Arial, sans-serif';
+      ctx.fillStyle = DIM;
+      ctx.fillText(meta, PAD + BOX_PAD, cy + 14);
+      cy += META_H;
+    }
+
+    rows.forEach(([label, value]) => {
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+      ctx.beginPath(); ctx.moveTo(PAD + BOX_PAD, cy + ROW_H - 6); ctx.lineTo(W - PAD - BOX_PAD, cy + ROW_H - 6); ctx.stroke();
+      ctx.font = 'bold 14px Arial, sans-serif';
+      ctx.fillStyle = GREEN;
+      ctx.fillText(label, PAD + BOX_PAD, cy + 20);
+      ctx.font = '14px Arial, sans-serif';
+      ctx.fillStyle = WHITE;
+      ctx.textAlign = 'right';
+      ctx.fillText(value, W - PAD - BOX_PAD, cy + 20);
+      ctx.textAlign = 'left';
+      cy += ROW_H;
+    });
+  }
+
+  let boxY = mapY + MAP_H + GAP;
+  drawBox(boxY, splitBoxH, t.splitTitle || 'SPLIT ANALYTICS', GREEN, splitRows.map(r => [r.label, r.value]), (record.date || '') + (record.location_name ? '   📍 ' + record.location_name : ''));
+  boxY += splitBoxH + GAP;
+  drawBox(boxY, dynBoxH, t.summaryTitle || '■ RUNNING DYNAMICS SUMMARY.', YELLOW, dynRows, null);
+  boxY += dynBoxH + GAP;
+
+  // ── 하단 브랜드 푸터 ──
+  ctx.strokeStyle = GREEN; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(PAD, boxY); ctx.lineTo(W - PAD, boxY); ctx.stroke();
+  ctx.font = 'bold 16px Arial, sans-serif';
+  ctx.fillStyle = GREEN;
+  ctx.fillText('Run Lab', PAD, boxY + 30);
+  ctx.font = '12px Arial, sans-serif';
+  ctx.fillStyle = DIM;
+  ctx.textAlign = 'right';
+  ctx.fillText('Track smarter, Run better', W - PAD, boxY + 30);
+  ctx.textAlign = 'left';
+
+  return canvas;
+}
 // 호환용 래퍼를 그대로 남겨둠. 안드로이드 브릿지 경로는 이제 이 함수를 거치지 않고
 // generateRunCardCanvas()의 결과를 canvas.toDataURL()로 바로 base64화해서 인코딩을 한 번만 함.
 function generateRunCardBlob(data, isKo) {
@@ -2027,7 +2262,17 @@ async function shareRunCardImage(data, isKo, shareTextFallback) {
   // canvas.toBlob()(PNG 인코딩) → FileReader.readAsDataURL()(base64 재인코딩) 이중 인코딩을
   // 없앴다. 이게 공유 버튼 반응 시간이 기기마다 들쭉날쭉하던 원인 중 하나였음.
   const canvas = generateRunCardCanvas(data, isKo);
-  const shareText = shareTextFallback || '';
+  await shareCanvasImage(canvas, isKo, shareTextFallback || '');
+}
+// [추가] 경로맵 상세 페이지 스타일 공유 카드(generateRouteCardCanvas)를 캔버스로 만들어서
+// 공유. 캔버스 생성부만 다르고 나머지 공유 경로(AndroidShare → navigator.share → 다운로드)는
+// shareRunCardImage와 동일하므로 shareCanvasImage()로 로직을 공유한다.
+async function shareRouteCardImage(record, isKo, displaySplits, t, shareTextFallback) {
+  const canvas = generateRouteCardCanvas(record, isKo, displaySplits, t);
+  await shareCanvasImage(canvas, isKo, shareTextFallback || '');
+}
+// [추가] shareRunCardImage/shareRouteCardImage가 공통으로 쓰는 "캔버스 → 공유" 로직을 분리.
+async function shareCanvasImage(canvas, isKo, shareText) {
 
   // 1순위: AndroidBridge 이미지 공유 (카카오톡 등 직접 공유)
   if (window.AndroidShare && window.AndroidShare.shareImage) {
@@ -5865,7 +6110,12 @@ if(this.currentUnit === 'mile') splitDist = (splitDist * 0.621371).toFixed(2);
 let splitPace = (displaySplits.length === 1 && (record.avgPace || record.pace)) ? (record.avgPace || record.pace) : split.pace;
 if(this.currentUnit === 'mile') splitPace = this.convertPaceToUnit(splitPace, 'mile');
 L.marker(split.coord, {
-icon: L.divIcon({ className: 'pace-marker', html: splitDist + (this.currentUnit === 'km' ? 'k' : 'm') + ': ' + splitPace, iconSize: [75, 16], iconAnchor: [37, 34] })
+// [수정] 기존 iconAnchor:[37,34]는 페이스 pill을 좌표보다 18~34px 위쪽에 띄웠는데,
+// 루프형 경로처럼 시작점과 종료점이 가까이 있는 경우 마지막 스플릿(종료 지점) pill이
+// 종료 마커(네모)가 아니라 시작/재생 마커(동그라미) 쪽에 붙어 보이는 문제가 있었음.
+// pill을 좌표 바로 아래쪽에 놓이도록 anchor를 바꿔서, 종료 지점 pill이 종료 마커
+// 바로 아래에 표시되도록 수정.
+icon: L.divIcon({ className: 'pace-marker', html: splitDist + (this.currentUnit === 'km' ? 'k' : 'm') + ': ' + splitPace, iconSize: [75, 16], iconAnchor: [37, -6] })
 }).addTo(this.detailMap);
 }
 });
@@ -5906,7 +6156,8 @@ LeanAngleUI.routeDetailRowHtml(record, lang)
 )) +
 '<div class="detail-log-item"><span>ALT</span><span>' + (record.alt || '0') + ' m.</span></div>' +
 '</div>';
-let buttonRowHtml = '<div class="detail-btn-row"><button class="btn-detail-act btn-detail-save" onclick="ui.saveDetailAction(' + record.id + ')">' + (t.saveBtn || "SAVE") + '</button><button class="btn-detail-act btn-detail-share" onclick="ui.shareDetailAction(' + record.id + ')">' + (t.shareBtn || "SHARE") + '</button></div>';
+let buttonRowHtml = '<div class="detail-btn-row"><button class="btn-detail-act btn-detail-save" onclick="ui.saveDetailAction(' + record.id + ')">' + (t.saveBtn || "SAVE") + '</button><button class="btn-detail-act btn-detail-share" onclick="ui.shareDetailAction(' + record.id + ')">' + (t.shareBtn || "SHARE") + '</button></div>' +
+'<div class="detail-btn-row detail-btn-row-secondary"><button class="btn-detail-act btn-detail-save-map" onclick="ui.shareDetailRouteAction(' + record.id + ')">' + (t.shareMapBtn || (lang === 'ko' ? "경로맵 스타일로 공유" : "Share as route card")) + '</button></div>';
 const detailData = document.getElementById('detail-data');
 if(detailData) detailData.innerHTML = splitLogsHtml + dynamicsHtml + buttonRowHtml;
 this.renderDetailMapInfo(record);
@@ -5963,6 +6214,19 @@ shareRunCardImage({
   steps: record.steps, walkSpm: record.walkSpm, stride: record.stride,
   kcal: record.kcal, alt: record.alt, avgHr: record.avgHr, nickname: null
 }, isKo, null);
+}
+// [추가] 경로맵 상세 페이지 스타일(지도 대신 경로 라인만 그린 것 + SPLIT ANALYTICS +
+// RUNNING DYNAMICS SUMMARY 카드)로 공유 이미지 생성. 크루 피드 카드(shareDetailAction)와는
+// 별도 버튼. 표시되는 스플릿 페이스는 getDisplaySplits()로 옛 데이터 보정을 거친 값을 사용.
+shareDetailRouteAction(id) {
+const h = storage.loadHistory();
+const record = h.find(r => r.id === id);
+if (!record) return;
+const lang = storage.getLang();
+const isKo = lang === 'ko';
+const t = translations[lang] || translations['en'];
+const displaySplits = getDisplaySplits(record);
+shareRouteCardImage(record, isKo, displaySplits, t, null);
 }
 openDiag(id) {
 const h = storage.loadHistory();
