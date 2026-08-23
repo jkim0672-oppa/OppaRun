@@ -2601,7 +2601,9 @@ let avgLineSvg = '';
 if (showAvgLine) {
   const avgVal = pts.reduce((a, p) => a + p.v, 0) / pts.length;
   const avgY = yFor(avgVal).toFixed(1);
-  avgLineSvg = '<line x1="' + PAD + '" y1="' + avgY + '" x2="' + (W - PAD) + '" y2="' + avgY + '" stroke="#888" stroke-width="1" stroke-dasharray="2,2" vector-effect="non-scaling-stroke"></line>';
+  // [수정] 점선이 무엇을 뜻하는지 알 수 없다는 피드백 반영 — 점선 오른쪽 끝에 작은 "avg" 라벨을 붙인다.
+  avgLineSvg = '<line x1="' + PAD + '" y1="' + avgY + '" x2="' + (W - PAD) + '" y2="' + avgY + '" stroke="#888" stroke-width="1" stroke-dasharray="2,2" vector-effect="non-scaling-stroke"></line>'
+    + '<text x="' + (W - PAD) + '" y="' + (parseFloat(avgY) - 1.5).toFixed(1) + '" font-size="5" fill="#999" text-anchor="end" font-family="sans-serif">avg</text>';
 }
 return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%;height:32px;display:block;margin-top:6px;">'
   + '<polyline points="' + areaPts + '" fill="' + colorHex + '" opacity="0.12" stroke="none"></polyline>'
@@ -6385,7 +6387,7 @@ hrComment = zoneInfo.z <= 2 ? t.diagHrZoneLow
 // 한눈에 오르내림을 볼 수 있도록. 스플릿이 2개 미만이면(짧은 러닝 등) 해당 그래프는 표시 안 함.
 const _splitsForGraph = r.diagSplits || [];
 const paceSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => paceStrToSeconds(s.pace)), '#00ff88', true);
-const cadSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.avgCadence === 'number' ? s.avgCadence : null)), '#4fc3f7', false);
+const cadSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3) ? s.avgCadence : null)), '#4fc3f7', false);
 const hrSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.avgHr === 'number' ? s.avgHr : null)), '#e53935', false);
 const altSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.altTo === 'number' ? s.altTo : null)), '#90a4ae', false);
 // [추가] 그래프 아래 거리/시간 축 라벨 (기준선과 함께, v2 스타일)
@@ -6394,7 +6396,9 @@ const totalAltGainForDiag = _splitsForGraph.length > 0 ? _splitsForGraph.reduce(
 // [추가] HR처럼 "평균 / 최고"로 보여주기 위한 케이던스·페이스 최고값.
 // 순간 최고 케이던스/페이스를 러닝 중 별도로 저장하지 않으므로, 100m 구간(diagSplits)
 // 단위 평균들 중 최고값(케이던스는 최댓값, 페이스는 가장 빠른=초/km가 가장 작은 값)으로 근사.
-const _cadPeakVals = _splitsForGraph.map(s => s.avgCadence).filter(v => typeof v === 'number');
+// [수정] 자투리 등 샘플 수가 너무 적은(3개 미만) 구간은 순간 노이즈 하나로도 평균이 크게
+// 흔들릴 수 있어 최고값 후보에서 제외한다(케이던스 최고값이 비정상적으로 튀어 보이던 원인).
+const _cadPeakVals = _splitsForGraph.filter(s => typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3)).map(s => s.avgCadence);
 const cadPeakForDiag = _cadPeakVals.length ? Math.max(..._cadPeakVals) : null;
 const _pacePeakSecs = _splitsForGraph.map(s => paceStrToSeconds(s.pace)).filter(v => typeof v === 'number');
 const pacePeakSecForDiag = _pacePeakSecs.length ? Math.min(..._pacePeakSecs) : null;
@@ -8482,7 +8486,7 @@ const _diagCadArr = this.state.diagCadenceSamples || [];
 const _diagAvgCad = _diagCadArr.length > 0 ? Math.round(_diagCadArr.reduce((a,b)=>a+b,0) / _diagCadArr.length) : null;
 const _diagHrArr = this.state.diagHrSamples || [];
 const _diagAvgHr = _diagHrArr.length > 0 ? Math.round(_diagHrArr.reduce((a,b)=>a+b,0) / _diagHrArr.length) : null;
-this.state.diagSplits.push({ km: diagTargetKm, t_sec: this.state.seconds, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastDiagAlt, avgCadence: _diagAvgCad, avgHr: _diagAvgHr });
+this.state.diagSplits.push({ km: diagTargetKm, t_sec: this.state.seconds, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastDiagAlt, avgCadence: _diagAvgCad, cadN: _diagCadArr.length, avgHr: _diagAvgHr });
 this.state.lastDiagCheckpoint = diagTargetKm;
 this.state.lastDiagSeconds = this.state.seconds;
 this.state.lastDiagAlt = this.state.currentAlt;
@@ -9206,9 +9210,12 @@ this.state.splits.push({ km: parseFloat(this.state.totalDist).toFixed(2), pace: 
 pushDiagSplitIfNeeded() {
 if (this.state.totalDist > this.state.lastDiagCheckpoint + 0.01 && this.state.seconds > this.state.lastDiagSeconds) {
 let diagSplitDuration = this.state.seconds - this.state.lastDiagSeconds;
-// [수정] diagSplitDuration은 "100m를 가는 데 걸린 시간"이라 그대로 쓰면 페이스(분/km)가 아님.
-// 표시/향후 재사용 시 오해가 없도록 km당 페이스로 정규화(100m 구간이므로 ×10).
-let diagPaceSecPerKm = diagSplitDuration / DIAG_SPLIT_INTERVAL_KM;
+// [수정] 자투리 구간은 100m보다 짧을 수 있는데도 항상 DIAG_SPLIT_INTERVAL_KM(0.1km)으로
+// 나누고 있어서, 예를 들어 실제로는 11m만 뛰었는데 100m를 뛴 것처럼 계산돼 페이스가
+// 비정상적으로(훨씬 빠르게) 튀어 보이는 버그가 있었음(진단 그래프 끝부분이 갑자기
+// 치솟는 원인). 위의 일반 km 스플릿 자투리 처리와 동일하게 실제 남은 거리로 나눈다.
+let diagSegmentKm = this.state.totalDist - this.state.lastDiagCheckpoint;
+let diagPaceSecPerKm = diagSegmentKm > 0 ? diagSplitDuration / diagSegmentKm : diagSplitDuration;
 let dMin = Math.floor(diagPaceSecPerKm / 60);
 let dSec = Math.round(diagPaceSecPerKm % 60);
 let diagPaceStr = dMin + "'" + String(dSec).padStart(2,'0') + '"';
@@ -9216,7 +9223,7 @@ const _diagCadArr2 = this.state.diagCadenceSamples || [];
 const _diagAvgCad2 = _diagCadArr2.length > 0 ? Math.round(_diagCadArr2.reduce((a,b)=>a+b,0) / _diagCadArr2.length) : null;
 const _diagHrArr2 = this.state.diagHrSamples || [];
 const _diagAvgHr2 = _diagHrArr2.length > 0 ? Math.round(_diagHrArr2.reduce((a,b)=>a+b,0) / _diagHrArr2.length) : null;
-this.state.diagSplits.push({ km: parseFloat(this.state.totalDist).toFixed(2), t_sec: this.state.seconds, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastDiagAlt, avgCadence: _diagAvgCad2, avgHr: _diagAvgHr2 });
+this.state.diagSplits.push({ km: parseFloat(this.state.totalDist).toFixed(2), t_sec: this.state.seconds, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastDiagAlt, avgCadence: _diagAvgCad2, cadN: _diagCadArr2.length, avgHr: _diagAvgHr2 });
 this.state.diagCadenceSamples = [];
 this.state.diagHrSamples = [];
 }
