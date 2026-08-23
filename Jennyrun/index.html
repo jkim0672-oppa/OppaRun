@@ -10652,7 +10652,8 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
     try {
       const { data, error } = await _sb
         .from('records')
-        .select('id, nickname, avatar_url, location_name, title, activity_mode, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, photo_url, message, avg_hr, max_hr, hr_zone, steps, walk_spm, stride_m, kcal, avg_lean_angle_deg, avg_lean_forward_deg, avg_lean_lateral_deg')
+        // [수정] 전체화면 확장맵에 km 스플릿 페이스 마커를 표시하려면 splits(좌표+구간페이스)가 필요해서 추가.
+        .select('id, nickname, avatar_url, location_name, title, activity_mode, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, splits, photo_url, message, avg_hr, max_hr, hr_zone, steps, walk_spm, stride_m, kcal, avg_lean_angle_deg, avg_lean_forward_deg, avg_lean_lateral_deg')
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) throw error;
@@ -11200,6 +11201,32 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(this._feedMapFull);
     const line = L.polyline(latlngs, { color: '#ff3333', weight: 3 }).addTo(this._feedMapFull);
     addRouteEndpointMarkers(this._feedMapFull, latlngs);
+    // [추가] 상세페이지(openDetail)와 동일하게 km 스플릿 페이스 마커도 표시.
+    // 업로드 시 splits가 함께 저장되므로(uploadRecord: splits: record.splits) 크루 피드
+    // 레코드에도 동일한 좌표/페이스 데이터가 있음. 마지막 스플릿(종료 지점)은 상세페이지와
+    // 같은 이유로 실제 경로 마지막 좌표를 그대로 쓰도록 강제한다.
+    // [수정] getDisplaySplits는 record.time(문자열)로 마지막 스플릿 페이스를 보정하는데,
+    // 피드 레코드는 duration_sec(초)만 갖고 있어 formatDuration으로 변환해서 넘겨준다.
+    const feedDisplaySplits = getDisplaySplits(Object.assign({}, record, { time: this.formatDuration(record.duration_sec) }));
+    const lastFeedPathCoord = latlngs[latlngs.length - 1];
+    const feedDisplaySplitsForMarkers = (feedDisplaySplits && feedDisplaySplits.length > 0 && lastFeedPathCoord)
+      ? feedDisplaySplits.map((s, i) => (i === feedDisplaySplits.length - 1) ? Object.assign({}, s, { coord: lastFeedPathCoord }) : s)
+      : feedDisplaySplits;
+    if (feedDisplaySplitsForMarkers && feedDisplaySplitsForMarkers.length > 0) {
+      // [주의] 여기는 community(CommunityManager) 메서드라 this가 ui(UIManager)가 아님.
+      // 단위 설정은 전역 ui 인스턴스에서 읽어야 한다.
+      const feedUnit = (typeof ui !== 'undefined' && ui.currentUnit === 'mile') ? 'mile' : 'km';
+      feedDisplaySplitsForMarkers.forEach(split => {
+        if (!split.coord) return;
+        let splitDist = split.km;
+        if (feedUnit === 'mile') splitDist = (splitDist * 0.621371).toFixed(2);
+        let splitPace = split.pace;
+        if (feedUnit === 'mile' && typeof ui !== 'undefined' && typeof ui.convertPaceToUnit === 'function') splitPace = ui.convertPaceToUnit(splitPace, 'mile');
+        L.marker(split.coord, {
+          icon: L.divIcon({ className: 'pace-marker', html: splitDist + (feedUnit === 'km' ? 'k' : 'm') + ': ' + splitPace, iconSize: [75, 16], iconAnchor: [37, -6] })
+        }).addTo(this._feedMapFull);
+      });
+    }
     // 크루피드 경로맵 확대(전체화면)는 항상 밝게 표시 (다크모드 설정과 무관)
     forceRouteMapBright(container);
     setTimeout(() => {
