@@ -2172,18 +2172,25 @@ function generateRouteCardCanvas(record, isKo, displaySplits, t) {
     }
 
     // 스플릿 pace pill 라벨
-    // [수정] ① 같은 projector로 좌표 변환(라이브 지도와 위치 일치) ② 글씨 크기 12px → 15px로 확대
-    // ③ 라벨을 지점 위에 겹치지 않도록 점 옆(오른쪽 위)으로 살짝 띄우고, 지점 자체에는 작은 점을 찍어
-    // 어느 지점의 스플릿인지 표시.
+    // [수정] ① 같은 projector로 좌표 변환(라이브 지도와 위치 일치) ② 글씨 크기 12px → 19px로 확대(이전 15px도
+    // 체감이 안 된다는 피드백이 있어 더 큼직하게) ③ 라벨을 지점 위에 겹치지 않도록 점 옆(오른쪽 위)으로 살짝
+    // 띄우고, 지점 자체에는 작은 점을 찍어 어느 지점의 스플릿인지 표시 ④ 마지막 스플릿(=총 기록거리, 예:
+    // 1.35km)은 정의상 "종료 지점"이어야 하는데, 루프형 경로처럼 시작점과 끝점이 가까운 경우 저장된
+    // split.coord가 실제 종료 좌표와 어긋나 보이는 문제가 있어, 마지막 스플릿만은 항상 실제 경로의
+    // 마지막 좌표(record.path 끝점 = 종료 마커 위치)를 그대로 쓰도록 강제한다.
     if (displaySplits && displaySplits.length > 0) {
-      const projSplitCoords = displaySplits.map(s => { const q = project(s.coord); return q ? [q[0], q[1]+mapY] : null; });
-      displaySplits.forEach((split, i) => {
+      const lastPathCoord = record.path[record.path.length - 1];
+      const splitsForDraw = displaySplits.map((s, i) =>
+        (i === displaySplits.length - 1 && lastPathCoord) ? Object.assign({}, s, { coord: lastPathCoord }) : s
+      );
+      const projSplitCoords = splitsForDraw.map(s => { const q = project(s.coord); return q ? [q[0], q[1]+mapY] : null; });
+      splitsForDraw.forEach((split, i) => {
         const p = projSplitCoords[i];
         if (!p) return;
         const label = split.km + 'k: ' + split.pace;
-        ctx.font = 'bold 15px Arial, sans-serif';
+        ctx.font = 'bold 19px Arial, sans-serif';
         const tw = ctx.measureText(label).width;
-        const pillW = tw + 20, pillH = 28;
+        const pillW = tw + 24, pillH = 34;
         const GAP_FROM_POINT = 10;
         // 라벨을 지점 오른쪽 위로 배치해 경로선과 겹치지 않게 함.
         // 지점이 캔버스 오른쪽 끝에 너무 가까우면 왼쪽으로, 위쪽 끝에 너무 가까우면 아래쪽으로 뒤집는다.
@@ -2199,10 +2206,10 @@ function generateRouteCardCanvas(record, isKo, displaySplits, t) {
         ctx.beginPath(); ctx.arc(p[0], p[1], 4, 0, Math.PI*2); ctx.stroke();
 
         ctx.fillStyle = 'rgba(0,0,0,0.88)';
-        roundRect(ctx, px, py, pillW, pillH, 7);
+        roundRect(ctx, px, py, pillW, pillH, 8);
         ctx.fill();
-        ctx.strokeStyle = GREEN; ctx.lineWidth = 1.2;
-        roundRect(ctx, px, py, pillW, pillH, 7);
+        ctx.strokeStyle = GREEN; ctx.lineWidth = 1.4;
+        roundRect(ctx, px, py, pillW, pillH, 8);
         ctx.stroke();
         ctx.fillStyle = WHITE;
         ctx.textAlign = 'center';
@@ -6129,8 +6136,15 @@ addRouteEndpointMarkers(this.detailMap, record.path);
 }
 // [수정] 지도 마커/SPLIT ANALYTICS 카드 둘 다 이 보정된 스플릿 배열을 사용
 const displaySplits = getDisplaySplits(record);
-if (displaySplits && displaySplits.length > 0 && this.detailMap) {
-displaySplits.forEach(split => {
+// [수정] 마지막 스플릿(=총 기록거리, 예: 1.35km)은 정의상 "종료 지점"이어야 한다. 루프형 경로처럼
+// 시작점과 끝점이 가까운 경우 저장된 split.coord가 실제 종료 좌표와 어긋나 보이는 문제가 있어,
+// 마지막 스플릿만은 항상 실제 경로의 마지막 좌표(record.path 끝점 = 종료 마커 위치)를 그대로 쓰도록 강제한다.
+const lastPathCoordForMarkers = record.path && record.path.length > 0 ? record.path[record.path.length - 1] : null;
+const displaySplitsForMarkers = (displaySplits && displaySplits.length > 0 && lastPathCoordForMarkers)
+? displaySplits.map((s, i) => (i === displaySplits.length - 1) ? Object.assign({}, s, { coord: lastPathCoordForMarkers }) : s)
+: displaySplits;
+if (displaySplitsForMarkers && displaySplitsForMarkers.length > 0 && this.detailMap) {
+displaySplitsForMarkers.forEach(split => {
 if (split.coord) {
 let splitDist = split.km;
 if(this.currentUnit === 'mile') splitDist = (splitDist * 0.621371).toFixed(2);
