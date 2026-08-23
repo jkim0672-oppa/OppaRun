@@ -2043,7 +2043,11 @@ function generateRouteCardCanvas(record, isKo, displaySplits, t) {
   }
 
   // ── 위경도 → 캔버스 좌표 (등장방형 근사, 지도 타일 없이 경로 모양만) ──
-  function projectPath(path, w, h, pad) {
+  // [수정] 스플릿 좌표도 반드시 "전체 경로(record.path) 기준"으로 계산된 동일한 투영 함수를
+  // 사용해야 한다. 예전 코드는 splits 좌표만 따로 projectPath()에 넣어 min/max를 다시 계산했는데,
+  // splits는 전체 경로의 극히 일부 좌표만 갖고 있어 bounding box가 달라지고, 그 결과 실제 지도(라이브)
+  // 에서 보이는 위치와 공유 이미지 속 라벨 위치가 서로 어긋나는 원인이 되었다.
+  function createProjector(path, w, h, pad) {
     let minLat=Infinity, maxLat=-Infinity, minLng=Infinity, maxLng=-Infinity;
     path.forEach(p => { if(!p) return; minLat=Math.min(minLat,p[0]); maxLat=Math.max(maxLat,p[0]); minLng=Math.min(minLng,p[1]); maxLng=Math.max(maxLng,p[1]); });
     const midLat = (minLat+maxLat)/2;
@@ -2055,7 +2059,11 @@ function generateRouteCardCanvas(record, isKo, displaySplits, t) {
     const drawW = dataW*scale, drawH = dataH*scale;
     const offX = pad + (availW-drawW)/2;
     const offY = pad + (availH-drawH)/2;
-    return path.map(p => p ? [offX + (p[1]-minLng)*lngScale*scale, offY + (maxLat-p[0])*scale] : null);
+    return function(p) { return p ? [offX + (p[1]-minLng)*lngScale*scale, offY + (maxLat-p[0])*scale] : null; };
+  }
+  function projectPath(path, w, h, pad) {
+    const project = createProjector(path, w, h, pad);
+    return path.map(project);
   }
 
   // ── 스플릿/다이나믹스 로우 리스트를 미리 계산해서 캔버스 전체 높이를 정함 ──
@@ -2139,7 +2147,10 @@ function generateRouteCardCanvas(record, isKo, displaySplits, t) {
 
   // ── 경로선 + 시작/종료 마커 + 스플릿 pill ──
   if (record.path && record.path.length > 1) {
-    const pts = projectPath(record.path, W, MAP_H, 36).map(p => p ? [p[0], p[1]+mapY] : null).filter(Boolean);
+    // [수정] 경로와 스플릿 좌표를 반드시 같은 projector(전체 경로 기준)로 변환해야
+    // 라이브 지도에서 보이는 위치와 공유 이미지 속 위치가 서로 일치한다.
+    const project = createProjector(record.path, W, MAP_H, 36);
+    const pts = record.path.map(p => { const q = project(p); return q ? [q[0], q[1]+mapY] : null; }).filter(Boolean);
     ctx.strokeStyle = RED;
     ctx.lineWidth = 4;
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
@@ -2161,26 +2172,44 @@ function generateRouteCardCanvas(record, isKo, displaySplits, t) {
     }
 
     // 스플릿 pace pill 라벨
+    // [수정] ① 같은 projector로 좌표 변환(라이브 지도와 위치 일치) ② 글씨 크기 12px → 15px로 확대
+    // ③ 라벨을 지점 위에 겹치지 않도록 점 옆(오른쪽 위)으로 살짝 띄우고, 지점 자체에는 작은 점을 찍어
+    // 어느 지점의 스플릿인지 표시.
     if (displaySplits && displaySplits.length > 0) {
-      const projSplitCoords = projectPath(displaySplits.map(s => s.coord), W, MAP_H, 36).map(p => p ? [p[0], p[1]+mapY] : null);
+      const projSplitCoords = displaySplits.map(s => { const q = project(s.coord); return q ? [q[0], q[1]+mapY] : null; });
       displaySplits.forEach((split, i) => {
         const p = projSplitCoords[i];
         if (!p) return;
         const label = split.km + 'k: ' + split.pace;
-        ctx.font = 'bold 12px Arial, sans-serif';
+        ctx.font = 'bold 15px Arial, sans-serif';
         const tw = ctx.measureText(label).width;
-        const pillW = tw + 16, pillH = 22;
-        const px = p[0] - pillW/2, py = p[1] + 10;
-        ctx.fillStyle = 'rgba(0,0,0,0.85)';
-        roundRect(ctx, px, py, pillW, pillH, 6);
+        const pillW = tw + 20, pillH = 28;
+        const GAP_FROM_POINT = 10;
+        // 라벨을 지점 오른쪽 위로 배치해 경로선과 겹치지 않게 함.
+        // 지점이 캔버스 오른쪽 끝에 너무 가까우면 왼쪽으로, 위쪽 끝에 너무 가까우면 아래쪽으로 뒤집는다.
+        const flipX = p[0] + GAP_FROM_POINT + pillW > W - 12;
+        const flipY = p[1] - GAP_FROM_POINT - pillH < mapY + 4;
+        const px = flipX ? p[0] - GAP_FROM_POINT - pillW : p[0] + GAP_FROM_POINT;
+        const py = flipY ? p[1] + GAP_FROM_POINT : p[1] - GAP_FROM_POINT - pillH;
+
+        // 지점 표시용 작은 점
+        ctx.fillStyle = GREEN;
+        ctx.beginPath(); ctx.arc(p[0], p[1], 4, 0, Math.PI*2); ctx.fill();
+        ctx.strokeStyle = BLACK; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(p[0], p[1], 4, 0, Math.PI*2); ctx.stroke();
+
+        ctx.fillStyle = 'rgba(0,0,0,0.88)';
+        roundRect(ctx, px, py, pillW, pillH, 7);
         ctx.fill();
-        ctx.strokeStyle = GREEN; ctx.lineWidth = 1;
-        roundRect(ctx, px, py, pillW, pillH, 6);
+        ctx.strokeStyle = GREEN; ctx.lineWidth = 1.2;
+        roundRect(ctx, px, py, pillW, pillH, 7);
         ctx.stroke();
         ctx.fillStyle = WHITE;
         ctx.textAlign = 'center';
-        ctx.fillText(label, p[0], py + 15);
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, px + pillW/2, py + pillH/2 + 1);
         ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
       });
     }
   } else {
