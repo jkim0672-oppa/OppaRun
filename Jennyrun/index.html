@@ -5124,22 +5124,32 @@ const order = ['chest', 'waist', 'armband', 'hand'];
 const overridesMap = prof.motionCalibOverrides || {};
 const factorMapKeys = { stride: 'strideCorrectionFactorByPos', gps: 'gpsDistCorrectionFactorByPos', cad: 'cadCorrectionFactorByPos', pace: 'paceCorrectionFactorByPos' };
 
-// 한 항목(committed vs current)을 비교해서, 다르면 노란색으로 강조해 렌더링.
-function row(label, committedVal, currentVal, fmt) {
+// 한 항목(committed → prev → current)을 비교해서 렌더링.
+// [추가] prevVal(직전 캘리 적용 전 undo 스냅샷 값)을 옵션으로 받아 최대 3단계로 표시.
+// 값이 이전 단계와 같으면 생략해서 실제로 바뀐 구간만 화살표로 이어붙인다.
+function row(label, committedVal, prevVal, currentVal, fmt) {
   const cf = fmt ? fmt(committedVal) : committedVal;
+  const pf = (prevVal != null) ? (fmt ? fmt(prevVal) : prevVal) : null;
   const nf = fmt ? fmt(currentVal) : currentVal;
-  const changed = String(cf) !== String(nf);
-  const curColor = changed ? '#ffcc44' : '#fff';
+  const steps = [{ v: cf, color: '#666' }];
+  if (pf != null && String(pf) !== String(steps[steps.length - 1].v)) {
+    steps.push({ v: pf, color: '#999' });
+  }
+  if (String(nf) !== String(steps[steps.length - 1].v)) {
+    steps.push({ v: nf, color: '#ffcc44', bold: true });
+  }
+  const valueHtml = steps.map(function(s, i) {
+    const span = s.bold ? ('<b style="color:' + s.color + ';">' + s.v + '</b>') : ('<span style="color:' + s.color + ';">' + s.v + '</span>');
+    return i === 0 ? span : (' → ' + span);
+  }).join('');
   return '<div style="display:flex; justify-content:space-between; gap:8px;">'
     + '<span style="color:#888;">' + label + '</span>'
-    + '<span>' + '<span style="color:#666;">' + cf + '</span>'
-    + (changed ? ' → <b style="color:' + curColor + ';">' + nf + '</b>' : '')
-    + '</span></div>';
+    + '<span>' + valueHtml + '</span></div>';
 }
 
 let html = '<div style="background:#1a1a1a; border:1.5px solid #333; border-radius:12px; padding:14px;">';
 html += '<div style="font-size:var(--fs-xxs); color:#888; margin-bottom:10px; line-height:1.5;">' +
-  (isKo ? '왼쪽 회색 = 커밋+다운로드했을 때 값. 오른쪽 노란색 = 지금 실제로 적용 중인 값(다른 경우만 표시).' : 'Grey (left) = value as of last commit/download. Yellow (right) = currently applied value (shown only where it differs).') +
+  (isKo ? '회색 = 커밋+다운로드했을 때 값. 중간 회색 = 직전 캘리브레이션 적용 전 값. 노란색 = 지금 실제로 적용 중인 값(다른 경우만 단계별로 표시).' : 'Grey = value as of last commit/download. Mid-grey = value before the last calibration apply. Yellow = currently applied value (shown only where it differs, step by step).') +
   '</div>';
 
 let anyChanged = false;
@@ -5161,6 +5171,22 @@ order.forEach(function(pos) {
     cad: (prof.cadCorrectionFactorByPos && typeof prof.cadCorrectionFactorByPos[pos] === 'number') ? prof.cadCorrectionFactorByPos[pos] : committedFactors.cad,
     pace: (prof.paceCorrectionFactorByPos && typeof prof.paceCorrectionFactorByPos[pos] === 'number') ? prof.paceCorrectionFactorByPos[pos] : committedFactors.pace
   };
+  // [추가] 바로 직전 캘리 적용 전 undo 스냅샷 — 있으면 committed와 current 사이 "이전 값" 단계로 표시.
+  const undo = (prof.motionCalibUndos && prof.motionCalibUndos[pos]) || null;
+  const prevOv = undo ? undo.prevOverride : null;
+  const prevMotion = undo ? {
+    gctFallbackRatio: (prevOv && prevOv.gctFallbackRatio != null) ? prevOv.gctFallbackRatio : committedMotion.gctFallbackRatio,
+    vertScale: (prevOv && prevOv.vertScale != null) ? prevOv.vertScale : committedMotion.vertScale,
+    rotRejectThreshold: (prevOv && prevOv.rotRejectThreshold != null) ? prevOv.rotRejectThreshold : committedMotion.rotRejectThreshold,
+    groundThreshold: (prevOv && prevOv.groundThreshold != null) ? prevOv.groundThreshold : committedMotion.groundThreshold,
+    impactThreshold: (prevOv && prevOv.impactThreshold != null) ? prevOv.impactThreshold : committedMotion.impactThreshold
+  } : null;
+  const prevFactors = undo ? {
+    stride: (typeof undo.prevStrideCorrectionFactor === 'number') ? undo.prevStrideCorrectionFactor : committedFactors.stride,
+    gps: (typeof undo.prevGpsDistCorrectionFactor === 'number') ? undo.prevGpsDistCorrectionFactor : committedFactors.gps,
+    cad: (typeof undo.prevCadCorrectionFactor === 'number') ? undo.prevCadCorrectionFactor : committedFactors.cad,
+    pace: (typeof undo.prevPaceCorrectionFactor === 'number') ? undo.prevPaceCorrectionFactor : committedFactors.pace
+  } : null;
 
   const posChanged = ov != null
     || curFactors.stride !== committedFactors.stride
@@ -5176,15 +5202,15 @@ order.forEach(function(pos) {
     (posChanged ? '  <span style="color:#ffcc44; font-size:var(--fs-xxs);">● ' + (isKo ? '변경됨' : 'CHANGED') + '</span>' : '') +
     '</div>';
   html += '<div style="font-size:var(--fs-xxs); line-height:1.9;">';
-  html += row('gctFallbackRatio', committedMotion.gctFallbackRatio, curMotion.gctFallbackRatio, function(v){ return v.toFixed(2); });
-  html += row('vertScale', committedMotion.vertScale, curMotion.vertScale);
-  html += row('rotRejectThreshold', committedMotion.rotRejectThreshold, curMotion.rotRejectThreshold);
-  html += row('groundThreshold', committedMotion.groundThreshold, curMotion.groundThreshold);
-  html += row('impactThreshold', committedMotion.impactThreshold, curMotion.impactThreshold);
-  html += row((isKo ? '보폭계수 stride' : 'stride'), committedFactors.stride, curFactors.stride, function(v){ return v.toFixed(3); });
-  html += row('gps', committedFactors.gps, curFactors.gps, function(v){ return v.toFixed(3); });
-  html += row((isKo ? '케이던스 cad' : 'cad'), committedFactors.cad, curFactors.cad, function(v){ return v.toFixed(3); });
-  html += row('pace', committedFactors.pace, curFactors.pace, function(v){ return v.toFixed(3); });
+  html += row('gctFallbackRatio', committedMotion.gctFallbackRatio, prevMotion && prevMotion.gctFallbackRatio, curMotion.gctFallbackRatio, function(v){ return v.toFixed(2); });
+  html += row('vertScale', committedMotion.vertScale, prevMotion && prevMotion.vertScale, curMotion.vertScale);
+  html += row('rotRejectThreshold', committedMotion.rotRejectThreshold, prevMotion && prevMotion.rotRejectThreshold, curMotion.rotRejectThreshold);
+  html += row('groundThreshold', committedMotion.groundThreshold, prevMotion && prevMotion.groundThreshold, curMotion.groundThreshold);
+  html += row('impactThreshold', committedMotion.impactThreshold, prevMotion && prevMotion.impactThreshold, curMotion.impactThreshold);
+  html += row((isKo ? '보폭계수 stride' : 'stride'), committedFactors.stride, prevFactors && prevFactors.stride, curFactors.stride, function(v){ return v.toFixed(3); });
+  html += row('gps', committedFactors.gps, prevFactors && prevFactors.gps, curFactors.gps, function(v){ return v.toFixed(3); });
+  html += row((isKo ? '케이던스 cad' : 'cad'), committedFactors.cad, prevFactors && prevFactors.cad, curFactors.cad, function(v){ return v.toFixed(3); });
+  html += row('pace', committedFactors.pace, prevFactors && prevFactors.pace, curFactors.pace, function(v){ return v.toFixed(3); });
   html += '</div></div>';
 });
 
