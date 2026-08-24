@@ -1237,6 +1237,24 @@ transform: scale(0.97); background: var(--primary); color: #111; border-color: v
 <div id="quick-devpos-armband" class="gender-btn" onclick="ui.quickSetDevicePos('armband')">ARMBAND</div>
 <div id="quick-devpos-hand" class="gender-btn" onclick="ui.quickSetDevicePos('hand')">HAND</div>
 </div>
+<!-- [신규] 설정에 들어가지 않고 바로 켜고 끌 수 있는 퀵 토글 3종(자동멈춤/로그기록/메트로놈).
+     설정 페이지·온보딩과 동일한 unit-btn 라벨+상태 텍스트 스타일을 그대로 재사용하고,
+     실제 토글은 기존 ui.toggleAutoPause()/ui.togglePrecisionLogRecording()/metro.toggle()을
+     그대로 호출해 설정 페이지와 항상 동기화되도록 함(별도 저장 로직 없음). -->
+<div class="gender-toggle-row" id="quick-toggles-row" style="margin-top:14px;">
+<div id="quick-autopause-switch" class="unit-btn" onclick="ui.quickToggleAutoPause()" style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; padding:10px 8px;">
+<span id="quick-label-autopause" style="font-size:var(--fs-xs); font-weight:900;">AUTO PAUSE</span>
+<span id="quick-autopause-status" style="font-size:var(--fs-xs); font-weight:900;">OFF</span>
+</div>
+<div id="quick-precision-log-switch" class="unit-btn" onclick="ui.quickTogglePrecisionLog()" style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; padding:10px 8px;">
+<span id="quick-label-precision-log" style="font-size:var(--fs-xs); font-weight:900;">LOG RECORDING</span>
+<span id="quick-precision-log-status" style="font-size:var(--fs-xs); font-weight:900;">OFF</span>
+</div>
+<div id="quick-metro-switch" class="unit-btn" onclick="ui.quickToggleMetro()" style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; padding:10px 8px;">
+<span id="quick-label-metro" style="font-size:var(--fs-xs); font-weight:900;">METRONOME</span>
+<span id="quick-metro-status" style="font-size:var(--fs-xs); font-weight:900;">OFF</span>
+</div>
+</div>
 <!-- [신규] 가슴 착용 선택 시에만 노출되는 린각도 ON/OFF 버튼. 다른 위치 버튼처럼 선택 즉시
      팝업이 닫히도록 토글 스위치 대신 ON/OFF 버튼 2개로 구성 (quickSetLeanAngle 참고). -->
 <div id="quick-lean-angle-section" style="display:none; margin-top:14px;">
@@ -3794,6 +3812,7 @@ const step2 = document.getElementById('quick-mode-step2');
 if (step1) step1.style.display = 'none';
 if (step2) step2.style.display = 'block';
 this.hideQuickLeanAngleToggle(); // [추가] 팝업을 새로 열 때는 항상 숨긴 상태로 시작
+this.syncQuickTogglesUI(); // [추가] 자동멈춤/로그기록/메트로놈 퀵 토글을 현재 저장값으로 동기화
 }
 // [신규] 퀵 팝업 2단계에서 위치 선택 - 기존 setDevicePos()를 그대로 재사용해
 // 설정 페이지 하이라이트/린각도 가용성/실행 중인 MotionManager까지 한번에 동기화
@@ -3837,6 +3856,37 @@ if (section) section.style.display = 'none';
 quickSetLeanAngle(enabled) {
 this.setLeanAngleEnabled(enabled);
 this.closeQuickModeSwitch();
+}
+// [신규] 퀵 팝업의 자동멈춤/로그기록/메트로놈 토글 - 설정으로 들어가지 않고 바로 켜고 끌 수 있게 함.
+// 기존 토글 함수를 그대로 재사용하므로(setAutoPause/setPrecisionLogRecording/metro.toggle 내부에서
+// 이 팝업의 DOM도 함께 갱신) 설정 페이지와 항상 동기화되고, 팝업은 닫지 않아 연속으로 여러 개를 켤 수 있음.
+quickToggleAutoPause() {
+this.toggleAutoPause();
+}
+quickTogglePrecisionLog() {
+this.togglePrecisionLogRecording();
+}
+quickToggleMetro() {
+metro.toggle();
+}
+// [신규] 퀵 팝업 2단계를 열 때 자동멈춤/로그기록/메트로놈 박스를 현재 저장값 기준으로 동기화.
+syncQuickTogglesUI() {
+const t = translations[storage.getLang()] || translations['en'];
+const apLabel = document.getElementById('quick-label-autopause');
+if (apLabel) apLabel.textContent = t.autoPauseLabel;
+const logLabel = document.getElementById('quick-label-precision-log');
+if (logLabel) logLabel.textContent = t.onbLogRecordLabel;
+const metroLabel = document.getElementById('quick-label-metro');
+if (metroLabel) metroLabel.textContent = t.metroTitle;
+const apBox = document.getElementById('quick-autopause-switch');
+const apStatus = document.getElementById('quick-autopause-status');
+if (apBox) apBox.classList.toggle('active', this.currentAutoPause === true);
+if (apStatus) apStatus.textContent = this.currentAutoPause ? 'ON' : 'OFF';
+const logBox = document.getElementById('quick-precision-log-switch');
+const logStatus = document.getElementById('quick-precision-log-status');
+if (logBox) logBox.classList.toggle('active', this.currentPrecisionLogEnabled === true);
+if (logStatus) logStatus.textContent = this.currentPrecisionLogEnabled ? 'ON' : 'OFF';
+this.updateQuickMetroBtn();
 }
 updateWalkDisplay(data) {
 if (data.steps !== undefined && this.dom.cadence) this.dom.cadence.textContent = data.steps;
@@ -4155,6 +4205,11 @@ const box = document.getElementById('precision-log-record-switch');
 const status = document.getElementById('precision-log-record-status');
 if (box) box.classList.toggle('active', enabled === true);
 if (status) status.textContent = enabled ? 'ON' : 'OFF';
+// [추가] 퀵 모드 팝업의 로그기록 토글도 함께 동기화
+const quickBox = document.getElementById('quick-precision-log-switch');
+const quickStatus = document.getElementById('quick-precision-log-status');
+if (quickBox) quickBox.classList.toggle('active', enabled === true);
+if (quickStatus) quickStatus.textContent = enabled ? 'ON' : 'OFF';
 }
 // [추가] 설정 페이지: 폰위치 선택은 걷기 모드에서는 필요 없으므로 비활성화(흐리게 + 클릭 차단)
 updatePosAvailability() {
@@ -4240,6 +4295,11 @@ const box = document.getElementById('autopause-switch-box');
 const status = document.getElementById('autopause-status');
 if(box) box.classList.toggle('active', enabled === true);
 if(status) status.textContent = enabled ? 'ON' : 'OFF';
+// [추가] 퀵 모드 팝업의 자동멈춤 토글도 함께 동기화
+const quickBox = document.getElementById('quick-autopause-switch');
+const quickStatus = document.getElementById('quick-autopause-status');
+if(quickBox) quickBox.classList.toggle('active', enabled === true);
+if(quickStatus) quickStatus.textContent = enabled ? 'ON' : 'OFF';
 // 러닝 중 끄면 즉시 오토포즈 해제 (화면에 남아있는 정지 표시 제거)
 if (typeof app !== 'undefined' && app && app.state) {
 app.state.autoPauseEnabled = enabled;
@@ -4714,6 +4774,8 @@ if(leanAngleToggleLabel) leanAngleToggleLabel.textContent = t.leanAngleToggleLab
 // [추가] 퀵 모드 팝업(가슴 선택 시 노출)의 린각도 타이틀도 언어 변경 시 함께 갱신
 const quickLeanAngleTitle = document.getElementById('quick-lean-angle-title');
 if(quickLeanAngleTitle) quickLeanAngleTitle.textContent = t.onbLeanAngleLabel;
+// [추가] 퀵 모드 팝업의 자동멈춤/로그기록/메트로놈 라벨도 언어 변경 시 함께 갱신
+if (typeof this.syncQuickTogglesUI === 'function') this.syncQuickTogglesUI();
 // [추가] 캘리브레이션 알림음 라벨/버튼 텍스트 번역 적용
 const calibSoundLabel = document.getElementById('label-calib-sound');
 if(calibSoundLabel) calibSoundLabel.textContent = t.calibSoundLabel;
@@ -5382,6 +5444,11 @@ updateQuickMetroBtn() {
 const btn = this.dom.quickMetro;
 const metroBox = document.getElementById('metro-switch-box');
 if(metroBox) metroBox.classList.toggle('active', metro.isPlaying === true);
+// [추가] 퀵 모드 팝업의 메트로놈 토글도 함께 동기화
+const quickMetroBox = document.getElementById('quick-metro-switch');
+const quickMetroStatus = document.getElementById('quick-metro-status');
+if(quickMetroBox) quickMetroBox.classList.toggle('active', metro.isPlaying === true);
+if(quickMetroStatus) quickMetroStatus.textContent = metro.isPlaying ? 'ON' : 'OFF';
 if(!btn) return;
 const lang = storage.getLang();
 const t = translations[lang] || translations['en'];
