@@ -2704,10 +2704,13 @@ const FACTORY_DEFAULT_FACTORS = { stride: 1.0, gps: 1.0, cad: 1.0, pace: 1.0 };
 // 폴백시켰었는데, 실제로는 이 표가 곧 그 원점이었다 — 커밋을 반복하면 "앱 기본값 보기"와
 // "FACTORY RESET"이 진짜 출고값이 아니라 최근 커밋값을 보여주는 버그였음(사용자 리포트로 발견).
 const FACTORY_MOTION_PROFILES = {
-  chest:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.151, vertScale: 0.511, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
+  // [수정] 가슴 0.151 / 손 0.193은 폰 1대 실측 기반이던 예전 값 — 사용자 확인 결과
+  // 진짜 팩토리 기본값은 4개 위치 전부 0.40(Malisoux 2019 인구평균 듀티팩터)으로
+  // 통일된 게 맞아서, 냉동 출고표도 DEVICE_MOTION_PROFILES와 동일하게 맞춘다.
+  chest:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0.511, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
   waist:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0.511, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
   armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0.511, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
-  hand:    { groundThreshold: 13.5, impactThreshold: 14, gctFallbackRatio: 0.193, vertScale: 0, minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: false, stepTrigger: 'native' },
+  hand:    { groundThreshold: 13.5, impactThreshold: 14, gctFallbackRatio: 0.40, vertScale: 0, minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: false, stepTrigger: 'native' },
 };
 // [리팩토링 2026-08-21] 위치별 모션 프로파일(gctFallbackRatio 등)이 이 파일 3곳
 // (여기 / applyDevicePos()의 profiles / DEVICE_PROFILE_DEFAULTS)에 각각 하드코딩
@@ -13931,6 +13934,11 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         vertScale: factoryP.vertScale,
         rotRejectThreshold: factoryP.rotRejectThreshold
       };
+      // [수정] 되돌리기(UNDO) 스냅샷을 안 지우면, 진짜 출고값으로 리셋된 뒤에도
+      // "커밋값 → 예전 되돌리기값 → 방금 리셋값" 3단계로 표시돼서 리셋이 제대로
+      // 안 된 것처럼 보이는 버그가 있었음(사용자 리포트로 발견). 리셋은 완전히
+      // 새로운 원점이므로 이 위치의 undo 스냅샷도 함께 지운다.
+      if (prof.motionCalibUndos) delete prof.motionCalibUndos[pos];
       storage.saveProfile(prof);
 
       if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
@@ -14115,6 +14123,9 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
           vertScale: factoryP.vertScale,
           rotRejectThreshold: factoryP.rotRejectThreshold
         };
+        // [수정] 위와 동일한 이유로, 전체 팩토리 리셋에서도 위치별 undo 스냅샷을
+        // 지워야 "커밋값 → 예전값 → 리셋값" 3단계 잔상 없이 깔끔하게 출고값으로 보인다.
+        if (prof.motionCalibUndos) delete prof.motionCalibUndos[pos];
       });
       storage.saveProfile(prof);
 
