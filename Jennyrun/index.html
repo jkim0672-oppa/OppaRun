@@ -9883,12 +9883,18 @@ app.maybeLogPrecisionSample();
 // 안전하게 0 처리된다.
 window.onNativeMotionUpdate = function (x, y, z, timestamp, gx, gy, gz) {
 try {
-if (typeof app !== 'undefined' && app &&
-    app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
+if (typeof app !== 'undefined' && app && app.state && app.state.isRunning && !app.state.isPaused) {
 const evt = { accelerationIncludingGravity: { x: x, y: y, z: z } };
 if (gx !== undefined && gy !== undefined && gz !== undefined) {
 evt.rotationRate = { alpha: gx, beta: gy, gamma: gz };
 }
+// [수정] 린각도 추출기는 자동멈춤 여부와 무관하게 항상 호출한다. 캘리브레이션(착용 대기 6초 +
+// 정지 자세 캡처 4초) 구간은 사용자가 가만히 서 있는 상태라 자동멈춤이 걸리기 딱 좋은 조건이라,
+// 기존처럼 !isAutoPaused에 묶어두면 "캘리브레이션을 위해 서 있는 행동 자체가 자동멈춤을 유발해
+// 캘리브레이션 진행을 막아버리는" 자기모순이 생겼다(캘리브레이션 완료 알림음이 안 울리던 원인).
+// 내부적으로 enabled(=가슴 착용+러닝)가 아니면 즉시 no-op이라 다른 모드/위치에는 영향 없다.
+if (app.leanTracker) app.leanTracker.handleMotion(evt);
+if (!app.state.isAutoPaused) {
 // [수정] 걷기 모드일 때는 걷기 전용 walkMotion(WalkStepDetector)으로,
 // 러닝/트레일 모드일 때는 기존 motion(MotionManager)으로 라우팅.
 // 기존엔 이 분기가 없어서 걷기 모드에서도 항상 러닝용 케이던스 계산기가 호출되어
@@ -9898,13 +9904,11 @@ if (app.walkMotion) app.walkMotion.handleMotion(evt);
 } else {
 if (app.motion) app.motion.handleMotion(evt);
 }
-// [신규] 린각도 추출기: 위 걸음 감지 라우팅과 완전 분리된 별도 경로. 내부적으로
-// enabled(=가슴 착용+러닝) 아니면 즉시 no-op이라 다른 모드/위치에는 영향 없음.
-if (app.leanTracker) app.leanTracker.handleMotion(evt);
 // [신규] 화면 꺼짐 대응: setInterval 대신 여기서 정밀 로그 트리거
 // (가속도계는 보통 GPS보다 훨씬 자주 들어오므로 이쪽이 주 경로)
 if (typeof app.maybeLogPrecisionSample === 'function') {
 app.maybeLogPrecisionSample();
+}
 }
 }
 } catch (e) { console.error('onNativeMotionUpdate error', e); }
@@ -9917,8 +9921,10 @@ app.maybeLogPrecisionSample();
 // 구간으로 제한되어 있음(그 이후엔 leanTracker가 알아서 무시함 — 여기서는 그냥 최신값만 전달).
 window.onNativeOrientationUpdate = function (matrixArr, timestamp) {
 try {
+// [수정] 위 onNativeMotionUpdate와 동일한 이유로 isAutoPaused 조건을 제거.
+// 방향 캘리브레이션도 러닝 시작 직후(첫 10m) 구간에 걸릴 수 있어 자동멈춤과 충돌 가능.
 if (typeof app !== 'undefined' && app && app.leanTracker &&
-    app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
+    app.state && app.state.isRunning && !app.state.isPaused) {
 app.leanTracker.setOrientationMatrix(matrixArr);
 }
 } catch (e) { console.error('onNativeOrientationUpdate error', e); }
