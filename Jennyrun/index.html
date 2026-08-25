@@ -7248,6 +7248,21 @@ this.commitStep(now, cycleTime, missedStepsToResync);
 // 어느 쪽이 "걸음이 있었다"고 트리거했는지와 무관하게 항상 동일한 방식으로 산출된다.
 // ── 걸음 확정(공통) ──
 commitStep(now, cycleTime, missedStepsToResync) {
+// [수정] GCT 계산용 "유효 사이클타임" 산출: 네이티브 걸음 브릿지가 걸음 이벤트를
+// 배치(batch)로 묶어 보낼 때 실제 보폭 간격이 아닌 66~110ms대의 가짜로 짧은
+// cycleTime이 들어오는 경우가 있다(위 onNativeStep 주석 참고). 이런 배치 아티팩트가
+// 그대로 GCT 클램프(measuredGCT ≤ cycleTime*0.9)에 상한선으로 쓰이면, 실측된 진짜
+// GCT(250~300ms대)가 이 가짜 상한에 잘려나가 66ms대로 왜곡된다(케이던스는 4초 윈도우
+// 평균이라 영향 없지만, 걸음 단위 GCT는 직접 영향받음). 직전 걸음들의 평균 주기 대비
+// 비정상적으로 짧으면(55% 미만) 배치 아티팩트로 보고, GCT 계산에는 직전 평균 주기를
+// 대신 사용한다 — 걸음 확정 자체(케이던스/스텝카운트)는 그대로 유지, GCT 산출에만 적용.
+const priorRollingAvg = this.recentCycleTimes.length >= 3
+? this.recentCycleTimes.reduce((a, b) => a + b, 0) / this.recentCycleTimes.length
+: null;
+const gctCycleTime = (priorRollingAvg != null && cycleTime < priorRollingAvg * 0.55)
+? priorRollingAvg
+: cycleTime;
+
 if (this.lastStepTime !== 0) {
 this.recentCycleTimes.push(cycleTime);
 if (this.recentCycleTimes.length > 8) this.recentCycleTimes.shift();
@@ -7284,7 +7299,8 @@ this.gctMeasuredCount++;
 // [개선-2] 이번 세션의 실측 성공 사례로부터 GCT/cycleTime 비율을 느린 EMA로 학습.
 // 이후 폴백이 발동하면(예: 일시적 노이즈로 안정구간 감지 실패) 위치별 고정 상수보다
 // "이 사람이 이번 러닝에서 실제로 보인 접지 패턴"에 더 가까운 값을 쓸 수 있게 된다.
-const observedRatio = Math.max(0.15, Math.min(0.75, measuredGCT / cycleTime));
+// [수정] 비율 학습/클램프 모두 배치 아티팩트를 걸러낸 gctCycleTime 기준으로 계산(위 참고).
+const observedRatio = Math.max(0.15, Math.min(0.75, measuredGCT / gctCycleTime));
 this.gctRatioLearned = (this.gctRatioLearned == null) ? observedRatio : (this.gctRatioLearned * 0.9 + observedRatio * 0.1);
 } else {
 this.gctFallbackCount++;
@@ -7294,10 +7310,10 @@ const base = this.gctFallbackRatio;
 const effectiveRatio = (this.gctRatioLearned != null && this.gctMeasuredCount >= 5)
 ? Math.max(base * 0.75, Math.min(base * 1.25, this.gctRatioLearned))
 : base;
-measuredGCT = cycleTime * effectiveRatio; // 위치별 폴백 비율(또는 세션 학습값)
+measuredGCT = gctCycleTime * effectiveRatio; // 위치별 폴백 비율(또는 세션 학습값)
 }
-// 비정상 범위(50ms 미만, cycleTime 초과) 보정
-measuredGCT = Math.max(50, Math.min(measuredGCT, cycleTime * 0.9));
+// 비정상 범위(50ms 미만, cycleTime 초과) 보정 — 여기도 gctCycleTime 기준
+measuredGCT = Math.max(50, Math.min(measuredGCT, gctCycleTime * 0.9));
 let currentGCT = Math.round(measuredGCT);
 
 // [수정] result.gct는 이번 스텝의 순간 측정값을 그대로 사용한다.
@@ -7307,7 +7323,10 @@ let currentGCT = Math.round(measuredGCT);
 // 평균을 내다 보니 "평균의 평균"이 되어 초반 페이스 변화에 거의 반응하지
 // 않고 값이 과거 쪽으로 계속 눌려있는 문제가 있었음.
 result.gct = currentGCT;
-result.flight = Math.round(((cycleTime - currentGCT) / cycleTime) * 100);
+// [수정] flight%도 GCT와 짝 맞춰 gctCycleTime 기준으로 계산. 원본 cycleTime(배치 아티팩트로
+// 짧을 수 있음)을 그대로 쓰면 currentGCT가 gctCycleTime 기준으로 보정된 뒤에도 분모만
+// 옛날처럼 짧아서 flight%가 음수로 튀는 모순이 생김.
+result.flight = Math.round(((gctCycleTime - currentGCT) / gctCycleTime) * 100);
 
 // 러닝 시작부터의 누적 평균은 계속 별도로 유지(다른 곳에서 필요할 수 있어 보관만 함).
 this.gctAccumulator += currentGCT;
@@ -7322,7 +7341,7 @@ if (this.recentGctValues.length > 5) this.recentGctValues.shift();
 result.gctDisplay = this.recentGctValues.length >= 3
 ? [...this.recentGctValues].sort((a, b) => a - b)[Math.floor(this.recentGctValues.length / 2)]
 : currentGCT;
-result.flightDisplay = Math.round(((cycleTime - result.gctDisplay) / cycleTime) * 100);
+result.flightDisplay = Math.round(((gctCycleTime - result.gctDisplay) / gctCycleTime) * 100);
 
 // [추가] 좌/우 측 GCT 및 케이던스 누적 (밸런스 산출용)
 let side = this.stepSide;
