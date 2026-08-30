@@ -9626,7 +9626,16 @@ let totalAltGain = 0;
 if (this.state.splits && this.state.splits.length > 0) {
 totalAltGain = this.state.splits.reduce((sum, split) => sum + Math.max(0, split.altDiff || 0), 0);
 }
-const avgPaceSec = ui.parsePaceToSeconds(ui.dom.avgPace.textContent);
+// [수정] 예전엔 ui.dom.avgPace.textContent(마지막 GPS 콜백 때 찍힌 값)를 그대로 읽어와서
+// FINISH를 누른 시점의 최종 totalDist/seconds보다 살짝 stale한 값이 기록/칼로리 계산에
+// 쓰이는 문제가 있었음(정밀 로그의 distKm/time 재계산값과 페이스가 어긋나는 원인).
+// → FINISH 시점의 최종 상태로 즉시 재계산해서 사용.
+const _finalAvgKmh = this.state.totalDist > 0 ? (this.state.totalDist / (this.state.seconds / 3600)) : 0;
+const avgPaceSec = this.state.totalDist > 0 ? (this.state.seconds / this.state.totalDist) : 0;
+const _finalAvgPaceStr = this.formatPace(_finalAvgKmh);
+// [수정] 직접 textContent를 대입하면 마일 단위 사용자의 단위 변환이 빠지므로,
+// 기존 updateRunningDisplay()를 그대로 재사용해 convertPaceToUnit()이 동일하게 적용되게 함.
+ui.updateRunningDisplay({ avgPace: _finalAvgPaceStr });
 const calculatedKcal = ui.calculateCalories(weightKg, this.state.totalDist, avgPaceSec, totalAltGain, ui.currentGender, p.age, this.state.activityMode === 'trail');
 // [수정] 기존엔 10초 윈도우 트림 평균을 우선 사용했으나, 이러면 같은 기록 안에서
 // STRIDE(총거리÷총걸음수, 실측값)와 CADENCE(윈도우 평균, 추정치)가 서로 다른 계산
@@ -9749,7 +9758,11 @@ let totalAltGain = 0;
 if (this.state.splits && this.state.splits.length > 0) {
 totalAltGain = this.state.splits.reduce((sum, split) => sum + Math.max(0, split.altDiff || 0), 0);
 }
-const avgPaceSec = ui.parsePaceToSeconds(ui.dom.avgPace.textContent);
+// [수정] onFinish()와 동일한 이유로 stale한 DOM 값 대신 최종 totalDist/seconds로 즉시 재계산.
+const _finalAvgKmh = this.state.totalDist > 0 ? (this.state.totalDist / (this.state.seconds / 3600)) : 0;
+const avgPaceSec = this.state.totalDist > 0 ? (this.state.seconds / this.state.totalDist) : 0;
+const _finalAvgPaceStr = this.formatPace(_finalAvgKmh);
+ui.updateRunningDisplay({ avgPace: _finalAvgPaceStr });
 const calculatedKcal = ui.calculateWalkCalories(weightKg, this.state.totalDist, avgPaceSec, totalAltGain, ui.currentGender, p.age);
 // [수정] 러닝(onFinish)과 동일한 원칙 적용: 샘플 평균(추정치)보다 총 걸음수÷총시간
 // (실측값)을 우선 사용해서, 같은 기록 안에서 SPM과 STRIDE(총거리÷총걸음수)가
@@ -12951,7 +12964,10 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // 방향은 gct/vert 등과 반대(역수)임에 주의 — 페이스는 계수를 올리면 값이 작아지므로
     // (빨라짐), 비율을 phone/garmin으로 잡아야 phone이 느리게(값이 큼) 나올 때 계수가
     // 올라가서 페이스가 줄어드는 방향으로 움직인다.
-    const suggestedPaceFactor = (phoneAvgPaceSec && garminAvgPaceSec && paceDiffPct != null && Math.abs(paceDiffPct) > 1)
+    // [수정] 오차가 1% 미만이면 항목 자체가 안 보여서 실시간 페이스를 수동으로 미세조정할
+    // 방법이 없었음 — 다른 항목과 달리 페이스는 오차 크기와 무관하게 항상 표를 띄워서
+    // 사용자가 언제든 값을 확인/수동 입력할 수 있게 함(제안값이 현재값과 거의 같아도 노출).
+    const suggestedPaceFactor = (phoneAvgPaceSec && garminAvgPaceSec && paceDiffPct != null)
       ? Math.round(curPaceFactor * stepRatio(phoneAvgPaceSec / garminAvgPaceSec, GPS_STEP_FRACTION) * 1000) / 1000 : null;
 
     // [추가] "권장 보정수치를 적용하면" 예상되는 값 — 실제로 앱 설정(gctFallbackRatio,
@@ -13124,7 +13140,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
           : '')
     }) + '</div>';
 
-    const hasSuggestion = suggestedRot != null || suggestedRotOS != null || suggestedGct != null || suggestedVertScale != null || suggestedStrideFactor != null || suggestedGpsDistFactor != null || suggestedCadFactor != null;
+    const hasSuggestion = suggestedRot != null || suggestedRotOS != null || suggestedGct != null || suggestedVertScale != null || suggestedStrideFactor != null || suggestedGpsDistFactor != null || suggestedCadFactor != null || suggestedPaceFactor != null;
 
     if (hasSuggestion) {
       // [수정] 예전엔 아래 5개 값이 있으면 무조건 전부 한꺼번에 적용됐음.
