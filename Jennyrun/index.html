@@ -12850,17 +12850,23 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     const phoneDistanceKm = avgArr(precItems.map(p => precLastDistKm(p.log)));
     const distDiffPct = (phoneDistanceKm && garminDistanceKm) ? ((phoneDistanceKm - garminDistanceKm) / garminDistanceKm * 100) : null;
 
-    // 현재 MotionManager 설정값 (실행 중이 아니어도 OppaRunApp 생성 시 저장된
-    // 착용 위치 프로파일이 이미 적용돼 있음)
+    // [수정] 예전엔 여기서 app.motion(현재 실시간으로 활성화된 착용위치 설정)을 그대로
+    // 읽었는데, 이 화면은 "Apply to position: X"로 이 로그의 착용위치(resolvedDevicePos) 기준
+    // 분석이라고 표시해놓고 정작 비교 기준값은 그와 무관하게 "마지막으로 실제 선택했던
+    // 착용위치"를 따라갔음. 예를 들어 이 기록이 CHEST로 찍혔어도, 그 이후 HAND로 한 번이라도
+    // 뛰었다면 app.motion.vertScale은 HAND 기본값인 0이 되어 curVertScale > 0 조건에 걸려
+    // 오차가 아무리 커도 vertScale 제안 자체가 통째로 사라졌다. resolvedDevicePos에 저장된
+    // 프로필(팩토리 기본값 + 위치별 캘리브레이션 오버라이드)에서 직접 읽어와 이 문제를 없앤다.
     let curGround = null, curImpact = null, curGct = null, curRot = null, curVertScale = null;
     try {
-      if (typeof app !== 'undefined' && app && app.motion) {
-        curGround = app.motion.groundThreshold;
-        curImpact = app.motion.impactThreshold;
-        curGct = app.motion.gctFallbackRatio;
-        curRot = app.motion.rotRejectThreshold;
-        curVertScale = app.motion.vertScale;
-      }
+      const _baseProfile = DEVICE_MOTION_PROFILES[resolvedDevicePos] || DEVICE_MOTION_PROFILES.chest;
+      const _ovProfile = storage.loadProfile();
+      const _posOv = (_ovProfile.motionCalibOverrides && _ovProfile.motionCalibOverrides[resolvedDevicePos]) || null;
+      curGround = (_posOv && typeof _posOv.groundThreshold === 'number') ? _posOv.groundThreshold : _baseProfile.groundThreshold;
+      curImpact = (_posOv && typeof _posOv.impactThreshold === 'number') ? _posOv.impactThreshold : _baseProfile.impactThreshold;
+      curGct = (_posOv && typeof _posOv.gctFallbackRatio === 'number') ? _posOv.gctFallbackRatio : _baseProfile.gctFallbackRatio;
+      curRot = (_posOv && typeof _posOv.rotRejectThreshold === 'number') ? _posOv.rotRejectThreshold : _baseProfile.rotRejectThreshold;
+      curVertScale = (_posOv && typeof _posOv.vertScale === 'number') ? _posOv.vertScale : _baseProfile.vertScale;
     } catch (e) {}
     // [참고] curStrideFactor / curGpsDistFactor는 위(phoneAvgStepMm 계산 직전)에서
     // 이미 로드해뒀음 — 여기서 다시 선언하지 않음.
