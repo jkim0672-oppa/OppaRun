@@ -3963,7 +3963,7 @@ return;
 const p = storage.loadProfile();
 const weightKg = p.wu === 'lb' ? p.w * 0.453592 : p.w;
 if (!weightKg) { calEl.textContent = '0'; return; }
-const avgPaceSec = ui.parsePaceToSeconds ? (this.state.seconds / this.state.totalDist) : 360;
+const avgPaceSec = this.state.totalDist > 0 ? (this.state.seconds / this.state.totalDist) : 360;
 let totalAltGain = this.state.totalAscent || 0;
 const liveKcal = ui.calculateCalories(weightKg, this.state.totalDist, avgPaceSec, totalAltGain, ui.currentGender, p.age, ui.currentActivityMode === 'trail');
 calEl.textContent = (liveKcal && liveKcal > 0) ? liveKcal : '0';
@@ -8585,13 +8585,15 @@ if (this.state.lastPosTimestamp) {
 const isTrailModeTick = ui.currentActivityMode === 'trail';
 const GPS_STALE_MS = isTrailModeTick ? 9000 : 6000; // 트레일은 신호 두절이 잦아 여유를 더 둠
 if ((Date.now() - this.state.lastPosTimestamp) > GPS_STALE_MS) {
-this.state.speedBuffer.push(0);
-if (this.state.speedBuffer.length > 8) this.state.speedBuffer.shift();
+// [수정 2026-08] 워치독 발동 시점엔 이미 6초/9초를 기다려 "GPS 끊김"이 확정된 상태라,
+// 그 이후에도 버퍼를 한 칸씩(push+shift) 채워가며 추가로 ~7초를 더 감쇠시킬 이유가 없음.
+// 발동 즉시 버퍼를 8칸 전부 0으로 스냅해서 화면이 곧바로 "--"로 전환되게 함.
+// (평소 자연 정지 시의 점진 감쇠는 updatePosition() 쪽 로직 그대로 유지되므로 영향 없음)
+this.state.speedBuffer = new Array(8).fill(0);
 this.state.lastValidSpeed = 0;
 this.state.pendingSpeedVal = null;
 if (!this.state.metricSpeedBuffer) this.state.metricSpeedBuffer = [];
-this.state.metricSpeedBuffer.push(0);
-if (this.state.metricSpeedBuffer.length > 8) this.state.metricSpeedBuffer.shift();
+this.state.metricSpeedBuffer = new Array(8).fill(0);
 this.state.lastValidMetricSpeed = 0;
 this.state.pendingMetricSpeedVal = null;
 
@@ -9485,7 +9487,12 @@ if (this.walkMotion) this.walkMotion.reset();
 // 계속 계산이 돌아가는 게 어색하다는 피드백에 따라 명시적 on/off 스위치를 추가함.
 // 이 판단은 세션 시작 시점 한 번만 고정되고(위 runDevicePos/activityMode와 동일 패턴),
 // 스위치가 꺼져있거나 손/허리/암밴드 착용, 걷기 모드면 세션 내내 no-op으로 남는다.
-if (this.leanTracker) this.leanTracker.reset(this.state.runDevicePos === 'chest' && this.state.activityMode !== 'walk' && storage.getLeanAngleEnabled(), () => this.playCalibDoneBeep());
+// [수정 2026-08-31] 기존엔 activityMode !== 'walk'(트레일도 포함)로 판정해서, 설정 화면의
+// _isLeanAngleGated(mode==='run'만 허용)가 매번 storage 플래그를 강제로 꺼주는 간접 동기화에만
+// 의존해 트레일 모드 오작동을 막고 있었음. 이 세션 시작 조건 자체를 설정 화면과 동일한 기준
+// (mode === 'run')으로 명시해 단일 기준으로 통일 — 트레일 지형의 흔들림 많은 움직임이
+// 린각도(자세 캘리브레이션 기반) 계산에 섞여 들어가는 걸 이 지점에서도 직접 차단.
+if (this.leanTracker) this.leanTracker.reset(this.state.runDevicePos === 'chest' && this.state.activityMode === 'run' && storage.getLeanAngleEnabled(), () => this.playCalibDoneBeep());
 if (this.state.activityMode === 'walk') {
 if (ui.dom.cadence) ui.dom.cadence.textContent = '0';
 if (ui.dom.gct) ui.dom.gct.textContent = '--';
