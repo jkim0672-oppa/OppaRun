@@ -8287,6 +8287,60 @@ function computeOsCadence(log) {
   const sc = (dur && last && last.stepCounterSteps !== '' && last.stepCounterSteps != null) ? (parseFloat(last.stepCounterSteps) / dur * 60) : null;
   return { sd, sc };
 }
+// [추가] 가민 비교(runCalibrationCompare)용 시간축 정렬: 가민을 먼저 켜고 폰을 늦게
+// 시작하거나(머리 쪽 어긋남), 가민을 먼저 끄고 폰이 걷기 상태로 몇 초 더 기록되는
+// 경우(꼬리 쪽 어긋남) 둘 다, 실제로는 "두 기기가 동시에 기록 중이던 구간"만 비교해야
+// 공정하다. 정밀 로그의 timestamp(ISO)와 가민 레코드의 unixMs 둘 다 절대시각이므로,
+// 겹치는 구간(늦게 시작한 쪽 시작 ~ 먼저 끝난 쪽 끝)을 구해서 양쪽을 그 구간으로
+// 잘라낸 뒤 비교에 사용한다. 로그/가민 파일이 1개씩(1:1 비교)일 때만 적용 —
+// 여러 개를 합쳐 평균 낼 때는 로그마다 시간대가 달라 "하나의 겹침 구간"이 의미가 없다.
+function precLogTimeRangeMs(log) {
+  if (!log || !log.length) return null;
+  const first = Date.parse(log[0].timestamp);
+  const last = Date.parse(log[log.length - 1].timestamp);
+  if (isNaN(first) || isNaN(last)) return null;
+  return { startMs: first, endMs: last };
+}
+function garminTimeRangeMs(item) {
+  if (!item || item.startMs == null || item.endMs == null) return null;
+  return { startMs: item.startMs, endMs: item.endMs };
+}
+function computeOverlapWindow(precLog, garminItem) {
+  const pr = precLogTimeRangeMs(precLog);
+  const gr = garminTimeRangeMs(garminItem);
+  if (!pr || !gr) return null;
+  const startMs = Math.max(pr.startMs, gr.startMs);
+  const endMs = Math.min(pr.endMs, gr.endMs);
+  if (!(endMs > startMs)) return null; // 겹치는 구간이 없으면 정렬 포기(전체 사용으로 폴백)
+  return { startMs, endMs };
+}
+function trimPrecLogToWindow(log, startMs, endMs) {
+  return log.filter(r => {
+    const ms = Date.parse(r.timestamp);
+    return !isNaN(ms) && ms >= startMs && ms <= endMs;
+  });
+}
+function trimGarminRecordsToWindow(records, startMs, endMs) {
+  return (records || []).filter(r => r.unixMs != null && r.unixMs >= startMs && r.unixMs <= endMs);
+}
+// [추가] 잘라낸 가민 레코드로 케이던스/GCT/수직진동/보폭 평균을 다시 계산(저장 용량 절약을
+// 위해 records엔 이 4개 필드만 남아있음 — summarize() 참고). distance/pace/HR은 초당 원본이
+// 보관되지 않아 이 방식으로는 재계산 불가하므로 원래 파일 전체 평균을 그대로 사용한다.
+function recomputeGarminAggFromRecords(records) {
+  let cadSum = 0, cadCount = 0, gctSum = 0, gctCount = 0, voSum = 0, voCount = 0, slSum = 0, slCount = 0;
+  records.forEach(r => {
+    if (r.cadence != null) { cadSum += r.cadence; cadCount++; }
+    if (r.stanceTimeMs != null) { gctSum += r.stanceTimeMs; gctCount++; }
+    if (r.verticalOscillationMm != null) { voSum += r.verticalOscillationMm; voCount++; }
+    if (r.stepLengthMm != null) { slSum += r.stepLengthMm; slCount++; }
+  });
+  return {
+    avgCadence: cadCount ? Math.round(cadSum / cadCount) : null,
+    avgGctMs: gctCount ? Math.round(gctSum / gctCount) : null,
+    avgVertOscMm: voCount ? Math.round((voSum / voCount) * 10) / 10 : null,
+    avgStepLengthMm: slCount ? Math.round((slSum / slCount) * 10) / 10 : null,
+  };
+}
 // ========== OppaRunApp (수정: 타이머 관리, auto-pause시 시간 정지, 중복 모션 리스너 제거) ==========
 class OppaRunApp {
 constructor() {
@@ -12059,7 +12113,7 @@ const garmin = (function () {
       // [추가] 시간 축 정렬 비교(캘리브레이션)용 원본 초당 레코드. 케이던스/GCT/수직진동/보폭만 남겨서
       // localStorage 용량을 아낀다 (위경도 등은 캘리브레이션에 불필요).
       records: records.map(r => ({
-        unixMs: r.unixMs, cadence: r.cadence, stanceTimeMs: r.stanceTimeMs, verticalOscillationMm: r.verticalOscillationMm, stepLengthMm: r.stepLengthMm
+        unixMs: r.unixMs, cadence: r.cadence, stanceTimeMs: r.stanceTimeMs, verticalOscillationMm: r.verticalOscillationMm, stepLengthMm: r.stepLengthMm, distance: r.distance != null ? r.distance : null
       }))
     };
   }
@@ -12767,9 +12821,39 @@ const garmin = (function () {
     if (!resultBox) return;
     const list = loadImports();
     // [수정] 체크된 가민 기록들 / 체크된 정밀 로그들을 모두 모은다 (1개면 기존과 동일한 1:1 비교).
-    const garminItems = list.filter(i => selectedIds.indexOf(i.id) >= 0);
+    let garminItems = list.filter(i => selectedIds.indexOf(i.id) >= 0);
     const precLogs = getCombinedPrecLogs();
-    const precItems = precLogs.filter(l => selectedPrecLogIds.indexOf(l.id) >= 0);
+    let precItems = precLogs.filter(l => selectedPrecLogIds.indexOf(l.id) >= 0);
+    // [추가] 시간축 정렬: 가민 1개 + 정밀 로그 1개(가장 흔한 1:1 비교)일 때만 적용.
+    // 가민을 먼저 켜고 폰을 늦게 시작했거나, 가민을 먼저 끄고 폰이 걷기 상태로 더
+    // 기록된 경우, 겹치지 않는 구간(정지 타이밍 어긋남)이 평균에 섞여 실제로는 없는
+    // 오차처럼 보이는 문제를 막는다. 겹치는 구간이 없거나 시각 파싱에 실패하면
+    // computeOverlapWindow가 null을 반환하고, 이 경우 원본 전체 데이터로 폴백한다.
+    let alignmentTrimmedHtml = '';
+    if (garminItems.length === 1 && precItems.length === 1) {
+      const overlap = computeOverlapWindow(precItems[0].log, garminItems[0]);
+      if (overlap) {
+        const trimmedLog = trimPrecLogToWindow(precItems[0].log, overlap.startMs, overlap.endMs);
+        const trimmedRecords = trimGarminRecordsToWindow(garminItems[0].records, overlap.startMs, overlap.endMs);
+        // 정렬로 잘려나간 시간이 1초 이상일 때만(부동소수 오차로 인한 무의미한 재계산 방지) 실제로 트림 적용.
+        const origPrecRange = precLogTimeRangeMs(precItems[0].log);
+        const origGarminRange = garminTimeRangeMs(garminItems[0]);
+        const trimmedSec = Math.round(
+          ((origPrecRange.endMs - origPrecRange.startMs) - (overlap.endMs - overlap.startMs)) / 1000
+          + ((origGarminRange.endMs - origGarminRange.startMs) - (overlap.endMs - overlap.startMs)) / 1000
+        );
+        if (trimmedLog.length > 1 && trimmedRecords.length > 1 && trimmedSec >= 1) {
+          const garminAgg = recomputeGarminAggFromRecords(trimmedRecords);
+          precItems = [Object.assign({}, precItems[0], { log: trimmedLog })];
+          garminItems = [Object.assign({}, garminItems[0], garminAgg, { records: trimmedRecords })];
+          alignmentTrimmedHtml = '<div style="font-size:var(--fs-xxs); color:#7fd3ff; font-weight:700; margin-bottom:10px;">'
+            + (isKo
+              ? '⏱ 시작/종료 타이밍이 어긋난 약 ' + trimmedSec + '초를 제외하고, 두 기기가 동시에 기록 중이던 구간만 비교했습니다.'
+              : '⏱ Excluded about ' + trimmedSec + 's of non-overlapping start/stop time — comparing only the window both devices were recording.')
+            + '</div>';
+        }
+      }
+    }
 
     // [추가] 선택한 정밀 로그들이 어느 착용위치로 기록됐는지 확인해서,
     // (1) 서로 다른 위치가 섞여있으면 경고, (2) 실제로 어느 위치 슬롯에 보정값이
@@ -13135,7 +13219,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // [추가] 거리는 소수점 2자리(km)로 표시해야 하므로 별도 포맷터 사용.
     const rowKm = (label, phoneVal, garminVal, diffPct) => rowFmt(label, phoneVal, garminVal, diffPct, (v) => v.toFixed(2) + ' km');
 
-    let html = posMismatchWarningHtml + posInfoHtml + '<div class="garmin-import-item">'
+    let html = posMismatchWarningHtml + posInfoHtml + alignmentTrimmedHtml + '<div class="garmin-import-item">'
       + '<div style="font-size:var(--fs-xxs); color:#888; font-weight:800; margin-bottom:8px; display:flex; justify-content:space-between;">'
       + '<span>' + (isKo ? '폰' : 'PHONE') + '</span><span>' + (isKo ? '가민' : 'GARMIN') + '</span><span>' + (isKo ? '오차' : 'DIFF') + '</span>'
       + '</div>'
