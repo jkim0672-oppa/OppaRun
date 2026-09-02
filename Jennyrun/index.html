@@ -7516,7 +7516,16 @@ const effectiveRatio = (this.gctRatioLearned != null && this.gctMeasuredCount >=
 measuredGCT = gctCycleTime * effectiveRatio; // 위치별 폴백 비율(또는 세션 학습값)
 }
 // 비정상 범위(50ms 미만, cycleTime 초과) 보정 — 여기도 gctCycleTime 기준
-measuredGCT = Math.max(50, Math.min(measuredGCT, gctCycleTime * 0.9));
+// [수정 2026-09-01] 절대 상한 추가: 위 상대클램프(gctCycleTime*0.9)는 cycleTime
+// 자체가 비정상적으로 큰 경우(예: 러닝 시작 직후 스퓨리어스 스텝 1회가 잘못
+// 커밋된 뒤 실제 러닝이 시작되기까지 몇 초~십수 초의 공백이 생기고, 그 다음
+// 진짜 스텝이 커밋될 때 cycleTime이 그 공백 전체가 됨)를 전혀 걸러내지 못해서,
+// 사람의 실제 접지시간과 무관하게 수 초~십수 초짜리 GCT가 그대로 통과하는
+// 사례가 실측 로그(CHEST, t=15초 근방)에서 확인됨: gct=10193ms.
+// 사람은 파워워킹을 포함해도 GCT가 대략 500~600ms를 넘지 않으므로, cycleTime
+// 기준 상대클램프와 별개로 절대 상한을 둔다.
+const GCT_ABS_MAX_MS = 600;
+measuredGCT = Math.max(50, Math.min(measuredGCT, gctCycleTime * 0.9, GCT_ABS_MAX_MS));
 let currentGCT = Math.round(measuredGCT);
 
 // [수정] result.gct는 이번 스텝의 순간 측정값을 그대로 사용한다.
@@ -9550,6 +9559,12 @@ const _winElapsedSec = this.state.seconds - _swOldest.t;
 const logSpeedKmh = (_windowDistM > 0 && _winElapsedSec > 0)
   ? ((_windowDistM / 1000) / (_winElapsedSec / 3600)).toFixed(1)
   : getTxt('curSpeed');
+// [수정 2026-09-01] 이번 로그 초 동안 새로 커밋된 스텝이 있었는지 확인.
+// gctCount는 commitStep()에서 GCT가 실제로 계산될 때만(즉 새 스텝이 확정될 때만)
+// 증가하므로, 직전 로그 시점 값과 같다면 이번 초엔 새 스텝이 없었다는 뜻이다.
+const _curGctCount = (this.motion && typeof this.motion.gctCount === 'number') ? this.motion.gctCount : null;
+const _hasNewStepThisSample = (_curGctCount == null) || (_curGctCount !== this.state.lastLoggedGctCount);
+if (_curGctCount != null) this.state.lastLoggedGctCount = _curGctCount;
 this.state.precisionLog.push({
 t: this.state.seconds,
 timestamp: nowIso,
@@ -9559,7 +9574,7 @@ gpsAcc: gpsAcc,
 distKm: this.state.totalDist ? this.state.totalDist.toFixed(3) : '0.000',
 speedKmh: logSpeedKmh,
 cadence: getTxt('cadence'),
-gctMs: getTxt('gct'),
+gctMs: _hasNewStepThisSample ? getTxt('gct') : '--',
 flightPct: getTxt('flight'),
 stepLengthM: stepLengthM,
 stepLengthWindowM: stepLengthWindowM != null ? stepLengthWindowM.toFixed(2) : '', // [추가] 구간평균 원본(디버그/재튜닝용)
@@ -9660,6 +9675,13 @@ this.state.lastDiagCheckpoint = 0;
 this.state.lastDiagSeconds = 0;
 this.state.lastDiagAlt = 0;
 this.state.precisionLog = []; // [추가] 정밀 비교용 초당 로그 (가민 워치 데이터와 대조용)
+// [수정 2026-09-01] gctMs 스테일 값 감지용: commitStep()에서 GCT가 실제로 새로 계산될 때마다
+// 증가하는 motion.gctCount의 "직전 로그 시점 값"을 저장해둔다. 새 스텝이 안 커밋된 초에는
+// 화면(getTxt('gct'))이 마지막 스텝 값을 계속 보여주는데, 이걸 그대로 로그에 찍으면 러닝
+// 후반부처럼 스텝 간격이 벌어지는 구간에서 같은 GCT 값이 여러 초 연속으로 찍혀 평균이
+// 왜곡된다(가민 대조 시 실측 로그에서 확인된 문제). 아래 push 블록에서 이 값과 비교해
+// 변화가 없으면 그 초는 gctMs를 '--'로 남긴다.
+this.state.lastLoggedGctCount = 0;
 this.state.strideWindow = []; // [추가] 보폭(step_length) 구간평균 계산용 슬라이딩 윈도우 버퍼
 this.state.lastKmCheckpoint = 0;
 this.state.lastKmSeconds = 0;
