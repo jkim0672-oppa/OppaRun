@@ -3890,13 +3890,36 @@ return Math.round(met * weightKg * hours * genderBonus * inclineBonus * ageBonus
 // 러닝 한 세션의 평균 파워(정수, W)를 반환. 유효한 페이스/체중이 없으면 null.
 calculateRunningPower(weightKg, distanceKm, paceSeconds, totalAltitudeGain) {
 if (!paceSeconds || paceSeconds <= 0 || !weightKg || !distanceKm || distanceKm <= 0) return null;
-const speedMPerMin = (distanceKm * 1000) / (paceSeconds / 60); // m/min
+const speedMPerMin = 60000 / paceSeconds; // m/min (페이스=초/km 이므로 총거리와 무관한 순수 속도)
 // 이번 러닝의 평균 경사(비율) — 상승고도만 반영한 근사치(내리막은 별도 보정 안 함)
 const grade = Math.max(0, totalAltitudeGain || 0) / (distanceKm * 1000);
 const vo2 = 3.5 + (0.2 * speedMPerMin) + (0.9 * speedMPerMin * grade); // ml/kg/min
 const kcalPerMin = (vo2 * weightKg / 1000) * 5; // L O2/min * 5kcal/L
 const watts = kcalPerMin * 69.7; // 1 kcal/min ≈ 69.7 W
 return Math.round(watts);
+}
+// [신규] 러닝 파워 강도 구간(Z1~Z5) 판정. 절대 와트는 체중에 따라 크게 달라지므로
+// 체중당 파워(W/kg)를 기준으로 판정한다. calculateRunningPower()가 반환하는 총 대사파워(W) 기준으로
+// 역산한 참고 구간이며(회복~스프린트), 심박존과 동일한 5단계 색상 팔레트를 재사용해 화면 간 통일감을 준다.
+// wkg가 null/NaN이면 null 반환(표시부에서 '--' 처리).
+getPowerZone(wkg) {
+if (wkg == null || isNaN(wkg)) return null;
+if (wkg < 12) return 1;   // 회복/이지
+if (wkg < 14) return 2;   // 보통(이지~마라톤)
+if (wkg < 16) return 3;   // 템포/역치
+if (wkg < 19) return 4;   // 인터벌/하드
+return 5;                 // 스프린트
+}
+getPowerColor(wkg) {
+const z = this.getPowerZone(wkg);
+switch (z) {
+case 1: return '#64b5f6';
+case 2: return '#81c784';
+case 3: return '#ffb74d';
+case 4: return '#ef5350';
+case 5: return '#b71c1c';
+default: return '#999';
+}
 }
 // [신규] 걷기 전용 칼로리 계산 (러닝용 calculateCalories와 별도, 걷기 속도 기준 MET 테이블 사용)
 calculateWalkCalories(weightKg, distanceKm, paceSeconds, totalAltitudeGain, gender, age) {
@@ -6082,7 +6105,7 @@ this.buildHrBoxHtml(r, t) +
 '<div class="h-det-box"><div class="h-det-label">' + t.cal + '</div><div class="h-det-val">' + (r.kcal || 0) + '<span class="c34">' + (r.weightKgSnapshot ? r.weightKgSnapshot.toFixed(1)+'kg' : '') + '</span></div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.gct + '</div><div class="h-det-val" style="color:' + this.getGctColor(r.gct) + '">' + (r.gct || '--') + ' <span class="u-font-size-fs-xxs">MS</span></div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.flight + '</div><div class="h-det-val" style="color:' + this.getFlightColor(r.flight) + '">' + (r.flight || '--') + ' <span class="u-font-size-fs-xxs">%</span></div></div>' +
-'<div class="h-det-box"><div class="h-det-label">' + t.powerLabel + '</div><div class="h-det-val">' + (r.power != null ? r.power : '--') + ' <span class="u-font-size-fs-xxs">W</span></div></div>' +
+'<div class="h-det-box"><div class="h-det-label">' + t.powerLabel + '</div><div class="h-det-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + ' <span class="u-font-size-fs-xxs">W</span></div></div>' +
 ((() => {
 let strideVal = '--';
 if (r.stride) {
@@ -6868,7 +6891,7 @@ contentArea.innerHTML =
 '<div style="margin-top:6px;font-size:var(--fs-sm);color:#aaa;font-weight:700;">' + (t.speed||'SPEED') + ' : ' + (() => { const p=r.avgPace||r.pace; if(p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60); return this.currentUnit==='mile'?(kmh*0.621371).toFixed(1)+' mi/h':kmh.toFixed(1)+' km/h';} return '--'; })() + '</div>' +
 '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + (pacePeakDisplay ? (' / ' + pacePeakDisplay) : '') + ' <span class="c44">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div>' + paceSparkSvg + (paceSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.powerLabel || "POWER") + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.power != null ? r.power : '--') + ' <span class="c44">W</span></div></div><div class="diag-tip">' + (t.infRunPowerD || '') + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.powerLabel || "POWER") + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + ' <span class="c44">W</span></div></div><div class="diag-tip">' + (t.infRunPowerD || '') + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.cadence ? this.getCadenceColor(r.cadence) : '#aaa') + '">CAD: ' + (r.cadence || 0) + (cadPeakForDiag != null ? (' / ' + cadPeakForDiag) : '') + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div>' + cadSparkSvg + (cadSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getStrideColor(strideNumForFeedback, diagProfile) + '">' + strideVal + '</div><div class="diag-ref">Ref: 0.5~0.75m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.gct && r.gct !== '--' ? this.getGctColor(r.gct) : '#aaa') + '">GCT: ' + r.gct + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
@@ -9966,6 +9989,7 @@ const _finalAvgPaceStr = this.formatPace(_finalAvgKmh);
 ui.updateRunningDisplay({ avgPace: _finalAvgPaceStr });
 const calculatedKcal = ui.calculateCalories(weightKg, this.state.totalDist, avgPaceSec, totalAltGain, ui.currentGender, p.age, this.state.activityMode === 'trail');
 const calculatedPower = ui.calculateRunningPower(weightKg, this.state.totalDist, avgPaceSec, totalAltGain); // [신규] 러닝 파워(와트) 추정치
+const calculatedPowerWkg = (calculatedPower != null && weightKg > 0) ? Math.round((calculatedPower / weightKg) * 10) / 10 : null; // [신규] 체중당 파워(W/kg) — 강도 색상 판정용, 기록 시점 체중으로 고정 저장
 // [수정] 기존엔 10초 윈도우 트림 평균을 우선 사용했으나, 이러면 같은 기록 안에서
 // STRIDE(총거리÷총걸음수, 실측값)와 CADENCE(윈도우 평균, 추정치)가 서로 다른 계산
 // 방식을 쓰게 되어 둘이 미세하게 어긋나는 문제가 있었음(예: 175spm인데 stride로
@@ -10043,6 +10067,7 @@ gyroDiag: gyroDiag, // [추가] 좌우 판별 진단용(임시) — 자이로 �
 vertRatio: measuredVertRatio,
 kcal: calculatedKcal,
 power: calculatedPower,            // [신규] 러닝 파워(와트) 추정치 — 메인 화면 제외 전 페이지 표시용
+powerWkg: calculatedPowerWkg,      // [신규] 체중당 파워(W/kg) — 강도 구간(Z1~Z5) 색상 판정용
 stride: _snapshotStride,           // [추가] 보폭 스냅샷 저장
 sensorDiag: _strideSensorFlag,     // [추가] 개발자 전용 진단 플래그. 클램프가 발동한 기록에만 값이 있음(UI 비노출, export로만 확인)
 devicePos: this.state.runDevicePos || null, // [추가] 이번 러닝에 실제로 적용된 착용 위치(클램프 여부와 무관하게 항상 기록)
@@ -11346,6 +11371,8 @@ const shareLeanAngle = opts.leanAngle !== false; // [신규] 린각도 공유 �
         // [신규] 러닝 파워(와트) 추정치. Supabase 'records' 테이블에 power_w(numeric, nullable)
         // 컬럼이 없다면 먼저 추가해야 저장됨. 칼로리와 같은 공개 체크박스(shareKcal)를 재사용.
         power_w: shareKcal ? (record.power != null ? record.power : null) : null,
+        // [신규] 체중당 파워(W/kg) — 크루카드 강도 색상 판정용. power_wkg(numeric, nullable) 컬럼 필요.
+        power_wkg: shareKcal ? (record.powerWkg != null ? record.powerWkg : null) : null,
         // [추가] 걷기 기록의 걸음수/분당걸음수도 함께 업로드 (크루 피드 카드에서 사용)
         steps: shareSteps ? (record.steps || null) : null,
         walk_spm: shareSteps ? (record.walkSpm || null) : null,
@@ -11378,7 +11405,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
       const { data, error } = await _sb
         .from('records')
         // [수정] 전체화면 확장맵에 km 스플릿 페이스 마커를 표시하려면 splits(좌표+구간페이스)가 필요해서 추가.
-        .select('id, nickname, avatar_url, location_name, title, activity_mode, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, splits, photo_url, message, avg_hr, max_hr, hr_zone, steps, walk_spm, stride_m, kcal, power_w, avg_lean_angle_deg, avg_lean_forward_deg, avg_lean_lateral_deg')
+        .select('id, nickname, avatar_url, location_name, title, activity_mode, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, splits, photo_url, message, avg_hr, max_hr, hr_zone, steps, walk_spm, stride_m, kcal, power_w, power_wkg, avg_lean_angle_deg, avg_lean_forward_deg, avg_lean_lateral_deg')
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) throw error;
@@ -11795,7 +11822,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
           </div>
           ${(r.power_w !== undefined && r.power_w !== null) ? `<div style="flex:1; text-align:center; ${r.hr_zone ? 'border-right:1px solid #f0f0f0;' : ''} padding:2px; min-width:0;">
             <div class="u-label-xxs-dim">${t.powerLabel||'POWER'}</div>
-            <div class="u-card-stat-value">${r.power_w}<span class="u-label-xxs-999"> W</span></div>
+            <div class="u-card-stat-value" style="color:${(typeof ui !== 'undefined') ? ui.getPowerColor(r.power_wkg) : '#111'};">${r.power_w}<span class="u-label-xxs-999"> W</span></div>
           </div>` : ''}
           ${r.hr_zone ? `<div class="c03">
             <div class="u-label-xxs-dim">${t.hrZoneLabel||'HR ZONE'}</div>
