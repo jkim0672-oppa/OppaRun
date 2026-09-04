@@ -6866,6 +6866,8 @@ const paceSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => paceStrToSeconds
 const cadSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3) ? s.avgCadence : null)), '#4fc3f7', false);
 const hrSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.avgHr === 'number' ? s.avgHr : null)), '#e53935', false);
 const altSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.altTo === 'number' ? s.altTo : null)), '#90a4ae', false);
+// [신규] 구간별 러닝 파워(와트) 그래프. 값이 없는(옛 기록) 구간은 null로 필터링됨.
+const powerSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.power === 'number' ? s.power : null)), '#ffb74d', false);
 // [추가] 그래프 아래 거리/시간 축 라벨 (기준선과 함께, v2 스타일)
 const diagAxisLabelsHtml = buildDiagAxisLabelsHtml(_splitsForGraph);
 const totalAltGainForDiag = _splitsForGraph.length > 0 ? _splitsForGraph.reduce((sum,s)=>sum+Math.max(0,s.altDiff||0),0) : 0;
@@ -6878,6 +6880,9 @@ const _cadPeakVals = _splitsForGraph.filter(s => typeof s.avgCadence === 'number
 const cadPeakForDiag = _cadPeakVals.length ? Math.max(..._cadPeakVals) : null;
 const _pacePeakSecs = _splitsForGraph.map(s => paceStrToSeconds(s.pace)).filter(v => typeof v === 'number');
 const pacePeakSecForDiag = _pacePeakSecs.length ? Math.min(..._pacePeakSecs) : null;
+// [신규] 구간 최고 파워(와트) — PACE/CAD와 동일하게 100m 구간 값들 중 최댓값으로 근사.
+const _powerPeakVals = _splitsForGraph.map(s => s.power).filter(v => typeof v === 'number' && isFinite(v));
+const powerPeakForDiag = _powerPeakVals.length ? Math.max(..._powerPeakVals) : null;
 function _fmtPeakPaceStr(sec) {
   if (sec == null) return null;
   const m = Math.floor(sec / 60), s = Math.round(sec % 60);
@@ -6891,7 +6896,7 @@ contentArea.innerHTML =
 '<div style="margin-top:6px;font-size:var(--fs-sm);color:#aaa;font-weight:700;">' + (t.speed||'SPEED') + ' : ' + (() => { const p=r.avgPace||r.pace; if(p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60); return this.currentUnit==='mile'?(kmh*0.621371).toFixed(1)+' mi/h':kmh.toFixed(1)+' km/h';} return '--'; })() + '</div>' +
 '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + (pacePeakDisplay ? (' / ' + pacePeakDisplay) : '') + ' <span class="c44">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div>' + paceSparkSvg + (paceSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.powerLabel || "POWER") + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + ' <span class="c44">W</span></div></div><div class="diag-tip">' + (t.infRunPowerD || '') + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.powerLabel || "POWER") + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + (powerPeakForDiag != null ? (' / ' + powerPeakForDiag) : '') + ' <span class="c44">W</span></div></div><div class="diag-tip">' + (t.infRunPowerD || '') + '</div>' + powerSparkSvg + (powerSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.cadence ? this.getCadenceColor(r.cadence) : '#aaa') + '">CAD: ' + (r.cadence || 0) + (cadPeakForDiag != null ? (' / ' + cadPeakForDiag) : '') + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div>' + cadSparkSvg + (cadSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getStrideColor(strideNumForFeedback, diagProfile) + '">' + strideVal + '</div><div class="diag-ref">Ref: 0.5~0.75m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.gct && r.gct !== '--' ? this.getGctColor(r.gct) : '#aaa') + '">GCT: ' + r.gct + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
@@ -9143,7 +9148,12 @@ const _diagCadArr = this.state.diagCadenceSamples || [];
 const _diagAvgCad = _diagCadArr.length > 0 ? Math.round(_diagCadArr.reduce((a,b)=>a+b,0) / _diagCadArr.length) : null;
 const _diagHrArr = this.state.diagHrSamples || [];
 const _diagAvgHr = _diagHrArr.length > 0 ? Math.round(_diagHrArr.reduce((a,b)=>a+b,0) / _diagHrArr.length) : null;
-this.state.diagSplits.push({ km: diagTargetKm, t_sec: this.state.seconds, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastDiagAlt, avgCadence: _diagAvgCad, cadN: _diagCadArr.length, avgHr: _diagAvgHr });
+// [신규] 구간별(100m) 러닝 파워(와트) — DIAG 그래프용. 세션 평균과 동일한 calculateRunningPower()를
+// 100m 구간의 페이스/고도차에 적용해 구간별 추정치를 얻는다.
+const _diagProf = storage.loadProfile();
+const _diagWeightKg = _diagProf.wu === 'lb' ? _diagProf.w * 0.453592 : _diagProf.w;
+const _diagPower = ui.calculateRunningPower(_diagWeightKg, DIAG_SPLIT_INTERVAL_KM, diagPaceSecPerKm, Math.max(0, this.state.currentAlt - this.state.lastDiagAlt));
+this.state.diagSplits.push({ km: diagTargetKm, t_sec: this.state.seconds, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastDiagAlt, avgCadence: _diagAvgCad, cadN: _diagCadArr.length, avgHr: _diagAvgHr, power: _diagPower });
 this.state.lastDiagCheckpoint = diagTargetKm;
 this.state.lastDiagSeconds = this.state.seconds;
 this.state.lastDiagAlt = this.state.currentAlt;
@@ -9917,7 +9927,12 @@ const _diagCadArr2 = this.state.diagCadenceSamples || [];
 const _diagAvgCad2 = _diagCadArr2.length > 0 ? Math.round(_diagCadArr2.reduce((a,b)=>a+b,0) / _diagCadArr2.length) : null;
 const _diagHrArr2 = this.state.diagHrSamples || [];
 const _diagAvgHr2 = _diagHrArr2.length > 0 ? Math.round(_diagHrArr2.reduce((a,b)=>a+b,0) / _diagHrArr2.length) : null;
-this.state.diagSplits.push({ km: parseFloat(this.state.totalDist).toFixed(2), t_sec: this.state.seconds, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastDiagAlt, avgCadence: _diagAvgCad2, cadN: _diagCadArr2.length, avgHr: _diagAvgHr2 });
+// [신규] 구간별(자투리) 러닝 파워(와트) — 실제 남은 거리(diagSegmentKm) 기준으로 계산해
+// 위 정규 100m 구간과 동일한 방식 유지.
+const _diagProf2 = storage.loadProfile();
+const _diagWeightKg2 = _diagProf2.wu === 'lb' ? _diagProf2.w * 0.453592 : _diagProf2.w;
+const _diagPower2 = ui.calculateRunningPower(_diagWeightKg2, diagSegmentKm, diagPaceSecPerKm, Math.max(0, this.state.currentAlt - this.state.lastDiagAlt));
+this.state.diagSplits.push({ km: parseFloat(this.state.totalDist).toFixed(2), t_sec: this.state.seconds, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastDiagAlt, avgCadence: _diagAvgCad2, cadN: _diagCadArr2.length, avgHr: _diagAvgHr2, power: _diagPower2 });
 this.state.diagCadenceSamples = [];
 this.state.diagHrSamples = [];
 }
