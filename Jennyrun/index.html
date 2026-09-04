@@ -6905,11 +6905,13 @@ paceComment = totalSec < 300 ? t.diagPaceFast
 }
 // [수정] 파워 카드 설명을 다른 카드들처럼 짧은 강도 코멘트로 — 긴 설명은 인포 탭(infRunPowerD)에만.
 let powerComment = '';
+let powerZoneDisplay = '--'; // [신규] HR 카드와 동일하게 파워 카드에도 존(Z1~Z5) 표시
 if (r.power != null && r.powerWkg != null) {
 const _pz = this.getPowerZone(r.powerWkg);
 powerComment = (_pz != null && _pz <= 2) ? t.diagPowerLow
 : (_pz === 3) ? t.diagPowerModerate
 : t.diagPowerHigh;
+powerZoneDisplay = (_pz != null) ? ('Z' + _pz) : '--';
 }
 // [추가] 심박수/HR 존 분석 (가민 연동 데이터 기반)
 let hrMainVal = '--';
@@ -6964,7 +6966,7 @@ contentArea.innerHTML =
 '<div style="margin-top:6px;font-size:var(--fs-sm);color:#aaa;font-weight:700;">' + (t.speed||'SPEED') + ' : ' + (() => { const p=r.avgPace||r.pace; if(p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60); return this.currentUnit==='mile'?(kmh*0.621371).toFixed(1)+' mi/h':kmh.toFixed(1)+' km/h';} return '--'; })() + '</div>' +
 '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + (pacePeakDisplay ? (' / ' + pacePeakDisplay) : '') + ' <span class="c44">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div>' + paceSparkSvg + (paceSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.powerLabel || "POWER") + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + (powerPeakForDiag != null ? (' / ' + powerPeakForDiag) : '') + ' <span class="c44">W</span></div></div><div class="diag-tip">' + powerComment + '</div>' + powerSparkSvg + (powerSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.powerLabel || "POWER") + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + (powerPeakForDiag != null ? (' / ' + powerPeakForDiag) : '') + ' <span class="c44">W</span></div><div class="diag-ref">' + (t.powerZoneLabel || 'POWER ZONE') + ': ' + powerZoneDisplay + '</div></div><div class="diag-tip">' + powerComment + '</div>' + powerSparkSvg + (powerSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.cadence ? this.getCadenceColor(r.cadence) : '#aaa') + '">CAD: ' + (r.cadence || 0) + (cadPeakForDiag != null ? (' / ' + cadPeakForDiag) : '') + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div>' + cadSparkSvg + (cadSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getStrideColor(strideNumForFeedback, diagProfile) + '">' + strideVal + '</div><div class="diag-ref">Ref: 0.5~0.75m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.gct && r.gct !== '--' ? this.getGctColor(r.gct) : '#aaa') + '">GCT: ' + r.gct + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
@@ -8635,7 +8637,7 @@ seconds: 0, steps: 0, totalDist: 0, lastPos: null, pathCoords: [],
 currentAlt: 0, lowSpeedStartTime: null, wakeLock: null,
 maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
 splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
-diagSplits: [], lastDiagCheckpoint: 0, lastDiagSeconds: 0, lastDiagAlt: 0, diagCadenceSamples: [], diagHrSamples: [],
+diagSplits: [], lastDiagCheckpoint: 0, lastDiagSeconds: 0, lastDiagAlt: null, diagCadenceSamples: [], diagHrSamples: [],
 // [추가] 실시간 상승고도 누적 상태 (트레일 모드 실시간 칼로리의 경사 보너스 계산용)
 totalAscent: 0, lastAscentAlt: null,
 lastPosTimestamp: Date.now(),
@@ -9161,8 +9163,8 @@ const _diagAvgHr = _diagHrArr.length > 0 ? Math.round(_diagHrArr.reduce((a,b)=>a
 // 100m 구간의 페이스/고도차에 적용해 구간별 추정치를 얻는다.
 const _diagProf = storage.loadProfile();
 const _diagWeightKg = _diagProf.wu === 'lb' ? _diagProf.w * 0.453592 : _diagProf.w;
-const _diagPower = ui.calculateRunningPower(_diagWeightKg, DIAG_SPLIT_INTERVAL_KM, diagPaceSecPerKm, Math.max(0, this.state.currentAlt - this.state.lastDiagAlt));
-this.state.diagSplits.push({ km: diagTargetKm, t_sec: this.state.seconds, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastDiagAlt, avgCadence: _diagAvgCad, cadN: _diagCadArr.length, avgHr: _diagAvgHr, power: _diagPower });
+const _diagPower = ui.calculateRunningPower(_diagWeightKg, DIAG_SPLIT_INTERVAL_KM, diagPaceSecPerKm, (this.state.lastDiagAlt == null ? 0 : Math.max(0, this.state.currentAlt - this.state.lastDiagAlt)));
+this.state.diagSplits.push({ km: diagTargetKm, t_sec: this.state.seconds, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: (this.state.lastDiagAlt == null ? 0 : this.state.currentAlt - this.state.lastDiagAlt), avgCadence: _diagAvgCad, cadN: _diagCadArr.length, avgHr: _diagAvgHr, power: _diagPower });
 this.state.lastDiagCheckpoint = diagTargetKm;
 this.state.lastDiagSeconds = this.state.seconds;
 this.state.lastDiagAlt = this.state.currentAlt;
@@ -9746,7 +9748,7 @@ this.state.diagCadenceSamples = []; // [추가] 진단 화면 미니 그래프�
 this.state.diagHrSamples = []; // [추가] 진단 화면 미니 그래프용: 현재 100m 구간 심박 누적
 this.state.lastDiagCheckpoint = 0;
 this.state.lastDiagSeconds = 0;
-this.state.lastDiagAlt = 0;
+this.state.lastDiagAlt = null;
 this.state.precisionLog = []; // [추가] 정밀 비교용 초당 로그 (가민 워치 데이터와 대조용)
 // [수정 2026-09-01] gctMs 스테일 값 감지용: commitStep()에서 GCT가 실제로 새로 계산될 때마다
 // 증가하는 motion.gctCount의 "직전 로그 시점 값"을 저장해둔다. 새 스텝이 안 커밋된 초에는
@@ -9935,8 +9937,8 @@ const _diagAvgHr2 = _diagHrArr2.length > 0 ? Math.round(_diagHrArr2.reduce((a,b)
 // 위 정규 100m 구간과 동일한 방식 유지.
 const _diagProf2 = storage.loadProfile();
 const _diagWeightKg2 = _diagProf2.wu === 'lb' ? _diagProf2.w * 0.453592 : _diagProf2.w;
-const _diagPower2 = ui.calculateRunningPower(_diagWeightKg2, diagSegmentKm, diagPaceSecPerKm, Math.max(0, this.state.currentAlt - this.state.lastDiagAlt));
-this.state.diagSplits.push({ km: parseFloat(this.state.totalDist).toFixed(2), t_sec: this.state.seconds, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastDiagAlt, avgCadence: _diagAvgCad2, cadN: _diagCadArr2.length, avgHr: _diagAvgHr2, power: _diagPower2 });
+const _diagPower2 = ui.calculateRunningPower(_diagWeightKg2, diagSegmentKm, diagPaceSecPerKm, (this.state.lastDiagAlt == null ? 0 : Math.max(0, this.state.currentAlt - this.state.lastDiagAlt)));
+this.state.diagSplits.push({ km: parseFloat(this.state.totalDist).toFixed(2), t_sec: this.state.seconds, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: (this.state.lastDiagAlt == null ? 0 : this.state.currentAlt - this.state.lastDiagAlt), avgCadence: _diagAvgCad2, cadN: _diagCadArr2.length, avgHr: _diagAvgHr2, power: _diagPower2 });
 this.state.diagCadenceSamples = [];
 this.state.diagHrSamples = [];
 }
@@ -10302,7 +10304,7 @@ currentAlt: 0, lowSpeedStartTime: null, wakeLock: null,
 startTimestamp: null, pausedMs: 0, pauseStartedAt: null,
 maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
 splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
-diagSplits: [], lastDiagCheckpoint: 0, lastDiagSeconds: 0, lastDiagAlt: 0, diagCadenceSamples: [], diagHrSamples: [],
+diagSplits: [], lastDiagCheckpoint: 0, lastDiagSeconds: 0, lastDiagAlt: null, diagCadenceSamples: [], diagHrSamples: [],
 totalAscent: 0, lastAscentAlt: null,
 lastPosTimestamp: Date.now(),
 speedBuffer: [], lastValidSpeed: 0, emaSpeedKmh: 0, metricSpeedBuffer: [], lastValidMetricSpeed: 0, metricSpeedKmh: 0, cadenceSamples: [], cadValHistory: [],
