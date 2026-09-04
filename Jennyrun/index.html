@@ -3146,7 +3146,7 @@ infCalibFactors: "CALIBRATION: DISPLAY CORRECTION FACTORS", infCalibFactorsD: "T
 tapToExpand: "TAP TO EXPAND", gpsInit: "GPS INITIALIZING... | ALT: --m",
 metroOn: "METRO ON", metroOff: "METRO OFF",
 dimActive: "Dark mode active", dimDismiss: "Tap here to exit",
-stride: "STRIDE", cadenceBal: "CADENCE BAL", gctBal: "GCT BAL", gyroBal: "GYRO BAL", altChange: "ALT CHANGE", hrAvgMax: "HR AVG/MAX", hrZoneLabel: "HR ZONE",
+stride: "STRIDE", cadenceBal: "CADENCE BAL", gctBal: "GCT BAL", gyroBal: "GYRO BAL", altChange: "ALT CHANGE", hrAvgMax: "HR AVG/MAX", hrZoneLabel: "HR ZONE", powerZoneLabel: "POWER ZONE",
 gctHandNote: "Hand-held: GCT less accurate, chest recommended",
 avgCadenceBal: "Avg Cadence Balance", avgGctBal: "Avg GCT Balance",
 diagEffScore: "RUNNING EFFICIENCY", diagPaceLabel: "PACE", diagCadLabel: "CADENCE",
@@ -3155,6 +3155,7 @@ diagBalanceGood: "Left-right balance looks even.",
 diagBalanceExplain: "CADENCE compares left/right step count, GCT compares left/right ground contact time, and GYRO compares left/right rotational movement — all shown as an L:R ratio (50:50 = perfectly even).",
 diagEffGood: "Excellent running efficiency!", diagEffAvg: "Average. Work on GCT and cadence.", diagEffBad: "Needs improvement. Metronome training recommended.",
 diagPaceFast: "Fast pace. Check sustainability.", diagPaceGood: "Good aerobic pace.", diagPaceEasy: "Easy pace. Try pushing a bit more.",
+diagPowerLow: "Low intensity. Good for recovery or easy runs.", diagPowerModerate: "Moderate intensity. A solid aerobic effort.", diagPowerHigh: "High intensity. Make sure to recover properly.",
 diagCadGood: "Optimal step frequency.", diagCadLow: "Slightly low cadence. Sync with metronome.",
 diagStrideGood: "Single step length. 0.5~0.75m is ideal.",
 diagGctBad: "Ground contact time is prolonged. Focus on quick pull-off.", diagGctGood: "Excellent movement elasticity.",
@@ -3255,7 +3256,7 @@ infCalibFactors: "캘리브레이션: 표시 수치 보정 계수", infCalibFact
 tapToExpand: "탭하여 확대", gpsInit: "GPS 초기화 중... | 고도: --m",
 metroOn: "메트로 ON", metroOff: "메트로 OFF",
 dimActive: "어두운 모드 활성화", dimDismiss: "이 글자를 터치하면 해제",
-stride: "보폭", cadenceBal: "케이던스 밸런스", gctBal: "GCT 밸런스", gyroBal: "자이로 밸런스", altChange: "고도 변화", hrAvgMax: "심박 평균/최고", hrZoneLabel: "심박 존",
+stride: "보폭", cadenceBal: "케이던스 밸런스", gctBal: "GCT 밸런스", gyroBal: "자이로 밸런스", altChange: "고도 변화", hrAvgMax: "심박 평균/최고", hrZoneLabel: "심박 존", powerZoneLabel: "파워 존",
 gctHandNote: "손 착용: GCT 오차 있음, 가슴 착용 권장",
 avgCadenceBal: "평균 케이던스 밸런스", avgGctBal: "평균 GCT 밸런스",
 diagEffScore: "러닝 효율 점수", diagPaceLabel: "페이스", diagCadLabel: "케이던스",
@@ -3264,6 +3265,7 @@ diagBalanceGood: "좌우 밸런스가 고른 편입니다.",
 diagBalanceExplain: "케이던스는 좌우 걸음 수, GCT는 좌우 지면 접촉 시간, GYRO는 좌우 회전 움직임을 비교한 값으로, 모두 L:R(좌:우) 비율로 표시됩니다(50:50이 완벽한 균형).",
 diagEffGood: "우수한 러닝 효율입니다!", diagEffAvg: "보통 수준입니다. GCT와 케이던스를 개선해보세요.", diagEffBad: "효율 개선이 필요합니다. 메트로놈 훈련을 권장합니다.",
 diagPaceFast: "빠른 페이스입니다. 지속 가능한지 확인하세요.", diagPaceGood: "적절한 유산소 페이스입니다.", diagPaceEasy: "여유 있는 페이스입니다. 조금 더 빠르게 도전해보세요.",
+diagPowerLow: "가벼운 강도입니다. 회복 러닝이나 이지런에 적합합니다.", diagPowerModerate: "적당한 강도입니다. 무난한 유산소 강도입니다.", diagPowerHigh: "고강도입니다. 충분한 회복을 챙기세요.",
 diagCadGood: "이상적인 보폭 빈도입니다.", diagCadLow: "케이던스가 다소 낮습니다. 메트로놈에 맞춰보세요.",
 diagStrideGood: "한 걸음 기준 보폭입니다. 0.5~0.75m가 이상적입니다.",
 diagGctBad: "지면 접촉 시간이 다소 깁니다. 발을 빠르게 회수하세요.", diagGctGood: "매우 뛰어난 탄력성입니다.",
@@ -4160,17 +4162,60 @@ this.hideAutoModeSuggestion();
 updateLiveCalories() {
 const calEl = document.getElementById('cal-val');
 if (!calEl) return;
-if (!this.state.totalDist || this.state.totalDist <= 0 || !this.state.seconds) {
+// [수정] ui(UIManager)에는 state가 없어 this.state가 매번 undefined였음(app.state를 써야 함).
+// 그 결과 이 함수가 호출될 때마다 조용히 TypeError로 실패해 매초 실행되는 runTick() 흐름이
+// 여기서 끊기고, 이 호출 뒤에 있는 checkAutoActivityModeTransition() 등도 함께 실행이 안 됐음.
+if (typeof app === 'undefined' || !app.state.totalDist || app.state.totalDist <= 0 || !app.state.seconds) {
 calEl.textContent = '0';
 return;
 }
 const p = storage.loadProfile();
 const weightKg = p.wu === 'lb' ? p.w * 0.453592 : p.w;
 if (!weightKg) { calEl.textContent = '0'; return; }
-const avgPaceSec = this.state.totalDist > 0 ? (this.state.seconds / this.state.totalDist) : 360;
-let totalAltGain = this.state.totalAscent || 0;
-const liveKcal = ui.calculateCalories(weightKg, this.state.totalDist, avgPaceSec, totalAltGain, ui.currentGender, p.age, ui.currentActivityMode === 'trail');
+const avgPaceSec = app.state.totalDist > 0 ? (app.state.seconds / app.state.totalDist) : 360;
+let totalAltGain = app.state.totalAscent || 0;
+const liveKcal = ui.calculateCalories(weightKg, app.state.totalDist, avgPaceSec, totalAltGain, ui.currentGender, p.age, ui.currentActivityMode === 'trail');
 calEl.textContent = (liveKcal && liveKcal > 0) ? liveKcal : '0';
+}
+// [신규] 심박계(BLE) 미연결 시, HEART RATE/HR ZONE 카드가 계속 "--"로 비어 보이는 대신
+// 실시간 러닝 파워(와트)/파워존으로 대체 표시. hrManager._hr가 0(=한번도 연결 안 됐거나
+// 연결 해제된 상태)일 때만 동작하며, 실제 심박 데이터가 들어오면 hrManager.updateDisplay()가
+// 라벨/값을 원래대로 되돌린다. 걷기 모드는 파워 계산 대상이 아니라 건너뜀.
+updateLiveHrPowerFallback() {
+if (typeof hrManager === 'undefined' || hrManager._hr) return; // 실제 심박 연결 중이면 건드리지 않음
+const hrValEl = document.getElementById('hr-val');
+const hrZoneValEl = document.getElementById('hr-zone-val');
+const hrCard = document.getElementById('card-hr');
+const zoneCard = document.getElementById('card-hrzone');
+const labelHrEl = document.getElementById('label-hr');
+const labelHrZoneEl = document.getElementById('label-hrzone');
+const lang = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang() : 'ko';
+const t = translations[lang] || translations['en'];
+if (labelHrEl) labelHrEl.textContent = t.powerLabel || 'POWER';
+if (labelHrZoneEl) labelHrZoneEl.textContent = t.powerZoneLabel || 'POWER ZONE';
+// [주의] ui(UIManager)에는 state가 없어 app.state를 직접 참조한다 (updateLiveCalories()와
+// 달리 this.state로 쓰지 않음 — this.state는 undefined라 매번 조용히 실패하는 기존 버그가 있음).
+if (typeof app === 'undefined' || !app.state.totalDist || app.state.totalDist <= 0 || !app.state.seconds) {
+if (hrValEl) hrValEl.textContent = '--';
+if (hrZoneValEl) { hrZoneValEl.textContent = '--'; hrZoneValEl.style.color = '#fff'; }
+return;
+}
+const p = storage.loadProfile();
+const weightKg = p.wu === 'lb' ? p.w * 0.453592 : p.w;
+if (!weightKg) return;
+const avgPaceSec = app.state.totalDist > 0 ? (app.state.seconds / app.state.totalDist) : 0;
+const totalAltGain = app.state.totalAscent || 0;
+const livePower = this.calculateRunningPower(weightKg, app.state.totalDist, avgPaceSec, totalAltGain);
+const livePowerWkg = (livePower != null && weightKg > 0) ? (livePower / weightKg) : null;
+const color = this.getPowerColor(livePowerWkg);
+if (hrValEl) { hrValEl.textContent = livePower != null ? livePower : '--'; hrValEl.style.color = color; }
+if (hrZoneValEl) {
+const z = this.getPowerZone(livePowerWkg);
+hrZoneValEl.textContent = z != null ? ('Z' + z) : '--';
+hrZoneValEl.style.color = color;
+}
+if (hrCard) { hrCard.style.borderColor = color; }
+if (zoneCard) { zoneCard.style.borderColor = color; }
 }
 parsePaceToSeconds(paceStr) {
 if (!paceStr || paceStr === INVALID_PACE) return 360;
@@ -6843,6 +6888,14 @@ paceComment = totalSec < 300 ? t.diagPaceFast
 : totalSec < 420 ? t.diagPaceGood
 : t.diagPaceEasy;
 }
+// [수정] 파워 카드 설명을 다른 카드들처럼 짧은 강도 코멘트로 — 긴 설명은 인포 탭(infRunPowerD)에만.
+let powerComment = '';
+if (r.power != null && r.powerWkg != null) {
+const _pz = this.getPowerZone(r.powerWkg);
+powerComment = (_pz != null && _pz <= 2) ? t.diagPowerLow
+: (_pz === 3) ? t.diagPowerModerate
+: t.diagPowerHigh;
+}
 // [추가] 심박수/HR 존 분석 (가민 연동 데이터 기반)
 let hrMainVal = '--';
 let hrColor = '#aaa';
@@ -6896,7 +6949,7 @@ contentArea.innerHTML =
 '<div style="margin-top:6px;font-size:var(--fs-sm);color:#aaa;font-weight:700;">' + (t.speed||'SPEED') + ' : ' + (() => { const p=r.avgPace||r.pace; if(p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60); return this.currentUnit==='mile'?(kmh*0.621371).toFixed(1)+' mi/h':kmh.toFixed(1)+' km/h';} return '--'; })() + '</div>' +
 '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + (pacePeakDisplay ? (' / ' + pacePeakDisplay) : '') + ' <span class="c44">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div>' + paceSparkSvg + (paceSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.powerLabel || "POWER") + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + (powerPeakForDiag != null ? (' / ' + powerPeakForDiag) : '') + ' <span class="c44">W</span></div></div><div class="diag-tip">' + (t.infRunPowerD || '') + '</div>' + powerSparkSvg + (powerSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.powerLabel || "POWER") + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + (powerPeakForDiag != null ? (' / ' + powerPeakForDiag) : '') + ' <span class="c44">W</span></div></div><div class="diag-tip">' + powerComment + '</div>' + powerSparkSvg + (powerSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.cadence ? this.getCadenceColor(r.cadence) : '#aaa') + '">CAD: ' + (r.cadence || 0) + (cadPeakForDiag != null ? (' / ' + cadPeakForDiag) : '') + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div>' + cadSparkSvg + (cadSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getStrideColor(strideNumForFeedback, diagProfile) + '">' + strideVal + '</div><div class="diag-ref">Ref: 0.5~0.75m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.gct && r.gct !== '--' ? this.getGctColor(r.gct) : '#aaa') + '">GCT: ' + r.gct + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
@@ -8899,7 +8952,7 @@ if (curSpeedEl) curSpeedEl.textContent = speedDisplay;
 ui.updateRunningDisplay({ pace: currentPaceStr });
 }
 }
-if (this.state.activityMode === "walk") { this.updateWalkLiveMetrics(); } else { ui.updateLiveCalories(); }
+if (this.state.activityMode === "walk") { this.updateWalkLiveMetrics(); } else { ui.updateLiveCalories(); ui.updateLiveHrPowerFallback(); }
 this.checkAutoActivityModeTransition();
 }
 // runTick()을 1초 간격으로 도는 타이머를 (재)시작. 기존 타이머가 있으면 정리 후 새로 건다
@@ -12081,6 +12134,13 @@ const hrManager = {
       if(zoneCard) { zoneCard.style.borderColor = z.color; }
       // 존 박스 하이라이트
       for(let i=1;i<=5;i++) { const box=document.getElementById('hr-zone-'+i); if(box) box.style.background=(i===z.z)?'rgba(255,255,255,0.08)':'#1a1a1a'; }
+      // [신규] 파워 대체 표시 중이었을 수 있으므로 라벨을 심박수/심박존으로 복원
+      const labelHrEl = document.getElementById('label-hr');
+      const labelHrZoneEl = document.getElementById('label-hrzone');
+      const lang = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang() : 'ko';
+      const t = translations[lang] || translations['en'];
+      if (labelHrEl) labelHrEl.textContent = t.diagHrLabel;
+      if (labelHrZoneEl) labelHrZoneEl.textContent = t.hrZoneLabel;
     } else {
       if(zoneEl) { zoneEl.textContent='--'; zoneEl.style.color='#fff'; }
       if(hrCard) { hrCard.style.borderColor='#333'; if(hrCard.querySelector('.value')) hrCard.querySelector('.value').style.color='#fff'; }
