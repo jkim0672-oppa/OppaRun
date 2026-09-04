@@ -1537,7 +1537,7 @@ transform: scale(0.97); background: var(--primary); color: #111; border-color: v
 <div class="card-hr-row">
   <div id="card-hr" class="card c57" onclick="ui.openHrConnect()">
     <div class="label" id="label-hr">HEART RATE</div>
-    <div class="value"><span id="hr-val" style="color:#e53935;">--</span><span style="font-size:var(--fs-xxs);color:#888;"> BPM</span></div>
+    <div class="value"><span id="hr-val" style="color:#e53935;">--</span><span id="hr-unit" style="font-size:var(--fs-xxs);color:#888;"> BPM</span></div>
   </div>
   <div id="card-hrzone" class="card c57" onclick="ui.openHrConnect()">
     <div class="label" id="label-hrzone">HR ZONE</div>
@@ -4127,44 +4127,12 @@ if (data.steps !== undefined && this.dom.cadence) this.dom.cadence.textContent =
 if (data.spm !== undefined && this.dom.flight) this.dom.flight.textContent = data.spm;
 if (data.stride !== undefined && this.dom.gct) this.dom.gct.textContent = data.stride;
 }
-// [개선-3] 걷기↔러닝 자동 감지 배너: app.checkAutoActivityModeTransition()이 일정 속도가
-// 지속되었다고 판단하면 호출한다. 자동으로 모드를 "강제 전환"하지 않고 사용자가 직접
-// 확인 후 선택하게 하는 이유: GCT/린각도 등은 전환 시점부터 새로 캘리브레이션되므로,
-// 신호대기 등으로 인한 일시적 속도 변화까지 자동으로 모드를 바꿔버리면 오히려
-// 캘리브레이션이 쓸데없이 자주 리셋되어 정확도가 떨어질 수 있기 때문.
-showAutoModeSuggestion(mode) {
-this.hideAutoModeSuggestion();
-const isKo = storage.getLang() === 'ko';
-const t = translations[storage.getLang()] || translations['en'];
-const modeLabel = mode === 'run' ? t.modeRunLabel : t.modeWalkLabel;
-const msg = isKo
-? (mode === 'run' ? '뛰는 속도가 계속 감지돼요. 러닝 모드로 바꿀까요?' : '걷는 속도가 계속 유지되고 있어요. 걷기 모드로 바꿀까요?')
-: (mode === 'run' ? 'Running pace detected for a while. Switch to RUN mode?' : 'Sustained walking pace detected. Switch to WALK mode?');
-const el = document.createElement('div');
-el.id = 'auto-mode-banner';
-el.style.cssText = 'position:fixed; left:12px; right:12px; bottom:calc(var(--tabbar-h) + 14px); z-index:9000; background:#1e1e1e; border:1.5px solid var(--primary); border-radius:14px; padding:12px 14px; display:flex; align-items:center; gap:10px; box-shadow:0 6px 24px rgba(0,0,0,0.5);';
-el.innerHTML = '<div style="flex:1; font-size:var(--fs-sm); font-weight:800; color:#fff; line-height:1.4;">' + msg + '</div>'
-+ '<button onclick="app.applyAutoModeSwitch(\'' + mode + '\')" style="background:var(--primary); color:#000; border:none; padding:9px 14px; border-radius:10px; font-weight:900; font-size:var(--fs-sm); cursor:pointer; white-space:nowrap; flex-shrink:0;">' + modeLabel + '</button>'
-+ '<button onclick="ui.dismissAutoModeSuggestion(\'' + mode + '\')" style="background:none; color:#888; border:none; padding:9px 6px; font-weight:800; font-size:var(--fs-sm); cursor:pointer; flex-shrink:0;">' + (isKo ? '무시' : 'Ignore') + '</button>';
-document.body.appendChild(el);
-}
-hideAutoModeSuggestion() {
-const el = document.getElementById('auto-mode-banner');
-if (el) el.remove();
-}
-dismissAutoModeSuggestion(mode) {
-if (typeof app !== 'undefined' && app.state) {
-app.state.autoModeBannerDismissedFor = mode;
-app.state.autoModeBannerShown = false;
-}
-this.hideAutoModeSuggestion();
-}
 updateLiveCalories() {
 const calEl = document.getElementById('cal-val');
 if (!calEl) return;
 // [수정] ui(UIManager)에는 state가 없어 this.state가 매번 undefined였음(app.state를 써야 함).
 // 그 결과 이 함수가 호출될 때마다 조용히 TypeError로 실패해 매초 실행되는 runTick() 흐름이
-// 여기서 끊기고, 이 호출 뒤에 있는 checkAutoActivityModeTransition() 등도 함께 실행이 안 됐음.
+// 여기서 끊기는 문제가 있었음.
 if (typeof app === 'undefined' || !app.state.totalDist || app.state.totalDist <= 0 || !app.state.seconds) {
 calEl.textContent = '0';
 return;
@@ -4184,6 +4152,7 @@ calEl.textContent = (liveKcal && liveKcal > 0) ? liveKcal : '0';
 updateLiveHrPowerFallback() {
 if (typeof hrManager === 'undefined' || hrManager._hr) return; // 실제 심박 연결 중이면 건드리지 않음
 const hrValEl = document.getElementById('hr-val');
+const hrUnitEl = document.getElementById('hr-unit');
 const hrZoneValEl = document.getElementById('hr-zone-val');
 const hrCard = document.getElementById('card-hr');
 const zoneCard = document.getElementById('card-hrzone');
@@ -4193,6 +4162,7 @@ const lang = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLa
 const t = translations[lang] || translations['en'];
 if (labelHrEl) labelHrEl.textContent = t.powerLabel || 'POWER';
 if (labelHrZoneEl) labelHrZoneEl.textContent = t.powerZoneLabel || 'POWER ZONE';
+if (hrUnitEl) hrUnitEl.textContent = ' W'; // [수정] 파워 대체표시 중엔 단위도 BPM이 아닌 W로 표시
 // [주의] ui(UIManager)에는 state가 없어 app.state를 직접 참조한다 (updateLiveCalories()와
 // 달리 this.state로 쓰지 않음 — this.state는 undefined라 매번 조용히 실패하는 기존 버그가 있음).
 if (typeof app === 'undefined' || !app.state.totalDist || app.state.totalDist <= 0 || !app.state.seconds) {
@@ -8629,9 +8599,7 @@ isCalibrationRun: false, calibrationKnownDistanceM: 0,
 // [추가] GPS 고도 보정용 - Open-Elevation API 지형고도값 기반 offset 보정
 elevOffset: 0, elevOffsetReady: false, lastElevFetchTime: 0, lastElevFetchPos: null, elevFetchInFlight: false,
 // [신규] 걷기 모드 전용 상태 (러닝 상태와 완전 분리)
-activityMode: 'run', walkSteps: 0, walkStepTimes: [], walkSpmSamples: [],
-// [개선-3] 걷기↔러닝 자동 감지 상태 (checkAutoActivityModeTransition에서 사용)
-autoModeCandidateMode: null, autoModeCandidateSince: null, autoModeBannerShown: false, autoModeBannerDismissedFor: null
+activityMode: 'run', walkSteps: 0, walkStepTimes: [], walkSpmSamples: []
 };
 this.map = null; this.marker = null; this.polyline = null; this.timer = null;
 this.motion = new MotionManager((data) => this.updateMetrics(data));
@@ -8846,62 +8814,6 @@ if (this.silentAudio) { this.silentAudio.close().catch(()=>{}); this.silentAudio
 // [수정] 러닝 종료 시 화면 꺼짐 방지 잠금도 함께 해제 (배터리 절약)
 if (this.noSleep) { try { this.noSleep.disable(); } catch(e) {} }
 }
-// [개선-3] 걷기↔러닝 자동 감지: 1초 타이머(onStart/onResume/checkResume)에서 매초 호출.
-// GPS 기반 지표계산 전용 속도(metricSpeedKmh, 모드 무관하게 항상 갱신됨)가 한쪽 모드의
-// 범위를 SUSTAIN_MS 이상 지속하면, 강제 전환 대신 화면 하단에 배너로 "전환할지" 물어본다.
-// (자동 강제전환을 하지 않는 이유는 showAutoModeSuggestion 주석 참고)
-checkAutoActivityModeTransition() {
-if (!this.state.isRunning || this.state.isPaused || this.state.isAutoPaused) return;
-if (this.state.activityMode === 'trail') return; // 트레일은 러닝 지표 체계를 그대로 쓰므로 대상에서 제외
-const speed = this.state.metricSpeedKmh || 0;
-const mode = this.state.activityMode;
-const RUN_SPEED_KMH = 6.8;  // 빠른 걷기 상한보다 높게 잡아 오탐(파워워킹 등) 방지
-const WALK_SPEED_KMH = 5.0; // 이 이하가 지속되면 걷기로 전환 걷기 제안 (신호대기 등 완전정지는 speed>0 조건에서 제외)
-const SUSTAIN_MS = 25000;   // 25초 이상 지속돼야 제안 - 짧은 가감속/신호대기 등 오탐 방지
-
-let candidateMode = null;
-if (mode === 'walk' && speed >= RUN_SPEED_KMH) candidateMode = 'run';
-else if (mode === 'run' && speed > 0 && speed <= WALK_SPEED_KMH) candidateMode = 'walk';
-
-if (!candidateMode) {
-this.state.autoModeCandidateMode = null;
-this.state.autoModeCandidateSince = null;
-return;
-}
-const now = Date.now();
-if (this.state.autoModeCandidateMode !== candidateMode) {
-this.state.autoModeCandidateMode = candidateMode;
-this.state.autoModeCandidateSince = now;
-return;
-}
-if (this.state.autoModeBannerDismissedFor === candidateMode) return; // 이번 세션에서 이미 무시함
-if (this.state.autoModeBannerShown) return; // 이미 표시 중
-if ((now - this.state.autoModeCandidateSince) >= SUSTAIN_MS) {
-this.state.autoModeBannerShown = true;
-ui.showAutoModeSuggestion(candidateMode);
-}
-}
-// [개선-3] 배너에서 사용자가 실제로 "전환"을 선택했을 때 러닝 도중 모드를 실시간으로 바꾼다.
-// 걸음 라우팅(this.state.activityMode === 'walk' 체크)이 매 모션 이벤트마다 다시 평가되는
-// 구조라(handleMotion 호출부 참고), 여기서 activityMode만 바꿔주면 이후 이벤트부터 자연스럽게
-// 새 감지기(motion/walkMotion)로 넘어간다. 각 감지기는 전환 시점부터 새로 시작해야 정확하므로
-// reset()으로 초기화한다(그전까지 쌓인 걸음수/거리/시간 등 다른 지표는 전혀 건드리지 않음).
-applyAutoModeSwitch(newMode) {
-const prevMode = this.state.activityMode;
-if (prevMode === newMode || !this.state.isRunning) { ui.hideAutoModeSuggestion(); return; }
-this.state.activityMode = newMode;
-storage.setActivityMode(newMode);
-if (newMode === 'run' && this.motion) this.motion.reset();
-if (newMode === 'walk' && this.walkMotion) this.walkMotion.reset();
-// [주의] 린각도 추출기는 세션 시작 시점에만 활성화 여부가 고정되는 모듈이라, 걷기→러닝
-// 중간 전환 시 이번 세션에서는 계속 비활성 상태로 남는다(다음 러닝부터 정상 동작).
-if (typeof ui !== 'undefined' && ui.setActivityMode) ui.setActivityMode(newMode); // 카드 라벨/탭 라벨 동기화
-ui.hideAutoModeSuggestion();
-this.state.autoModeBannerShown = false;
-this.state.autoModeCandidateMode = null;
-this.state.autoModeCandidateSince = null;
-this.state.autoModeBannerDismissedFor = null;
-}
 // [리팩토링] 원래 onStart/onResume/checkResume 3곳에 각각 통째로 복붙돼 있던 "매초 실행"
 // 콜백을 하나로 통합. 이제 매초 로직은 runTick() 한 곳에만 존재하고, 3곳은 모두
 // startLiveTimer()만 호출한다. 새 지표/훅을 추가할 땐 runTick() 한 곳만 고치면 되고,
@@ -8953,7 +8865,6 @@ ui.updateRunningDisplay({ pace: currentPaceStr });
 }
 }
 if (this.state.activityMode === "walk") { this.updateWalkLiveMetrics(); } else { ui.updateLiveCalories(); ui.updateLiveHrPowerFallback(); }
-this.checkAutoActivityModeTransition();
 }
 // runTick()을 1초 간격으로 도는 타이머를 (재)시작. 기존 타이머가 있으면 정리 후 새로 건다
 // (중복 인터벌 방지). onStart/onResume/checkResume은 이 함수 하나만 호출하면 된다.
@@ -9829,12 +9740,6 @@ this.state.activityMode = storage.getActivityMode();
 this.state.walkSteps = 0;
 this.state.walkStepTimes = [];
 this.state.walkSpmSamples = [];
-// [개선-3] 새 세션마다 자동 모드전환 감지 상태 초기화
-this.state.autoModeCandidateMode = null;
-this.state.autoModeCandidateSince = null;
-this.state.autoModeBannerShown = false;
-this.state.autoModeBannerDismissedFor = null;
-if (typeof ui !== 'undefined' && ui.hideAutoModeSuggestion) ui.hideAutoModeSuggestion();
 if (this.walkMotion) this.walkMotion.reset();
 // [신규] 린각도 추출기 리셋: 가슴 착용 + 러닝(걷기 아님) + 설정에서 스위치가 켜져
 // 있을 때만 활성화. 예전엔 가슴+러닝이면 무조건 자동 작동했는데, 사용자가 원치 않을 때도
@@ -9879,7 +9784,6 @@ this.state.lastPrecisionLogAt = 0;
 onStop() {
 this.state.isPaused = true;
 this.state.isAutoPaused = false;
-if (typeof ui !== 'undefined' && ui.hideAutoModeSuggestion) ui.hideAutoModeSuggestion(); // [개선-3] 일시정지 중엔 전환 제안 숨김
 this.markPauseStart(); // [수정] 일시정지 시작 시각 기록 (경과시간 재계산에 사용)
 // [신규] 일시정지 중엔 화면 고정 해제 (신호 대기 중 다른 앱 확인 가능하도록)
 if (window.AndroidLockBridge && AndroidLockBridge.unlockRun) {
@@ -10027,7 +9931,6 @@ return { stride, sensorFlag };
 onFinish() {
 if(this.timer) clearInterval(this.timer);
 this.stopSilentKeepAlive();
-if (typeof ui !== 'undefined' && ui.hideAutoModeSuggestion) ui.hideAutoModeSuggestion(); // [개선-3]
 // [추가] 캘리브레이션 러닝(4번 개선사항)이면 일반 기록 저장 대신
 // 개인 보폭 보정계수만 계산해서 저장하고 종료한다.
 if (this.state.isCalibrationRun) {
@@ -12137,10 +12040,12 @@ const hrManager = {
       // [신규] 파워 대체 표시 중이었을 수 있으므로 라벨을 심박수/심박존으로 복원
       const labelHrEl = document.getElementById('label-hr');
       const labelHrZoneEl = document.getElementById('label-hrzone');
+      const hrUnitEl = document.getElementById('hr-unit');
       const lang = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang() : 'ko';
       const t = translations[lang] || translations['en'];
       if (labelHrEl) labelHrEl.textContent = t.diagHrLabel;
       if (labelHrZoneEl) labelHrZoneEl.textContent = t.hrZoneLabel;
+      if (hrUnitEl) hrUnitEl.textContent = ' BPM'; // [수정] 파워 대체표시(W)에서 실제 심박수로 돌아올 때 단위 복원
     } else {
       if(zoneEl) { zoneEl.textContent='--'; zoneEl.style.color='#fff'; }
       if(hrCard) { hrCard.style.borderColor='#333'; if(hrCard.querySelector('.value')) hrCard.querySelector('.value').style.color='#fff'; }
