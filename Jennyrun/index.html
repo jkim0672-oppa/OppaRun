@@ -1865,7 +1865,7 @@ alt="runner"/>
   <div id="precision-log-list" style="max-height:210px; overflow-y:auto; padding-right:2px;"></div>
 </div>
 <div class="settings-group u-margin-top-14px">
-<div id="label-data-backup" class="settings-label" onclick="ui.handleDevModeTap()" style="cursor:pointer; user-select:none;">SETTINGS BACKUP</div>
+<div id="label-data-backup" class="settings-label" onclick="ui.handleDevModeTap()" style="cursor:pointer; user-select:none;">FULL DATA BACKUP</div>
 <div style="display:flex; gap:10px;">
 <button id="btn-export-data" class="c47" onclick="storage.exportData()">EXPORT</button>
 <button id="btn-import-data" class="c47" onclick="document.getElementById('import-file-input').click()">IMPORT</button>
@@ -3177,7 +3177,7 @@ infBalance: "UNDERSTANDING BALANCE METRICS", infBalanceD: "Cadence/GCT/Gyro Bala
   infLean: "UNDERSTANDING LEAN ANGLE", infLeanD: "LEAN ANGLE shows your forward lean, plus total lean and lateral sway alongside. Forward lean: 4-8° good, 8-12° borderline, 12°+ excessive. Lateral sway: under 5° fine, 10°+ may signal weak core/hip stability. It's the angle your center of mass leans forward relative to your ground contact point — ground reaction force, propulsion, and gravity combine to create it. (In the diagnosis page diagram, the lean axis, angle, center of mass, and gravity/propulsion reflect your measured data; the GRF arrow is illustrative only and not measured.)",
 infHeartRate: "HEART RATE & ZONES", infHeartRateD: "Heart rate zones help you train at the right intensity. Zone 1~2 (50~70% max HR) builds aerobic base and aids recovery. Zone 3 (70~80%) improves cardiovascular efficiency. Zone 4~5 (80~100%) develops speed and power but requires adequate recovery time. Max HR is roughly estimated as 220 minus your age.",
 height: "HEIGHT", weight: "WEIGHT",
-age: "AGE", devicePos: "DEVICE PLACEMENT", dataBackup: "SETTINGS BACKUP", exportBtn: "EXPORT", importBtn: "IMPORT",
+age: "AGE", devicePos: "DEVICE PLACEMENT", dataBackup: "FULL DATA BACKUP", exportBtn: "EXPORT", importBtn: "IMPORT",
 devposChest: "CHEST", devposWaist: "WAIST", devposArmband: "ARMBAND", devposHand: "HAND",
 diagTitle: "RUN DIAGNOSIS", diagDyna: "RUNNING DYNAMICS", diagBalance: "CADENCE & PACE", diagRecov: "RECOVERY GUIDE",
 splitTitle: "SPLIT DISTANCE ANALYTICS.", splitPace: "Pace", splitAlt: "Altitude",
@@ -3287,7 +3287,7 @@ infBalance: "밸런스 지표 이해하기", infBalanceD: "케이던스/GCT/자�
   infLean: "린각도 이해하기", infLeanD: "린각도는 전방 기울기가 메인이고, 총 기울기·측방 흔들림도 함께 보여줘요. 전방 기울기는 4~8도 양호, 8~12도 주의, 12도 초과 과도. 측방 흔들림은 5도 이내 양호, 10도 초과면 코어/고관절 안정성을 체크해보세요. 몸의 무게중심이 지면 접촉점보다 앞으로 얼마나 기울어 있는지를 나타낸 각도로, 착지 시 지면 반력(GRF)과 추진력, 중력이 함께 작용해 전방 기울기를 만듭니다. (진단 페이지 다이어그램의 기울기 축·각도·무게중심·중력/추진력은 실측값 기준이며, GRF 화살표는 개념 설명용으로 측정되지 않습니다.)",
 infHeartRate: "심박수 & 존 가이드", infHeartRateD: "심박수 존은 올바른 강도로 훈련하는 데 도움이 됩니다. 존 1~2 (최대 심박수의 50~70%)는 유산소 기반을 다지고 회복을 돕습니다. 존 3 (70~80%)는 심폐 효율을 향상시킵니다. 존 4~5 (80~100%)는 스피드와 파워를 키우지만 충분한 회복이 필요합니다. 최대 심박수는 220에서 나이를 뺀 값으로 추정합니다.",
 height: "신장", weight: "체중",
-age: "나이", devicePos: "기기 착용 위치", dataBackup: "설정 백업", exportBtn: "내보내기", importBtn: "가져오기",
+age: "나이", devicePos: "기기 착용 위치", dataBackup: "전체 데이터 백업", exportBtn: "내보내기", importBtn: "가져오기",
 devposChest: "가슴", devposWaist: "허리", devposArmband: "암밴드", devposHand: "손",
 diagTitle: "러닝 정밀 진단", diagDyna: "러닝 다이내믹스 분석", diagBalance: "페이스 & 케이던스 밸런스", diagRecov: "부상 방지 및 리커버리",
 splitTitle: "구간별 고도 및 페이스 상세 기록.", splitPace: "페이스", splitAlt: "고도",
@@ -3424,6 +3424,23 @@ clearTempSession() { localStorage.removeItem(this.TEMP_SESSION_KEY); }
 // 설정(SETTINGS) 페이지에서 실제로 조절하는 항목들만 백업 대상으로 삼는다.
 // - profile: MY INFO(키/몸무게/나이/성별X는 별도/기기 위치) + STRIDE CALIBRATION 보정계수 포함
 // - activityMode: RUN SETTINGS의 ACTIVITY MODE (기존엔 빠져있던 항목이라 추가함)
+// [추가] localStorage에서 JSON 배열/객체를 안전하게 읽어오는 헬퍼.
+// 파싱 실패(손상된 데이터 등) 시 에러를 던지는 대신 fallback을 반환해 export 자체가 죽지 않게 함.
+_readRaw(key, fallback) {
+try {
+const v = localStorage.getItem(key);
+return v ? JSON.parse(v) : fallback;
+} catch (e) { return fallback; }
+}
+// [수정 2026-09-05] 기존엔 "설정(SETTINGS)" 항목만 백업 대상이었으나,
+// 사용자 요청에 따라 앱 전체 데이터(러닝 기록/정밀 로그/가민 분석실 데이터/
+// 크루 로컬 프로필)까지 하나의 백업 파일에 포함하도록 확장.
+// - history: 러닝 기록 리스트 (기존엔 "설정이 아니다"라는 이유로 제외됐었음)
+// - precisionLogs: 정밀 로그(초당 기록) 리스트
+// - garminImports / precLogImports / pendingCalibRuns: 가민 분석실(INFO>GARMIN)에서
+//   가져온 FIT 기록, 비교용 지난 로그, 진행 중인 캘리브레이션 대기열
+// - community: 크루 기능에 쓰이는 로컬 식별 정보(닉네임/유저ID/아바타/이메일).
+//   실제 게시글·좋아요 등은 서버(Supabase)에 있으므로 여기엔 로컬 식별자만 담는다.
 exportData() {
 const data = {
 profile: this.loadProfile(),
@@ -3435,12 +3452,27 @@ precisionLogEnabled: this.getPrecisionLogEnabled(),
 leanAngleEnabled: this.getLeanAngleEnabled(),
 mapTheme: this.getMapTheme(),
 activityMode: this.getActivityMode(),
+calibSoundType: this.getCalibSoundType(),
+calibSoundVolume: this.getCalibSoundVolume(),
+devMode: this.getDevMode(),
+history: this.loadHistory(),
+precisionLogs: this.loadPrecisionLogs(),
+garminImports: this._readRaw('oppaRunGarminImports', []),
+precLogImports: this._readRaw('oppaRunPrecLogImports', []),
+pendingCalibRuns: this._readRaw('oppaRunPendingCalibRuns', []),
+community: {
+nickname: localStorage.getItem('jennyRunNickname') || '',
+userId: localStorage.getItem('jennyRunUserId') || '',
+avatarUrl: localStorage.getItem('jennyRunAvatarUrl') || '',
+avatarPos: localStorage.getItem('jennyRunAvatarPos') || '',
+email: localStorage.getItem('jennyRunEmail') || ''
+},
 exportedAt: new Date().toISOString(),
-version: 2
+version: 3
 };
 const jsonStr = JSON.stringify(data, null, 2);
 const dateStr = new Date().toISOString().slice(0,10);
-const fileName = 'oppa-run-settings-backup-' + dateStr + '.json';
+const fileName = 'jrun-full-backup-' + dateStr + '.json';
 if (window.AndroidDownload && typeof window.AndroidDownload.saveFileAs === 'function') {
   // [추가] 저장 위치(폴더)를 사용자가 직접 고르는 새 브릿지 - 결과는 window.onAndroidSaveResult 콜백으로 옴
   window.AndroidDownload.saveFileAs(jsonStr, fileName);
@@ -3734,7 +3766,7 @@ const msgEl = document.getElementById('import-confirm-msg');
 const cancelBtn = document.getElementById('btn-import-cancel');
 const okBtn = document.getElementById('btn-import-ok');
 const modal = document.getElementById('import-confirm-modal');
-if(msgEl) msgEl.textContent = isKo ? '가져온 데이터로 현재 설정을 덮어씁니다. (러닝 기록에는 영향 없음) 계속할까요?' : 'This will overwrite your current settings with the imported data. (Your run history will not be affected.) Continue?';
+if(msgEl) msgEl.textContent = isKo ? '가져온 백업 파일로 설정, 러닝 기록, 정밀 로그, 가민 분석실 데이터, 크루 로컬 프로필 등 앱의 모든 데이터를 덮어씁니다. 계속할까요?' : 'This will overwrite ALL app data — settings, run history, precision logs, Garmin data, and your local crew profile — with the imported backup. Continue?';
 if(cancelBtn) cancelBtn.textContent = isKo ? '취소' : 'CANCEL';
 if(okBtn) okBtn.textContent = isKo ? '가져오기' : 'IMPORT';
 if(modal) modal.classList.add('is-open');
@@ -5895,8 +5927,10 @@ if(modal) modal.classList.remove('is-open');
 if (!isConfirmed || !storage._pendingImportData) return;
 const data = storage._pendingImportData;
 const isKo = storage.getLang() === 'ko';
-// [수정] 러닝 기록(history)은 "설정"이 아니므로 더 이상 임포트로 덮어쓰지 않는다.
-// (구버전 백업 파일에 history가 남아있어도 무시하고, 설정 항목만 복원)
+// [수정 2026-09-05] 기존엔 "설정" 항목만 복원하고 history(러닝 기록)는 의도적으로 무시했으나,
+// exportData()가 전체 데이터를 담도록 확장됨에 따라 여기서도 러닝 기록/정밀 로그/
+// 가민 분석실 데이터/크루 로컬 프로필까지 모두 복원한다.
+// 구버전 백업 파일(위 항목이 없는 파일)을 가져와도 각 필드가 존재할 때만 덮어쓰므로 안전함.
 if (data.profile) storage.saveProfile(Object.assign({ h:175, hu:'cm', w:70, wu:'kg', age:30, devicePos:'chest', strideCorrectionFactor:1.0, gpsDistCorrectionFactor:0.950, cadCorrectionFactor:1.0, paceCorrectionFactor:1.0 }, data.profile));
 if (data.lang) storage.setLang(data.lang);
 if (data.unit) storage.setUnit(data.unit);
@@ -5906,6 +5940,24 @@ if (typeof data.precisionLogEnabled === 'boolean') storage.setPrecisionLogEnable
 if (typeof data.leanAngleEnabled === 'boolean') storage.setLeanAngleEnabled(data.leanAngleEnabled);
 if (data.mapTheme) storage.setMapTheme(data.mapTheme);
 if (data.activityMode) storage.setActivityMode(data.activityMode);
+if (data.calibSoundType) storage.setCalibSoundType(data.calibSoundType);
+if (typeof data.calibSoundVolume === 'number') storage.setCalibSoundVolume(data.calibSoundVolume);
+if (typeof data.devMode === 'boolean') storage.setDevMode(data.devMode);
+// [추가] 러닝 기록 / 정밀 로그 / 가민 분석실 데이터 복원
+if (Array.isArray(data.history)) localStorage.setItem(storage.HISTORY_KEY, JSON.stringify(data.history));
+if (Array.isArray(data.precisionLogs)) storage.savePrecisionLogsList(data.precisionLogs);
+if (Array.isArray(data.garminImports)) localStorage.setItem('oppaRunGarminImports', JSON.stringify(data.garminImports));
+if (Array.isArray(data.precLogImports)) localStorage.setItem('oppaRunPrecLogImports', JSON.stringify(data.precLogImports));
+if (Array.isArray(data.pendingCalibRuns)) localStorage.setItem('oppaRunPendingCalibRuns', JSON.stringify(data.pendingCalibRuns));
+// [추가] 크루 기능 로컬 식별 정보 복원 (게시글/좋아요 등 실제 콘텐츠는 서버(Supabase)에 있으므로
+// 여기선 닉네임/유저ID/아바타/이메일 같은 "이 기기가 어떤 크루 계정인지" 식별 정보만 복원)
+if (data.community) {
+if (data.community.nickname) localStorage.setItem('jennyRunNickname', data.community.nickname);
+if (data.community.userId) localStorage.setItem('jennyRunUserId', data.community.userId);
+if (data.community.avatarUrl) localStorage.setItem('jennyRunAvatarUrl', data.community.avatarUrl);
+if (data.community.avatarPos) localStorage.setItem('jennyRunAvatarPos', data.community.avatarPos);
+if (data.community.email) localStorage.setItem('jennyRunEmail', data.community.email);
+}
 storage._pendingImportData = null;
 this.showAppAlert(isKo ? '데이터를 성공적으로 불러왔습니다.\n앱을 새로고침합니다.' : 'Data imported successfully.\nReloading app.', () => window.location.reload());
 }
