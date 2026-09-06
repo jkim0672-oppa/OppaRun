@@ -3223,7 +3223,7 @@ calibOutOfRange: "The result was far outside a normal range, so it wasn't applie
 crewTitle: "JRUN PRO CREW", crewSub: "Latest runs from the crew",
 crewLoading: "Loading...", crewEmpty: "No runs yet", crewEmptySub: "Be the first runner!",
 crewLike: "Like", crewComment: "Comment", crewDelete: "Delete",
-crewCommentPlaceholder: "Leave a comment...", crewSend: "Send",
+crewCommentPlaceholder: "Leave a comment...", crewSend: "Send", commentFailed: "Couldn't post your comment. Please check your connection and try again.", commentDeleteFailed: "Couldn't delete your comment. Please check your connection and try again.",
 crewNoComments: "No comments yet", crewConfirmDelete: "Delete this record from community?",
 crewLikersTitle: "Likes", crewNoLikes: "No likes yet",
 crewMorning: "Morning Run", crewAfternoon: "Afternoon Run", crewEvening: "Evening Run", crewNight: "Night Run",
@@ -3334,7 +3334,7 @@ calibOutOfRange: "결과가 정상 범위를 크게 벗어나 적용하지 않�
 crewTitle: "JRUN PRO CREW", crewSub: "러너들의 최신 기록",
 crewLoading: "불러오는 중...", crewEmpty: "아직 기록이 없어요", crewEmptySub: "첫 번째 러너가 되어보세요!",
 crewLike: "좋아요", crewComment: "댓글", crewDelete: "삭제",
-crewCommentPlaceholder: "댓글 남기기...", crewSend: "전송",
+crewCommentPlaceholder: "댓글 남기기...", crewSend: "전송", commentFailed: "댓글을 등록하지 못했어요. 연결 상태를 확인하고 다시 시도해주세요.", commentDeleteFailed: "댓글을 삭제하지 못했어요. 연결 상태를 확인하고 다시 시도해주세요.",
 crewNoComments: "아직 댓글이 없어요", crewConfirmDelete: "이 커뮤니티 기록을 삭제할까요?",
 crewLikersTitle: "좋아요", crewNoLikes: "아직 좋아요가 없어요",
 crewMorning: "아침 러닝", crewAfternoon: "오후 러닝", crewEvening: "저녁 러닝", crewNight: "야간 러닝",
@@ -11613,23 +11613,37 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
     }
   }
   async toggleLike(recordId) {
-    const uid = await this.ensureUserId();
-    const { data } = await _sb.from('likes').select('id').eq('record_id', recordId).eq('user_id', uid);
-    const alreadyLiked = data && data.length > 0;
-    if (!this.likesByRecord) this.likesByRecord = {};
-    if (!this.likesByRecord[recordId]) this.likesByRecord[recordId] = [];
-    if (alreadyLiked) {
-      await _sb.from('likes').delete().eq('record_id', recordId).eq('user_id', uid);
-      this.likesByRecord[recordId] = this.likesByRecord[recordId].filter(l => l.user_id !== uid);
-    } else {
-      const nickname = this.getNickname() || 'Runner';
-      const avatar_url = this.getAvatarUrl() || null;
-      await _sb.from('likes').insert({ record_id: recordId, user_id: uid, nickname: nickname, avatar_url: avatar_url });
-      this.likesByRecord[recordId].push({ record_id: recordId, user_id: uid, nickname: nickname, avatar_url: avatar_url });
+    // [수정] 좋아요 버튼 빠르게 연타하면 이전 요청이 끝나기 전에 또 눌려서
+    // 같은 사용자의 좋아요가 DB에 중복 insert 되거나(유니크 제약 위반), 로컬
+    // likesByRecord에 중복으로 쌓여 카운트가 실제보다 크게 보이는 문제가 있었음.
+    // → 레코드별로 처리 중 플래그를 둬서 중복 호출을 막음.
+    if (!this._likeInFlight) this._likeInFlight = {};
+    if (this._likeInFlight[recordId]) return;
+    this._likeInFlight[recordId] = true;
+    try {
+      const uid = await this.ensureUserId();
+      const { data } = await _sb.from('likes').select('id').eq('record_id', recordId).eq('user_id', uid);
+      const alreadyLiked = data && data.length > 0;
+      if (!this.likesByRecord) this.likesByRecord = {};
+      if (!this.likesByRecord[recordId]) this.likesByRecord[recordId] = [];
+      if (alreadyLiked) {
+        const { error } = await _sb.from('likes').delete().eq('record_id', recordId).eq('user_id', uid);
+        if (!error) this.likesByRecord[recordId] = this.likesByRecord[recordId].filter(l => l.user_id !== uid);
+        else console.warn('unlike failed', error);
+      } else {
+        const nickname = this.getNickname() || 'Runner';
+        const avatar_url = this.getAvatarUrl() || null;
+        const { error } = await _sb.from('likes').insert({ record_id: recordId, user_id: uid, nickname: nickname, avatar_url: avatar_url });
+        // [수정] insert 실패(중복 등) 시 로컬에 좋아요를 낙관적으로 쌓지 않도록 방지
+        if (!error) this.likesByRecord[recordId].push({ record_id: recordId, user_id: uid, nickname: nickname, avatar_url: avatar_url });
+        else console.warn('like failed', error);
+      }
+      // [수정] 좋아요 하나 누를 때마다 피드 전체를 다시 그리면(renderFeed 전체 재호출)
+      // 스크롤 위치가 초기화돼서 화면이 위로 튀는 문제가 있었음. 이제 이 버튼만 그 자리에서 갱신.
+      this.updateLikeButtonUI(recordId, uid);
+    } finally {
+      this._likeInFlight[recordId] = false;
     }
-    // [수정] 좋아요 하나 누를 때마다 피드 전체를 다시 그리면(renderFeed 전체 재호출)
-    // 스크롤 위치가 초기화돼서 화면이 위로 튀는 문제가 있었음. 이제 이 버튼만 그 자리에서 갱신.
-    this.updateLikeButtonUI(recordId, uid);
   }
   // [추가] 좋아요 버튼 하나만 색상/카운트를 갱신 (피드 전체 재렌더 없이).
   updateLikeButtonUI(recordId, uid) {
@@ -11676,22 +11690,45 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
   async submitComment(recordId) {
     const input = document.getElementById('comment-input-' + recordId);
     if (!input || !input.value.trim()) return;
-    const uid = await this.ensureUserId();
-    const nickname = this.getNickname() || 'Runner';
-    await _sb.from('comments').insert({
-      record_id: recordId,
-      user_id: uid,
-      nickname: nickname,
-      message: input.value.trim()
-    });
-    input.value = '';
-    await this.renderFeed();
+    // [수정] 전송 버튼 연타/Enter+클릭 동시 입력 시 같은 댓글이 중복 등록되는 것 방지
+    if (!this._commentInFlight) this._commentInFlight = {};
+    if (this._commentInFlight[recordId]) return;
+    this._commentInFlight[recordId] = true;
+    const t = this._t();
+    const message = input.value.trim();
+    try {
+      const uid = await this.ensureUserId();
+      const nickname = this.getNickname() || 'Runner';
+      const { error } = await _sb.from('comments').insert({
+        record_id: recordId,
+        user_id: uid,
+        nickname: nickname,
+        message: message
+      });
+      if (error) throw error;
+      // [수정] 성공했을 때만 입력창을 비움 — 실패 시 입력한 댓글 내용을 그대로 유지해서
+      // 사용자가 다시 타이핑하지 않고 재전송할 수 있게 함.
+      input.value = '';
+      await this.renderFeed();
+    } catch(e) {
+      console.warn('submitComment failed', e);
+      await appAlert(t.commentFailed || "Couldn't post your comment. Please check your connection and try again.");
+    } finally {
+      this._commentInFlight[recordId] = false;
+    }
   }
 
   async deleteComment(commentId) {
-    const uid = await this.ensureUserId();
-    await _sb.from('comments').delete().eq('id', commentId).eq('user_id', uid);
-    await this.renderFeed();
+    const t = this._t();
+    try {
+      const uid = await this.ensureUserId();
+      const { error } = await _sb.from('comments').delete().eq('id', commentId).eq('user_id', uid);
+      if (error) throw error;
+      await this.renderFeed();
+    } catch(e) {
+      console.warn('deleteComment failed', e);
+      await appAlert(t.commentDeleteFailed || "Couldn't delete your comment. Please check your connection and try again.");
+    }
   }
 
   toggleComments(recordId) {
@@ -13432,11 +13469,13 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // 크게 안 바뀌니 노이즈 있는 러닝 하나로 확 틀어질 위험이 줄고, 여러 번 비교/적용을
     // 반복하면 자연히 가민 값 쪽으로 수렴함.
     // stepRatio(garminOverPhone, fraction): 이번 비교에서 나온 오차(가민/폰 비율 - 1) 중
-    // fraction만큼만 실제로 반영. fraction은 항목별로 다르게 줌:
-    //  - 일반 항목(GCT/수직진동/보폭/케이던스): 20% — 화면에 직접 찍히지 않는 부가지표라
+    // fraction만큼만 실제로 반영. fraction은 항목별로 다르게 줌 (아래 상수 참고, 2026-08 기준):
+    //  - 보폭/케이던스(GENERAL_STEP_FRACTION): 30% — 화면에 직접 찍히지 않는 부가지표라
     //    다소 빠르게 수렴시켜도 체감 리스크가 낮음.
-    //  - GPS 거리 보정계수: 8% — 화면에 찍히는 실제 거리·페이스에 바로 반영되는 값이라
-    //    더 보수적으로 (기존에도 다른 항목보다 좁게 클램프했던 항목).
+    //  - GCT/수직진동(GCT_VERT_STEP_FRACTION): 50% — 더 빠르게 수렴시키기 위해 별도로 분리.
+    //  - GPS 거리 보정계수/페이스 전용 보정계수(GPS_STEP_FRACTION): 10% — 화면에 찍히는
+    //    실제 거리·페이스에 바로 반영되는 값이라 더 보수적으로 (기존에도 다른 항목보다
+    //    좁게 클램프했던 항목).
     const stepRatio = (garminOverPhone, fraction) => 1 + fraction * (garminOverPhone - 1);
     const GENERAL_STEP_FRACTION = 0.30;
     const GCT_VERT_STEP_FRACTION = 0.50; // [수정] GCT/VERT OSC만 더 빠르게 수렴시키기 위해 분리한 전용 비율
