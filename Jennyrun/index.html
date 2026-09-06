@@ -13250,18 +13250,37 @@ const garmin = (function () {
     // 오차처럼 보이는 문제를 막는다. 겹치는 구간이 없거나 시각 파싱에 실패하면
     // computeOverlapWindow가 null을 반환하고, 이 경우 원본 전체 데이터로 폴백한다.
     let alignmentTrimmedHtml = '';
+    // [추가] 겹치는 구간이 아예 없거나(시간대 자체가 다른 기록), 겹치는 구간은 있어도
+    // 대부분 잘려나가 남는 구간이 너무 짧으면(=비교할 의미가 없으면) 초 단위 오차가 아니라
+    // 분 단위로 크게 어긋난 것이므로, 조용히 폴백하지 않고 경고 후 비교를 중단한다.
+    const MISALIGN_ABORT_SEC = 120; // 2분 이상 잘려나가면 중단
     if (garminItems.length === 1 && precItems.length === 1) {
       const overlap = computeOverlapWindow(precItems[0].log, garminItems[0]);
+      const origPrecRange = precLogTimeRangeMs(precItems[0].log);
+      const origGarminRange = garminTimeRangeMs(garminItems[0]);
+      if (!overlap && origPrecRange && origGarminRange) {
+        const gapMin = Math.round((Math.max(origPrecRange.startMs, origGarminRange.startMs) - Math.min(origPrecRange.endMs, origGarminRange.endMs)) / 60000);
+        appAlert(isKo
+          ? '⚠ 선택한 가민 기록과 정밀 로그의 시간대가 겹치지 않습니다 (약 ' + gapMin + '분 차이). 같은 러닝을 기록한 파일이 맞는지 확인 후 다시 선택해주세요.'
+          : '⚠ The selected Garmin record and precision log don\'t overlap in time (about ' + gapMin + ' min apart). Please check you picked files from the same run and try again.');
+        resultBox.innerHTML = '';
+        return;
+      }
       if (overlap) {
         const trimmedLog = trimPrecLogToWindow(precItems[0].log, overlap.startMs, overlap.endMs);
         const trimmedRecords = trimGarminRecordsToWindow(garminItems[0].records, overlap.startMs, overlap.endMs);
         // 정렬로 잘려나간 시간이 1초 이상일 때만(부동소수 오차로 인한 무의미한 재계산 방지) 실제로 트림 적용.
-        const origPrecRange = precLogTimeRangeMs(precItems[0].log);
-        const origGarminRange = garminTimeRangeMs(garminItems[0]);
         const trimmedSec = Math.round(
           ((origPrecRange.endMs - origPrecRange.startMs) - (overlap.endMs - overlap.startMs)) / 1000
           + ((origGarminRange.endMs - origGarminRange.startMs) - (overlap.endMs - overlap.startMs)) / 1000
         );
+        if (trimmedSec >= MISALIGN_ABORT_SEC) {
+          appAlert(isKo
+            ? '⚠ 두 기록의 시작/종료 시각이 약 ' + Math.round(trimmedSec / 60) + '분 어긋나 있어, 겹치는 구간이 너무 짧아 비교 의미가 없습니다. 같은 러닝을 기록한 파일이 맞는지 확인 후 다시 선택해주세요.'
+            : '⚠ The start/end times are off by about ' + Math.round(trimmedSec / 60) + ' min, leaving too little overlap to compare meaningfully. Please check you picked files from the same run and try again.');
+          resultBox.innerHTML = '';
+          return;
+        }
         if (trimmedLog.length > 1 && trimmedRecords.length > 1 && trimmedSec >= 1) {
           const garminAgg = recomputeGarminAggFromRecords(trimmedRecords);
           precItems = [Object.assign({}, precItems[0], { log: trimmedLog })];
