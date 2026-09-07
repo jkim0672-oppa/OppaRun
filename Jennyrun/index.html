@@ -11029,9 +11029,19 @@ class CommunityManager {
   async ensureUserId() {
     if (this.userId) return this.userId;
     let uid = localStorage.getItem(this.USER_ID_KEY);
-    // 기존 저장값이 uuid 형식인지 확인
-    if (uid && uid.match(/^[0-9a-f-]{36}$/)) { this.userId = uid; return uid; }
-    // 익명 로그인 시도
+    // [수정] 캐시된 uid가 UUID 형식이어도, 실제 Supabase 인증 세션이 살아있지 않으면
+    // records 등의 RLS 정책(auth.uid() = user_id) 검사에서 막힌다. 형식만 보고 바로
+    // 반환하던 기존 방식 대신, 실제 세션을 먼저 확인해서 그 값을 기준으로 삼는다.
+    try {
+      const { data: sessionRes } = await _sb.auth.getSession();
+      const liveUid = sessionRes && sessionRes.session && sessionRes.session.user && sessionRes.session.user.id;
+      if (liveUid) {
+        if (liveUid !== uid) localStorage.setItem(this.USER_ID_KEY, liveUid);
+        this.userId = liveUid;
+        return liveUid;
+      }
+    } catch(e) { console.warn('Supabase session check failed', e); }
+    // 살아있는 세션이 없으면(만료/소실 등) 새로 익명 로그인
     try {
       const { data, error } = await _sb.auth.signInAnonymously();
       if (data && data.user) {
