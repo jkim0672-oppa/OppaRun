@@ -745,6 +745,20 @@ display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: no
 -webkit-font-smoothing: antialiased;
 padding-top: var(--top-inset);
 box-sizing: border-box;
+-webkit-user-select: none;
+-moz-user-select: none;
+-ms-user-select: none;
+user-select: none;
+-webkit-touch-callout: none;
+}
+/* [추가] 길게 눌러도 텍스트 선택/복사 팝업이 안 뜨게 전체 차단했지만,
+   실제 입력이 필요한 요소(input/textarea/contenteditable)는 예외로 다시 허용 */
+input, textarea, [contenteditable="true"] {
+-webkit-user-select: text;
+-moz-user-select: text;
+-ms-user-select: text;
+user-select: text;
+-webkit-touch-callout: default;
 }
 /* ===== 메인 지도(RUN 화면 상단 지도) ===== */
 #map-area { flex-shrink: 0; width: 100%; }
@@ -7449,9 +7463,6 @@ this.calibForceSamples = [];
 onNativeStep(tsMs) {
 const now = (typeof tsMs === 'number') ? tsMs : Date.now();
 this.nativeStepTimestamps.push(now);
-// [추가] 구제 판정용 4초 윈도우와 별개로, 러닝 전체 총 개수는 계속 누적
-// (가민 비교 화면에서 "안드로이드 걸음감지센서 vs 자체알고리즘" 교차검증용)
-this.nativeStepDetectorTotalCount++;
 // 최근 4초치만 보관 (오래된 건 케이던스 판단에 의미 없음)
 const cutoff = now - 4000;
 while (this.nativeStepTimestamps.length && this.nativeStepTimestamps[0] < cutoff) {
@@ -9449,6 +9460,12 @@ storage.saveTempSession(this.state);
 updateMetrics(data) {
 if (this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
 this.state.steps++;
+// [수정] 원래 onNativeStep()에서 게이트/일시정지 체크보다 먼저 무조건 증가시키던
+// nativeStepDetectorTotalCount(정밀 로그의 stepDetectorCnt 컬럼 소스)를 여기로 이동.
+// 일시정지 중 오탐이나 80ms 중복게이트에 걸러진 이벤트까지 로그 걸음수에 새고 있어서,
+// 목록의 실측 케이던스(state.steps 기반)보다 로그 쪽 케이던스가 항상 높게 나오는
+// 불일치가 있었음. 이제 이 state.steps++와 완전히 같은 조건에서만 증가하므로 두 값이 일치한다.
+if (this.motion) this.motion.nativeStepDetectorTotalCount++;
 this.state.stepCount++;
 this.state.totalGct += data.gct || 0;
 this.state.totalFlight += data.flight || 0;
