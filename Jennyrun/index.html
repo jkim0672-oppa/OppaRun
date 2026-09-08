@@ -1073,7 +1073,7 @@ filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
 #devpos-hand.active, #onb-devpos-hand.active    { background: #e05a4e; color: #fff; border-color: #e05a4e; }
 #activity-mode-row .gender-btn, #onb-activity-mode-row .gender-btn { font-size:var(--fs-sm); padding: 13px 4px; }
 /* ===== 메트로놈(리듬 어시스턴트) 화면 ===== */
-#metro-bpm-val { font-size:var(--fs-display); font-weight: 900; text-align: center; color: var(--primary); margin: 5px 0; }
+#metro-bpm-val { font-size:var(--fs-xl); font-weight: 900; text-align: center; color: var(--primary); margin: 5px 0; }
 .metro-slider { width: 100%; accent-color: var(--primary); margin: 10px 0; height: 4px; }
 .pace-marker {
 background: rgba(0,0,0,0.85); border: 1px solid var(--primary); border-radius: 6px;
@@ -1571,8 +1571,9 @@ transform: scale(0.97); background: var(--primary); color: #111; border-color: v
 <input type="checkbox" id="metro-accent" checked style="width:20px; height:20px; accent-color:var(--primary);">
 </div>
 </div>
-<div style="padding: 0 15px;">
-<button id="btn-metro-toggle" class="btn-act c64" onclick="metro.toggle()">START</button>
+<div style="padding: 0 15px; display:flex; gap:10px;">
+<button id="btn-metro-start" class="btn-act c64" style="flex:1;" onclick="metro.start()">START</button>
+<button id="btn-metro-stop" class="btn-act btn-stop" style="flex:1; display:block;" onclick="metro.stop()">STOP</button>
 </div>
 </div>
 <!-- ===== RUN 메인 화면 (대시보드 카드 + START/STOP 컨트롤) ===== -->
@@ -1755,7 +1756,7 @@ alt="runner"/>
 <!-- [추가] 자동저장 로그 카드와 동일한 스타일로, 불러온 지난 로그도 항목별 DELETE 버튼과 함께
      카드로 보여준다 (가민 FIT 가져오기 목록과 동일한 패턴: 드롭다운은 빠른 선택용, 카드는 개별 관리용). -->
 <div id="calib-preclog-import-list" class="u-margin-top-10px"></div>
-<button id="btn-run-calib-compare" class="btn-run-calib-compare" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-sm); margin-top:10px;" onclick="garmin.runCalibrationCompare()">COMPARE SELECTED</button>
+<button id="btn-run-calib-compare" class="btn-run-calib-compare" style="background:var(--primary); color:#000; border:none; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-sm); margin-top:10px;" onclick="garmin.runCalibrationCompare()">COMPARE SELECTED</button>
 <div id="garmin-calib-result" class="u-margin-top-12px"></div>
 <!-- [추가] 여러 번(다른 페이스로) 비교한 결과를 바로 적용하지 않고 모아뒀다가,
      평균값으로 한 번만 적용할 수 있게 하는 대기목록. runCalibrationCompare()가
@@ -3916,7 +3917,8 @@ this.currentStatActivityType = 'run'; // [신규] 통계 페이지 RUN/WALK 분�
 this.pendingDeleteId = null;
 this.pendingSaveId = null;
 this.menuBpmDisplay = document.getElementById('label-metro-menu');
-this.btnMetroToggle = document.getElementById('btn-metro-toggle');
+this.btnMetroStart = document.getElementById('btn-metro-start');
+this.btnMetroStop = document.getElementById('btn-metro-stop');
 this.currentUnit = storage.getUnit();
 this.currentGender = storage.getGender();
 this.currentAutoPause = storage.getAutoPause();
@@ -5435,7 +5437,7 @@ const metroAccent = document.getElementById('metro-accent-label');
 if(metroAccent) metroAccent.textContent = t.metroAccent;
 const diagTitle = document.getElementById('diag-view-title');
 if(diagTitle) diagTitle.textContent = t.diagTitle;
-if(this.btnMetroToggle) this.btnMetroToggle.textContent = metro.isPlaying ? t.stop : t.start;
+if(this.updateMetroStartStopBtns) this.updateMetroStartStopBtns();
 // TAP TO EXPAND 힌트 교체
 const mapExpandHint = document.getElementById('map-expand-hint');
 if(mapExpandHint) mapExpandHint.textContent = '⛶ ' + t.tapToExpand;
@@ -5851,6 +5853,20 @@ this.menuBpmDisplay.textContent = bpmVal + (lang === 'ko' ? ' 비트' : ' BPM');
 } else {
 btn.textContent = t.metroOff; btn.style.background = "#333"; btn.style.color = "#999"; btn.style.borderColor = "#444";
 if(this.menuBpmDisplay) this.menuBpmDisplay.textContent = t.metroTitle;
+}
+}
+// [추가] 메트로놈 페이지의 START/STOP 버튼 2개 - 라벨은 언어별로, 상태는
+// 현재 재생 중인 쪽 반대 버튼을 흐리게 처리해 지금 뭐가 눌려있는지 구분되게 함
+updateMetroStartStopBtns() {
+const lang = storage.getLang();
+const t = translations[lang] || translations['en'];
+if(this.btnMetroStart) {
+this.btnMetroStart.textContent = t.start;
+this.btnMetroStart.style.opacity = metro.isPlaying ? '0.4' : '1';
+}
+if(this.btnMetroStop) {
+this.btnMetroStop.textContent = t.stop;
+this.btnMetroStop.style.opacity = metro.isPlaying ? '1' : '0.4';
 }
 }
 // ── 심박 모달 ──
@@ -7116,7 +7132,27 @@ constructor() { this.audioCtx = null; this.nextTickTime = 0; this.timerID = null
 init() { if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
 async playClick() { if (!this.audioCtx) await this.init(); if (this.audioCtx.state === 'suspended') await this.audioCtx.resume(); const osc = this.audioCtx.createOscillator(); const envelope = this.audioCtx.createGain(); const accentCheck = document.getElementById('metro-accent'); const isAccent = accentCheck && accentCheck.checked && this.currentBeat === 0; osc.type = 'triangle'; osc.frequency.value = isAccent ? 1200 : 800; const volInput = document.getElementById('metro-vol'); envelope.gain.value = volInput ? volInput.value : 0.5; envelope.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.1); osc.connect(envelope); envelope.connect(this.audioCtx.destination); osc.start(this.audioCtx.currentTime); osc.stop(this.audioCtx.currentTime + 0.1); this.currentBeat = (this.currentBeat + 1) % 4; }
 scheduler() { if (!this.audioCtx) return; while (this.nextTickTime < this.audioCtx.currentTime + 0.1) { this.playClick(); const bpmInput = document.getElementById('metro-bpm'); const bpm = bpmInput ? parseFloat(bpmInput.value) : 180; this.nextTickTime += 60.0 / bpm; } this.timerID = setTimeout(() => this.scheduler(), 25); }
-async toggle() { await this.init(); if (this.isPlaying) { clearTimeout(this.timerID); this.isPlaying = false; if (this.audioCtx) this.audioCtx.suspend(); } else { await this.audioCtx.resume(); this.currentBeat = 0; this.nextTickTime = this.audioCtx.currentTime; this.scheduler(); this.isPlaying = true; } ui.updateQuickMetroBtn(); const lang = storage.getLang(); if(ui.btnMetroToggle) ui.btnMetroToggle.textContent = this.isPlaying ? translations[lang].stop : translations[lang].start; }
+async start() {
+  await this.init();
+  if (this.isPlaying) return;
+  await this.audioCtx.resume();
+  this.currentBeat = 0;
+  this.nextTickTime = this.audioCtx.currentTime;
+  this.scheduler();
+  this.isPlaying = true;
+  ui.updateQuickMetroBtn();
+  if (typeof ui.updateMetroStartStopBtns === 'function') ui.updateMetroStartStopBtns();
+}
+async stop() {
+  await this.init();
+  if (!this.isPlaying) return;
+  clearTimeout(this.timerID);
+  this.isPlaying = false;
+  if (this.audioCtx) this.audioCtx.suspend();
+  ui.updateQuickMetroBtn();
+  if (typeof ui.updateMetroStartStopBtns === 'function') ui.updateMetroStartStopBtns();
+}
+async toggle() { if (this.isPlaying) { await this.stop(); } else { await this.start(); } }
 updateDisplay() { const bpmInput = document.getElementById('metro-bpm'); const bpm = bpmInput ? bpmInput.value : 180; if(ui.dom.metroBpmVal) ui.dom.metroBpmVal.textContent = bpm; if(this.isPlaying && ui.menuBpmDisplay) { const lang = storage.getLang(); ui.menuBpmDisplay.textContent = bpm + (lang === 'ko' ? ' 비트' : ' BPM'); } }
 }
 // ========== MotionManager ==========
