@@ -1258,14 +1258,6 @@ overflow-x: auto; white-space: nowrap; -ms-overflow-style: none; scrollbar-width
 .user-action-unfollow-btn { background:#2a2a2a; color:#ccc; border:1.5px solid #444; padding:14px; border-radius:12px; font-weight:800; font-size:var(--fs-md); cursor:pointer; }
 .user-action-unfollow-btn.is-open { display:block; }
 .custom-confirm-box { background: #1a1a1a; border: 2px solid #333; border-radius: 16px; width: 100%; max-width: 320px; padding: 22px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
-/* [추가 2026-09-09] DIAG 카드 스파크라인 탭 확대 기능 */
-.diag-spark-tap { cursor: pointer; -webkit-tap-highlight-color: transparent; }
-.diag-spark-hint { text-align: right; font-size: var(--fs-xxs, 10px); color: #666; font-weight: 700; margin-top: 2px; }
-.diag-chart-modal-box { max-width: 360px; text-align: left; padding: 16px; }
-.diag-chart-modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.diag-chart-modal-title { font-size: var(--fs-md); font-weight: 900; color: #fff; letter-spacing: 0.3px; }
-.diag-chart-modal-close { font-size: 18px; color: #888; padding: 4px 8px; cursor: pointer; }
-.diag-chart-modal-body { width: 100%; }
 .custom-confirm-msg { font-size:var(--fs-md); font-weight: 800; color: #ffffff; margin-bottom: 22px; line-height: 1.5; word-break: keep-all; }
 .custom-confirm-actions { display: flex; gap: 10px; }
 .btn-confirm-act { flex: 1; height: 48px; border-radius: 24px; border: none; font-weight: 900; font-size:var(--fs-md); cursor: pointer; }
@@ -1373,15 +1365,6 @@ transform: scale(0.97); background: var(--primary); color: #111; border-color: v
 <button id="btn-confirm-cancel" class="btn-confirm-act btn-confirm-cancel" onclick="ui.closeConfirmModal(false)">CANCEL</button>
 <button id="btn-confirm-delete" class="btn-confirm-act btn-confirm-delete" onclick="ui.closeConfirmModal(true)">DELETE</button>
 </div>
-</div>
-</div>
-<div id="diag-chart-modal-overlay" class="custom-confirm-overlay diag-chart-modal-overlay">
-<div class="custom-confirm-box diag-chart-modal-box">
-<div class="diag-chart-modal-header">
-<span id="diag-chart-modal-title" class="diag-chart-modal-title"></span>
-<span class="diag-chart-modal-close" onclick="ui.closeDiagChartModal()">✕</span>
-</div>
-<div id="diag-chart-modal-body" class="diag-chart-modal-body"></div>
 </div>
 </div>
 <div id="save-confirm-modal" class="custom-confirm-overlay">
@@ -2886,70 +2869,6 @@ return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style=
   + '<polyline points="' + coords.join(' ') + '" fill="none" stroke="' + colorHex + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>'
   + '</svg>';
 }
-// [추가 2026-09-09] DIAG 카드 탭 시 열리는 상세 차트(모달)용 큰 SVG. buildSparklineSVG와
-// 같은 좌표 로직(다운샘플링/평균선 포함)을 쓰되, 카드 안 미니그래프(100x32, 축 없음)와 달리
-// Y축 격자선+값 라벨과 데이터 포인트 점을 추가로 그린다. yFormatter(v)로 지표별 표시 형식
-// (페이스는 분'초", 나머지는 정수+단위)을 넘겨받는다.
-function buildDetailChartSVG(values, colorHex, invert, yFormatter) {
-if (!values || !values.length) return '';
-let pts = values.map((v, i) => ({ i, v })).filter(p => typeof p.v === 'number' && isFinite(p.v));
-if (pts.length < 2) return '';
-const MAX_POINTS = 60;
-if (pts.length > MAX_POINTS) {
-  const bucketSize = Math.ceil(pts.length / MAX_POINTS);
-  const bucketed = [];
-  for (let b = 0; b < pts.length; b += bucketSize) {
-    const chunk = pts.slice(b, b + bucketSize);
-    const avgV = chunk.reduce((a, p) => a + p.v, 0) / chunk.length;
-    bucketed.push({ i: bucketed.length, v: avgV });
-  }
-  pts = bucketed;
-  values = pts;
-}
-const W = 320, H = 190, PAD_L = 38, PAD_R = 10, PAD_T = 10, PAD_B = 10;
-let min = Math.min(...pts.map(p => p.v));
-let max = Math.max(...pts.map(p => p.v));
-if (max - min < 1e-6) { min -= 1; max += 1; }
-const yFor = (v) => {
-  let t = (v - min) / (max - min);
-  if (invert) t = 1 - t;
-  return PAD_T + (1 - t) * (H - PAD_T - PAD_B);
-};
-const xStep = (W - PAD_L - PAD_R) / (values.length - 1 || 1);
-const coords = pts.map(p => {
-  const x = PAD_L + p.i * xStep;
-  const y = yFor(p.v);
-  return x.toFixed(1) + ',' + y.toFixed(1);
-});
-const first = coords[0].split(',');
-const last = coords[coords.length - 1].split(',');
-const areaPts = first[0] + ',' + (H - PAD_B) + ' ' + coords.join(' ') + ' ' + last[0] + ',' + (H - PAD_B);
-// Y축 격자선 4단(최솟값~최댓값 균등분할) + 값 라벨
-const TICKS = 4;
-let gridSvg = '';
-for (let k = 0; k <= TICKS; k++) {
-  const val = min + (max - min) * (k / TICKS);
-  const y = yFor(val).toFixed(1);
-  const label = yFormatter ? yFormatter(val) : Math.round(val);
-  gridSvg += '<line x1="' + PAD_L + '" y1="' + y + '" x2="' + (W - PAD_R) + '" y2="' + y + '" stroke="#2a2a2a" stroke-width="1"></line>'
-    + '<text x="' + (PAD_L - 6) + '" y="' + y + '" fill="#888" font-size="9" text-anchor="end" dominant-baseline="middle">' + label + '</text>';
-}
-const avgVal = pts.reduce((a, p) => a + p.v, 0) / pts.length;
-const avgY = yFor(avgVal).toFixed(1);
-const avgDashSvg = '<line x1="' + PAD_L + '" y1="' + avgY + '" x2="' + (W - PAD_R) + '" y2="' + avgY + '" stroke="#888" stroke-width="1" stroke-dasharray="3,3" vector-effect="non-scaling-stroke"></line>';
-let dotsSvg = '';
-coords.forEach(c => {
-  const xy = c.split(',');
-  dotsSvg += '<circle cx="' + xy[0] + '" cy="' + xy[1] + '" r="2.2" fill="' + colorHex + '"></circle>';
-});
-return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%;height:190px;display:block;">'
-  + gridSvg
-  + '<polyline points="' + areaPts + '" fill="' + colorHex + '" opacity="0.12" stroke="none"></polyline>'
-  + avgDashSvg
-  + '<polyline points="' + coords.join(' ') + '" fill="none" stroke="' + colorHex + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>'
-  + dotsSvg
-  + '</svg>';
-}
 // [추가] DIAG 미니 그래프 아래에 표시할 거리/시간 라벨 HTML.
 // 전체 거리에 따라 라벨 개수를 3→4→5개로 늘려서, 짧은 러닝에서는 카드 안에서
 // 겹치지 않게, 긴 러닝에서는 그래프 굴곡과 거리/시간을 맞춰볼 수 있게 한다.
@@ -3310,7 +3229,7 @@ diagCadGood: "Optimal step frequency.", diagCadLow: "Slightly low cadence. Sync 
 diagStrideGood: "Single step length. 0.5~0.75m is ideal.",
 diagGctBad: "Ground contact time is prolonged. Focus on quick pull-off.", diagGctGood: "Excellent movement elasticity.",
 diagFlightShort: "Short flight time. Improve elastic energy return.", diagFlightGood: "Good flight time range.", diagFlightLong: "Long flight time. Check for excessive vertical oscillation.",
-diagHrLabel: "HEART RATE", diagHrNoData: "Connect a heart rate monitor (e.g. Garmin) to see heart rate analysis for this run.", diagHrZoneLow: "Low-intensity recovery zone. Great for building your aerobic base.", diagHrZoneGood: "Efficient aerobic zone. A solid intensity for building endurance.", diagHrZoneHigh: "High-intensity zone. Effective for speed and power, but make sure to recover properly.", diagAltLabel: "GPS ALTITUDE", diagAltNoData: "Not enough GPS split data was recorded for this run to show an elevation profile.", diagTapExpand: "Tap to expand", diagLeanLabel: "LEAN ANGLE", diagLeanDiagramTitle: "LEAN ANGLE DIAGRAM", diagLeanDiagramDesc: "Shows how far your center of mass leans forward past your ground contact point. (See the Theory Guide tab for more.)",
+diagHrLabel: "HEART RATE", diagHrNoData: "Connect a heart rate monitor (e.g. Garmin) to see heart rate analysis for this run.", diagHrZoneLow: "Low-intensity recovery zone. Great for building your aerobic base.", diagHrZoneGood: "Efficient aerobic zone. A solid intensity for building endurance.", diagHrZoneHigh: "High-intensity zone. Effective for speed and power, but make sure to recover properly.", diagAltLabel: "GPS ALTITUDE", diagAltNoData: "Not enough GPS split data was recorded for this run to show an elevation profile.", diagLeanLabel: "LEAN ANGLE", diagLeanDiagramTitle: "LEAN ANGLE DIAGRAM", diagLeanDiagramDesc: "Shows how far your center of mass leans forward past your ground contact point. (See the Theory Guide tab for more.)",
 diagLeanGround: "Ground", diagLeanVertical: "Vertical", diagLeanAxis: "Lean Axis", diagLeanCom: "Center of Mass", diagLeanGravity: "Gravity", diagLeanPropulsion: "Propulsion", diagLeanGrf: "GRF (Ground Reaction Force)", diagLeanGrfNote: "*Illustrative only, not measured",
 diagRecovSkip: "Distance under 100m, recovery analysis not provided.",
 devposHandWarning: "⚠ Holding the phone in your hand significantly reduces the accuracy of cadence, GCT, and balance data due to arm-swing motion. Chest, waist, or armband placement is recommended.",
@@ -3421,7 +3340,7 @@ diagCadGood: "이상적인 보폭 빈도입니다.", diagCadLow: "케이던스�
 diagStrideGood: "한 걸음 기준 보폭입니다. 0.5~0.75m가 이상적입니다.",
 diagGctBad: "지면 접촉 시간이 다소 깁니다. 발을 빠르게 회수하세요.", diagGctGood: "매우 뛰어난 탄력성입니다.",
 diagFlightShort: "체공시간이 짧습니다. 탄성 에너지 활용을 높여보세요.", diagFlightGood: "적절한 체공시간입니다.", diagFlightLong: "체공시간이 깁니다. 과도한 수직 낭비가 있을 수 있습니다.",
-diagHrLabel: "심박수", diagHrNoData: "가민 등 심박계를 연결하면 이 러닝의 심박수 분석을 확인할 수 있어요.", diagHrZoneLow: "저강도 회복 구간입니다. 유산소 기초 체력을 다지기에 좋습니다.", diagHrZoneGood: "효율적인 유산소 구간입니다. 지구력 향상에 적합한 강도입니다.", diagHrZoneHigh: "고강도 구간입니다. 스피드와 파워 향상에 효과적이지만 충분한 회복이 필요합니다.", diagAltLabel: "GPS 고도", diagAltNoData: "이 러닝은 고도 그래프를 표시할 GPS 구간 데이터가 충분히 기록되지 않았습니다.", diagTapExpand: "탭하여 확대", diagLeanLabel: "린각도", diagLeanDiagramTitle: "린각도 다이어그램", diagLeanDiagramDesc: "몸의 무게중심이 지면 접촉점보다 얼마나 앞으로 기울어 있는지를 보여줍니다. (자세한 설명은 이론 가이드 탭 참고)",
+diagHrLabel: "심박수", diagHrNoData: "가민 등 심박계를 연결하면 이 러닝의 심박수 분석을 확인할 수 있어요.", diagHrZoneLow: "저강도 회복 구간입니다. 유산소 기초 체력을 다지기에 좋습니다.", diagHrZoneGood: "효율적인 유산소 구간입니다. 지구력 향상에 적합한 강도입니다.", diagHrZoneHigh: "고강도 구간입니다. 스피드와 파워 향상에 효과적이지만 충분한 회복이 필요합니다.", diagAltLabel: "GPS 고도", diagAltNoData: "이 러닝은 고도 그래프를 표시할 GPS 구간 데이터가 충분히 기록되지 않았습니다.", diagLeanLabel: "린각도", diagLeanDiagramTitle: "린각도 다이어그램", diagLeanDiagramDesc: "몸의 무게중심이 지면 접촉점보다 얼마나 앞으로 기울어 있는지를 보여줍니다. (자세한 설명은 이론 가이드 탭 참고)",
 diagLeanGround: "지면", diagLeanVertical: "수직축", diagLeanAxis: "기울기 축", diagLeanCom: "무게중심", diagLeanGravity: "중력", diagLeanPropulsion: "추진력", diagLeanGrf: "지면 반력 (GRF)", diagLeanGrfNote: "*측정값 아님, 개념 설명용",
 diagRecovSkip: "100m 미만 거리는 회복 분석이 제공되지 않습니다.",
 devposHandWarning: "⚠ 휴대폰을 손에 들고 뛰면 팔 흔들림으로 인해 케이던스, GCT, 밸런스 데이터의 정확도가 크게 떨어집니다. 가슴, 허리, 암밴드 착용을 권장합니다.",
@@ -7149,24 +7068,6 @@ const altSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.altTo =
 const powerSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.power === 'number' ? s.power : null)), '#ffb74d', false);
 // [추가] 그래프 아래 거리/시간 축 라벨 (기준선과 함께, v2 스타일)
 const diagAxisLabelsHtml = buildDiagAxisLabelsHtml(_splitsForGraph);
-// [추가 2026-09-09] DIAG 카드 스파크라인 탭 시 여는 상세 차트 모달용 캐시. 카드 렌더링 때
-// 쓴 것과 동일한 값 배열/색상/반전여부를 그대로 재사용해 모달에서 다시 계산하지 않는다.
-this._diagChartCache = {
-  splits: _splitsForGraph,
-  axisLabelsHtml: diagAxisLabelsHtml,
-  metrics: {
-    pace: { values: _splitsForGraph.map(s => paceStrToSeconds(s.pace)), color: '#00ff88', invert: true,
-      title: t.diagPaceLabel, fmt: (v) => { const m = Math.floor(v/60), s = Math.round(v%60); return m + "'" + String(s).padStart(2,'0') + '"'; } },
-    cadence: { values: _splitsForGraph.map(s => (typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3) ? s.avgCadence : null)), color: '#4fc3f7', invert: false,
-      title: t.diagCadLabel, fmt: (v) => Math.round(v) + ' spm' },
-    hr: { values: _splitsForGraph.map(s => (typeof s.avgHr === 'number' ? s.avgHr : null)), color: '#e53935', invert: false,
-      title: t.diagHrLabel, fmt: (v) => Math.round(v) + ' bpm' },
-    alt: { values: _splitsForGraph.map(s => (typeof s.altTo === 'number' ? s.altTo : null)), color: '#90a4ae', invert: false,
-      title: t.diagAltLabel || 'GPS ALTITUDE', fmt: (v) => v.toFixed(0) + ' m' },
-    power: { values: _splitsForGraph.map(s => (typeof s.power === 'number' ? s.power : null)), color: '#ffb74d', invert: false,
-      title: t.powerLabel || 'POWER', fmt: (v) => Math.round(v) + ' W' },
-  }
-};
 const totalAltGainForDiag = _splitsForGraph.length > 0 ? _splitsForGraph.reduce((sum,s)=>sum+Math.max(0,s.altDiff||0),0) : 0;
 // [추가] HR처럼 "평균 / 최고"로 보여주기 위한 케이던스·페이스 최고값.
 // 순간 최고 케이던스/페이스를 러닝 중 별도로 저장하지 않으므로, 100m 구간(diagSplits)
@@ -7192,15 +7093,15 @@ contentArea.innerHTML =
 '<div class="diag-card"><div class="diag-label">' + (t.time||'TIME') + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.time||'--') + '</div></div>' +
 '<div style="margin-top:6px;font-size:var(--fs-sm);color:#aaa;font-weight:700;">' + (t.speed||'SPEED') + ' : ' + (() => { const p=r.avgPace||r.pace; if(p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60); return this.currentUnit==='mile'?(kmh*0.621371).toFixed(1)+' mi/h':kmh.toFixed(1)+' km/h';} return '--'; })() + '</div>' +
 '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + (pacePeakDisplay ? (' / ' + pacePeakDisplay) : '') + ' <span class="c44">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div>' + (paceSparkSvg ? ('<div class="diag-spark-tap" onclick="ui.openDiagChartModal(\'pace\')">' + paceSparkSvg + diagAxisLabelsHtml + '<div class="diag-spark-hint">🔍 ' + (t.diagTapExpand || 'Tap to expand') + '</div></div>') : '') + '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.powerLabel || "POWER") + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + (powerPeakForDiag != null ? (' / ' + powerPeakForDiag) : '') + ' <span class="c44">W</span></div><div class="diag-ref">' + (t.powerZoneLabel || 'POWER ZONE') + ': ' + powerZoneDisplay + '</div></div><div class="diag-tip">' + powerComment + '</div>' + (powerSparkSvg ? ('<div class="diag-spark-tap" onclick="ui.openDiagChartModal(\'power\')">' + powerSparkSvg + diagAxisLabelsHtml + '<div class="diag-spark-hint">🔍 ' + (t.diagTapExpand || 'Tap to expand') + '</div></div>') : '') + '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.cadence ? this.getCadenceColor(r.cadence) : '#aaa') + '">CAD: ' + (r.cadence || 0) + (cadPeakForDiag != null ? (' / ' + cadPeakForDiag) : '') + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div>' + (cadSparkSvg ? ('<div class="diag-spark-tap" onclick="ui.openDiagChartModal(\'cadence\')">' + cadSparkSvg + diagAxisLabelsHtml + '<div class="diag-spark-hint">🔍 ' + (t.diagTapExpand || 'Tap to expand') + '</div></div>') : '') + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + (pacePeakDisplay ? (' / ' + pacePeakDisplay) : '') + ' <span class="c44">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div>' + paceSparkSvg + (paceSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.powerLabel || "POWER") + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + (powerPeakForDiag != null ? (' / ' + powerPeakForDiag) : '') + ' <span class="c44">W</span></div><div class="diag-ref">' + (t.powerZoneLabel || 'POWER ZONE') + ': ' + powerZoneDisplay + '</div></div><div class="diag-tip">' + powerComment + '</div>' + powerSparkSvg + (powerSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.cadence ? this.getCadenceColor(r.cadence) : '#aaa') + '">CAD: ' + (r.cadence || 0) + (cadPeakForDiag != null ? (' / ' + cadPeakForDiag) : '') + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div>' + cadSparkSvg + (cadSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getStrideColor(strideNumForFeedback, diagProfile) + '">' + strideVal + '</div><div class="diag-ref">Ref: 0.5~0.75m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.gct && r.gct !== '--' ? this.getGctColor(r.gct) : '#aaa') + '">GCT: ' + r.gct + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagBalanceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getBalanceColor(r.cadenceBal, r.gctBal) + '">' + (r.cadenceBal || '50:50') + ' <span style="font-size:var(--fs-xs);color:#aaa">L:R</span></div><div class="diag-ref">GCT ' + (r.gctBal || '50:50') + ' &nbsp;·&nbsp; GYRO ' + (r.gyroBal || '50:50') + '</div></div><div class="diag-tip">' + diagFeedback.balance + '</div><div style="font-size:var(--fs-xs);color:#888;font-weight:600;line-height:1.5;margin-top:8px;padding-top:8px;border-top:1px solid #222;">' + (t.diagBalanceExplain || '') + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagFlightLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (isNaN(flightNum)?'#aaa':this.getFlightColor(flightNum)) + '">' + flightVal + (flightVal!=='--'?' %':'') + '</div><div class="diag-ref">Ref: 30~45%</div></div><div class="diag-tip">' + flightComment + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagHrLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + hrColor + '">' + hrMainVal + '</div><div class="diag-ref">' + t.hrZoneLabel + ': ' + hrZoneDisplay + '</div></div><div class="diag-tip">' + hrComment + '</div>' + (hrSparkSvg ? ('<div class="diag-spark-tap" onclick="ui.openDiagChartModal(\'hr\')">' + hrSparkSvg + diagAxisLabelsHtml + '<div class="diag-spark-hint">🔍 ' + (t.diagTapExpand || 'Tap to expand') + '</div></div>') : '') + '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagAltLabel || "GPS ALTITUDE") + '</div><div class="diag-val-group"><div class="diag-main-val">' + (altSparkSvg ? ('+' + totalAltGainForDiag.toFixed(0) + ' <span class="c44">M</span>') : '--') + '</div></div>' + (altSparkSvg ? ('<div class="diag-spark-tap" onclick="ui.openDiagChartModal(\'alt\')">' + altSparkSvg + diagAxisLabelsHtml + '<div class="diag-spark-hint">🔍 ' + (t.diagTapExpand || 'Tap to expand') + '</div></div>') : '<div class="diag-tip">' + (t.diagAltNoData || '') + '</div>') + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagHrLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + hrColor + '">' + hrMainVal + '</div><div class="diag-ref">' + t.hrZoneLabel + ': ' + hrZoneDisplay + '</div></div><div class="diag-tip">' + hrComment + '</div>' + hrSparkSvg + (hrSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagAltLabel || "GPS ALTITUDE") + '</div><div class="diag-val-group"><div class="diag-main-val">' + (altSparkSvg ? ('+' + totalAltGainForDiag.toFixed(0) + ' <span class="c44">M</span>') : '--') + '</div></div>' + (altSparkSvg ? (altSparkSvg + diagAxisLabelsHtml) : '<div class="diag-tip">' + (t.diagAltNoData || '') + '</div>') + '</div>' +
 // [추가] 린각도: 해당 기록에 데이터가 있을 때만 카드+다이어그램 노출 (LeanAngleUI.has()로 게이팅, 계산/판정 로직은 모듈만 사용)
 (LeanAngleUI.has(r) ?
 '<div class="diag-card"><div class="diag-label">' + (t.diagLeanLabel || 'LEAN ANGLE') + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (LeanAngleUI.colorForPrimary(r.avgLeanAngleDeg, r.avgLeanForwardDeg) || '#aaa') + '">' + LeanAngleUI.fmtPrimary(r.avgLeanAngleDeg, r.avgLeanForwardDeg) + '</div><div class="diag-ref">Ref: 4~8°</div></div><div class="diag-tip">' + (LeanAngleUI.primarySubHtml(r.avgLeanAngleDeg, r.avgLeanLateralDeg, r.avgLeanForwardDeg, lang, 'var(--fs-xs)') || '') + '</div>' +
@@ -7225,29 +7126,6 @@ if (LeanAngleUI.has(r)) LeanAngleUI.renderDiagram(r.avgLeanAngleDeg, r.avgLeanFo
 }
 }
 closeDiag() { const dv = document.getElementById('diag-view'); if(dv) dv.classList.remove('is-open'); }
-// [추가 2026-09-09] DIAG 카드의 미니 스파크라인(100x32, 축 없음)을 탭했을 때 같은 데이터로
-// 축 라벨·격자선·평균선이 있는 큰 상세 차트를 모달로 띄운다. 목록 카드 자체는 계속 작게
-// 유지하고, 디테일이 필요할 때만 확대해서 보는 방식(카드 5개를 전부 키우는 대신).
-openDiagChartModal(metricKey) {
-const cache = this._diagChartCache;
-if (!cache) return;
-const cfg = cache.metrics[metricKey];
-if (!cfg) return;
-const lang = storage.getLang();
-const t = translations[lang];
-const overlay = document.getElementById('diag-chart-modal-overlay');
-const titleEl = document.getElementById('diag-chart-modal-title');
-const bodyEl = document.getElementById('diag-chart-modal-body');
-if (!overlay || !bodyEl) return;
-if (titleEl) titleEl.textContent = cfg.title || '';
-const detailSvg = buildDetailChartSVG(cfg.values, cfg.color, cfg.invert, cfg.fmt);
-bodyEl.innerHTML = detailSvg + (cache.axisLabelsHtml || '');
-overlay.classList.add('is-open');
-}
-closeDiagChartModal() {
-const overlay = document.getElementById('diag-chart-modal-overlay');
-if (overlay) overlay.classList.remove('is-open');
-}
 }
 // ========== MetroEngine (수정 없음) ==========
 class MetroEngine {
