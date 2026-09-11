@@ -1782,6 +1782,9 @@ alt="runner"/>
 <!-- [추가] 현재 적용된 보정값 상태 표시 + 초기화 버튼. 비교를 다시 하지 않아도
      언제든 코드 기본값으로 되돌릴 수 있도록 항상 표시됨(적용된 값이 있을 때만 보임). -->
 <div id="garmin-calib-status" class="u-margin-top-10px"></div>
+<!-- [추가 2026-09-10] 위치별 보정값 복제 버튼: 커스텀 보정을 적용한 적 없는 위치로도
+     복제해 넣을 수 있어야 해서 garmin-calib-status와 분리된 별도 컨테이너로 항상 표시 -->
+<div id="garmin-calib-copy" class="u-margin-top-10px"></div>
 </div>
 <!-- [/추가] 캘리브레이션 비교 -->
 </div>
@@ -2964,8 +2967,8 @@ const FACTORY_MOTION_PROFILES = {
 // [CALIB_ANCHOR:DEVICE_PROFILES] 캘리브레이션 스니펫(코드 반영용)을 여기 표에 붙여넣으세요.
 const DEVICE_MOTION_PROFILES = {
   chest:   { groundThreshold: 10.05, impactThreshold: 11.6, gctFallbackRatio: 0.36, vertScale: 0.492, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-08-29] SETTINGS > SHOW CURRENT DATA에서 확인한 이번 캘리브레이션 최종 적용값(노란색)을 코드 기본값으로 커밋: groundThreshold 11→10.05, impactThreshold 10.5→11.6, gctFallbackRatio 0.40→0.36, vertScale 0.511→0.492. rotRejectThreshold는 이번 캘리브레이션에서 변경 없음(220 유지).
-  waist:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0.511, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-08-21] 허리 위치의 신호 패턴이 가슴과 크게 다르지 않다는 판단 하에, 팩토리 기본값을 가슴과 완전히 통일
-  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0.511, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-08-21] 암밴드 위치의 신호 패턴이 가슴과 크게 다르지 않다는 판단 하에, 팩토리 기본값을 가슴과 완전히 통일
+  waist:   { groundThreshold: 10.05, impactThreshold: 11.6, gctFallbackRatio: 0.36, vertScale: 0.492, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-10] 허리는 몸통 중심부(COM) 근처라 가슴과 신호 패턴이 가깝다고 보고, 08-21에 걸었던 구버전 가슴 통일값 대신 08-29에 갱신된 "현재" 가슴 커밋값으로 다시 맞춤(그때는 통일해놓고 이후 가슴만 갱신되며 어긋나 있었음).
+  armband: { groundThreshold: 11.75, impactThreshold: 9.87, gctFallbackRatio: 0.43, vertScale: 0, minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-10] 암밴드(어깨/상완)는 팔에 착용해 손과 더 가까운 움직임 패턴을 보일 걸로 판단, 08-21의 가슴 통일값 대신 손(hand) 커밋값으로 교체. 실측 캘리브레이션 전까지의 잠정 시작값 — 가민 비교로 재검증 필요.
   // [수정] 손에 들고 뛸 때는 자체 가속도/자이로 임계값 알고리즘으로 걸음을 "직접 판정"하지 않고
   // 안드로이드 표준 방식(TYPE_STEP_DETECTOR)을 걸음 판정의 주(主) 신호로 쓴다. groundThreshold/
   // impactThreshold/rotRejectThreshold는 이제 걸음을 세는 데 쓰이지 않고 GCT 추정 등 보조 계산에만
@@ -14325,6 +14328,10 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
   function renderCalibStatus(isKo) {
     const box = document.getElementById('garmin-calib-status');
     if (!box) return;
+    // [추가 2026-09-10] 위치별 복제 버튼 묶음은 override 존재 여부와 무관하게 항상 최신
+    // 상태로 유지되어야 하므로, renderCalibStatus가 호출되는 모든 지점(적용/리셋/되돌리기 등)에서
+    // 자동으로 같이 갱신되게 여기서 한 번에 호출한다.
+    if (typeof renderCalibCopyControls === 'function') renderCalibCopyControls(isKo);
     let overridesMap = {}, undosMap = {};
     try {
       const p = storage.loadProfile();
@@ -14796,6 +14803,77 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     }
   }
 
+  // [추가 2026-09-10] "이 위치 계수를 다른 위치로 복제": 출발 위치(fromPos)의 현재
+  // 유효값(override가 있으면 override, 없으면 DEVICE_MOTION_PROFILES 커밋 기본값)과
+  // 보폭/GPS/케이던스/페이스 보정계수를, 목적지 위치(toPos)의 override 슬롯에 그대로
+  // 밀어넣는다. 내부적으로 applyMotionCalibSuggestion을 재사용 — "가민 비교 제안 적용"과
+  // 완전히 같은 경로를 타므로 UNDO 스냅샷도 동일하게 남는다(되돌리기 가능).
+  function copyCalibrationBetweenPositions(fromPos, toPos) {
+    const isKo = isKoLang();
+    if (fromPos === toPos) return;
+    try {
+      const prof = storage.loadProfile();
+      const overridesMap = prof.motionCalibOverrides || {};
+      const fromOv = overridesMap[fromPos] || {};
+      const base = DEVICE_PROFILE_DEFAULTS[fromPos] || DEVICE_PROFILE_DEFAULTS.chest;
+
+      const _defFactors = DEFAULT_PROFILE_FACTORS_BY_POS[fromPos] || FACTORY_DEFAULT_FACTORS;
+      const strideMap = prof.strideCorrectionFactorByPos || {};
+      const gpsMap = prof.gpsDistCorrectionFactorByPos || {};
+      const cadMap = prof.cadCorrectionFactorByPos || {};
+      const paceMap = prof.paceCorrectionFactorByPos || {};
+
+      const suggestion = {
+        ground: fromOv.groundThreshold != null ? fromOv.groundThreshold : base.groundThreshold,
+        impact: fromOv.impactThreshold != null ? fromOv.impactThreshold : base.impactThreshold,
+        gct: fromOv.gctFallbackRatio != null ? fromOv.gctFallbackRatio : base.gctFallbackRatio,
+        vertScale: fromOv.vertScale != null ? fromOv.vertScale : base.vertScale,
+        rot: fromOv.rotRejectThreshold != null ? fromOv.rotRejectThreshold : base.rotRejectThreshold,
+        strideFactor: (typeof strideMap[fromPos] === 'number' && strideMap[fromPos] > 0) ? strideMap[fromPos] : _defFactors.stride,
+        gpsDistFactor: (typeof gpsMap[fromPos] === 'number' && gpsMap[fromPos] > 0) ? gpsMap[fromPos] : _defFactors.gps,
+        cadFactor: (typeof cadMap[fromPos] === 'number' && cadMap[fromPos] > 0) ? cadMap[fromPos] : _defFactors.cad,
+        paceFactor: (typeof paceMap[fromPos] === 'number' && paceMap[fromPos] > 0) ? paceMap[fromPos] : _defFactors.pace
+      };
+
+      applyMotionCalibSuggestion(prof, toPos, suggestion);
+      storage.saveProfile(prof);
+
+      if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
+        app.motion.applyDevicePos(prof.devicePos || 'chest');
+      }
+
+      renderCalibStatus(isKo);
+      if (typeof renderCalibCopyControls === 'function') renderCalibCopyControls(isKo);
+
+      const fromLabel = isKo ? (POS_LABEL_KO[fromPos] || fromPos) : (POS_LABEL_EN[fromPos] || fromPos.toUpperCase());
+      const toLabel = isKo ? (POS_LABEL_KO[toPos] || toPos) : (POS_LABEL_EN[toPos] || toPos.toUpperCase());
+      alert(isKo
+        ? '[' + fromLabel + ']의 보정값을 [' + toLabel + ']에 복제했습니다. (' + toLabel + ' 쪽은 UNDO로 되돌릴 수 있어요)'
+        : 'Copied calibration from [' + fromLabel + '] to [' + toLabel + ']. (You can UNDO on ' + toLabel + '.)');
+    } catch (err) {
+      alert((isKo ? '복제 중 오류: ' : 'Copy error: ') + err.message);
+    }
+  }
+
+  // [추가 2026-09-10] 위치별 "복제" 버튼 묶음을 그리는 함수. renderCalibStatus의 카드와
+  // 달리 override 적용 여부와 무관하게 4개 위치를 항상 보여준다 — 아직 한 번도 커스텀
+  // 보정을 적용한 적 없는 위치(예: 방금 갱신한 waist/armband)로도 복제해 넣을 수 있어야 하므로.
+  function renderCalibCopyControls(isKo) {
+    const box = document.getElementById('garmin-calib-copy');
+    if (!box) return;
+    const positions = ['chest', 'waist', 'armband', 'hand'];
+    box.innerHTML = '<div style="font-size:var(--fs-xxs); color:#888; font-weight:800; margin:14px 0 6px;">'
+      + (isKo ? '위치별 보정값 복제' : 'COPY CALIBRATION BETWEEN POSITIONS') + '</div>'
+      + positions.map(function(toPos) {
+        const toLabel = isKo ? (POS_LABEL_KO[toPos] || toPos) : (POS_LABEL_EN[toPos] || toPos.toUpperCase());
+        const fromButtons = positions.filter(function(p) { return p !== toPos; }).map(function(fromPos) {
+          const fromLabel = isKo ? (POS_LABEL_KO[fromPos] || fromPos) : (POS_LABEL_EN[fromPos] || fromPos.toUpperCase());
+          return '<button style="background:#1a1a1a; color:var(--primary); border:1px solid #333; padding:8px; border-radius:8px; font-weight:800; font-size:var(--fs-xxs); cursor:pointer;" onclick="garmin.copyCalibrationBetweenPositions(\'' + fromPos + '\', \'' + toPos + '\')">' + fromLabel + ' → ' + toLabel + '</button>';
+        }).join('');
+        return '<div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; margin-bottom:8px;">' + fromButtons + '</div>';
+      }).join('');
+  }
+
   // [추가] 설정 페이지 CALIB 탭용: 위치별로 하나씩 누르지 않고 4개 위치(chest/waist/
   // armband/hand)를 한 번에 처리하는 통합 버전. 로직은 resetCalibration/
   // applyCommittedDefault와 동일 — override 존재 여부와 무관하게 항상 값을 채워
@@ -15112,7 +15190,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     }
   }
 
-  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, togglePrecLogSelect, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
+  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, togglePrecLogSelect, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, copyCalibrationBetweenPositions, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
