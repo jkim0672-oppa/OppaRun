@@ -14387,7 +14387,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       const finalGct = ov.gctFallbackRatio != null ? ov.gctFallbackRatio : base.gctFallbackRatio;
       const finalVert = ov.vertScale != null ? ov.vertScale : base.vertScale;
       const finalRot = ov.rotRejectThreshold != null ? ov.rotRejectThreshold : base.rotRejectThreshold;
-      const snippetLine = '// 찾기: CALIB_ANCHOR:DEVICE_PROFILES\n'
+      const snippetLine = '// Find: CALIB_ANCHOR:DEVICE_PROFILES\n'
         + pos + ':   { groundThreshold: ' + base.groundThreshold + ', impactThreshold: ' + base.impactThreshold
         + ', gctFallbackRatio: ' + finalGct + ', vertScale: ' + finalVert + ', minStepInterval: ' + base.minStepInterval
         + ', vertEnabled: ' + base.vertEnabled + ', rotRejectThreshold: ' + finalRot + ' },';
@@ -14401,7 +14401,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       if (typeof cadVal2 === 'number' && cadVal2 !== 1.0) factorParts.push('cadCorrectionFactor: ' + cadVal2.toFixed(3));
       if (typeof paceVal2 === 'number' && paceVal2 !== 1.0) factorParts.push('paceCorrectionFactor: ' + paceVal2.toFixed(3)); // [추가]
       if (factorParts.length) {
-        profileFactorsLine = '\n\n// 찾기: CALIB_ANCHOR:DEFAULT_PROFILE (' + pos + ')\n' + factorParts.join(', ');
+        profileFactorsLine = '\n\n// Find: CALIB_ANCHOR:DEFAULT_PROFILE (' + pos + ')\n' + factorParts.join(', ');
       }
       const snippet = snippetLine + profileFactorsLine;
       const escapedSnippet = snippet.replace(/'/g, "\\'").replace(/\n/g, '\\n');
@@ -14483,18 +14483,23 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     patches.forEach(function (patch) {
       const ov = patch.ov, curProf = patch.curProf, pos = patch.pos;
 
-      // 1) [리팩토링 2026-08-21] "커밋된 기본값"으로서의 위치별 모션 프로파일은 이제
-      // DEVICE_MOTION_PROFILES 한 곳에만 리터럴로 존재하고(anchor: CALIB_ANCHOR:DEVICE_PROFILES),
-      // applyDevicePos()의 profiles와 DEVICE_PROFILE_DEFAULTS는 전부 그걸 참조만 하므로,
-      // 이 한 곳만 patch하면 나머지도 자동으로 동일한 값이 된다(예전엔 여러 곳을 각각
-      // 따로 patch해야 했고, 그중 한 곳이라도 빠지면 RESET/화면표시가 라이브 값과 어긋났음).
-      // [주의 2026-08-22] FACTORY_MOTION_PROFILES(진짜 출고 원본값, 이 앵커보다 파일 상단에
-      // 위치)는 이 patch 대상에 절대 포함되지 않는다 — 앵커 "뒤"에서부터만 찾기 때문에
-      // 구조적으로 안전하다. 커밋을 아무리 반복해도 출고 원본값은 그대로 보존된다.
-      // [수정 2026-08-08 — 중요 버그 수정] newObj가 nativeRescueEnabled/stepTrigger 필드를
-      // 안 넣고 있어서, 다운로드해서 커밋하면 그 위치의 stepTrigger:'native'가 통째로
-      // 사라지는 심각한 버그가 있었음(=커밋한 순간 그 위치가 다시 자체 알고리즘으로
-      // 돌아가버림). 이제 base(DEVICE_PROFILE_DEFAULTS)의 두 필드까지 그대로 채워 넣는다.
+      // 1) [Refactor 2026-08-21] The per-position motion profiles that serve as the
+      // "committed defaults" now exist as a literal in exactly one place
+      // (DEVICE_MOTION_PROFILES, anchor: CALIB_ANCHOR:DEVICE_PROFILES). Both the profiles
+      // used by applyDevicePos() and DEVICE_PROFILE_DEFAULTS merely reference that one
+      // place, so patching only this location automatically keeps everything else in
+      // sync (previously several locations had to be patched separately, and missing
+      // even one caused RESET/on-screen values to drift from the live values).
+      // [Note 2026-08-22] FACTORY_MOTION_PROFILES (the true factory-shipped original
+      // values, located above this anchor in the file) can never be included in this
+      // patch target — because the search only looks "after" the anchor, this is
+      // structurally safe. No matter how many times you commit, the factory-shipped
+      // original values remain untouched.
+      // [Fix 2026-08-08 — important bug fix] newObj was not including the
+      // nativeRescueEnabled/stepTrigger fields, so downloading and committing would
+      // wipe out that position's stepTrigger:'native' entirely (i.e. the moment you
+      // committed, that position would fall back to its own algorithm again). It now
+      // also fills in those two fields straight from base (DEVICE_PROFILE_DEFAULTS).
       const devAnchorTag = 'CALIB_ANCHOR:DEVICE_PROFILES';
       const devAnchorIdx = html.indexOf(devAnchorTag);
       if (devAnchorIdx !== -1 && ov && pos) {
