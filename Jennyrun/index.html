@@ -3556,7 +3556,7 @@ alert(isKo
 return false;
 }
 }
-savePrecisionLog(log, devicePos) { // [수정] 착용 위치를 로그와 함께 저장해 나중에 export해도 어느 위치 기록인지 확인 가능하게 함
+savePrecisionLog(log, devicePos, activityMode) { // [수정] 착용 위치를 로그와 함께 저장해 나중에 export해도 어느 위치 기록인지 확인 가능하게 함
 if (!log || !log.length) return;
 // [추가] 초장거리(예: 마라톤/울트라, 3시간+) 러닝은 초당 샘플이 수만 개까지 쌓여
 // localStorage 용량 한도를 넘길 수 있음. 5000개(초당 기록 기준 약 1시간 23분 분량)를
@@ -3570,7 +3570,10 @@ finalLog = log.filter((_, i) => i % step === 0);
 downsampled = true;
 }
 const list = this.loadPrecisionLogs();
-list.unshift({ id: 'plog_' + Date.now(), savedAt: new Date().toISOString(), log: finalLog, downsampled: downsampled, devicePos: devicePos || null });
+// [추가] isFreerun: 프리런은 착용 위치가 devicePos에 기록되지 않으므로(null),
+// 목록 표시에서만 "FREE RUN" 배지를 보여주기 위한 표시 전용 플래그. 캘리브레이션/자가보정
+// 로직은 여전히 devicePos(null)만 보고 동작하므로 건드리지 않음.
+list.unshift({ id: 'plog_' + Date.now(), savedAt: new Date().toISOString(), log: finalLog, downsampled: downsampled, devicePos: devicePos || null, isFreerun: activityMode === 'freerun' });
 // [수정] localStorage 용량 보호 + "지난 로그가 쌓여봐야 소용없다"는 사용 패턴 반영.
 // 기존 30개 → 최근 10개까지만 보관 (그 이상은 오래돼서 비교 의미가 떨어짐).
 this.savePrecisionLogsList(list.slice(0, 10));
@@ -4928,7 +4931,7 @@ const badge = item.imported ? ' <span class="c26">· ' + (isKo ? '가져옴' : '
 const downsampledBadge = item.downsampled ? ' <span style="color:#e0a030; font-weight:700;">· ' + (isKo ? '축약됨' : 'DOWNSAMPLED') + '</span>' : '';
 // [추가] 착용 위치 배지: 어느 위치로 뛴 로그인지 리스트에서 바로 구분 가능하게 표시
 const posLabelMap = isKo ? { chest:'가슴', waist:'허리', armband:'암밴드', hand:'손' } : { chest:'CHEST', waist:'WAIST', armband:'ARMBAND', hand:'HAND' };
-const posBadge = item.devicePos ? ' <span class="c27">· ' + (posLabelMap[item.devicePos] || item.devicePos) + '</span>' : '';
+const posBadge = item.isFreerun ? ' <span class="c27">· ' + (isKo ? '프리런' : 'FREE RUN') + '</span>' : (item.devicePos ? ' <span class="c27">· ' + (posLabelMap[item.devicePos] || item.devicePos) + '</span>' : '');
 return '<div class="garmin-import-item">'
 + '<div class="garmin-import-item-head">'
 + '<div class="garmin-import-item-title u-line-height-1-5">'
@@ -10332,7 +10335,7 @@ maxHr: (() => { const hm = hrManager.getAvgMax(); return hm.max !== null ? hm.ma
 hrZone: (() => { const hm = hrManager.getAvgMax(); const refHr = hm.avg !== null ? hm.avg : hrManager._hr; return refHr > 0 ? 'Z' + hrManager.getZone(refHr).z : null; })()
 };
 storage.saveRecord(record);
-storage.savePrecisionLog(this.state.precisionLog, this.state.runDevicePos); // [수정] 정밀 로그 영구 저장 (앱 재시작/새 러닝 후에도 내보내기 가능) + 착용위치 동봉
+storage.savePrecisionLog(this.state.precisionLog, (this.state.activityMode === 'freerun') ? null : (this.state.runDevicePos || null), this.state.activityMode); // [수정] 정밀 로그 영구 저장 (앱 재시작/새 러닝 후에도 내보내기 가능) + 착용위치 동봉 — record.devicePos와 동일 규칙으로 프리런 예외 적용, activityMode는 목록에 FREE RUN 배지 표시용
 // 커뮤니티 업로드는 선택사항: 공유 모달을 띄워 사용자가 선택
 storage.clearTempSession();
 this.state.isRunning = false;
@@ -10415,7 +10418,7 @@ maxHr: (() => { const hm = hrManager.getAvgMax(); return hm.max !== null ? hm.ma
 hrZone: (() => { const hm = hrManager.getAvgMax(); const refHr = hm.avg !== null ? hm.avg : hrManager._hr; return refHr > 0 ? 'Z' + hrManager.getZone(refHr).z : null; })()
 };
 storage.saveRecord(record);
-storage.savePrecisionLog(this.state.precisionLog, this.state.runDevicePos);
+storage.savePrecisionLog(this.state.precisionLog, this.state.runDevicePos, this.state.activityMode);
 storage.clearTempSession();
 this.state.isRunning = false;
 this.state.isPaused = false;
@@ -13034,7 +13037,7 @@ const garmin = (function () {
       // 항상 위 줄엔 날짜/시간, 아래 줄엔 rows·위치가 오도록 2줄로 고정.
       const dateTimeStr = fmtDate(new Date(l.savedAt).getTime());
       const rowsStr = l.log.length + (isKo ? '개' : ' rows');
-      const posBadge = l.devicePos ? ' <span class="c27">· ' + (posShortMap[l.devicePos] || l.devicePos) + '</span>' : '';
+      const posBadge = l.isFreerun ? ' <span class="c27">· F</span>' : (l.devicePos ? ' <span class="c27">· ' + (posShortMap[l.devicePos] || l.devicePos) + '</span>' : '');
       const orderBadge = '<span class="c09">#' + (idx + 1) + '</span> ';
       // [수정] FIT 가져오기/설정 탭 PRECISION LOGS 카드와 동일한 garmin-import-item 스타일로 통일.
       // COMPARE와 DELETE를 세로로 쌓지 않고 가로로 나란히 배치해 오터치를 줄임.
