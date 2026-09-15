@@ -4442,12 +4442,24 @@ if (labelFlight) labelFlight.textContent = _tMode.flight;
 if (gctUnit) gctUnit.textContent = ' MS';
 if (flightUnit) flightUnit.textContent = ' %';
 }
-// [신규] 프리러닝은 자이로/가속도 기반 지표(GCT/FLIGHT)를 아예 계산하지 않으므로
-// 두 카드를 흐리게 비활성화(저장/공유 버튼과 동일한 opacity 0.6 컨벤션) + "--" 고정 표시.
-// CADENCE는 네이티브 스텝 디텍터 기반이라 그대로 유지.
+// [수정] GCT/FLIGHT 카드 비활성화 여부는 별도 메서드(updateGctFlightAvailability)로 분리 —
+// 위치(devicePos) 전환 시(setDevicePos)에도 같은 로직을 재사용해야 하기 때문.
+this.updateGctFlightAvailability();
+// [신규] 하단 탭바의 RUN 탭 라벨도 선택된 모드에 맞춰 즉시 갱신
+this.updateTabRunLabel();
+}
+// [수정] GCT/FLIGHT 카드 비활성화: 프리런 모드이거나(자이로/가속도 지표 자체를 안 씀),
+// 손(hand) 착용 위치일 때(가속도 기반 추정치라 부정확 — 이전엔 경고 문구만 달았는데,
+// 추정 수치를 그대로 노출하면 사용자가 실측값처럼 믿고 추이 비교를 할 위험이 있어
+// 프리런과 동일하게 카드 자체를 흐리게 숨기는 방식으로 통일함).
+// 걷기 모드는 이 카드를 STRIDE(보폭)로 재활용하며 모션 기반 GCT와 무관하므로 제외.
+// 모드 전환(setActivityMode)과 위치 전환(setDevicePos) 양쪽에서 호출해 항상 최신 상태 유지.
+updateGctFlightAvailability() {
+const mode = this.currentActivityMode;
+const pos = (function () { try { return storage.loadProfile().devicePos || 'chest'; } catch (e) { return 'chest'; } })();
 const cardGctEl = document.getElementById('card-gct');
 const cardFlightEl = document.getElementById('card-flight');
-const gctFlightDisabled = (mode === 'freerun');
+const gctFlightDisabled = (mode === 'freerun') || (pos === 'hand' && mode !== 'walk');
 if (cardGctEl) { cardGctEl.style.opacity = gctFlightDisabled ? '0.6' : '1'; cardGctEl.style.pointerEvents = gctFlightDisabled ? 'none' : 'auto'; }
 if (cardFlightEl) { cardFlightEl.style.opacity = gctFlightDisabled ? '0.6' : '1'; cardFlightEl.style.pointerEvents = gctFlightDisabled ? 'none' : 'auto'; }
 if (gctFlightDisabled) {
@@ -4456,8 +4468,6 @@ const flightValEl = document.getElementById('flight');
 if (gctValEl) gctValEl.textContent = '--';
 if (flightValEl) flightValEl.textContent = '--';
 }
-// [신규] 하단 탭바의 RUN 탭 라벨도 선택된 모드에 맞춰 즉시 갱신
-this.updateTabRunLabel();
 }
 // [추가] 최초 실행 온보딩 화면 - 활동모드 선택 (아직 확정 저장은 안 하고 화면 표시만 갱신)
 onbSelectMode(mode) {
@@ -5714,6 +5724,8 @@ const p = storage.loadProfile();
 p.devicePos = pos;
 storage.saveProfile(p);
 this.updateDevicePosUI(pos);
+// [추가] 착용 위치가 바뀌면(특히 HAND ↔ 다른 위치) GCT/FLIGHT 카드 표시 여부도 재평가
+this.updateGctFlightAvailability();
 // [추가] 착용 위치가 바뀌면 린각도 스위치 사용 가능 여부(러닝+가슴)도 재평가
 this.updateLeanAngleAvailability();
 // MotionManager에 즉시 반영 (러닝 중에 바꿔도 바로 적용됨)
@@ -6418,8 +6430,8 @@ this.buildHrBoxHtml(r, t) +
 '<div class="h-det-box"><div class="h-det-label">' + t.pace + '</div><div class="h-det-val">' + displayPace + '</div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.cadence + '</div><div class="h-det-val" style="color:' + this.getCadenceColor(r.cadence) + '">' + (r.cadence || 0) + '</div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.cal + '</div><div class="h-det-val">' + (r.kcal || 0) + '<span class="c34">' + (r.weightKgSnapshot ? r.weightKgSnapshot.toFixed(1)+'kg' : '') + '</span></div></div>' +
-'<div class="h-det-box"><div class="h-det-label">' + t.gct + '</div><div class="h-det-val" style="color:' + this.getGctColor(r.gct) + '">' + (r.gct || '--') + ' <span class="u-font-size-fs-xxs">MS</span></div></div>' +
-'<div class="h-det-box"><div class="h-det-label">' + t.flight + '</div><div class="h-det-val" style="color:' + this.getFlightColor(r.flight) + '">' + (r.flight || '--') + ' <span class="u-font-size-fs-xxs">%</span></div></div>' +
+'<div class="h-det-box"><div class="h-det-label">' + t.gct + '</div><div class="h-det-val" style="color:' + (this.isGyroAccelUnreliable(r) ? '#aaa' : this.getGctColor(r.gct)) + '">' + (this.isGyroAccelUnreliable(r) ? '--' : (r.gct || '--')) + ' <span class="u-font-size-fs-xxs">MS</span></div></div>' +
+'<div class="h-det-box"><div class="h-det-label">' + t.flight + '</div><div class="h-det-val" style="color:' + (this.isGyroAccelUnreliable(r) ? '#aaa' : this.getFlightColor(r.flight)) + '">' + (this.isGyroAccelUnreliable(r) ? '--' : (r.flight || '--')) + ' <span class="u-font-size-fs-xxs">%</span></div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.powerLabel + '</div><div class="h-det-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + ' <span class="u-font-size-fs-xxs">W</span></div></div>' +
 ((() => {
 let strideVal = '--';
@@ -6439,18 +6451,16 @@ return '<div class="h-det-box"><div class="h-det-label">' + t.stride + '</div><d
 '</div></div>' +
 // [추가] 케이던스 밸런스 / GCT 밸런스 표시 (좌:우 실측값, 새 데이터 행)
 '<div class="h-group"><div class="h-group-title">' + t.hSecBalance + '</div><div class="h-group-grid">' +
-'<div class="h-det-box"><div class="h-det-label">' + t.cadenceBal + '</div><div class="h-det-val u-color-dddddd">' + (r.cadenceBal || '50:50') + ' <span class="u-font-size-fs-xxs">L:R</span></div></div>' +
-'<div class="h-det-box"><div class="h-det-label">' + t.gctBal + '</div><div class="h-det-val u-color-dddddd">' + (r.gctBal || '50:50') + ' <span class="u-font-size-fs-xxs">L:R</span></div></div>' +
-'<div class="h-det-box"><div class="h-det-label">' + t.gyroBal + '</div><div class="h-det-val u-color-dddddd">' + (r.gyroBal || '50:50') + ' <span class="u-font-size-fs-xxs">L:R</span></div></div>' +
+'<div class="h-det-box"><div class="h-det-label">' + t.cadenceBal + '</div><div class="h-det-val u-color-dddddd">' + (this.isGyroAccelUnreliable(r) ? '50:50' : (r.cadenceBal || '50:50')) + ' <span class="u-font-size-fs-xxs">L:R</span></div></div>' +
+'<div class="h-det-box"><div class="h-det-label">' + t.gctBal + '</div><div class="h-det-val u-color-dddddd">' + (this.isGyroAccelUnreliable(r) ? '50:50' : (r.gctBal || '50:50')) + ' <span class="u-font-size-fs-xxs">L:R</span></div></div>' +
+'<div class="h-det-box"><div class="h-det-label">' + t.gyroBal + '</div><div class="h-det-val u-color-dddddd">' + (this.isGyroAccelUnreliable(r) ? '50:50' : (r.gyroBal || '50:50')) + ' <span class="u-font-size-fs-xxs">L:R</span></div></div>' +
 '</div></div>' +
 '<div class="h-group"><div class="h-group-title">' + t.hSecEtc + '</div><div class="h-group-grid">' +
 '<div class="h-det-box"><div class="h-det-label">' + t.altChange + '</div><div class="h-det-val u-color-dddddd">' + ((r.splits && r.splits.length > 0) ? r.splits.reduce((sum,s)=>sum+Math.max(0,s.altDiff||0),0) : 0) + ' <span class="u-font-size-fs-xxs">M</span></div></div>' +
 LeanAngleUI.listDetBoxHtml(r, lang) +
 // [추가] 심박수 평균/최고 + 심박 존 (가민 연동 데이터, 기존 6개 데이터 밑에 추가)
 this.buildHrBoxHtml(r, t) +
-'</div></div>' +
-// [추가 2026-08-20] 손(hand) 위치로 기록된 러닝일 때만 GCT 신뢰도 안내 한 줄 표시
-(r.devicePos === 'hand' ? '<div style="font-size:var(--fs-xxs);color:#ffb84d;font-weight:700;margin-top:6px;text-align:left;">' + t.gctHandNote + '</div>' : '')
+'</div></div>'
 )) +
 '</div>' +
 '<div class="h-delete-row" style="display:flex;justify-content:space-between;align-items:center;">' +
@@ -6464,6 +6474,10 @@ this.buildHrBoxHtml(r, t) +
 }).join('');
 }
 getCadenceColor(v) { const l = this.getCadenceLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
+// [추가] 자이로/가속도 기반 지표(GCT/FLIGHT/좌우 밸런스)를 신뢰할 수 없는 기록인지 판정.
+// 프리런 모드이거나 손(hand) 착용으로 기록된 경우 — 라이브 화면의
+// updateGctFlightAvailability()와 같은 조건을, 이미 저장된 과거 기록(히스토리 목록)에도 동일하게 적용.
+isGyroAccelUnreliable(r) { return r.activityMode === 'freerun' || r.devicePos === 'hand'; }
 getGctColor(v) { const l = this.getGctLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
 getFlightColor(v) { const l = this.getFlightLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
 getLeanForwardColor(v) { const l = this.getLeanForwardLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
@@ -7116,8 +7130,11 @@ if (r.stride) {
     strideVal = calcStride(speedKmh, r.cadence, _hcm2, _prof2.strideCorrectionFactor).toFixed(2) + ' m';
   }
 }
+// [수정] 프리런/손 착용 기록은 자이로/가속도 기반 지표(GCT/FLIGHT/밸런스)를 신뢰할 수 없으므로,
+// 리스트 화면과 동일하게 숨김 처리 — 실제 값 대신 '--'/'50:50' 중립값, 코멘트도 "데이터 없음"으로.
+const _gctFlightHidden = this.isGyroAccelUnreliable(r);
 // 체공시간
-const flightVal = r.flight && r.flight !== '--' ? r.flight : '--';
+const flightVal = (!_gctFlightHidden && r.flight && r.flight !== '--') ? r.flight : '--';
 const flightNum = parseInt(flightVal);
 let flightComment = '';
 if (!isNaN(flightNum)) {
@@ -7130,7 +7147,7 @@ const diagProfile = storage.loadProfile();
 const diagGender = storage.getGender();
 const strideNumForFeedback = parseFloat(strideVal) || 0;
 const diagFeedback = buildPersonalFeedback(
-  { cadence: r.cadence, gct: r.gct, stride: strideNumForFeedback, cadenceBal: r.cadenceBal, gctBal: r.gctBal },
+  { cadence: r.cadence, gct: _gctFlightHidden ? null : r.gct, stride: strideNumForFeedback, cadenceBal: _gctFlightHidden ? null : r.cadenceBal, gctBal: _gctFlightHidden ? null : r.gctBal },
   diagProfile, diagGender, lang === 'ko'
 );
 let cadComment = diagFeedback.cadence;
@@ -7140,7 +7157,7 @@ let strideComment = diagFeedback.stride;
 let effScore = '--';
 let effComment = '';
 let effColor = '#aaa';
-if (r.cadence && r.gct && r.flight && r.flight !== '--' && r.gct !== '--') {
+if (!_gctFlightHidden && r.cadence && r.gct && r.flight && r.flight !== '--' && r.gct !== '--') {
   const score = calcEffScore(r);
   if (score !== null) {
     effScore = score;
@@ -7225,8 +7242,8 @@ contentArea.innerHTML =
 '<div class="diag-card"><div class="diag-label">' + (t.powerLabel || "POWER") + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + (powerPeakForDiag != null ? (' / ' + powerPeakForDiag) : '') + ' <span class="c44">W</span></div><div class="diag-ref">' + (t.powerZoneLabel || 'POWER ZONE') + ': ' + powerZoneDisplay + '</div></div><div class="diag-tip">' + powerComment + '</div>' + powerSparkSvg + (powerSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.cadence ? this.getCadenceColor(r.cadence) : '#aaa') + '">CAD: ' + (r.cadence || 0) + (cadPeakForDiag != null ? (' / ' + cadPeakForDiag) : '') + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div>' + cadSparkSvg + (cadSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getStrideColor(strideNumForFeedback, diagProfile) + '">' + strideVal + '</div><div class="diag-ref">Ref: 0.5~0.75m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.gct && r.gct !== '--' ? this.getGctColor(r.gct) : '#aaa') + '">GCT: ' + r.gct + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagBalanceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getBalanceColor(r.cadenceBal, r.gctBal) + '">' + (r.cadenceBal || '50:50') + ' <span style="font-size:var(--fs-xs);color:#aaa">L:R</span></div><div class="diag-ref">GCT ' + (r.gctBal || '50:50') + ' &nbsp;·&nbsp; GYRO ' + (r.gyroBal || '50:50') + '</div></div><div class="diag-tip">' + diagFeedback.balance + '</div><div style="font-size:var(--fs-xs);color:#888;font-weight:600;line-height:1.5;margin-top:8px;padding-top:8px;border-top:1px solid #222;">' + (t.diagBalanceExplain || '') + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (!_gctFlightHidden && r.gct && r.gct !== '--' ? this.getGctColor(r.gct) : '#aaa') + '">GCT: ' + (_gctFlightHidden ? '--' : r.gct) + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagBalanceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (_gctFlightHidden ? '#aaa' : this.getBalanceColor(r.cadenceBal, r.gctBal)) + '">' + (_gctFlightHidden ? '50:50' : (r.cadenceBal || '50:50')) + ' <span style="font-size:var(--fs-xs);color:#aaa">L:R</span></div><div class="diag-ref">GCT ' + (_gctFlightHidden ? '50:50' : (r.gctBal || '50:50')) + ' &nbsp;·&nbsp; GYRO ' + (_gctFlightHidden ? '50:50' : (r.gyroBal || '50:50')) + '</div></div><div class="diag-tip">' + diagFeedback.balance + '</div><div style="font-size:var(--fs-xs);color:#888;font-weight:600;line-height:1.5;margin-top:8px;padding-top:8px;border-top:1px solid #222;">' + (t.diagBalanceExplain || '') + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagFlightLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (isNaN(flightNum)?'#aaa':this.getFlightColor(flightNum)) + '">' + flightVal + (flightVal!=='--'?' %':'') + '</div><div class="diag-ref">Ref: 30~45%</div></div><div class="diag-tip">' + flightComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagHrLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + hrColor + '">' + hrMainVal + '</div><div class="diag-ref">' + t.hrZoneLabel + ': ' + hrZoneDisplay + '</div></div><div class="diag-tip">' + hrComment + '</div>' + hrSparkSvg + (hrSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagAltLabel || "GPS ALTITUDE") + '</div><div class="diag-val-group"><div class="diag-main-val">' + (altSparkSvg ? ('+' + totalAltGainForDiag.toFixed(0) + ' <span class="c44">M</span>') : '--') + '</div></div>' + (altSparkSvg ? (altSparkSvg + diagAxisLabelsHtml) : '<div class="diag-tip">' + (t.diagAltNoData || '') + '</div>') + '</div>' +
