@@ -2841,7 +2841,7 @@ return total > 0 ? total : null;
 // [추가] highlightBest 파라미터 추가(기본 true): 카드 상단에 표시되는 "평균/최고" 숫자 중
 // "최고" 값이 그래프 상 정확히 어느 지점인지 한눈에 보이도록, 해당 지점에만 다른 색 점을 찍는다.
 // invert=true(작을수록 좋음, 예: 페이스)면 최솟값 지점, 아니면 최댓값 지점이 "최고"가 된다.
-function buildSparklineSVG(values, colorHex, invert, showAvgLine, highlightBest) {
+function buildSparklineSVG(values, colorHex, invert, showAvgLine, highlightBest, times) {
 if (showAvgLine === undefined) showAvgLine = true;
 if (highlightBest === undefined) highlightBest = true;
 if (!values || !values.length) return '';
@@ -2851,16 +2851,22 @@ if (pts.length < 2) return '';
 // 작은 박스 안에서 지저분해 보이지 않도록, 너무 많으면 구간 평균으로 묶어 단순화(데이터 손실은
 // 저장된 splits 자체가 아니라 이 미니 그래프 표시에만 적용됨).
 const MAX_POINTS = 40;
+// [추가] 최고기록 유지 구간의 지속시간(초)을 판단하려면 각 포인트의 누적 시간(t_sec)이 필요.
+// 40개 넘어 구간 평균으로 묶일 때는 그 구간에서 "마지막" 스플릿의 시간을 대표값으로 쓴다.
+let ptTimes = times ? pts.map(p => (typeof times[p.i] === 'number' ? times[p.i] : null)) : null;
 if (pts.length > MAX_POINTS) {
   const bucketSize = Math.ceil(pts.length / MAX_POINTS);
   const bucketed = [];
+  const bucketedTimes = [];
   for (let b = 0; b < pts.length; b += bucketSize) {
     const chunk = pts.slice(b, b + bucketSize);
     const avgV = chunk.reduce((a, p) => a + p.v, 0) / chunk.length;
     bucketed.push({ i: bucketed.length, v: avgV });
+    if (ptTimes) bucketedTimes.push(ptTimes[b + chunk.length - 1]);
   }
   pts = bucketed;
   values = pts; // x축 간격 계산에 다운샘플된 길이를 사용
+  ptTimes = ptTimes ? bucketedTimes : null;
 }
 const W = 100, H = 32, PAD = 2; // [수정] 기준선이 덜 답답해 보이도록 높이 26→32
 let min = Math.min(...pts.map(p => p.v));
@@ -2889,36 +2895,51 @@ if (showAvgLine) {
   const avgY = yFor(avgVal).toFixed(1);
   avgDashSvg = '<line x1="' + PAD + '" y1="' + avgY + '" x2="' + (W - PAD) + '" y2="' + avgY + '" stroke="#888" stroke-width="1" stroke-dasharray="2,2" vector-effect="non-scaling-stroke"></line>';
 }
-// [수정] 최고기록 지점 표시 방식을 점(dot)에서 세로 점선으로 변경.
-// 최고값이 한 지점에서만 순간적으로 찍혔으면 점선 1개, 여러 지점에 걸쳐 계속 유지됐으면
-// (구간 최고 페이스가 계속 이어지는 경우 등) 그 구간의 시작~끝을 점선 2개로 표시한다.
+// [수정] 최고기록 지점 표시: 세로 점선.
+// - 최고값의 ±10% 이내 값이 30초 이상 이어지면 "구간 유지"로 보고 그 구간의 시작~끝에 점선 2개
+// - 그 조건을 못 채우면(순간적으로 스쳐간 값) 실제 최고기록 지점 1곳에만 점선 1개
+// - 점선이 실선(데이터 라인) 위로 삐져나오지 않도록, 그래프 맨 위(y=0)가 아니라 해당 지점의
+//   실제 곡선 y좌표에서 시작해 아래로만 그린다.
 let bestLineSvg = '';
 if (highlightBest) {
   const bestVal = invert ? Math.min(...pts.map(p => p.v)) : Math.max(...pts.map(p => p.v));
-  // 부동소수점 비교 오차를 감안해 그래프 값 범위의 0.1% 이내면 "같은 값(최고 유지 중)"으로 취급
-  const EPS = Math.max(1e-6, (max - min) * 0.001);
-  const isBest = (v) => Math.abs(v - bestVal) <= EPS;
-  // 최고값이 이어지는 가장 긴 연속 구간을 찾는다.
-  let bestRunStart = -1, bestRunLen = 0, runStart = -1;
+  const TOL = Math.abs(bestVal) * 0.03;
+  const isNearBest = (v) => Math.abs(v - bestVal) <= TOL;
+  const MIN_SUSTAIN_SEC = 30;
+  // 최고값 근처(±10%) 값이 이어지는 모든 연속 구간을 찾고, 그중 30초 이상 유지된 구간이 있으면
+  // 가장 긴 것을 채택한다.
+  let qualifiedRun = null; // {start, end}
+  let longestRun = null;   // 시간 정보가 없을 때를 대비한 대체용(포인트 개수 기준)
+  let runStart = -1;
   for (let k = 0; k <= pts.length; k++) {
-    const hit = k < pts.length && isBest(pts[k].v);
+    const hit = k < pts.length && isNearBest(pts[k].v);
     if (hit) {
       if (runStart === -1) runStart = k;
     } else if (runStart !== -1) {
-      const len = k - runStart;
-      if (len > bestRunLen) { bestRunLen = len; bestRunStart = runStart; }
+      const runEnd = k - 1;
+      if (!longestRun || (runEnd - runStart) > (longestRun.end - longestRun.start)) longestRun = { start: runStart, end: runEnd };
+      if (ptTimes) {
+        const tStart = runStart > 0 ? ptTimes[runStart - 1] : 0;
+        const tEnd = ptTimes[runEnd];
+        const dur = (typeof tStart === 'number' && typeof tEnd === 'number') ? (tEnd - tStart) : 0;
+        if (dur >= MIN_SUSTAIN_SEC && (!qualifiedRun || dur > qualifiedRun.dur)) qualifiedRun = { start: runStart, end: runEnd, dur: dur };
+      }
       runStart = -1;
     }
   }
-  const drawDash = (x) => '<line x1="' + x + '" y1="0" x2="' + x + '" y2="' + H + '" stroke="#FFD60A" stroke-width="1" stroke-dasharray="2,2" vector-effect="non-scaling-stroke"></line>';
-  if (bestRunLen > 1) {
-    const startX = coords[bestRunStart].split(',')[0];
-    const endX = coords[bestRunStart + bestRunLen - 1].split(',')[0];
-    bestLineSvg = drawDash(startX) + drawDash(endX);
+  const yAt = (idx) => coords[idx].split(',')[1];
+  const xAt = (idx) => coords[idx].split(',')[0];
+  const drawDash = (idx) => '<line x1="' + xAt(idx) + '" y1="' + yAt(idx) + '" x2="' + xAt(idx) + '" y2="' + H + '" stroke="#FFD60A" stroke-width="1" stroke-dasharray="2,2" vector-effect="non-scaling-stroke"></line>';
+  if (qualifiedRun && qualifiedRun.end > qualifiedRun.start) {
+    bestLineSvg = drawDash(qualifiedRun.start) + drawDash(qualifiedRun.end);
   } else {
-    const idx = bestRunStart !== -1 ? bestRunStart : 0;
-    const x = coords[idx].split(',')[0];
-    bestLineSvg = drawDash(x);
+    // 30초 이상 유지된 구간이 없으면(시간 정보가 없는 경우 포함) 진짜 최고기록 지점 하나만 표시
+    let bestIdx = 0;
+    for (let k = 1; k < pts.length; k++) {
+      const better = invert ? (pts[k].v < pts[bestIdx].v) : (pts[k].v > pts[bestIdx].v);
+      if (better) bestIdx = k;
+    }
+    bestLineSvg = drawDash(bestIdx);
   }
 }
 return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%;height:32px;display:block;margin-top:6px;">'
@@ -7161,12 +7182,13 @@ hrComment = zoneInfo.z <= 2 ? t.diagHrZoneLow
 // [추가] 박스 아래 작은 구간별(km 스플릿 기준) 변화 그래프 — 케이던스/페이스/심박/GPS고도
 // 한눈에 오르내림을 볼 수 있도록. 스플릿이 2개 미만이면(짧은 러닝 등) 해당 그래프는 표시 안 함.
 const _splitsForGraph = r.diagSplits || [];
-const paceSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => paceStrToSeconds(s.pace)), '#00ff88', true);
-const cadSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3) ? s.avgCadence : null)), '#4fc3f7', false);
-const hrSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.avgHr === 'number' ? s.avgHr : null)), '#e53935', false);
-const altSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.altTo === 'number' ? s.altTo : null)), '#90a4ae', false);
+const _diagSplitTimes = _splitsForGraph.map(s => (typeof s.t_sec === 'number' ? s.t_sec : null));
+const paceSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => paceStrToSeconds(s.pace)), '#00ff88', true, undefined, undefined, _diagSplitTimes);
+const cadSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3) ? s.avgCadence : null)), '#4fc3f7', false, undefined, undefined, _diagSplitTimes);
+const hrSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.avgHr === 'number' ? s.avgHr : null)), '#e53935', false, undefined, undefined, _diagSplitTimes);
+const altSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.altTo === 'number' ? s.altTo : null)), '#90a4ae', false, undefined, undefined, _diagSplitTimes);
 // [신규] 구간별 러닝 파워(와트) 그래프. 값이 없는(옛 기록) 구간은 null로 필터링됨.
-const powerSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.power === 'number' ? s.power : null)), '#ffb74d', false);
+const powerSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.power === 'number' ? s.power : null)), '#ffb74d', false, undefined, undefined, _diagSplitTimes);
 // [추가] 그래프 아래 거리/시간 축 라벨 (기준선과 함께, v2 스타일)
 const diagAxisLabelsHtml = buildDiagAxisLabelsHtml(_splitsForGraph);
 const totalAltGainForDiag = _splitsForGraph.length > 0 ? _splitsForGraph.reduce((sum,s)=>sum+Math.max(0,s.altDiff||0),0) : 0;
