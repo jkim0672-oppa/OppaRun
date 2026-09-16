@@ -6520,10 +6520,10 @@ this.buildHrBoxHtml(r, t) +
 }).join('');
 }
 getCadenceColor(v) { const l = this.getCadenceLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
-// [추가] 자이로/가속도 기반 지표(GCT/FLIGHT/좌우 밸런스)를 신뢰할 수 없는 기록인지 판정.
-// 프리런 모드이거나 손(hand) 착용으로 기록된 경우 — 라이브 화면의
-// updateGctFlightAvailability()와 같은 조건을, 이미 저장된 과거 기록(히스토리 목록)에도 동일하게 적용.
-isGyroAccelUnreliable(r) { return r.activityMode === 'freerun' || r.devicePos === 'hand'; }
+// [수정] 리스트(히스토리 목록/공유모달/TOTAL 통계)에서는 프리런·손(hand) 착용 기록도
+// 가슴/허리와 동일하게 GCT/FLIGHT/밸런스 데이터를 그대로 출력하도록 변경.
+// (기존엔 자이로/가속도 기반 지표 신뢰도가 낮다고 보고 이 함수가 true를 반환해 "--"로 가렸었음)
+isGyroAccelUnreliable(r) { return false; }
 getGctColor(v) { const l = this.getGctLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
 getFlightColor(v) { const l = this.getFlightLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
 getLeanForwardColor(v) { const l = this.getLeanForwardLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
@@ -7371,6 +7371,11 @@ this.stepSide = 0;
 this.sideGctAccumulator = [0, 0];
 this.sideGctCount = [0, 0];
 this.sideStepCount = [0, 0];
+// [추가] 밸런스 안정구간 탐지용 스텝별 원시 로그(프리런/손/암밴드처럼 신호가 튀는
+// 착용 위치에서도 가장 오래 일정하게 유지된 구간의 값을 골라 출력하기 위함)
+this.stepSideLog = [];
+this.stepGctSideLog = [];
+this.stepGyroSideLog = [];
 this.impactTime = 0;
 this.belowThresholdSince = 0;
 this.quietPhaseSinceLastStep = false; // [추가] 걸음 이중 감지 방지용 플래그
@@ -7644,6 +7649,10 @@ this.stepSide = 0;
 this.sideGctAccumulator = [0, 0];
 this.sideGctCount = [0, 0];
 this.sideStepCount = [0, 0];
+// [추가] 밸런스 안정구간 탐지용 스텝별 원시 로그도 매 러닝 시작 시 초기화
+this.stepSideLog = [];
+this.stepGctSideLog = [];
+this.stepGyroSideLog = [];
 this.impactTime = 0;
 this.belowThresholdSince = 0;
 this.quietPhaseSinceLastStep = false; // [추가] 걸음 이중 감지 방지용 플래그
@@ -8050,6 +8059,9 @@ let side = this.stepSide;
 this.sideGctAccumulator[side] += currentGCT;
 this.sideGctCount[side]++;
 this.sideStepCount[side]++;
+// [추가] 밸런스 안정구간 탐지용 원시 로그
+this.stepSideLog.push(side);
+this.stepGctSideLog.push({ side, value: currentGCT });
 result.sideGct = currentGCT;
 result.cycleTime = cycleTime;
 }
@@ -8068,6 +8080,8 @@ this.sideGyroCount[curSide]++;
 // [추가] 정밀 좌우 밸런스(gyroBal)용: 이번 사이클 평균 자이로 크기를 side별로 누적
 this.sideGyroMagSum[curSide] += this.gyroCycleMagSum / this.gyroCycleCount;
 this.sideGyroMagCount[curSide]++;
+// [추가] 밸런스 안정구간 탐지용 원시 로그
+this.stepGyroSideLog.push({ side: curSide, value: this.gyroCycleMagSum / this.gyroCycleCount });
 // [추가] 정밀 로그(초당)용: 이번에 끝난 스텝 1회의 축별 부호 있는 평균값을 그대로 보관
 // (리셋되기 전에 저장해야 함 — 아래에서 gyroCycleSum이 0으로 초기화됨)
 this.lastStepGyroA = +(this.gyroCycleSum.a / this.gyroCycleCount).toFixed(2);
@@ -8147,36 +8161,97 @@ this.stepSide = (this.stepSide + 1 + missedStepsToResync) % 2;
 this.stepIndexTotal++; // [추가 2026-08-29] 스냅 간격 판단용 걸음 번호 증가
 this.onStep(result);
 }
-// [추가] 케이던스/GCT 좌우 밸런스(%) 계산
-// 반환값: { cadenceBal: "left:right", gctBal: "left:right" }
+// [추가] 밸런스 안정구간 탐지 헬퍼: 스텝 원시 로그(side 0/1의 값)에서 슬라이딩
+// 윈도우(windowSize 걸음)마다 "좌측 비율(%)"을 하나씩 뽑아 시계열(series)을 만든다.
+// entries: [{side, value}, ...] 형태의 원시 로그. cadenceBal은 value=1 고정으로 넘겨
+// 걸음 수 비율을, gct/gyroBal은 value=측정값으로 넘겨 평균값 비율을 계산한다.
+_rollingLeftPctSeries(entries, windowSize) {
+const series = [];
+if (!entries || entries.length < windowSize) return series;
+for (let i = windowSize - 1; i < entries.length; i++) {
+let sumL = 0, cntL = 0, sumR = 0, cntR = 0;
+for (let j = i - windowSize + 1; j <= i; j++) {
+const e = entries[j];
+if (e.side === 0) { sumL += e.value; cntL++; } else { sumR += e.value; cntR++; }
+}
+const avgL = cntL > 0 ? sumL / cntL : 0;
+const avgR = cntR > 0 ? sumR / cntR : 0;
+const total = avgL + avgR;
+if (total > 0) series.push((avgL / total) * 100);
+}
+return series;
+}
+// [추가] 밸런스 안정구간 탐지 헬퍼: series(롤링 좌측 비율 시계열)에서 연속으로
+// band(%포인트) 폭 안에 머무는 가장 긴 구간("가장 오래 일정하게 유지된 값")을 찾아
+// 그 구간의 평균을 반환한다. 충분히 긴 안정 구간이 없으면 null(호출부에서 폴백 처리).
+_stablePlateauAvg(series, band, minRun) {
+if (!series || series.length < minRun) return null;
+let bestStart = 0, bestLen = 0;
+let curStart = 0, curMin = series[0], curMax = series[0];
+for (let i = 1; i <= series.length; i++) {
+let extend = false;
+if (i < series.length) {
+const v = series[i];
+const newMin = Math.min(curMin, v);
+const newMax = Math.max(curMax, v);
+if (newMax - newMin <= band) { curMin = newMin; curMax = newMax; extend = true; }
+}
+if (!extend) {
+const len = i - curStart;
+if (len > bestLen) { bestLen = len; bestStart = curStart; }
+if (i < series.length) { curStart = i; curMin = series[i]; curMax = series[i]; }
+}
+}
+if (bestLen < minRun) return null;
+const slice = series.slice(bestStart, bestStart + bestLen);
+return slice.reduce((s, v) => s + v, 0) / slice.length;
+}
+// [수정] 케이던스/GCT/자이로 좌우 밸런스(%) 계산.
+// 가슴/허리는 신호가 깨끗해 러닝 내내 값이 일정하지만, 프리런·손(hand)·암밴드처럼
+// 팔 흔들림이 섞이는 위치는 순간값이 크게 튀어 전체 평균을 왜곡할 수 있다. 그래서
+// 러닝 전체 단순평균 대신, 걸음별 롤링(20걸음) 좌측비율 시계열에서 "가장 오래
+// 일정하게(±band 이내) 유지된 구간"을 찾아 그 구간의 평균을 출력값으로 쓴다 —
+// 안정 구간을 못 찾을 만큼 데이터가 적으면(짧은 러닝 등) 기존 전체 평균으로 폴백한다.
+// 반환값: { cadenceBal: "left:right", gctBal: "left:right", gyroBal: "left:right" }
 // ── 좌우 밸런스 / 보조 지표 계산 ──
 getBalance() {
-const totalSteps = this.sideStepCount[0] + this.sideStepCount[1];
+const WINDOW = 20;  // 롤링 윈도우 크기(걸음 수)
+const BAND = 4;     // 이 폭(%포인트) 안에서 연속 유지되면 "안정 구간"으로 인정
+const MIN_RUN = 15; // 안정 구간으로 인정할 최소 연속 윈도우 샘플 수
+
 let cadenceBal = '50:50';
+const totalSteps = this.sideStepCount[0] + this.sideStepCount[1];
 if (totalSteps > 0) {
-const left = Math.round((this.sideStepCount[0] / totalSteps) * 100);
-const right = 100 - left;
-cadenceBal = left + ':' + right;
+const cadenceEntries = this.stepSideLog.map(side => ({ side, value: 1 }));
+const series = this._rollingLeftPctSeries(cadenceEntries, Math.min(WINDOW, cadenceEntries.length));
+const plateauAvg = this._stablePlateauAvg(series, BAND, MIN_RUN);
+const leftPct = plateauAvg != null ? plateauAvg : (this.sideStepCount[0] / totalSteps) * 100;
+const left = Math.round(leftPct);
+cadenceBal = left + ':' + (100 - left);
 }
+
 let gctBal = '50:50';
 const avgL = this.sideGctCount[0] > 0 ? this.sideGctAccumulator[0] / this.sideGctCount[0] : 0;
 const avgR = this.sideGctCount[1] > 0 ? this.sideGctAccumulator[1] / this.sideGctCount[1] : 0;
 if (avgL > 0 || avgR > 0) {
+const series = this._rollingLeftPctSeries(this.stepGctSideLog, Math.min(WINDOW, this.stepGctSideLog.length));
+const plateauAvg = this._stablePlateauAvg(series, BAND, MIN_RUN);
 const total = avgL + avgR;
-const left = total > 0 ? Math.round((avgL / total) * 100) : 50;
-const right = 100 - left;
-gctBal = left + ':' + right;
+const fallbackPct = total > 0 ? (avgL / total) * 100 : 50;
+const left = Math.round(plateauAvg != null ? plateauAvg : fallbackPct);
+gctBal = left + ':' + (100 - left);
 }
-// [추가] 정밀 좌우 밸런스(gyroBal): 자이로 크기(magnitude, deg/s) 좌우 평균 비율
-// gctBal과 동일한 공식(평균값 대 평균값 비율)을 자이로 크기에 적용
+// [추가] 정밀 좌우 밸런스(gyroBal): 자이로 크기(magnitude, deg/s) 좌우 안정 구간 비율
 let gyroBal = '50:50';
 const gyroAvgL = this.sideGyroMagCount[0] > 0 ? this.sideGyroMagSum[0] / this.sideGyroMagCount[0] : 0;
 const gyroAvgR = this.sideGyroMagCount[1] > 0 ? this.sideGyroMagSum[1] / this.sideGyroMagCount[1] : 0;
 if (gyroAvgL > 0 || gyroAvgR > 0) {
+const series = this._rollingLeftPctSeries(this.stepGyroSideLog, Math.min(WINDOW, this.stepGyroSideLog.length));
+const plateauAvg = this._stablePlateauAvg(series, BAND, MIN_RUN);
 const gyroTotal = gyroAvgL + gyroAvgR;
-const left = gyroTotal > 0 ? Math.round((gyroAvgL / gyroTotal) * 100) : 50;
-const right = 100 - left;
-gyroBal = left + ':' + right;
+const fallbackPct = gyroTotal > 0 ? (gyroAvgL / gyroTotal) * 100 : 50;
+const left = Math.round(plateauAvg != null ? plateauAvg : fallbackPct);
+gyroBal = left + ':' + (100 - left);
 }
 return { cadenceBal, gctBal, gyroBal };
 }
