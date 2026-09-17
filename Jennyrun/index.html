@@ -2385,10 +2385,12 @@ function generateRouteCardCanvas(record, isKo, displaySplits, t) {
     dynRows.push([t.spmLabel || 'SPM', String(record.walkSpm || 0)]);
     dynRows.push([t.stride || 'Stride', record.stride ? parseFloat(record.stride).toFixed(2) + ' m' : '--']);
   } else {
-    // [수정] 프리런/손 착용 기록은 GCT/FLIGHT를 신뢰할 수 없으므로 공유카드(경로형)에서도 "--" 처리
-    const _routeShareDynUntrusted = (record.activityMode === 'freerun') || (record.devicePos === 'hand');
-    dynRows.push([t.avgGct || 'Average GCT', (!_routeShareDynUntrusted && record.gct || '--') + ' ms.']);
-    dynRows.push([t.avgFlight || 'Average Flight', (!_routeShareDynUntrusted && record.flight || '--') + ' %.']);
+    // [수정] 리스트/통계/크루/진단과 동일하게 프리런·손(hand) 기록도 GCT/FLIGHT를 그대로 노출.
+    // (이 함수는 앱 인스턴스 밖의 독립 함수라 this.isGyroAccelUnreliable을 직접 못 쓰므로 상수로 고정)
+    // [수정] GCT는 프리런/손 착용 기록에서 여전히 신뢰할 수 없어 가리고, FLIGHT는 그대로 노출.
+    const _routeGctUntrusted = (record.activityMode === 'freerun') || (record.devicePos === 'hand');
+    dynRows.push([t.avgGct || 'Average GCT', (!_routeGctUntrusted && record.gct || '--') + ' ms.']);
+    dynRows.push([t.avgFlight || 'Average Flight', (record.flight || '--') + ' %.']);
     dynRows.push([t.avgCadence || 'Average Cadence', (record.cadence || 0) + ' SPM.']);
     let strideVal = '--';
     if (record.cadence && kmh) strideVal = ((kmh/3.6)/(record.cadence/60)).toFixed(2) + ' m';
@@ -6266,11 +6268,11 @@ const setOptionalRow = (cb, hasValue) => {
   else { row.classList.remove('hidden'); cb.checked = true; }
 };
 setOptionalRow(cadenceCheckbox, !!record.cadence);
-// [수정] 프리런/손 착용 기록은 업로드 시점에 어차피 GCT/FLIGHT가 null로 차단되므로,
-// 체크해도 공유되지 않는 항목을 보여주지 않도록 공유 모달에서부터 숨김 처리.
-const _shareModalDynUntrusted = this.isGyroAccelUnreliable ? this.isGyroAccelUnreliable(record) : ((record.activityMode === 'freerun') || (record.devicePos === 'hand'));
-setOptionalRow(gctCheckbox, !_shareModalDynUntrusted && !!record.gct && record.gct !== '--');
-setOptionalRow(flightCheckbox, !_shareModalDynUntrusted && record.flight != null && record.flight !== '--');
+// [수정] GCT는 프리런/손 착용 기록에서 여전히 업로드 시 차단되므로 체크박스도 숨기고,
+// FLIGHT는 이제 업로드가 그대로 되므로 체크박스도 정상 노출.
+const _shareModalGctUntrusted = this.isGctVertUnreliable ? this.isGctVertUnreliable(record) : ((record.activityMode === 'freerun') || (record.devicePos === 'hand'));
+setOptionalRow(gctCheckbox, !_shareModalGctUntrusted && !!record.gct && record.gct !== '--');
+setOptionalRow(flightCheckbox, record.flight != null && record.flight !== '--');
 setOptionalRow(strideCheckbox, !!record.stride);
 setOptionalRow(kcalCheckbox, !!record.kcal);
 setOptionalRow(stepsCheckbox, !!(record.steps || record.walkSpm));
@@ -6476,7 +6478,7 @@ this.buildHrBoxHtml(r, t) +
 '<div class="h-det-box"><div class="h-det-label">' + t.pace + '</div><div class="h-det-val">' + displayPace + '</div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.cadence + '</div><div class="h-det-val" style="color:' + this.getCadenceColor(r.cadence) + '">' + (r.cadence || 0) + '</div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.cal + '</div><div class="h-det-val">' + (r.kcal || 0) + '<span class="c34">' + (r.weightKgSnapshot ? r.weightKgSnapshot.toFixed(1)+'kg' : '') + '</span></div></div>' +
-'<div class="h-det-box"><div class="h-det-label">' + t.gct + '</div><div class="h-det-val" style="color:' + (this.isGyroAccelUnreliable(r) ? '#aaa' : this.getGctColor(r.gct)) + '">' + (this.isGyroAccelUnreliable(r) ? '--' : (r.gct || '--')) + ' <span class="u-font-size-fs-xxs">MS</span></div></div>' +
+'<div class="h-det-box"><div class="h-det-label">' + t.gct + '</div><div class="h-det-val" style="color:' + (this.isGctVertUnreliable(r) ? '#aaa' : this.getGctColor(r.gct)) + '">' + (this.isGctVertUnreliable(r) ? '--' : (r.gct || '--')) + ' <span class="u-font-size-fs-xxs">MS</span></div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.flight + '</div><div class="h-det-val" style="color:' + (this.isGyroAccelUnreliable(r) ? '#aaa' : this.getFlightColor(r.flight)) + '">' + (this.isGyroAccelUnreliable(r) ? '--' : (r.flight || '--')) + ' <span class="u-font-size-fs-xxs">%</span></div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.powerLabel + '</div><div class="h-det-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + ' <span class="u-font-size-fs-xxs">W</span></div></div>' +
 ((() => {
@@ -6521,9 +6523,14 @@ this.buildHrBoxHtml(r, t) +
 }
 getCadenceColor(v) { const l = this.getCadenceLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
 // [수정] 리스트(히스토리 목록/공유모달/TOTAL 통계)에서는 프리런·손(hand) 착용 기록도
-// 가슴/허리와 동일하게 GCT/FLIGHT/밸런스 데이터를 그대로 출력하도록 변경.
+// 가슴/허리와 동일하게 FLIGHT/밸런스 데이터를 그대로 출력.
 // (기존엔 자이로/가속도 기반 지표 신뢰도가 낮다고 보고 이 함수가 true를 반환해 "--"로 가렸었음)
 isGyroAccelUnreliable(r) { return false; }
+// [추가] GCT/VERT(및 이 둘을 재료로 하는 효율점수)는 위 FLIGHT/밸런스와 달리 프리런·손(hand)
+// 착용 기록에서 여전히 신뢰도가 낮다고 보고 별도로 가린다 — GCT는 팔 흔들림/불규칙한 움직임이
+// 착지시간 판정에 직접 섞이고, VERT는 손에서는 아예 계산이 안 되며(vertEnabled:false) 프리런도
+// 같은 이유로 신뢰하지 않기로 함.
+isGctVertUnreliable(r) { return r.activityMode === 'freerun' || r.devicePos === 'hand'; }
 getGctColor(v) { const l = this.getGctLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
 getFlightColor(v) { const l = this.getFlightLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
 getLeanForwardColor(v) { const l = this.getLeanForwardLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
@@ -6893,9 +6900,10 @@ if(parts.length === 2) totalSeconds += (parseInt(parts[0],10)*60)+parseInt(parts
 else if(parts.length === 3) totalSeconds += (parseInt(parts[0],10)*3600)+(parseInt(parts[1],10)*60)+parseInt(parts[2],10);
 }
 if(r.cadence && typeof r.cadence === 'number' && !isNaN(r.cadence)) { sumCadence += r.cadence; countCadence++; }
-// [수정] 프리런/손 착용 기록은 자이로/가속도 기반 지표(GCT/FLIGHT/밸런스)를 신뢰할 수 없으므로 평균 집계에서 제외
+// [수정] GCT는 프리런/손 착용 기록을 여전히 평균 집계에서 제외(신뢰도 낮음), FLIGHT/밸런스는 포함
+const _statsGctUntrusted = this.isGctVertUnreliable(r);
 const _statsDynUntrusted = this.isGyroAccelUnreliable(r);
-if(!_statsDynUntrusted && r.gct && r.gct !== '--') { const gctVal = parseInt(r.gct,10); if(!isNaN(gctVal) && gctVal >= 100 && gctVal <= 400) { sumGct += gctVal; countGct++; } }
+if(!_statsGctUntrusted && r.gct && r.gct !== '--') { const gctVal = parseInt(r.gct,10); if(!isNaN(gctVal) && gctVal >= 100 && gctVal <= 400) { sumGct += gctVal; countGct++; } }
 if(!_statsDynUntrusted && r.flight && r.flight !== '--') { const flightVal = parseInt(r.flight,10); if(!isNaN(flightVal) && flightVal >= 0 && flightVal <= 100) { sumFlight += flightVal; countFlight++; } }
 if(r.alt !== undefined && typeof r.alt === 'number' && !isNaN(r.alt)) { sumAlt += r.alt; countAlt++; }
 if(r.power != null && typeof r.power === 'number' && !isNaN(r.power)) { sumPower += r.power; countPower++; } // [신규]
@@ -7058,7 +7066,7 @@ let dynamicsHtml = '<div class="detail-log-box u-margin-top-12px"><div class="de
 '<div class="detail-log-item"><span>' + (t.stride || "Stride") + '</span><span>' + (record.stride ? parseFloat(record.stride).toFixed(2) + ' m' : '--') + '</span></div>'
 ) : (
 // [수정] 프리런/손 착용 기록은 GCT/FLIGHT를 신뢰할 수 없으므로 경로 상세 페이지 요약 박스에서도 "--" 처리
-'<div class="detail-log-item"><span>' + (t.avgGct || "Average GCT") + '</span><span>' + (this.isGyroAccelUnreliable(record) ? '--' : (record.gct || '--')) + ' ms.</span></div>' +
+'<div class="detail-log-item"><span>' + (t.avgGct || "Average GCT") + '</span><span>' + (this.isGctVertUnreliable(record) ? '--' : (record.gct || '--')) + ' ms.</span></div>' +
 '<div class="detail-log-item"><span>' + (t.avgFlight || "Average Flight") + '</span><span>' + (this.isGyroAccelUnreliable(record) ? '--' : (record.flight || '--')) + ' %.</span></div>' +
 '<div class="detail-log-item"><span>' + (t.avgCadence || "Average Cadence") + '</span><span>' + (record.cadence || 0) + ' SPM.</span></div>' +
 '<div class="detail-log-item"><span>' + (t.avgPowerLabel || "Average Power") + '</span><span>' + (record.power != null ? record.power : '--') + ' W.</span></div>' +
@@ -7113,19 +7121,19 @@ const unitText = this.currentUnit === 'km' ? 'km' : 'mi';
 
 const cadence = record.cadence || 170;
 const vertRatioVal = record.vertRatio ? record.vertRatio : (7.5 - (cadence - 160) * 0.05).toFixed(1);
-// [수정] 프리런/손 착용 기록은 GCT/FLIGHT/밸런스(그리고 그걸 재료로 계산되는 효율점수)를
-// 신뢰할 수 없으므로, 리스트/진단/크루와 동일한 기준으로 공유카드에서도 비활성화 처리.
-const _shareDynUntrusted = this.isGyroAccelUnreliable(record);
-const effScore = (!_shareDynUntrusted) ? (calcEffScore(record) ?? 0) : 0;
+// [수정] GCT(및 이를 재료로 하는 효율점수)는 프리런/손 착용 기록에서 여전히 신뢰할 수
+// 없으므로 공유카드에서도 비활성화. FLIGHT/밸런스는 이제 리스트/진단/크루와 동일하게 노출.
+const _shareGctUntrusted = this.isGctVertUnreliable(record);
+const effScore = (!_shareGctUntrusted) ? (calcEffScore(record) ?? 0) : 0;
 const dateStr = record.date ? record.date.split(' ')[0] : '';
 
 shareRunCardImage({
   dist: displayDist.toFixed(2), distUnit: unitText, time: record.time, pace: displayPace,
   cadence: record.cadence,
-  gct: _shareDynUntrusted ? '--' : record.gct,
-  flight: _shareDynUntrusted ? '--' : record.flight,
+  gct: _shareGctUntrusted ? '--' : record.gct,
+  flight: record.flight,
   vertRatio: vertRatioVal,
-  cadenceBal: _shareDynUntrusted ? '50:50' : record.cadenceBal, effScore, dateStr,
+  cadenceBal: record.cadenceBal, effScore, dateStr,
   // [추가] 활동모드에 따라 카드 레이아웃(걷기용 STEPS/SPM 등)이 분기되도록 전달
   activityMode: record.activityMode || 'run',
   steps: record.steps, walkSpm: record.walkSpm, stride: record.stride,
@@ -7185,8 +7193,9 @@ if (r.stride) {
     strideVal = calcStride(speedKmh, r.cadence, _hcm2, _prof2.strideCorrectionFactor).toFixed(2) + ' m';
   }
 }
-// [수정] 프리런/손 착용 기록은 자이로/가속도 기반 지표(GCT/FLIGHT/밸런스)를 신뢰할 수 없으므로,
-// 리스트 화면과 동일하게 숨김 처리 — 실제 값 대신 '--'/'50:50' 중립값, 코멘트도 "데이터 없음"으로.
+// [수정] GCT(및 이를 재료로 하는 효율점수)는 프리런/손 착용 기록에서 여전히 신뢰할 수 없어
+// 숨김 처리하지만, FLIGHT/밸런스는 이제 리스트와 동일하게 실제 값을 그대로 노출.
+const _gctUntrusted = this.isGctVertUnreliable(r);
 const _gctFlightHidden = this.isGyroAccelUnreliable(r);
 // 체공시간
 const flightVal = (!_gctFlightHidden && r.flight && r.flight !== '--') ? r.flight : '--';
@@ -7202,7 +7211,7 @@ const diagProfile = storage.loadProfile();
 const diagGender = storage.getGender();
 const strideNumForFeedback = parseFloat(strideVal) || 0;
 const diagFeedback = buildPersonalFeedback(
-  { cadence: r.cadence, gct: _gctFlightHidden ? null : r.gct, stride: strideNumForFeedback, cadenceBal: _gctFlightHidden ? null : r.cadenceBal, gctBal: _gctFlightHidden ? null : r.gctBal },
+  { cadence: r.cadence, gct: _gctUntrusted ? null : r.gct, stride: strideNumForFeedback, cadenceBal: _gctFlightHidden ? null : r.cadenceBal, gctBal: _gctFlightHidden ? null : r.gctBal },
   diagProfile, diagGender, lang === 'ko'
 );
 let cadComment = diagFeedback.cadence;
@@ -7212,7 +7221,7 @@ let strideComment = diagFeedback.stride;
 let effScore = '--';
 let effComment = '';
 let effColor = '#aaa';
-if (!_gctFlightHidden && r.cadence && r.gct && r.flight && r.flight !== '--' && r.gct !== '--') {
+if (!_gctUntrusted && r.cadence && r.gct && r.flight && r.flight !== '--' && r.gct !== '--') {
   const score = calcEffScore(r);
   if (score !== null) {
     effScore = score;
@@ -7297,7 +7306,7 @@ contentArea.innerHTML =
 '<div class="diag-card"><div class="diag-label">' + (t.powerLabel || "POWER") + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + (powerPeakForDiag != null ? (' / ' + powerPeakForDiag) : '') + ' <span class="c44">W</span></div><div class="diag-ref">' + (t.powerZoneLabel || 'POWER ZONE') + ': ' + powerZoneDisplay + '</div></div><div class="diag-tip">' + powerComment + '</div>' + powerSparkSvg + (powerSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.cadence ? this.getCadenceColor(r.cadence) : '#aaa') + '">CAD: ' + (r.cadence || 0) + (cadPeakForDiag != null ? (' / ' + cadPeakForDiag) : '') + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div>' + cadSparkSvg + (cadSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getStrideColor(strideNumForFeedback, diagProfile) + '">' + strideVal + '</div><div class="diag-ref">Ref: 0.5~0.75m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (!_gctFlightHidden && r.gct && r.gct !== '--' ? this.getGctColor(r.gct) : '#aaa') + '">GCT: ' + (_gctFlightHidden ? '--' : r.gct) + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (!_gctUntrusted && r.gct && r.gct !== '--' ? this.getGctColor(r.gct) : '#aaa') + '">GCT: ' + (_gctUntrusted ? '--' : r.gct) + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagBalanceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (_gctFlightHidden ? '#aaa' : this.getBalanceColor(r.cadenceBal, r.gctBal)) + '">' + (_gctFlightHidden ? '50:50' : (r.cadenceBal || '50:50')) + ' <span style="font-size:var(--fs-xs);color:#aaa">L:R</span></div><div class="diag-ref">GCT ' + (_gctFlightHidden ? '50:50' : (r.gctBal || '50:50')) + ' &nbsp;·&nbsp; GYRO ' + (_gctFlightHidden ? '50:50' : (r.gyroBal || '50:50')) + '</div></div><div class="diag-tip">' + diagFeedback.balance + '</div><div style="font-size:var(--fs-xs);color:#888;font-weight:600;line-height:1.5;margin-top:8px;padding-top:8px;border-top:1px solid #222;">' + (t.diagBalanceExplain || '') + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagFlightLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (isNaN(flightNum)?'#aaa':this.getFlightColor(flightNum)) + '">' + flightVal + (flightVal!=='--'?' %':'') + '</div><div class="diag-ref">Ref: 30~45%</div></div><div class="diag-tip">' + flightComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagHrLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + hrColor + '">' + hrMainVal + '</div><div class="diag-ref">' + t.hrZoneLabel + ': ' + hrZoneDisplay + '</div></div><div class="diag-tip">' + hrComment + '</div>' + hrSparkSvg + (hrSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
@@ -10518,7 +10527,10 @@ const _profVert = storage.loadProfile();
 const _hcmVert = _profVert.hu === 'inch' ? Math.round(_profVert.h * 2.54) : _profVert.h;
 strideForVert = calcStride(speedKmh, avgCadence, _hcmVert, _profVert.strideCorrectionFactor);
 }
-const measuredVertRatio = this.motion ? this.motion.getVertRatio(strideForVert) : null;
+// [수정] VERT(수직진동 비율)는 손(hand)에서 이미 vertEnabled:false로 계산 자체가 안 되는데,
+// 프리런은 착용위치와 무관하게 동작하다 보니 이 null 처리가 안 걸려있었음 — 손과 동일하게
+// 프리런도 실측 VERT 대신 null(→ calcEffScore의 케이던스 기반 추정값으로 폴백)로 맞춤.
+const measuredVertRatio = (this.motion && this.state.activityMode !== 'freerun') ? this.motion.getVertRatio(strideForVert) : null;
 this.pushKmSplitIfNeeded();
 this.pushDiagSplitIfNeeded();
 const _now = new Date();
@@ -11855,8 +11867,8 @@ async uploadRecord(record, photoFile, shareOptions, message) {
         if (tp.length === 2) durationSec = parseInt(tp[0])*60 + parseInt(tp[1]);
         else if (tp.length === 3) durationSec = parseInt(tp[0])*3600 + parseInt(tp[1])*60 + parseInt(tp[2]);
       }
-      // [수정] 프리런/손 착용 기록은 GCT/FLIGHT(그리고 이를 재료로 계산되는 효율점수)를
-      // 신뢰할 수 없으므로, 업로드 시점부터 크루 피드/공유카드에 노출되지 않도록 원천 차단.
+      // [수정] GCT(및 이를 재료로 하는 효율점수)는 프리런·손(hand) 기록에서 여전히 신뢰할 수
+      // 없어 업로드 시 차단하고, FLIGHT는 리스트/통계/진단/루트와 동일하게 그대로 업로드.
       const dynamicsUntrusted = (record.activityMode === 'freerun') || (record.devicePos === 'hand');
       // 효율점수 계산 (공통 함수)
       let effScore = null;
@@ -11900,7 +11912,7 @@ const shareLeanAngle = opts.leanAngle !== false; // [신규] 린각도 공유 �
         // [수정] 공유 모달 드롭다운의 각 체크박스를 끄면 해당 필드는 null로 업로드(비공개)
         cadence: shareCadence ? (record.cadence || null) : null,
         gct_ms: (shareGct && !dynamicsUntrusted) ? (record.gct || null) : null,
-        flight_pct: (shareFlight && !dynamicsUntrusted && record.flight) ? parseInt(record.flight) : null,
+        flight_pct: (shareFlight && record.flight) ? parseInt(record.flight) : null,
         stride_m: shareStride ? (record.stride || null) : null,
         // [수정] 효율점수는 케이던스/GCT/체공비율로부터 계산되는 파생값이라, 그중 하나라도 비공개 처리되면 함께 숨김
         eff_score: (shareCadence && shareGct && shareFlight) ? effScore : null,
