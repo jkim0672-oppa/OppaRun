@@ -4185,12 +4185,19 @@ updateTabRunLabel() {
 const t = translations[storage.getLang()] || translations['en'];
 const tabRun = document.getElementById('tab-run');
 if (!tabRun) return;
+// [수정] RUN/TRAIL 모드는 기기 착용 위치(devicePos) 4종에 맞춰 접미사를 붙이고
+// (예: RUN_C/RUN_W/RUN_A/RUN_H, TRAIL_C/TRAIL_W/TRAIL_A/TRAIL_H),
+// 착용 위치가 의미 없는 WALK/FREE RUN은 기존처럼 전체 단어 라벨을 그대로 보여줌.
+// 실제 갱신은 setActivityMode()와 updateDevicePosUI()(착용 위치 변경/로드 시)에서
+// 이 함수를 자동으로 다시 호출해줌.
 const mode = this.currentActivityMode || 'run';
-// [수정] 모드명 전체로 바꾸지 않고, 기본 RUN 라벨 뒤에 모드 약자만 붙이는 방식으로 변경
-// (예: 걷기 → "RUN_W", 트레일 → "RUN_T", 프리러닝 → "RUN_F", 일반 러닝은 접미사 없이 "RUN")
-const suffixMap = { walk: 'W', trail: 'T', freerun: 'F' };
-const suffix = suffixMap[mode];
-tabRun.textContent = suffix ? (t.run + '_' + suffix) : t.run;
+if (mode === 'walk') { tabRun.textContent = t.modeWalkLabel; return; }
+if (mode === 'freerun') { tabRun.textContent = t.modeFreerunLabel; return; }
+const posSuffixMap = { chest: 'C', waist: 'W', armband: 'A', hand: 'H' };
+const pos = (function () { try { return storage.loadProfile().devicePos || 'chest'; } catch (e) { return 'chest'; } })();
+const suffix = posSuffixMap[pos];
+const base = (mode === 'trail') ? t.modeTrailLabel : t.run;
+tabRun.textContent = suffix ? (base + '_' + suffix) : base;
 }
 // [신규] 하단 RUN 탭 클릭 처리 - 이미 시작 화면(대기 상태)에 있을 때만 퀵 모드 전환 팝업을 띄우고,
 // 다른 탭(REC·SET/CREW)에 있거나 러닝이 진행 중일 때는 기존처럼 그냥 시작 화면으로 이동만 함.
@@ -5823,6 +5830,8 @@ warningEl.textContent = t.devposHandWarning;
 warningEl.classList.remove('is-open');
 warningEl.textContent = '';
 }
+// [추가] 착용 위치가 갱신될 때마다 하단 RUN 탭 라벨(RUN_C/RUN_W/RUN_A/RUN_H)도 동기화
+this.updateTabRunLabel();
 }
 // [추가] 정밀 보폭 캘리브레이션: 사용자가 알고 있는 정확한 거리를 뛰게 해서
 // 개인 보폭 보정계수를 학습시키는 기능 (4번 개선사항)
