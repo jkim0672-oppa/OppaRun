@@ -2741,19 +2741,26 @@ function calcEffScore(record) {
   // 1) 케이던스: 170~185 최적
   const cadScore = _effCadScore(cadence);
 
-  // 2) GCT: ≤200ms 만점, ≥300ms 0점
+  // 2) GCT: [수정 2026-09-19] 앱의 GCT 등급 기준(getGctLevel: 좋음 ≤270, 보통 ≤300)에 맞춰 조정.
+  //    기존엔 엘리트 기준(≤200 만점, ≥300 0점)이라 등급이 "좋음"(초록)인 259ms도 41점밖에 못 받았음.
+  //    ≤220 만점 → 270ms 80점(좋음 경계) → 300ms 55점(보통 경계) → 360ms 이상 0점
   const gctScore = (() => {
-    if (gct <= 200) return 100;
-    if (gct <= 300) return Math.round(100 - ((gct - 200) / 100) * 100);
+    if (gct <= 220) return 100;
+    if (gct <= 270) return Math.round(100 - ((gct - 220) / 50) * 20);
+    if (gct <= 300) return Math.round(80 - ((gct - 270) / 30) * 25);
+    if (gct <= 360) return Math.round(55 - ((gct - 300) / 60) * 55);
     return 0;
   })();
 
-  // 3) 체공시간: 30~45% 최적
+  // 3) 체공시간: [수정 2026-09-19] 앱의 체공 등급 기준(getFlightLevel: 좋음 ≥22, 보통 ≥12)에 맞춰 조정.
+  //    30~45% 만점 → 22%에서 80점(좋음 경계) → 12%에서 55점(보통 경계)
   const flightScore = (() => {
     if (flight >= 30 && flight <= 45) return 100;
-    if (flight >= 20 && flight < 30)  return Math.round(50 + (flight - 20) * 5);
-    if (flight > 45 && flight <= 55)  return Math.round(100 - (flight - 45) * 5);
-    return Math.max(0, flight < 20 ? flight * 2.5 : 50 - (flight - 55) * 4);
+    if (flight >= 22 && flight < 30)  return Math.round(80 + (flight - 22) * 2.5);
+    if (flight >= 12 && flight < 22)  return Math.round(55 + (flight - 12) * 2.5);
+    if (flight < 12) return Math.max(0, Math.round(flight * 55 / 12));
+    if (flight <= 55) return Math.round(100 - (flight - 45) * 5);
+    return Math.max(0, 50 - (flight - 55) * 4);
   })();
 
   // 4) 수직진폭: 6~9% 최적
