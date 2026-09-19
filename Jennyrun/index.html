@@ -2197,6 +2197,8 @@ function generateRunCardCanvas(data, isKo) {
 
     // ── 6개 지표 그리드 ──
     const effScore = data.effScore != null ? data.effScore : 0;
+    // [추가] 간이 효율점수(손/프리런): 라벨에 "간이" 표시, 색 기준은 90/75(간이 점수는 범위가 60~100으로 눌려 있음)
+    const effIsSimple = !!data.effSimple && data.effScore != null;
     const gridY = mainY + 116;
     const sw = (W - PAD*2 - 20) / 3, sh = 110;
     const row2y = gridY;
@@ -2227,7 +2229,7 @@ function generateRunCardCanvas(data, isKo) {
     } else {
       statTile(PAD,         row2y, sw, sh, isKo?'케이던스':'CADENCE',    data.cadence||'--', 'SPM');
       statTile(PAD+sw+10,   row2y, sw, sh, isKo?'지면접촉':'GCT',       data.gct||'--',     'ms');
-      statTile(PAD+sw*2+20, row2y, sw, sh, isKo?'효율점수':'EFFICIENCY',  effScore,           '/ 100');
+      statTile(PAD+sw*2+20, row2y, sw, sh, effIsSimple ? (isKo?'효율(간이)':'EFF (SIMPLE)') : (isKo?'효율점수':'EFFICIENCY'),  effScore,           '/ 100');
       statTile(PAD,         row3y, sw, sh, 'ALT',                         (data.alt != null ? data.alt : '--'), 'm');
       statTile(PAD+sw+10,   row3y, sw, sh, isKo?'체공시간':'FLIGHT',      data.flight||'--',  '%');
       statTile(PAD+sw*2+20, row3y, sw, sh, isKo?'GCT 밸런스':'GCT BAL',   data.gctBal||'--', ''); // [수정] 케이던스 밸런스 제거 → GCT 밸런스
@@ -2247,10 +2249,12 @@ function generateRunCardCanvas(data, isKo) {
       const walkMsg = isKo ? '오늘도 걸었어요!' : 'Great walk today!';
       ctx.fillText(walkMsg, PAD + 16, barY + 48);
     } else {
-      const effC = effScore >= 75 ? '#00aa55' : effScore >= 50 ? '#f5a623' : '#e03e3e';
+      const effC = effIsSimple
+        ? (effScore >= 90 ? '#00aa55' : effScore >= 75 ? '#f5a623' : '#e03e3e')
+        : (effScore >= 75 ? '#00aa55' : effScore >= 50 ? '#f5a623' : '#e03e3e');
       ctx.font = 'bold 13px Arial, sans-serif';
       ctx.fillStyle = GRAY;
-      ctx.fillText(isKo ? '효율 점수' : 'EFFICIENCY SCORE', PAD + 16, barY + 22);
+      ctx.fillText(effIsSimple ? (isKo ? '효율 점수 (간이)' : 'EFFICIENCY SCORE (SIMPLE)') : (isKo ? '효율 점수' : 'EFFICIENCY SCORE'), PAD + 16, barY + 22);
 
       const bx = PAD + 16, by2 = barY + 30, bw = W - PAD*2 - 130, bh = 14;
       ctx.fillStyle = DIVIDER;
@@ -2693,6 +2697,36 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
+// [분리] 케이던스 점수: 170~185 최적 (calcEffScore / calcEffScoreSimple 공용)
+function _effCadScore(cadence) {
+  if (cadence >= 170 && cadence <= 185) return 100;
+  if (cadence >= 160 && cadence < 170)  return 60 + (cadence - 160) * 4;
+  if (cadence > 185 && cadence <= 195)  return 100 - (cadence - 185) * 4;
+  if (cadence < 160) return Math.max(0, 40 + (cadence - 150) * 2);
+  return Math.max(0, 60 - (cadence - 195) * 3);
+}
+// [분리] 보폭 점수: 키(다리길이 추정) 대비 적정 비율 (calcEffScore / calcEffScoreSimple 공용)
+function _effStrideScore(record) {
+  const prof = storage.loadProfile();
+  const hcm  = prof.hu === 'inch' ? Math.round(prof.h * 2.54) : prof.h;
+  const legLen = (hcm * 0.47) / 100;
+  const strideM = parseFloat(record.stride) || 0;
+  if (!strideM || strideM <= 0 || !legLen) return 70;
+  // [수정] stride가 이제 한 걸음 기준값이라 legLen*2가 아닌 legLen과 비교
+  const ratio = strideM / legLen;
+  if (ratio >= 0.9 && ratio <= 1.3)  return 100;
+  if (ratio >= 0.7 && ratio < 0.9)   return Math.round(70 + (ratio - 0.7) * 150);
+  if (ratio > 1.3 && ratio <= 1.6)   return Math.round(100 - (ratio - 1.3) * 100);
+  return Math.max(0, Math.round(60 - Math.abs(ratio - 1.1) * 30));
+}
+// [추가] 간이 효율점수: 손/프리런처럼 GCT·FLIGHT·수직진폭을 못 믿는 기록용.
+// 신뢰할 수 있는 케이던스(28)와 보폭(15)만 쓰고 65:35로 환산해 100점 만점으로 맞춘다.
+// 가슴/허리 기록의 정식 효율점수와는 기준이 달라 직접 비교하면 안 됨(화면에 "간이"로 표시).
+function calcEffScoreSimple(record) {
+  const cadence = parseInt(record.cadence);
+  if (!cadence) return null;
+  return Math.min(100, Math.max(0, Math.round(_effCadScore(cadence) * 0.65 + _effStrideScore(record) * 0.35)));
+}
 function calcEffScore(record) {
   const cadence = parseInt(record.cadence);
   const gct     = parseInt(record.gct);
@@ -2700,13 +2734,7 @@ function calcEffScore(record) {
   if (!cadence || !gct || isNaN(flight)) return null;
 
   // 1) 케이던스: 170~185 최적
-  const cadScore = (() => {
-    if (cadence >= 170 && cadence <= 185) return 100;
-    if (cadence >= 160 && cadence < 170)  return 60 + (cadence - 160) * 4;
-    if (cadence > 185 && cadence <= 195)  return 100 - (cadence - 185) * 4;
-    if (cadence < 160) return Math.max(0, 40 + (cadence - 150) * 2);
-    return Math.max(0, 60 - (cadence - 195) * 3);
-  })();
+  const cadScore = _effCadScore(cadence);
 
   // 2) GCT: ≤200ms 만점, ≥300ms 0점
   const gctScore = (() => {
@@ -2733,19 +2761,7 @@ function calcEffScore(record) {
   })();
 
   // 5) 보폭: 키 대비 적정 비율
-  const prof = storage.loadProfile();
-  const hcm  = prof.hu === 'inch' ? Math.round(prof.h * 2.54) : prof.h;
-  const legLen = (hcm * 0.47) / 100;
-  const strideM = parseFloat(record.stride) || 0;
-  const strideScore = (() => {
-    if (!strideM || strideM <= 0 || !legLen) return 70;
-    // [수정] stride가 이제 한 걸음 기준값이라 legLen*2가 아닌 legLen과 비교
-    const ratio = strideM / legLen;
-    if (ratio >= 0.9 && ratio <= 1.3)  return 100;
-    if (ratio >= 0.7 && ratio < 0.9)   return Math.round(70 + (ratio - 0.7) * 150);
-    if (ratio > 1.3 && ratio <= 1.6)   return Math.round(100 - (ratio - 1.3) * 100);
-    return Math.max(0, Math.round(60 - Math.abs(ratio - 1.1) * 30));
-  })();
+  const strideScore = _effStrideScore(record);
 
   // 6) 밸런스 패널티 (최대 -20점)
   const parseBal = (bal) => {
@@ -3292,7 +3308,7 @@ diagEffScore: "RUNNING EFFICIENCY", diagPaceLabel: "PACE", diagCadLabel: "CADENC
 diagStrideLabel: "STRIDE LENGTH", diagGctLabel: "RUNNING DYNAMICS", diagFlightLabel: "FLIGHT TIME", diagBalanceLabel: "L/R BALANCE",
 diagBalanceGood: "Left-right balance looks even.",
 diagBalanceExplain: "GCT compares left/right ground contact time, and GYRO compares left/right rotational movement — all shown as an L:R ratio (50:50 = perfectly even).",
-diagEffGood: "Excellent running efficiency!", diagEffAvg: "Average. Work on GCT and cadence.", diagEffBad: "Needs improvement. Metronome training recommended.",
+diagEffGood: "Excellent running efficiency!", diagEffAvg: "Average. Work on GCT and cadence.", diagEffBad: "Needs improvement. Metronome training recommended.", diagEffAvgSimple: "Average. Try to bring cadence closer to 170~185.", diagEffScoreSimple: "RUNNING EFFICIENCY (SIMPLE)", diagEffNote: "Combines cadence, GCT, flight, vertical oscillation and stride.", diagEffNoteSimple: "A rough guide from cadence and stride only. Don't compare it with chest/waist scores.",
 diagPaceFast: "Fast pace. Check sustainability.", diagPaceGood: "Good aerobic pace.", diagPaceEasy: "Easy pace. Try pushing a bit more.",
 diagPowerLow: "Low intensity. Good for recovery or easy runs.", diagPowerModerate: "Moderate intensity. A solid aerobic effort.", diagPowerHigh: "High intensity. Make sure to recover properly.",
 diagCadGood: "Optimal step frequency.", diagCadLow: "Slightly low cadence. Sync with metronome.",
@@ -3318,7 +3334,7 @@ crewNoComments: "No comments yet", crewConfirmDelete: "Delete this record from c
 crewLikersTitle: "Likes", crewNoLikes: "No likes yet",
 crewMorning: "Morning Run", crewAfternoon: "Afternoon Run", crewEvening: "Evening Run", crewNight: "Night Run",
 crewTab: "CREW",
-crewDist: "Distance", crewTime: "Time", crewPace: "Pace", crewEff: "Efficiency", crewMe: "Me", editTitle: "EDIT TITLE",
+crewDist: "Distance", crewTime: "Time", crewPace: "Pace", crewEff: "Efficiency", crewEffSimple: "Eff (simple)", crewMe: "Me", editTitle: "EDIT TITLE",
 crewFollow: "Follow", crewFollowing: "Following", crewUnfollow: "Unfollow",
 blockedUsersLabel: "BLOCKED USERS", noBlockedUsers: "No blocked users.", unblock: "Unblock",
 blockConfirm: "Block this user? You will no longer see their posts and comments.", reportSubmitted: "Report submitted. Thank you.",
@@ -3403,7 +3419,7 @@ diagEffScore: "러닝 효율 점수", diagPaceLabel: "페이스", diagCadLabel: 
 diagStrideLabel: "보폭 (STRIDE)", diagGctLabel: "러닝 다이내믹스 (GCT)", diagFlightLabel: "체공시간 (FLIGHT)", diagBalanceLabel: "좌우 밸런스",
 diagBalanceGood: "좌우 밸런스가 고른 편입니다.",
 diagBalanceExplain: "GCT는 좌우 지면 접촉 시간, GYRO는 좌우 회전 움직임을 비교한 값으로, 모두 L:R(좌:우) 비율로 표시됩니다(50:50이 완벽한 균형).",
-diagEffGood: "우수한 러닝 효율입니다!", diagEffAvg: "보통 수준입니다. GCT와 케이던스를 개선해보세요.", diagEffBad: "효율 개선이 필요합니다. 메트로놈 훈련을 권장합니다.",
+diagEffGood: "우수한 러닝 효율입니다!", diagEffAvg: "보통 수준입니다. GCT와 케이던스를 개선해보세요.", diagEffBad: "효율 개선이 필요합니다. 메트로놈 훈련을 권장합니다.", diagEffAvgSimple: "보통 수준입니다. 케이던스를 170~185에 가깝게 맞춰보세요.", diagEffScoreSimple: "러닝 효율 점수 (간이)", diagEffNote: "케이던스, GCT, 체공, 수직진폭, 보폭을 종합한 점수예요.", diagEffNoteSimple: "케이던스와 보폭만으로 계산한 참고용 점수예요. 가슴/허리 점수와 비교하지 마세요.",
 diagPaceFast: "빠른 페이스입니다. 지속 가능한지 확인하세요.", diagPaceGood: "적절한 유산소 페이스입니다.", diagPaceEasy: "여유 있는 페이스입니다. 조금 더 빠르게 도전해보세요.",
 diagPowerLow: "가벼운 강도입니다. 회복 러닝이나 이지런에 적합합니다.", diagPowerModerate: "적당한 강도입니다. 무난한 유산소 강도입니다.", diagPowerHigh: "고강도입니다. 충분한 회복을 챙기세요.",
 diagCadGood: "이상적인 보폭 빈도입니다.", diagCadLow: "케이던스가 다소 낮습니다. 메트로놈에 맞춰보세요.",
@@ -3429,7 +3445,7 @@ crewNoComments: "아직 댓글이 없어요", crewConfirmDelete: "이 커뮤니�
 crewLikersTitle: "좋아요", crewNoLikes: "아직 좋아요가 없어요",
 crewMorning: "아침 러닝", crewAfternoon: "오후 러닝", crewEvening: "저녁 러닝", crewNight: "야간 러닝",
 crewTab: "크루",
-crewDist: "거리", crewTime: "시간", crewPace: "페이스", crewEff: "효율", crewMe: "나", editTitle: "제목 수정",
+crewDist: "거리", crewTime: "시간", crewPace: "페이스", crewEff: "효율", crewEffSimple: "효율(간이)", crewMe: "나", editTitle: "제목 수정",
 crewFollow: "팔로우", crewFollowing: "팔로잉", crewUnfollow: "언팔로우",
 blockedUsersLabel: "차단 목록", noBlockedUsers: "차단한 사용자가 없습니다.", unblock: "차단 해제",
 blockConfirm: "이 사용자를 차단할까요? 앞으로 이 사용자의 게시글과 댓글이 보이지 않습니다.", reportSubmitted: "신고가 접수되었습니다. 감사합니다.",
@@ -7184,10 +7200,11 @@ const unitText = this.currentUnit === 'km' ? 'km' : 'mi';
 
 const cadence = record.cadence || 170;
 const vertRatioVal = record.vertRatio ? record.vertRatio : (7.5 - (cadence - 160) * 0.05).toFixed(1);
-// [수정] GCT(및 이를 재료로 하는 효율점수)는 프리런/손 착용 기록에서 여전히 신뢰할 수
-// 없으므로 공유카드에서도 비활성화. FLIGHT/밸런스는 이제 리스트/진단/크루와 동일하게 노출.
+// [수정] GCT/FLIGHT/밸런스는 프리런/손 착용 기록에서 공유카드에도 표시하지 않는다.
+// 효율점수는 정식 점수 대신 케이던스+보폭 기반 "간이" 점수를 표시(카드에 간이 표기).
 const _shareGctUntrusted = this.isGctVertUnreliable(record);
-const effScore = (!_shareGctUntrusted) ? (calcEffScore(record) ?? 0) : 0;
+const _shareEffSimple = _shareGctUntrusted && !!record.cadence;
+const effScore = !_shareGctUntrusted ? (calcEffScore(record) ?? 0) : (_shareEffSimple ? (calcEffScoreSimple(record) ?? 0) : 0);
 const dateStr = record.date ? record.date.split(' ')[0] : '';
 
 shareRunCardImage({
@@ -7196,7 +7213,7 @@ shareRunCardImage({
   gct: _shareGctUntrusted ? '--' : record.gct,
   flight: _shareGctUntrusted ? '--' : record.flight,
   vertRatio: vertRatioVal,
-  gctBal: _shareGctUntrusted ? '--' : record.gctBal, effScore, dateStr,
+  gctBal: _shareGctUntrusted ? '--' : record.gctBal, effScore, effSimple: _shareEffSimple, dateStr,
   // [추가] 활동모드에 따라 카드 레이아웃(걷기용 STEPS/SPM 등)이 분기되도록 전달
   activityMode: record.activityMode || 'run',
   steps: record.steps, walkSpm: record.walkSpm, stride: record.stride,
@@ -7284,6 +7301,7 @@ let strideComment = diagFeedback.stride;
 let effScore = '--';
 let effComment = '';
 let effColor = '#aaa';
+let effIsSimple = false;
 if (!_gctUntrusted && r.cadence && r.gct && r.flight && r.flight !== '--' && r.gct !== '--') {
   const score = calcEffScore(r);
   if (score !== null) {
@@ -7291,6 +7309,18 @@ if (!_gctUntrusted && r.cadence && r.gct && r.flight && r.flight !== '--' && r.g
     effColor = score >= 80 ? 'var(--good)' : score >= 55 ? 'var(--warning)' : 'var(--danger)';
     effComment = score >= 80 ? t.diagEffGood
     : score >= 55 ? t.diagEffAvg
+    : t.diagEffBad;
+  }
+} else if (_gctUntrusted && r.cadence) {
+  // [추가] 프리런/손: GCT·FLIGHT 없이 케이던스+보폭만으로 계산한 간이 점수
+  const score = calcEffScoreSimple(r);
+  if (score !== null) {
+    effIsSimple = true;
+    effScore = score;
+    // 간이 점수는 보폭 항목이 대부분 만점이라 실제 범위가 60~100으로 눌려 있음 → 판정 기준을 90/75로 상향
+    effColor = score >= 90 ? 'var(--good)' : score >= 75 ? 'var(--warning)' : 'var(--danger)';
+    effComment = score >= 90 ? t.diagEffGood
+    : score >= 75 ? (t.diagEffAvgSimple || t.diagEffAvg)
     : t.diagEffBad;
   }
 }
@@ -7361,7 +7391,7 @@ function _fmtPeakPaceStr(sec) {
 let pacePeakDisplay = _fmtPeakPaceStr(pacePeakSecForDiag);
 if (pacePeakDisplay && this.currentUnit === 'mile') pacePeakDisplay = this.convertPaceToUnit(pacePeakDisplay, 'mile');
 contentArea.innerHTML =
-'<div class="diag-card"><div class="diag-label">' + (t.diagEffScore) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + effColor + '">' + effScore + ' <span style="font-size:var(--fs-md);color:#aaa">/ 100</span></div><div class="diag-ref">Ref: ≥80</div></div><div class="diag-tip">' + effComment + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (effIsSimple ? (t.diagEffScoreSimple || t.diagEffScore) : t.diagEffScore) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + effColor + '">' + effScore + ' <span style="font-size:var(--fs-md);color:#aaa">/ 100</span></div>' + (effIsSimple ? '' : '<div class="diag-ref">Ref: ≥80</div>') + '</div><div class="diag-tip">' + effComment + '</div>' + (effScore !== '--' ? '<div style="margin-top:6px;font-size:var(--fs-xxs);color:#888;font-weight:700;">' + (effIsSimple ? (t.diagEffNoteSimple || '') : (t.diagEffNote || '')) + '</div>' : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.time||'TIME') + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.time||'--') + '</div></div>' +
 '<div style="margin-top:6px;font-size:var(--fs-sm);color:#aaa;font-weight:700;">' + (t.speed||'SPEED') + ' : ' + (() => { const p=r.avgPace||r.pace; if(p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60); return this.currentUnit==='mile'?(kmh*0.621371).toFixed(1)+' mi/h':kmh.toFixed(1)+' km/h';} return '--'; })() + '</div>' +
 '</div>' +
@@ -11899,6 +11929,12 @@ async uploadRecord(record, photoFile, shareOptions, message) {
       if (!dynamicsUntrusted && record.cadence && record.gct && record.flight && record.flight !== '--' && record.gct !== '--') {
         effScore = calcEffScore(record);
       }
+      // [추가] 손/프리런: 정식 점수 대신 간이 점수(케이던스+보폭). DB에 새 컬럼 없이 eff_score에 넣고,
+      // "eff_score는 있는데 gct_ms가 null"이면 간이 점수로 식별한다(정식 점수는 GCT가 있어야만 계산됨).
+      let effScoreSimple = null;
+      if (dynamicsUntrusted && record.cadence) {
+        effScoreSimple = calcEffScoreSimple(record);
+      }
       let photoUrl = null;
       if (photoFile) {
         photoUrl = await this.uploadPhoto(uid, record.id, photoFile);
@@ -11939,7 +11975,9 @@ const shareLeanAngle = opts.leanAngle !== false; // [신규] 린각도 공유 �
         flight_pct: (shareFlight && !dynamicsUntrusted && record.flight) ? parseInt(record.flight) : null,
         stride_m: shareStride ? (record.stride || null) : null,
         // [수정] 효율점수는 케이던스/GCT/체공비율로부터 계산되는 파생값이라, 그중 하나라도 비공개 처리되면 함께 숨김
-        eff_score: (shareCadence && shareGct && shareFlight) ? effScore : null,
+        eff_score: dynamicsUntrusted
+          ? ((shareCadence && shareStride) ? effScoreSimple : null)
+          : ((shareCadence && shareGct && shareFlight) ? effScore : null),
         alt: record.alt || 0,
         // [추가] 칼로리 (기존엔 아예 업로드되지 않아 크루 카드/공유카드에서 항상 비어있었음)
         kcal: shareKcal ? (record.kcal || null) : null,
@@ -12039,12 +12077,13 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
         ? `${r.nickname}님의 ${activityNounKo}: ${distText}km · ${durText} · 페이스 ${paceText}/km${r.message ? '\n' + r.message : ''}`
         : `${r.nickname}'s ${activityNounEn}: ${distText}km in ${durText} @ ${paceText}/km${r.message ? '\n' + r.message : ''}`;
       const effScore = r.eff_score || 0;
+      const effIsSimpleCrew = r.eff_score != null && r.eff_score > 0 && r.gct_ms == null; // 간이 점수 식별
       const headerDateStr = new Date(r.created_at).toLocaleString(isKo?'ko-KR':'en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
       await shareRunCardImage({
         nickname: r.nickname,
         dist: distText, distUnit: 'km',
         time: durText, pace: paceText,
-        cadence: r.cadence, gct: r.gct_ms, flight: r.flight_pct, effScore,
+        cadence: r.cadence, gct: r.gct_ms, flight: r.flight_pct, effScore, effSimple: effIsSimpleCrew,
         avgHr: r.avg_hr || null, hrZone: r.hr_zone || null,
         // [추가] 활동모드에 따라 카드 레이아웃이 분기되도록 전달
         activityMode: activityMode,
@@ -12307,8 +12346,13 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
       const commentCount = recordComments.length;
       const initial = escapeHtml(this.getInitial(r.nickname));
       const runLabel = this.getRunTimeLabel(t, r.created_at);
-      const effColor = r.eff_score >= 75 ? '#2e7d32' : r.eff_score >= 50 ? '#e65100' : '#c62828';
-      const effBg = r.eff_score >= 75 ? '#e8f5e9' : r.eff_score >= 50 ? '#fff3e0' : '#ffebee';
+      // [수정] 크루 카드 효율점수 표시용 (기존 effColor/effBg는 어디에도 쓰이지 않아 교체).
+      // eff_score는 있는데 gct_ms가 없으면 간이 점수(손/프리런). 카드는 좋음/나쁨 2색 규칙을 따른다.
+      const hasEffCard = r.eff_score != null && r.eff_score > 0;
+      const effIsSimpleCard = hasEffCard && r.gct_ms == null;
+      const effValColorCard = !hasEffCard ? '#111'
+        : ((effIsSimpleCard ? r.eff_score >= 90 : r.eff_score >= 80) ? CrewStatColor.GOOD : CrewStatColor.BAD);
+      const effLabelCard = effIsSimpleCard ? (t.crewEffSimple || 'EFF (SIMPLE)') : (t.crewEff || 'EFF');
       // [수정] RUN/WALK/TRAIL/FREE RUN 배지 (과거 기록엔 activity_mode가 없으므로 'run'으로 간주)
       const activityMode = r.activity_mode || 'run';
       const isKoFeed = storage.getLang() === 'ko';
@@ -12446,11 +12490,15 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
             <div class="u-card-stat-value" style="color:${CrewStatColor.hrZoneColor(r.hr_zone)};">${r.hr_zone}</div>
           </div>` : ''}
           </div>
-          ${(r.avg_hr !== undefined && r.avg_hr !== null) ? `<div class="c23">
-          <div class="c03">
+          ${(hasEffCard || (r.avg_hr !== undefined && r.avg_hr !== null)) ? `<div class="c23">
+          ${hasEffCard ? `<div class="${(r.avg_hr !== undefined && r.avg_hr !== null) ? 'u-stat-cell' : 'c03'}">
+            <div class="u-label-xxs-dim">${effLabelCard}</div>
+            <div class="u-card-stat-value" style="color:${effValColorCard};">${r.eff_score}<span class="u-label-xxs-999"> / 100</span></div>
+          </div>` : ''}
+          ${(r.avg_hr !== undefined && r.avg_hr !== null) ? `<div class="c03">
             <div class="u-label-xxs-dim">${t.hrAvgMax||'HR'}</div>
             <div class="c43">${r.avg_hr + ' / ' + ((r.max_hr !== undefined && r.max_hr !== null) ? r.max_hr : r.avg_hr)}<span class="u-label-xxs-999"> BPM</span></div>
-          </div>
+          </div>` : ''}
           </div>` : ''}
           `}
           ${activityMode === 'walk' ? `
