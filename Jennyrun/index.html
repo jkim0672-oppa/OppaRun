@@ -2199,7 +2199,7 @@ function generateRunCardCanvas(data, isKo) {
 
     // ── 6개 지표 그리드 ──
     const effScore = data.effScore != null ? data.effScore : 0;
-    // [추가] 간이 효율점수(손/프리런): 라벨에 "간이" 표시, 색 기준은 90/75(간이 점수는 범위가 60~100으로 눌려 있음)
+    // [추가] 간이 효율점수(손/프리런/암밴드): 라벨에 "간이" 표시 (색 기준은 정식 점수와 동일)
     const effIsSimple = !!data.effSimple && data.effScore != null;
     const gridY = mainY + 116;
     const sw = (W - PAD*2 - 20) / 3, sh = 110;
@@ -2251,9 +2251,7 @@ function generateRunCardCanvas(data, isKo) {
       const walkMsg = isKo ? '오늘도 걸었어요!' : 'Great walk today!';
       ctx.fillText(walkMsg, PAD + 16, barY + 48);
     } else {
-      const effC = effIsSimple
-        ? (effScore >= 90 ? '#00aa55' : effScore >= 75 ? '#f5a623' : '#e03e3e')
-        : (effScore >= 75 ? '#00aa55' : effScore >= 50 ? '#f5a623' : '#e03e3e');
+      const effC = effScore >= 75 ? '#00aa55' : effScore >= 50 ? '#f5a623' : '#e03e3e';
       ctx.font = 'bold 13px Arial, sans-serif';
       ctx.fillStyle = GRAY;
       ctx.fillText(effIsSimple ? (isKo ? '효율 점수 (간이)' : 'EFFICIENCY SCORE (SIMPLE)') : (isKo ? '효율 점수' : 'EFFICIENCY SCORE'), PAD + 16, barY + 22);
@@ -2721,13 +2719,18 @@ function _effStrideScore(record) {
   if (ratio > 1.3 && ratio <= 1.6)   return Math.round(100 - (ratio - 1.3) * 100);
   return Math.max(0, Math.round(60 - Math.abs(ratio - 1.1) * 30));
 }
-// [추가] 간이 효율점수: 손/프리런처럼 GCT·FLIGHT·수직진폭을 못 믿는 기록용.
-// 신뢰할 수 있는 케이던스(28)와 보폭(15)만 쓰고 65:35로 환산해 100점 만점으로 맞춘다.
-// 가슴/허리 기록의 정식 효율점수와는 기준이 달라 직접 비교하면 안 됨(화면에 "간이"로 표시).
+// [추가] 간이 효율점수: 손/프리런/암밴드처럼 GCT·FLIGHT·수직진폭을 못 믿는 기록용.
+// [수정 2026-09-19] 정식 점수와 같은 가중치(케이던스 28, 보폭 15, GCT 25, 체공 18, 수직 14)를 쓰되,
+// 못 재는 세 항목(합계 57%)은 일반 러너 평균 수준(70점)으로 가정해 채운다. 이렇게 하면 간이 점수가
+// 정식 점수와 같은 눈금이 되어 서로 비슷한 범위로 나온다(예전 방식은 케이던스·보폭만 100점 환산해
+// 정식 점수보다 20점 안팎 높게 나왔음). 가정값이라 오차가 크므로 화면에는 계속 "간이"로 표시.
+const EFF_SIMPLE_ASSUMED_SCORE = 70;
 function calcEffScoreSimple(record) {
   const cadence = parseInt(record.cadence);
   if (!cadence) return null;
-  return Math.min(100, Math.max(0, Math.round(_effCadScore(cadence) * 0.65 + _effStrideScore(record) * 0.35)));
+  return Math.min(100, Math.max(0, Math.round(
+    _effCadScore(cadence) * 0.28 + _effStrideScore(record) * 0.15 + EFF_SIMPLE_ASSUMED_SCORE * 0.57
+  )));
 }
 function calcEffScore(record) {
   const cadence = parseInt(record.cadence);
@@ -3310,7 +3313,7 @@ diagEffScore: "RUNNING EFFICIENCY", diagPaceLabel: "PACE", diagCadLabel: "CADENC
 diagStrideLabel: "STRIDE LENGTH", diagGctLabel: "RUNNING DYNAMICS", diagFlightLabel: "FLIGHT TIME", diagBalanceLabel: "L/R BALANCE",
 diagBalanceGood: "Left-right balance looks even.",
 diagBalanceExplain: "GCT compares left/right ground contact time, and GYRO compares left/right rotational movement — all shown as an L:R ratio (50:50 = perfectly even).",
-diagEffGood: "Excellent running efficiency!", diagEffAvg: "Average. Work on GCT and cadence.", diagEffBad: "Needs improvement. Metronome training recommended.", diagEffAvgSimple: "Average. Try to bring cadence closer to 170~185.", diagEffScoreSimple: "RUNNING EFFICIENCY (SIMPLE)", diagEffNote: "Combines cadence, GCT, flight, vertical oscillation and stride.", diagEffNoteSimple: "A rough guide from cadence and stride only. Don't compare it with chest/waist scores.",
+diagEffGood: "Excellent running efficiency!", diagEffAvg: "Average. Work on GCT and cadence.", diagEffBad: "Needs improvement. Metronome training recommended.", diagEffAvgSimple: "Average. Try to bring cadence closer to 170~185.", diagEffScoreSimple: "RUNNING EFFICIENCY (SIMPLE)", diagEffNote: "Combines cadence, GCT, flight, vertical oscillation and stride.", diagEffNoteSimple: "GCT, flight and vertical oscillation are assumed average, so treat it as a rough guide.",
 diagPaceFast: "Fast pace. Check sustainability.", diagPaceGood: "Good aerobic pace.", diagPaceEasy: "Easy pace. Try pushing a bit more.",
 diagPowerLow: "Low intensity. Good for recovery or easy runs.", diagPowerModerate: "Moderate intensity. A solid aerobic effort.", diagPowerHigh: "High intensity. Make sure to recover properly.",
 diagCadGood: "Optimal step frequency.", diagCadLow: "Slightly low cadence. Sync with metronome.",
@@ -3421,7 +3424,7 @@ diagEffScore: "러닝 효율 점수", diagPaceLabel: "페이스", diagCadLabel: 
 diagStrideLabel: "보폭 (STRIDE)", diagGctLabel: "러닝 다이내믹스 (GCT)", diagFlightLabel: "체공시간 (FLIGHT)", diagBalanceLabel: "좌우 밸런스",
 diagBalanceGood: "좌우 밸런스가 고른 편입니다.",
 diagBalanceExplain: "GCT는 좌우 지면 접촉 시간, GYRO는 좌우 회전 움직임을 비교한 값으로, 모두 L:R(좌:우) 비율로 표시됩니다(50:50이 완벽한 균형).",
-diagEffGood: "우수한 러닝 효율입니다!", diagEffAvg: "보통 수준입니다. GCT와 케이던스를 개선해보세요.", diagEffBad: "효율 개선이 필요합니다. 메트로놈 훈련을 권장합니다.", diagEffAvgSimple: "보통 수준입니다. 케이던스를 170~185에 가깝게 맞춰보세요.", diagEffScoreSimple: "러닝 효율 점수 (간이)", diagEffNote: "케이던스, GCT, 체공, 수직진폭, 보폭을 종합한 점수예요.", diagEffNoteSimple: "케이던스와 보폭만으로 계산한 참고용 점수예요. 가슴/허리 점수와 비교하지 마세요.",
+diagEffGood: "우수한 러닝 효율입니다!", diagEffAvg: "보통 수준입니다. GCT와 케이던스를 개선해보세요.", diagEffBad: "효율 개선이 필요합니다. 메트로놈 훈련을 권장합니다.", diagEffAvgSimple: "보통 수준입니다. 케이던스를 170~185에 가깝게 맞춰보세요.", diagEffScoreSimple: "러닝 효율 점수 (간이)", diagEffNote: "케이던스, GCT, 체공, 수직진폭, 보폭을 종합한 점수예요.", diagEffNoteSimple: "케이던스와 보폭만 측정하고 GCT·체공·수직은 평균으로 가정한 참고용 점수예요.",
 diagPaceFast: "빠른 페이스입니다. 지속 가능한지 확인하세요.", diagPaceGood: "적절한 유산소 페이스입니다.", diagPaceEasy: "여유 있는 페이스입니다. 조금 더 빠르게 도전해보세요.",
 diagPowerLow: "가벼운 강도입니다. 회복 러닝이나 이지런에 적합합니다.", diagPowerModerate: "적당한 강도입니다. 무난한 유산소 강도입니다.", diagPowerHigh: "고강도입니다. 충분한 회복을 챙기세요.",
 diagCadGood: "이상적인 보폭 빈도입니다.", diagCadLow: "케이던스가 다소 낮습니다. 메트로놈에 맞춰보세요.",
@@ -7319,10 +7322,10 @@ if (!_gctUntrusted && r.cadence && r.gct && r.flight && r.flight !== '--' && r.g
   if (score !== null) {
     effIsSimple = true;
     effScore = score;
-    // 간이 점수는 보폭 항목이 대부분 만점이라 실제 범위가 60~100으로 눌려 있음 → 판정 기준을 90/75로 상향
-    effColor = score >= 90 ? 'var(--good)' : score >= 75 ? 'var(--warning)' : 'var(--danger)';
-    effComment = score >= 90 ? t.diagEffGood
-    : score >= 75 ? (t.diagEffAvgSimple || t.diagEffAvg)
+    // 간이 점수도 정식 점수와 같은 눈금이므로 같은 판정 기준(80/55)을 쓴다
+    effColor = score >= 80 ? 'var(--good)' : score >= 55 ? 'var(--warning)' : 'var(--danger)';
+    effComment = score >= 80 ? t.diagEffGood
+    : score >= 55 ? (t.diagEffAvgSimple || t.diagEffAvg)
     : t.diagEffBad;
   }
 }
@@ -12368,7 +12371,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
       const hasEffCard = r.eff_score != null && r.eff_score > 0;
       const effIsSimpleCard = hasEffCard && r.gct_ms == null;
       const effValColorCard = !hasEffCard ? '#111'
-        : ((effIsSimpleCard ? r.eff_score >= 90 : r.eff_score >= 80) ? CrewStatColor.GOOD : CrewStatColor.BAD);
+        : ((r.eff_score >= 80) ? CrewStatColor.GOOD : CrewStatColor.BAD);
       const effLabelCard = effIsSimpleCard ? (t.crewEffSimple || 'EFF (SIMPLE)') : (t.crewEff || 'EFF');
       // [수정] RUN/WALK/TRAIL/FREE RUN 배지 (과거 기록엔 activity_mode가 없으므로 'run'으로 간주)
       const activityMode = r.activity_mode || 'run';
