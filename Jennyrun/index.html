@@ -7029,7 +7029,9 @@ try { history.pushState({ jrPage: 'detail' }, ''); } catch(e) {}
 if (this.detailMap) { this.detailMap.remove(); this.detailMap = null; }
 const detailMapDiv = document.getElementById('detail-map');
 if(detailMapDiv && typeof L !== 'undefined') {
-this.detailMap = L.map('detail-map-canvas', {zoomControl: false, attributionControl: false});
+// [수정] zoomSnap:0 → 경로가 컨테이너 크기에 맞춰 연속적으로(정수 줌 단계 없이) 꽉 차게 맞춰짐.
+// 정수 줌만 허용하면 지도 높이가 조금만 달라도 기록마다 경로가 2배 차이 나게 보였음.
+this.detailMap = L.map('detail-map-canvas', {zoomControl: false, attributionControl: false, zoomSnap: 0});
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(this.detailMap);
 // [수정] 경로맵은 밤에 뛰었든 낮에 뛰었든, 다크모드 설정과 무관하게 항상 밝게 표시
 forceRouteMapBright(detailMapDiv);
@@ -7037,7 +7039,9 @@ setTimeout(() => { if(this.detailMap) this.detailMap.invalidateSize(); }, 200);
 }
 if (record.path && record.path.length > 0 && this.detailMap) {
 let poly = L.polyline(record.path, {color: '#ff3333', weight: 2}).addTo(this.detailMap);
-this.detailMap.fitBounds(poly.getBounds());
+// [수정] 여백/maxZoom 없이 즉시 fitBounds 하던 것을 공통 함수로 교체 (레이아웃 확정 후에도 자동 재맞춤)
+this._detailRouteBounds = poly.getBounds();
+this._fitDetailRoute();
 // [수정] 방향 화살표는 제거하고, 시작 지점/종료 지점만 표시 (작은 삼각형/사각형 마커)
 addRouteEndpointMarkers(this.detailMap, record.path);
 }
@@ -7112,7 +7116,37 @@ let buttonRowHtml = '<div class="detail-btn-row"><button class="btn-detail-act b
 '<div class="detail-btn-row detail-btn-row-secondary"><button class="btn-detail-act btn-detail-save-map" onclick="ui.shareDetailRouteAction(' + record.id + ')">' + (t.shareMapBtn || (lang === 'ko' ? "경로맵 스타일로 공유" : "Share as route card")) + '</button></div>';
 const detailData = document.getElementById('detail-data');
 if(detailData) detailData.innerHTML = splitLogsHtml + dynamicsHtml + buttonRowHtml;
+// [수정] 하단 데이터 카드가 채워지면 flex 레이아웃 때문에 지도 높이가 줄어드는데(기록마다 행 수가 다름),
+// 그 뒤에 경로를 다시 맞추도록 컨테이너 크기 변화를 감시한다.
+this._watchDetailMapResize();
 this.renderDetailMapInfo(record);
+}
+// [수정] 히스토리 상세 미니맵 경로 맞춤 (기록마다 경로 크기가 달라 보이던 문제 해결)
+// - 컨테이너 크기 재계산(invalidateSize) 후 fitBounds
+// - 상단 닫기 버튼 / 하단 페이스 pill이 경로를 가리지 않도록 여백 지정
+// - maxZoom 지정 (경로가 매우 짧을 때 zoom이 Infinity가 되는 것 방지)
+_fitDetailRoute() {
+const m = this.detailMap, b = this._detailRouteBounds;
+if (!m || !b || !b.isValid()) return;
+const el = m.getContainer();
+if (!el || el.clientWidth < 50 || el.clientHeight < 50) return; // 아직 레이아웃 전이거나 숨김 상태
+m.invalidateSize({ animate: false });
+m.fitBounds(b, { paddingTopLeft: [45, 45], paddingBottomRight: [45, 50], maxZoom: 18, animate: false });
+}
+_watchDetailMapResize() {
+if (this._detailMapRO) { this._detailMapRO.disconnect(); this._detailMapRO = null; }
+const el = document.getElementById('detail-map-canvas');
+if (!el) return;
+if (typeof ResizeObserver !== 'undefined') {
+let raf = 0;
+this._detailMapRO = new ResizeObserver(() => {
+cancelAnimationFrame(raf);
+raf = requestAnimationFrame(() => this._fitDetailRoute());
+});
+this._detailMapRO.observe(el);
+} else {
+[100, 300, 700].forEach(ms => setTimeout(() => this._fitDetailRoute(), ms));
+}
 }
 closeDetail() { this.stopRoutePlayback(); const dv = document.getElementById('detail-view'); if(dv) dv.classList.remove('is-open'); }
 // [수정] SPLIT DISTANCE ANALYTICS 카드 첫 줄(날짜/시간/장소)에 표시. 장소는 좌표가 있으면 비동기로 역지오코딩해서 채워넣음.
