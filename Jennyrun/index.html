@@ -796,6 +796,25 @@ padding: 10px 22px; border-radius: 24px; font-weight: 900; font-size:var(--fs-ba
 box-shadow: 0 2px 12px rgba(0,255,136,0.25);
 }
 .map-fs-play-btn.playing { background: var(--primary); color: #000; }
+/* [추가 2026-09-19] 진단 화면의 작은 스파크라인 그래프를 탭하면 뜨는 확대 화면.
+   .map-fs-overlay/.map-fs-close-btn(위 공용 클래스)을 그대로 재사용하고,
+   내부 콘텐츠(스크롤 가능한 큰 그래프+세부 지표)만 전용 클래스로 새로 추가함. */
+.diag-graph-fs-content {
+flex: 1; width: 100%; overflow-y: auto; box-sizing: border-box;
+padding: calc(var(--top-inset) + 66px) 18px calc(var(--bottom-inset, 0px) + 30px);
+background: #000;
+}
+.diag-graph-fs-title { font-size: var(--fs-xl); font-weight: 900; color: #fff; }
+.diag-graph-fs-sub { font-size: var(--fs-xs); color: #888; font-weight: 700; margin-top: 4px; }
+.diag-graph-fs-svgwrap { margin: 22px 0 12px; background: #111; border-radius: 12px; padding: 14px 8px 10px; border: 1px solid #262626; }
+.diag-graph-fs-note { font-size: var(--fs-sm); color: #ccc; font-weight: 700; margin-top: 10px; line-height: 1.5; }
+.diag-graph-fs-stats { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+.diag-graph-fs-stat { flex: 1 1 28%; min-width: 90px; background: #161616; border: 1px solid #2c2c2c; border-radius: 10px; padding: 10px 8px; text-align: center; }
+.diag-graph-fs-stat-label { font-size: var(--fs-xxs); color: #888; font-weight: 900; letter-spacing: 0.3px; text-transform: uppercase; margin-bottom: 4px; }
+.diag-graph-fs-stat-val { font-size: var(--fs-md); color: #fff; font-weight: 900; }
+/* 진단 카드 안의 작은 그래프 클릭 영역: 탭 가능함을 알려주는 커서+우측 하단 확대 힌트 */
+.diag-graph-wrap { cursor: pointer; position: relative; }
+.diag-graph-expand-hint { font-size: var(--fs-xxs); color: #666; font-weight: 800; text-align: right; margin-top: 3px; letter-spacing: 0.3px; }
 /* [신규] 메인 맵 전체화면 하단 - 러닝 중 평균 PACE/CADENCE/STRIDE 스탯바 */
 /* [2026-09 수정] 데이터박스 2배 확대 + 주간/야간 배색 분리(시인성 개선).
    기존 --fs-xxs/--fs-base 스케일 변수에 calc()로 2배만 적용해 폰트 스케일 체계는
@@ -1549,6 +1568,18 @@ transform: scale(0.97); background: var(--primary); color: #111; border-color: v
 <button id="btn-feed-route-play" class="map-fs-play-btn" onclick="community.toggleFeedRoutePlayback()">▶ PLAY</button>
 <button id="btn-feed-map-fullscreen-close" class="map-fs-close-btn" onclick="history.back()">✕ CLOSE</button>
 </div>
+</div>
+<!-- [추가 2026-09-19] 진단 화면 스파크라인 그래프 확대 전체화면 오버레이 -->
+<div id="diag-graph-fullscreen-overlay" class="map-fs-overlay">
+<div class="diag-graph-fs-content">
+<div id="diag-graph-fs-title" class="diag-graph-fs-title">--</div>
+<div id="diag-graph-fs-sub" class="diag-graph-fs-sub"></div>
+<div id="diag-graph-fs-svgwrap" class="diag-graph-fs-svgwrap"></div>
+<div id="diag-graph-fs-axis"></div>
+<div id="diag-graph-fs-note" class="diag-graph-fs-note"></div>
+<div id="diag-graph-fs-stats" class="diag-graph-fs-stats"></div>
+</div>
+<button id="btn-diag-graph-fullscreen-close" class="map-fs-close-btn" onclick="history.back()">✕ CLOSE</button>
 </div>
 <!-- ===== 러닝 진단(RUN DIAGNOSIS) 화면 ===== -->
 <div id="diag-view" class="diag-view">
@@ -3085,7 +3116,11 @@ if (edgeSet) {
   if (firstCore > 0) edgeSvg += faded(coords.slice(0, firstCore + 1));
   if (lastCore < pts.length - 1) edgeSvg += faded(coords.slice(lastCore));
 }
-return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%;height:32px;display:block;margin-top:6px;">'
+// [추가 2026-09-19] opts.heightPx: 확대(전체화면) 표시용으로 렌더링 높이만 키운다.
+// viewBox 좌표계(H=32)는 그대로 두고 CSS 높이만 늘리면, preserveAspectRatio="none" +
+// vector-effect="non-scaling-stroke" 조합 덕분에 선 굵기는 그대로 유지된 채 세로로 확대되어 그려진다.
+const svgHeightPx = (opts && opts.heightPx) || 32;
+return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%;height:' + svgHeightPx + 'px;display:block;margin-top:6px;">'
   + '<polyline points="' + areaPts + '" fill="' + colorHex + '" opacity="0.12" stroke="none"></polyline>'
   + avgDashSvg
   + bestLineSvg
@@ -3095,20 +3130,24 @@ return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style=
   + '</svg>';
 }
 // [추가 2026-09-19] 그래프 세로 눈금/최고값 계산에서 제외할 경계 구간(양 끝에만 존재):
-//  - 첫 구간: 출발 직후 가속/케이던스 상승 중이라 항상 제외
+//  - 첫 구간(들): 출발 직후 가속/케이던스 상승 중이라 항상 제외. leadCount로 개수 조절(기본 1).
 //  - 마지막 구간: 70m 미만 자투리이거나, 가운데 구간 중앙값에서 8% 넘게 벗어난 경우(정지 직전 감속 등)
 // 이런 극단값 하나가 나머지 구간을 납작하게 눌러 보이게 하던 문제를 막는다. vals는 그래프에 쓰는 값 배열.
-function getGraphEdgeSet(splits, vals) {
+// [수정 2026-09-19] leadCount 파라미터 추가: calcPacingMetrics의 전/후반 평균 계산(pick, i>=2)과
+// 케이던스·심박 그래프의 흐린 edge 표시 범위를 맞추기 위해, 해당 그래프는 leadCount=2로 호출한다
+// (평균 계산에 안 쓰인 초반 구간은 그래프에서도 흐리게 보이도록 일관성을 맞춤).
+function getGraphEdgeSet(splits, vals, leadCount) {
   const set = new Set();
   if (!splits || splits.length < 5) return set;
-  set.add(0);
+  const lead = leadCount || 1;
+  for (let k = 0; k < Math.min(lead, splits.length); k++) set.add(k);
   const lastIdx = splits.length - 1;
   const kmLast = parseFloat(splits[lastIdx].km);
   const kmPrev = parseFloat(splits[lastIdx - 1].km);
   if (isFinite(kmLast) && isFinite(kmPrev) && (kmLast - kmPrev) < 0.07) {
     set.add(lastIdx);
   } else if (vals) {
-    const mid = vals.slice(1, lastIdx).filter(v => typeof v === 'number' && isFinite(v)).sort((x, y) => x - y);
+    const mid = vals.slice(lead, lastIdx).filter(v => typeof v === 'number' && isFinite(v)).sort((x, y) => x - y);
     const v = vals[lastIdx];
     if (mid.length >= 3 && typeof v === 'number' && isFinite(v)) {
       const med = mid[Math.floor(mid.length / 2)];
@@ -7575,14 +7614,18 @@ const _diagSplitTimes = _splitsForGraph.map(s => (typeof s.t_sec === 'number' ? 
 // [추가 2026-09-19] 출발 첫 구간/끝 자투리는 그래프 눈금·최고값에서 제외, 전/후반 평균선 추가
 const _paceVals = _splitsForGraph.map(s => paceStrToSeconds(s.pace));
 const _cadVals = _splitsForGraph.map(s => (typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3) ? s.avgCadence : null));
+const _hrVals = _splitsForGraph.map(s => (typeof s.avgHr === 'number' ? s.avgHr : null));
 const _powVals = _splitsForGraph.map(s => (typeof s.power === 'number' ? s.power : null));
 const _edgePace = getGraphEdgeSet(_splitsForGraph, _paceVals);
-const _edgeCad = getGraphEdgeSet(_splitsForGraph, _cadVals);
+// [수정 2026-09-19] 케이던스·심박은 calcPacingMetrics의 전/후반 평균이 초반 2구간(i>=2)을 뺴고
+// 계산되므로, 그래프의 흐린 edge 표시도 leadCount=2로 맞춰 흰 평균선 시작점과 일치시킨다.
+const _edgeCad = getGraphEdgeSet(_splitsForGraph, _cadVals, 2);
+const _edgeHr = getGraphEdgeSet(_splitsForGraph, _hrVals, 2);
 const _edgePow = getGraphEdgeSet(_splitsForGraph, _powVals);
 const _pm = calcPacingMetrics(r);
 const paceSparkSvg = buildSparklineSVG(_paceVals, '#00ff88', true, undefined, undefined, _diagSplitTimes, { edge: _edgePace, half: _pm.paceHalf });
 const cadSparkSvg = buildSparklineSVG(_cadVals, '#4fc3f7', false, undefined, undefined, _diagSplitTimes, { edge: _edgeCad, half: _pm.cadHalf });
-const hrSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.avgHr === 'number' ? s.avgHr : null)), '#e53935', false, undefined, undefined, _diagSplitTimes, { half: _pm.hrHalf });
+const hrSparkSvg = buildSparklineSVG(_hrVals, '#e53935', false, undefined, undefined, _diagSplitTimes, { edge: _edgeHr, half: _pm.hrHalf });
 const altSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.altTo === 'number' ? s.altTo : null)), '#90a4ae', false, undefined, undefined, _diagSplitTimes);
 // [신규] 구간별 러닝 파워(와트) 그래프. 값이 없는(옛 기록) 구간은 null로 필터링됨.
 const powerSparkSvg = buildSparklineSVG(_powVals, '#ffb74d', false, undefined, undefined, _diagSplitTimes, { edge: _edgePow });
@@ -7624,20 +7667,24 @@ function _fmtPeakPaceStr(sec) {
 }
 let pacePeakDisplay = _fmtPeakPaceStr(pacePeakSecForDiag);
 if (pacePeakDisplay && this.currentUnit === 'mile') pacePeakDisplay = this.convertPaceToUnit(pacePeakDisplay, 'mile');
+// [추가 2026-09-19] 미니 그래프를 탭하면 큰 확대 화면(openDiagGraphFullscreen)이 뜨도록 감싸는 헬퍼.
+// 그래프가 없으면(짧은 러닝 등) 그냥 빈 문자열 — 탭할 것도, 힌트도 안 나온다.
+const _expandHint = '<div class="diag-graph-expand-hint">\u26F6 ' + t.tapToExpand + '</div>';
+const _wrapGraph = (key, svg, extraHtml) => svg ? ('<div class="diag-graph-wrap" onclick="ui.openDiagGraphFullscreen(\'' + key + '\',' + r.id + ')">' + svg + (extraHtml || '') + _expandHint + '</div>') : '';
 contentArea.innerHTML =
 '<div class="diag-card"><div class="diag-label">' + (effIsSimple ? (t.diagEffScoreSimple || t.diagEffScore) : t.diagEffScore) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + effColor + '">' + effScore + ' <span style="font-size:var(--fs-md);color:#aaa">/ 100</span></div>' + (effIsSimple ? '' : '<div class="diag-ref">Ref: ≥80</div>') + '</div><div class="diag-tip">' + effComment + '</div>' + (effScore !== '--' ? '<div style="margin-top:6px;font-size:var(--fs-xxs);color:#888;font-weight:700;">' + (effIsSimple ? (t.diagEffNoteSimple || '') : (t.diagEffNote || '')) + '</div>' : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.time||'TIME') + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.time||'--') + '</div></div>' +
 '<div style="margin-top:6px;font-size:var(--fs-sm);color:#aaa;font-weight:700;">' + (t.speed||'SPEED') + ' : ' + (() => { const p=r.avgPace||r.pace; if(p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60); return this.currentUnit==='mile'?(kmh*0.621371).toFixed(1)+' mi/h':kmh.toFixed(1)+' km/h';} return '--'; })() + '</div>' +
 '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + (pacePeakDisplay ? (' / ' + pacePeakDisplay) : '') + ' <span class="c44">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div>' + paceSparkSvg + (paceSparkSvg ? diagAxisLabelsHtml + paceNoteHtml : '') + '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.powerLabel || "POWER") + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + (powerPeakForDiag != null ? (' / ' + powerPeakForDiag) : '') + ' <span class="c44">W</span></div><div class="diag-ref">' + (t.powerZoneLabel || 'POWER ZONE') + ': ' + powerZoneDisplay + '</div></div><div class="diag-tip">' + powerComment + '</div>' + powerSparkSvg + (powerSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.cadence ? this.getCadenceColor(r.cadence) : '#aaa') + '">CAD: ' + (r.cadence || 0) + (cadPeakForDiag != null ? (' / ' + cadPeakForDiag) : '') + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div>' + cadSparkSvg + (cadSparkSvg ? diagAxisLabelsHtml + cadNoteHtml : '') + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + (pacePeakDisplay ? (' / ' + pacePeakDisplay) : '') + ' <span class="c44">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div>' + _wrapGraph('pace', paceSparkSvg, diagAxisLabelsHtml + paceNoteHtml) + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.powerLabel || "POWER") + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + (powerPeakForDiag != null ? (' / ' + powerPeakForDiag) : '') + ' <span class="c44">W</span></div><div class="diag-ref">' + (t.powerZoneLabel || 'POWER ZONE') + ': ' + powerZoneDisplay + '</div></div><div class="diag-tip">' + powerComment + '</div>' + _wrapGraph('power', powerSparkSvg, diagAxisLabelsHtml) + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.cadence ? this.getCadenceColor(r.cadence) : '#aaa') + '">CAD: ' + (r.cadence || 0) + (cadPeakForDiag != null ? (' / ' + cadPeakForDiag) : '') + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div>' + _wrapGraph('cadence', cadSparkSvg, diagAxisLabelsHtml + cadNoteHtml) + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getStrideColor(strideNumForFeedback, diagProfile) + '">' + strideVal + '</div><div class="diag-ref">Ref: 0.5~0.75m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (!_gctUntrusted && r.gct && r.gct !== '--' ? this.getGctColor(r.gct) : '#aaa') + '">GCT: ' + (_gctUntrusted ? '--' : r.gct) + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagBalanceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (_gctFlightHidden ? '#aaa' : this.getBalanceColor(r.gctBal)) + '">GCT ' + (_gctFlightHidden ? '--' : (r.gctBal || '--')) + ' <span style="font-size:var(--fs-xs);color:#aaa">L:R</span></div><div class="diag-ref">GYRO ' + (_gctFlightHidden ? '--' : (r.gyroBal || '--')) + '</div></div><div class="diag-tip">' + diagFeedback.balance + '</div><div style="font-size:var(--fs-xs);color:#888;font-weight:600;line-height:1.5;margin-top:8px;padding-top:8px;border-top:1px solid #222;">' + (t.diagBalanceExplain || '') + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagFlightLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (isNaN(flightNum)?'#aaa':this.getFlightColor(flightNum)) + '">' + flightVal + (flightVal!=='--'?' %':'') + '</div><div class="diag-ref">Ref: 30~45%</div></div><div class="diag-tip">' + flightComment + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagHrLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + hrColor + '">' + hrMainVal + '</div><div class="diag-ref">' + t.hrZoneLabel + ': ' + hrZoneDisplay + '</div></div><div class="diag-tip">' + hrComment + '</div>' + hrSparkSvg + (hrSparkSvg ? diagAxisLabelsHtml + hrNoteHtml : '') + '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagAltLabel || "GPS ALTITUDE") + '</div><div class="diag-val-group"><div class="diag-main-val">' + (altSparkSvg ? ('+' + totalAltGainForDiag.toFixed(0) + ' <span class="c44">M</span>') : '--') + '</div></div>' + (altSparkSvg ? (altSparkSvg + diagAxisLabelsHtml) : '<div class="diag-tip">' + (t.diagAltNoData || '') + '</div>') + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagHrLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + hrColor + '">' + hrMainVal + '</div><div class="diag-ref">' + t.hrZoneLabel + ': ' + hrZoneDisplay + '</div></div><div class="diag-tip">' + hrComment + '</div>' + _wrapGraph('hr', hrSparkSvg, diagAxisLabelsHtml + hrNoteHtml) + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagAltLabel || "GPS ALTITUDE") + '</div><div class="diag-val-group"><div class="diag-main-val">' + (altSparkSvg ? ('+' + totalAltGainForDiag.toFixed(0) + ' <span class="c44">M</span>') : '--') + '</div></div>' + (altSparkSvg ? _wrapGraph('alt', altSparkSvg, diagAxisLabelsHtml) : '<div class="diag-tip">' + (t.diagAltNoData || '') + '</div>') + '</div>' +
 // [추가] 린각도: 해당 기록에 데이터가 있을 때만 카드+다이어그램 노출 (LeanAngleUI.has()로 게이팅, 계산/판정 로직은 모듈만 사용)
 (LeanAngleUI.has(r) ?
 '<div class="diag-card"><div class="diag-label">' + (t.diagLeanLabel || 'LEAN ANGLE') + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (LeanAngleUI.colorForPrimary(r.avgLeanAngleDeg, r.avgLeanForwardDeg) || '#aaa') + '">' + LeanAngleUI.fmtPrimary(r.avgLeanAngleDeg, r.avgLeanForwardDeg) + '</div><div class="diag-ref">Ref: 4~8°</div></div><div class="diag-tip">' + (LeanAngleUI.primarySubHtml(r.avgLeanAngleDeg, r.avgLeanLateralDeg, r.avgLeanForwardDeg, lang, 'var(--fs-xs)') || '') + '</div>' +
@@ -16052,6 +16099,102 @@ this.stopRoutePlayback();
 // 다음번 열 때 갱신 위해 초기화
 if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
 };
+// [추가 2026-09-19] 진단 화면 미니 그래프 확대(전체화면) — 작은 카드에서 안 보이던
+// 평균/최고/최저/구간수/총시간 같은 세부 지표를 큰 그래프와 함께 보여준다.
+// id로 기록을 다시 찾아 그래프별 값을 새로 계산하는 방식(openDiag과 별개, 자기완결적).
+UIManager.prototype.openDiagGraphFullscreen = function(metricKey, id) {
+const h = storage.loadHistory();
+const r = h.find(rec => rec.id === id);
+const splits = (r && r.diagSplits) || [];
+if (!r || splits.length < 2) return;
+const lang = storage.getLang();
+const t = translations[lang];
+const koLang = lang === 'ko';
+const times = splits.map(s => (typeof s.t_sec === 'number' ? s.t_sec : null));
+const pm = calcPacingMetrics(r);
+let vals, color, invert, edge, half, label, fmt, noteHtml;
+if (metricKey === 'pace') {
+  vals = splits.map(s => paceStrToSeconds(s.pace));
+  color = '#00ff88'; invert = true;
+  edge = getGraphEdgeSet(splits, vals);
+  half = pm.paceHalf;
+  label = t.diagPaceLabel;
+  fmt = (v) => { if (v == null || !isFinite(v)) return '--'; const sec = Math.round(v); let str = Math.floor(sec / 60) + "'" + String(sec % 60).padStart(2, '0') + '"'; if (this.currentUnit === 'mile') str = this.convertPaceToUnit(str, 'mile'); return str; };
+  noteHtml = pm.paceHalf ? ((koLang ? '전반 ' : '1st half ') + fmt(pm.paceHalf.v1) + ' \u2192 ' + (koLang ? '후반 ' : '2nd half ') + fmt(pm.paceHalf.v2)
+    + ' (' + (pm.splitDiff > 0 ? '+' : (pm.splitDiff < 0 ? '\u2212' : '')) + Math.abs(pm.splitDiff) + (koLang ? '초' : 's') + ')'
+    + (pm.paceStab ? ' \u00b7 ' + (koLang ? '안정성 \u00b1' : 'stability \u00b1') + pm.paceStab.sec + (koLang ? '초' : 's') : '')) : '';
+} else if (metricKey === 'cadence') {
+  vals = splits.map(s => (typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3) ? s.avgCadence : null));
+  color = '#4fc3f7'; invert = false;
+  edge = getGraphEdgeSet(splits, vals, 2);
+  half = pm.cadHalf;
+  label = t.diagCadLabel;
+  fmt = (v) => (v == null || !isFinite(v)) ? '--' : (Math.round(v) + ' SPM');
+  noteHtml = pm.cadHalf ? ((koLang ? '전반 ' : '1st ') + Math.round(pm.cadHalf.v1) + ' \u2192 ' + (koLang ? '후반 ' : '2nd ') + Math.round(pm.cadHalf.v2) + ' SPM'
+    + ' (' + (pm.cadDrift > 0 ? '+' : (pm.cadDrift < 0 ? '\u2212' : '')) + Math.abs(Math.round(pm.cadDrift * 10) / 10).toFixed(1) + '%)') : '';
+} else if (metricKey === 'hr') {
+  vals = splits.map(s => (typeof s.avgHr === 'number' ? s.avgHr : null));
+  color = '#e53935'; invert = false;
+  edge = getGraphEdgeSet(splits, vals, 2);
+  half = pm.hrHalf;
+  label = t.diagHrLabel;
+  fmt = (v) => (v == null || !isFinite(v)) ? '--' : (Math.round(v) + ' BPM');
+  noteHtml = pm.hrHalf ? ((koLang ? '전반 ' : '1st ') + Math.round(pm.hrHalf.v1) + ' \u2192 ' + (koLang ? '후반 ' : '2nd ') + Math.round(pm.hrHalf.v2) + ' bpm'
+    + ' (' + (pm.hrDrift > 0 ? '+' : (pm.hrDrift < 0 ? '\u2212' : '')) + Math.abs(pm.hrDrift) + ')') : '';
+} else if (metricKey === 'power') {
+  vals = splits.map(s => (typeof s.power === 'number' ? s.power : null));
+  color = '#ffb74d'; invert = false;
+  edge = getGraphEdgeSet(splits, vals);
+  half = null;
+  label = t.powerLabel || 'POWER';
+  fmt = (v) => (v == null || !isFinite(v)) ? '--' : (Math.round(v) + ' W');
+  noteHtml = '';
+} else if (metricKey === 'alt') {
+  vals = splits.map(s => (typeof s.altTo === 'number' ? s.altTo : null));
+  color = '#90a4ae'; invert = false;
+  edge = new Set();
+  half = null;
+  label = t.diagAltLabel || 'GPS ALTITUDE';
+  fmt = (v) => (v == null || !isFinite(v)) ? '--' : (Math.round(v) + ' M');
+  noteHtml = '';
+} else { return; }
+const svg = buildSparklineSVG(vals, color, invert, true, true, times, { edge: edge, half: half, heightPx: 220 });
+if (!svg) return;
+const axisHtml = buildDiagAxisLabelsHtml(splits);
+// 세부 지표: 작은 카드엔 없던 평균/최고/최저/구간 수/총 소요시간을 계산해 보여준다.
+const validVals = vals.filter((v, i) => typeof v === 'number' && isFinite(v) && !edge.has(i));
+let statsHtml = '';
+if (validVals.length) {
+  const avg = validVals.reduce((a, b) => a + b, 0) / validVals.length;
+  const mn = Math.min(...validVals), mx = Math.max(...validVals);
+  const bestVal = invert ? mn : mx, worstVal = invert ? mx : mn;
+  let totalT = null;
+  for (let k = times.length - 1; k >= 0; k--) { if (typeof times[k] === 'number') { totalT = times[k]; break; } }
+  const stat = (labelTxt, valTxt) => '<div class="diag-graph-fs-stat"><div class="diag-graph-fs-stat-label">' + labelTxt + '</div><div class="diag-graph-fs-stat-val">' + valTxt + '</div></div>';
+  statsHtml = stat(koLang ? '평균' : 'AVG', fmt(avg)) + stat(koLang ? '최고' : 'BEST', fmt(bestVal)) + stat(koLang ? '최저' : 'WORST', fmt(worstVal))
+    + stat(koLang ? '구간 수' : 'SPLITS', String(validVals.length))
+    + (totalT != null ? stat(koLang ? '총 시간' : 'TOTAL TIME', fmtDiagAxisTime(totalT)) : '');
+}
+const titleEl = document.getElementById('diag-graph-fs-title');
+const subEl = document.getElementById('diag-graph-fs-sub');
+const svgWrapEl = document.getElementById('diag-graph-fs-svgwrap');
+const axisEl = document.getElementById('diag-graph-fs-axis');
+const noteEl = document.getElementById('diag-graph-fs-note');
+const statsEl = document.getElementById('diag-graph-fs-stats');
+if (titleEl) titleEl.textContent = label;
+if (subEl) subEl.textContent = this.formatRecordDateTimeLocalized(r.date) + (r.dist ? (' \u00b7 ' + r.dist + ' km') : '');
+if (svgWrapEl) svgWrapEl.innerHTML = svg;
+if (axisEl) axisEl.innerHTML = axisHtml;
+if (noteEl) noteEl.innerHTML = noteHtml;
+if (statsEl) statsEl.innerHTML = statsHtml;
+const overlay = document.getElementById('diag-graph-fullscreen-overlay');
+if (overlay) overlay.classList.add('active');
+try { history.pushState({ jrPage: 'diagGraphFull' }, ''); } catch (e) {}
+};
+UIManager.prototype.closeDiagGraphFullscreen = function() {
+const overlay = document.getElementById('diag-graph-fullscreen-overlay');
+if (overlay) overlay.classList.remove('active');
+};
 // ========== 경로 재생 (전체화면 지도) ==========
 // [수정] 기존에는 히스토리 상세 맵(_detailMapFull) 전용으로만 짜여 있었음.
 // 크루 피드의 전체화면 지도에서도 동일한 재생 기능을 쓸 수 있도록, 재생 대상
@@ -16363,6 +16506,12 @@ UIManager.prototype.stopRoutePlayback = function() {
     const feedMapFull = document.getElementById('feed-map-fullscreen-overlay');
     if (feedMapFull && feedMapFull.classList.contains('active')) {
       if (typeof community !== 'undefined') community.closeFeedMapFullscreen();
+      return;
+    }
+    // [추가 2026-09-19] 진단 화면 그래프 확대가 열려있으면 → 진단 화면으로 복귀(닫기만)
+    const diagGraphFull = document.getElementById('diag-graph-fullscreen-overlay');
+    if (diagGraphFull && diagGraphFull.classList.contains('active')) {
+      if (ui) ui.closeDiagGraphFullscreen();
       return;
     }
     // [추가] 기록 상세(경로 맵) 페이지가 열려있으면 → 메인 RUN 화면으로 복귀
