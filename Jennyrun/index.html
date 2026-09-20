@@ -2803,8 +2803,11 @@ function calcPacingMetrics(record) {
   // 2) 전/후반 페이스 차: 총 거리의 절반 지점에서 시간을 보간해 (후반 − 전반) 초/km. 음수 = 네거티브 스플릿(후반이 빠름)
   // [수정 2026-09-19] 출발 직후(GRAPH_LEAD_SEC.pace 이내) 구간은 가속 중이라 전/후반 평균에서 제외한다.
   // 그래프의 흐린 구간·케이던스/심박 전후반 평균과 같은 기준이 되어 숫자와 그래프(흰 선 시작점)가 일치한다.
+  // 끝의 짧은 자투리(70m 미만) / 정지 직전 감속 구간도 그래프의 흐린 점선(getGraphEdgeSet)과 같은 규칙으로 제외한다.
+  // (자투리를 포함하면 10~30m가 몇 초 걸린 값이 후반 평균을 크게 끌어올려 그래프의 흰 선이 최저점 아래로 붙는 문제가 있었음)
   // 제외하고 남는 거리가 0.4km 미만인 짧은 러닝은 값이 사라지지 않도록 예전처럼 전체 구간을 사용한다.
-  const coreSegs = valid.filter(g => g.idx >= leadPace);
+  const _edgeForHalf = getGraphEdgeSet(sp, sp.map(s => paceStrToSeconds(s.pace)), leadPace);
+  const coreSegs = valid.filter(g => g.idx >= leadPace && !_edgeForHalf.has(g.idx));
   const coreKm0 = coreSegs.reduce((a, g) => a + g.dkm, 0);
   const useSegs = coreKm0 >= 0.4 ? coreSegs : valid;
   const useKm = useSegs.reduce((a, g) => a + g.dkm, 0);
@@ -3219,7 +3222,12 @@ function buildDiagGraphFsPlotHtml(svg, lay, o) {
       + seg(lay.half.r2, (ko ? '후반 평균 ' : '2nd half avg ') + fmt(lay.half.v2))
       + '</div>';
   }
-  let tags = '';
+  // 방향 안내(빠름/느림 등): ▲▼ 글리프는 기기 폰트에 따라 크게 나와 옆 라벨을 가리므로 CSS 삼각형으로 그린다.
+  // 다른 라벨(최고/평균)이 위에 그려지도록 가장 먼저 넣는다.
+  const tri = (up) => '<i style="display:inline-block;vertical-align:middle;width:0;height:0;margin-left:4px;border-left:4px solid transparent;border-right:4px solid transparent;' + (up ? 'border-bottom' : 'border-top') + ':6px solid #888;"></i>';
+  const hintTop = (o.invert ? (ko ? '빠름' : 'Fast') : (ko ? '높음' : 'High')) + tri(true);
+  const hintBot = (o.invert ? (ko ? '느림' : 'Slow') : (ko ? '낮음' : 'Low')) + tri(false);
+  let tags = '<div style="' + tag + 'left:2px;top:0;color:#888;">' + hintTop + '</div><div style="' + tag + 'left:2px;bottom:0;color:#888;">' + hintBot + '</div>';
   if (lay.avgY != null && o.avgVal != null) {
     tags += '<div style="' + tag + 'right:2px;top:' + pctY(lay.avgY) + ';transform:translateY(-100%);color:#a0a0a0;">' + (ko ? '평균 ' : 'AVG ') + fmt(o.avgVal) + '</div>';
   }
@@ -3229,13 +3237,10 @@ function buildDiagGraphFsPlotHtml(svg, lay, o) {
       tags += '<div style="' + tag + 'left:' + pctX(mid) + ';bottom:3px;transform:translateX(-50%);color:#FFD60A;">' + (ko ? '최고 유지구간' : 'Best stretch') + '</div>';
     } else {
       const bx = lay.best[0].x;
-      const side = bx > W * 0.6 ? ('right:' + pctX(W - bx) + ';margin-right:4px;') : ('left:' + pctX(bx) + ';margin-left:4px;');
+      const side = bx > W * 0.6 ? ('right:' + pctX(W - bx) + ';margin-right:4px;') : ('left:max(calc(' + pctX(bx) + ' + 4px), 58px);');
       tags += '<div style="' + tag + side + 'bottom:3px;color:#FFD60A;">' + (ko ? '최고 ' : 'Best ') + fmt(o.bestVal) + '</div>';
     }
   }
-  const hintTop = o.invert ? (ko ? '빠름 ▲' : 'Fast ▲') : (ko ? '높음 ▲' : 'High ▲');
-  const hintBot = o.invert ? (ko ? '느림 ▼' : 'Slow ▼') : (ko ? '낮음 ▼' : 'Low ▼');
-  tags += '<div style="' + tag + 'left:2px;top:0;color:#888;">' + hintTop + '</div><div style="' + tag + 'left:2px;bottom:0;color:#888;">' + hintBot + '</div>';
   // svg는 margin-top:6px 로 그려지므로(flow-root로 감쌈) 라벨 레이어도 top:6px, 높이는 그래프 렌더 높이와 동일
   return '<div>' + head + '<div style="position:relative;display:flow-root;">' + svg
     + '<div style="position:absolute;left:0;right:0;top:6px;height:' + o.heightPx + 'px;pointer-events:none;">' + tags + '</div></div></div>';
