@@ -802,20 +802,23 @@ box-shadow: 0 2px 12px rgba(0,255,136,0.25);
    내부 콘텐츠(스크롤 가능한 큰 그래프+세부 지표)만 전용 클래스로 새로 추가함. */
 .diag-graph-fs-content {
 flex: 1; width: 100%; overflow-y: auto; box-sizing: border-box;
-padding: calc(var(--top-inset) + 66px) 18px calc(var(--bottom-inset, 0px) + 30px);
+/* [수정 2026-09-25] 여백을 줄여 콘텐츠가 화면 안에 더 잘 들어오게 함 — 아래 설명 참고 */
+padding: calc(var(--top-inset) + 54px) 18px calc(var(--bottom-inset, 0px) + 16px);
 background: #000;
 /* [수정 2026-09-25] 페이스/케이던스/심박처럼 "전/후반 평균" 헤더+노트가 붙어 콘텐츠가
    화면보다 길어지는 그래프는 이 박스가 스크롤되는데, overscroll-behavior가 없으면
    맨 위/아래에서 살짝만 당겨도 뒤 배경까지 같이 흔들리는 바운스가 생겨 "화면이 고정 안
    되고 스크롤되는 느낌"을 준다. 파워/고도처럼 헤더가 없어 스크롤이 안 생기는 그래프는
-   애초에 흔들릴 일이 없어 괜찮았던 것. contain으로 이 박스 안에서 스크롤을 가둔다. */
+   애초에 흔들릴 일이 없어 괜찮았던 것. contain으로 이 박스 안에서 스크롤을 가둔다.
+   [추가] 근본적으로는 "스크롤할 필요 자체가 없게" 만드는 게 제일 확실해서, 위/아래 여백과
+   그래프 높이를 줄여 콘텐츠가 화면 안에 들어올 확률을 높였다(아래 svgwrap/note/stats 참고). */
 overscroll-behavior-y: contain;
 }
 .diag-graph-fs-title { font-size: var(--fs-xl); font-weight: 900; color: #fff; }
 .diag-graph-fs-sub { font-size: var(--fs-xs); color: #888; font-weight: 700; margin-top: 4px; }
-.diag-graph-fs-svgwrap { margin: 22px 0 12px; background: #111; border-radius: 12px; padding: 14px 8px 10px; border: 1px solid #262626; }
-.diag-graph-fs-note { font-size: var(--fs-sm); color: #ccc; font-weight: 700; margin-top: 10px; line-height: 1.5; }
-.diag-graph-fs-stats { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+.diag-graph-fs-svgwrap { margin: 14px 0 8px; background: #111; border-radius: 12px; padding: 14px 8px 10px; border: 1px solid #262626; }
+.diag-graph-fs-note { font-size: var(--fs-sm); color: #ccc; font-weight: 700; margin-top: 8px; line-height: 1.4; }
+.diag-graph-fs-stats { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
 .diag-graph-fs-stat { flex: 1 1 28%; min-width: 90px; background: #161616; border: 1px solid #2c2c2c; border-radius: 10px; padding: 10px 8px; text-align: center; }
 .diag-graph-fs-stat-label { font-size: var(--fs-xxs); color: #888; font-weight: 900; letter-spacing: 0.3px; text-transform: uppercase; margin-bottom: 4px; }
 .diag-graph-fs-stat-val { font-size: var(--fs-md); color: #fff; font-weight: 900; }
@@ -3260,7 +3263,15 @@ function buildDiagGraphFsPlotHtml(svg, lay, o) {
   const tag = 'position:absolute;white-space:nowrap;font-size:var(--fs-xs);font-weight:900;line-height:1.2;padding:1px 4px;border-radius:4px;background:rgba(17,17,17,0.78);';
   let head = '';
   if (lay.half) {
-    const seg = (r, txt) => '<div style="position:absolute;top:0;left:' + pctX(r[0]) + ';width:' + ((r[1] - r[0]) / W * 100).toFixed(2) + '%;text-align:center;white-space:nowrap;font-size:var(--fs-xs);font-weight:900;color:#e6e6e6;">' + txt + '<i style="display:block;height:5px;margin:3px 2px 0;border:1px solid rgba(255,255,255,0.5);border-top:none;"></i></div>';
+// [수정 2026-09-25] 전/후반 평균 라벨이 그래프 오른쪽(혹은 왼쪽) 끝에 붙은 짧은 구간 위에 놓일 때,
+    // 가운데 정렬(text-align:center)이라 글자가 상자보다 넓으면 양쪽으로 똑같이 넘치는데, 상자 끝이
+    // 이미 화면 가장자리와 맞닿아 있어서 그쪽으로 넘친 글자가 화면 밖으로 잘려나갔다. 상자가 오른쪽
+    // 끝(78% 이상)에 있으면 텍스트를 상자 오른쪽 끝에 맞춰(그래서 넘치는 쪽이 안쪽인 왼쪽이 되도록),
+    // 왼쪽 끝(22% 이하)에 있으면 그 반대로 정렬해 항상 화면 안쪽으로만 넘치게 한다.
+    const seg = (r, txt) => {
+      const align = r[1] > W * 0.78 ? 'right' : (r[0] < W * 0.22 ? 'left' : 'center');
+      return '<div style="position:absolute;top:0;left:' + pctX(r[0]) + ';width:' + ((r[1] - r[0]) / W * 100).toFixed(2) + '%;text-align:' + align + ';white-space:nowrap;font-size:var(--fs-xs);font-weight:900;color:#e6e6e6;">' + txt + '<i style="display:block;height:5px;margin:3px 2px 0;border:1px solid rgba(255,255,255,0.5);border-top:none;"></i></div>';
+    };
     head = '<div style="position:relative;height:28px;">'
       + seg(lay.half.r1, (ko ? '전반 평균 ' : '1st half avg ') + fmt(lay.half.v1))
       + seg(lay.half.r2, (ko ? '후반 평균 ' : '2nd half avg ') + fmt(lay.half.v2))
@@ -16296,7 +16307,7 @@ if (metricKey === 'pace') {
   noteHtml = '';
 } else { return; }
 let lay = null;
-const svg = buildSparklineSVG(vals, color, invert, true, true, times, { edge: edge, half: half, minRangePct: minRangePct, heightPx: 220, onLayout: (L) => { lay = L; } });
+const svg = buildSparklineSVG(vals, color, invert, true, true, times, { edge: edge, half: half, minRangePct: minRangePct, heightPx: 190, onLayout: (L) => { lay = L; } });
 if (!svg) return;
 const axisHtml = buildDiagAxisLabelsHtml(splits);
 // 세부 지표: 작은 카드엔 없던 평균/최고/최저/구간 수/총 소요시간을 계산해 보여준다.
@@ -16324,7 +16335,7 @@ if (subEl) subEl.textContent = this.formatRecordDateTimeLocalized(r.date) + (r.d
 // [추가 2026-09-19] 그래프 위에 글자 라벨 얹기(평균/최고는 아래 세부 지표와 같은 유효 구간 기준)
 const _lblAvg = validVals.length ? validVals.reduce((a, b) => a + b, 0) / validVals.length : null;
 const _lblBest = validVals.length ? (invert ? Math.min(...validVals) : Math.max(...validVals)) : null;
-if (svgWrapEl) svgWrapEl.innerHTML = buildDiagGraphFsPlotHtml(svg, lay, { ko: koLang, fmt: fmt, invert: invert, heightPx: 220, avgVal: _lblAvg, bestVal: _lblBest });
+if (svgWrapEl) svgWrapEl.innerHTML = buildDiagGraphFsPlotHtml(svg, lay, { ko: koLang, fmt: fmt, invert: invert, heightPx: 190, avgVal: _lblAvg, bestVal: _lblBest });
 if (axisEl) axisEl.innerHTML = axisHtml;
 if (noteEl) noteEl.innerHTML = noteHtml;
 if (statsEl) statsEl.innerHTML = statsHtml;
