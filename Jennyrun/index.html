@@ -1671,6 +1671,7 @@ transform: scale(0.97); background: var(--primary); color: #111; border-color: v
 <div class="diag-card"><div id="info-elite-title" class="u-title-primary">ELITE VS RECREATIONAL RUNNERS</div><div id="info-elite-desc" class="u-desc-sm">Cadence: elite ~180~200 vs recreational ~155~175 SPM. GCT: elite ~150~200 vs recreational ~250~300ms+. Flight time: elite ~35~45% vs recreational ~15~25%. This app's colors follow the recreational scale (170+/160+, ≤270/≤300, 22%+/12%+).</div></div>
 <div class="diag-card"><div id="info-balance-title" class="u-title-primary">UNDERSTANDING BALANCE METRICS</div><div id="info-balance-desc" class="u-desc-sm">GCT/Gyro Balance compare left vs right leg as an L:R ratio (50:50 = perfectly even). A 5~8 point gap is normal; 10+ persistently may signal a muscle imbalance worth checking.</div></div>
 <div class="diag-card"><div id="info-lean-title" class="u-title-primary">UNDERSTANDING LEAN ANGLE</div><div id="info-lean-desc" class="u-desc-sm">LEAN ANGLE shows your forward lean, plus total lean and lateral sway alongside. Forward lean: 4-8° good, 8-12° borderline, 12°+ excessive. Lateral sway: under 5° fine, 10°+ may signal weak core/hip stability.</div></div>
+<div class="diag-card"><div id="info-pacing-title" class="u-title-primary">UNDERSTANDING PACING METRICS</div><div id="info-pacing-desc" class="u-desc-sm">Pace stability is how much your 100 m split pace swings (±sec). Split diff is 2nd-half minus 1st-half pace (negative = negative split). Cadence drift is how much cadence changed in the 2nd half. HR drift is how much heart rate rose in the 2nd half (10+ min runs only).</div></div>
 <div class="diag-card"><div id="info-warmup-title" class="u-title-primary">WARM-UP & COOL-DOWN</div><div id="info-warmup-desc" class="u-desc-sm">Start with 5~10 min of light jogging or dynamic stretching to raise your heart rate gradually. After running, walk and stretch for 5~10 min to help recovery and reduce muscle soreness.</div></div>
 <div class="diag-card"><div id="info-hydration-title" class="u-title-primary">HYDRATION & FUELING</div><div id="info-hydration-desc" class="u-desc-sm">For runs over 60 minutes, drink small amounts of water regularly. For runs over 90 minutes, consider light carbohydrate intake (gels, bananas, sports drinks).</div></div>
 <div class="diag-card"><div id="info-recovery-title" class="u-title-primary">REST & RECOVERY DAYS</div><div id="info-recovery-desc" class="u-desc-sm">Muscles rebuild during rest. Beginners should take at least 1~2 full rest days per week, and avoid running through persistent joint pain.</div></div>
@@ -2697,6 +2698,91 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
+// [추가 2026-09-19] 페이싱 지표 4종: 페이스 안정성 / 전·후반 페이스 차 / 케이던스 유지 / 심박 드리프트.
+// 모두 record.diagSplits(100m 구간 기록: km 누적, t_sec, pace, avgCadence, cadN, avgHr)만으로 계산한다.
+// GPS·걸음 감지·심박에서 나오는 값이라 착용 위치(손/암밴드/프리런 포함)와 무관하게 믿을 수 있다.
+// 값이 없거나 데이터가 모자라면 해당 항목은 null (리스트에서는 그 칸을 아예 그리지 않음).
+function calcPacingMetrics(record) {
+  const out = { paceStab: null, splitDiff: null, cadDrift: null, hrDrift: null, paceHalf: null, cadHalf: null, hrHalf: null };
+  const sp = (record && Array.isArray(record.diagSplits)) ? record.diagSplits : [];
+  if (sp.length < 4) return out;
+  // 구간(dkm, dt) 목록: 누적 km 차이 + t_sec 차이 (t_sec가 없는 옛 기록은 페이스 문자열로 대체)
+  const segs = [];
+  let prevKm = 0, prevT = 0;
+  sp.forEach((s, idx) => {
+    const km = parseFloat(s.km);
+    if (!isFinite(km)) { segs.push(null); return; }
+    const dkm = km - prevKm;
+    let dt = null;
+    if (typeof s.t_sec === 'number') dt = s.t_sec - prevT;
+    else { const ps = paceStrToSeconds(s.pace); if (ps != null) dt = ps * dkm; }
+    if (typeof s.t_sec === 'number') prevT = s.t_sec; else if (dt != null) prevT += dt;
+    prevKm = km;
+    segs.push((dkm > 0 && dt != null && dt > 0) ? { dkm, dt, idx } : null);
+  });
+  const valid = segs.filter(Boolean);
+  if (valid.length < 4) return out;
+  const totalKm = valid.reduce((a, g) => a + g.dkm, 0);
+  const totalT  = valid.reduce((a, g) => a + g.dt, 0);
+
+  // 1) 페이스 안정성: 첫 구간(출발 가속)과 70m 미만 자투리를 뺀 100m 구간 페이스의 표준편차(초/km).
+  //    중앙값 ±3·MAD 밖의 튀는 값(GPS 순간 오차)은 제외.
+  const paces = valid.slice(1).filter(g => g.dkm >= 0.07).map(g => g.dt / g.dkm);
+  if (paces.length >= 5) {
+    const sorted = [...paces].sort((a, b) => a - b);
+    const med = sorted[Math.floor(sorted.length / 2)];
+    const devs = paces.map(v => Math.abs(v - med)).sort((a, b) => a - b);
+    const mad = devs[Math.floor(devs.length / 2)] * 1.4826;
+    const kept = mad > 0 ? paces.filter(v => Math.abs(v - med) <= 3 * mad) : paces;
+    if (kept.length >= 4) {
+      const mean = kept.reduce((a, b) => a + b, 0) / kept.length;
+      const std = Math.sqrt(kept.reduce((a, b) => a + (b - mean) * (b - mean), 0) / kept.length);
+      out.paceStab = { sec: Math.round(std), cv: std / mean };
+    }
+  }
+
+  // 2) 전/후반 페이스 차: 총 거리의 절반 지점에서 시간을 보간해 (후반 − 전반) 초/km. 음수 = 네거티브 스플릿(후반이 빠름)
+  if (totalKm >= 0.4) {
+    const half = totalKm / 2;
+    let accKm = 0, accT = 0, tHalf = null, midIdx = null;
+    for (const g of valid) {
+      if (accKm + g.dkm >= half) {
+        const f = (half - accKm) / g.dkm;
+        tHalf = accT + g.dt * f;
+        midIdx = g.idx - 0.5 + f; // 그래프 x좌표(구간 인덱스) 기준 절반 지점
+        break;
+      }
+      accKm += g.dkm; accT += g.dt;
+    }
+    if (tHalf != null) {
+      const v1 = tHalf / half, v2 = (totalT - tHalf) / half;
+      out.splitDiff = Math.round(v2 - v1);
+      out.paceHalf = { v1, v2, r1: [0, midIdx], r2: [midIdx, valid[valid.length - 1].idx], mid: midIdx };
+    }
+  }
+
+  // 3) 케이던스 유지, 4) 심박 드리프트: 출발 직후 2개 구간(케이던스/심박이 올라가는 중)을 빼고 전반/후반 평균 비교
+  const half2 = (arr) => { const n = Math.floor(arr.length / 2); return [arr.slice(0, n), arr.slice(arr.length - n)]; };
+  const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+  // 원본 구간 인덱스(i)를 함께 들고 다녀야 그래프에 전/후반 선을 정확히 그릴 수 있다
+  const pick = (test, key) => sp.map((s, i) => ({ i, v: s[key], s })).filter(o => o.i >= 2 && test(o.s));
+  const halfInfo = (arr) => {
+    const [a, b] = half2(arr);
+    const va = avg(a.map(o => o.v)), vb = avg(b.map(o => o.v));
+    return { v1: va, v2: vb, r1: [a[0].i, a[a.length - 1].i], r2: [b[0].i, b[b.length - 1].i], mid: null };
+  };
+  const cadArr = pick(s => typeof s.avgCadence === 'number' && s.avgCadence > 0 && (s.cadN == null || s.cadN >= 3), 'avgCadence');
+  if (cadArr.length >= 4) {
+    out.cadHalf = halfInfo(cadArr);
+    out.cadDrift = ((out.cadHalf.v2 - out.cadHalf.v1) / out.cadHalf.v1) * 100;
+  }
+  const hrArr = pick(s => typeof s.avgHr === 'number' && s.avgHr > 0, 'avgHr');
+  if (hrArr.length >= 4 && totalT >= 600) { // 10분 미만은 워밍업 심박 상승이 지배적이라 드리프트로 보지 않음
+    out.hrHalf = halfInfo(hrArr);
+    out.hrDrift = Math.round(out.hrHalf.v2 - out.hrHalf.v1);
+  }
+  return out;
+}
 // [분리] 케이던스 점수: 170~185 최적 (calcEffScore / calcEffScoreSimple 공용)
 function _effCadScore(cadence) {
   if (cadence >= 170 && cadence <= 185) return 100;
@@ -2863,7 +2949,11 @@ return total > 0 ? total : null;
 // [추가] highlightBest 파라미터 추가(기본 true): 카드 상단에 표시되는 "평균/최고" 숫자 중
 // "최고" 값이 그래프 상 정확히 어느 지점인지 한눈에 보이도록, 해당 지점에만 다른 색 점을 찍는다.
 // invert=true(작을수록 좋음, 예: 페이스)면 최솟값 지점, 아니면 최댓값 지점이 "최고"가 된다.
-function buildSparklineSVG(values, colorHex, invert, showAvgLine, highlightBest, times) {
+// [수정 2026-09-19] opts 추가:
+//  - opts.edge: Set(원본 인덱스) — 출발 직후 첫 구간/끝의 짧은 자투리처럼 극단값이 되기 쉬운 구간.
+//    세로 눈금(min/max)·평균선·최고 표시에서 제외하고, 선은 흐린 점선으로 그래프 끝에 붙여 그린다.
+//  - opts.half: {v1, v2, r1:[시작,끝], r2:[시작,끝], mid} — 전반/후반 평균 흰 선과 가운데 세로 점선.
+function buildSparklineSVG(values, colorHex, invert, showAvgLine, highlightBest, times, opts) {
 if (showAvgLine === undefined) showAvgLine = true;
 if (highlightBest === undefined) highlightBest = true;
 if (!values || !values.length) return '';
@@ -2876,55 +2966,70 @@ const MAX_POINTS = 40;
 // [추가] 최고기록 유지 구간의 지속시간(초)을 판단하려면 각 포인트의 누적 시간(t_sec)이 필요.
 // 40개 넘어 구간 평균으로 묶일 때는 그 구간에서 "마지막" 스플릿의 시간을 대표값으로 쓴다.
 let ptTimes = times ? pts.map(p => (typeof times[p.i] === 'number' ? times[p.i] : null)) : null;
+let bucketed = false;
 if (pts.length > MAX_POINTS) {
   const bucketSize = Math.ceil(pts.length / MAX_POINTS);
-  const bucketed = [];
+  const bucketed_ = [];
   const bucketedTimes = [];
   for (let b = 0; b < pts.length; b += bucketSize) {
     const chunk = pts.slice(b, b + bucketSize);
     const avgV = chunk.reduce((a, p) => a + p.v, 0) / chunk.length;
-    bucketed.push({ i: bucketed.length, v: avgV });
+    bucketed_.push({ i: bucketed_.length, v: avgV });
     if (ptTimes) bucketedTimes.push(ptTimes[b + chunk.length - 1]);
   }
-  pts = bucketed;
+  pts = bucketed_;
   values = pts; // x축 간격 계산에 다운샘플된 길이를 사용
   ptTimes = ptTimes ? bucketedTimes : null;
+  bucketed = true;
 }
+// [추가] 경계(edge) 구간 처리: 구간 묶음(bucketed)이 일어난 긴 러닝에서는 이미 평균으로 희석되므로 적용 안 함
+let edgeSet = (!bucketed && opts && opts.edge && opts.edge.size) ? opts.edge : null;
+const isEdge = (p) => !!(edgeSet && edgeSet.has(p.i));
+if (edgeSet && pts.filter(p => !isEdge(p)).length < 3) edgeSet = null; // 남는 포인트가 너무 적으면 그냥 전부 사용
+const scalePts = edgeSet ? pts.filter(p => !isEdge(p)) : pts;
 const W = 100, H = 32, PAD = 2; // [수정] 기준선이 덜 답답해 보이도록 높이 26→32
-let min = Math.min(...pts.map(p => p.v));
-let max = Math.max(...pts.map(p => p.v));
+let min = Math.min(...scalePts.map(p => p.v));
+let max = Math.max(...scalePts.map(p => p.v));
 if (max - min < 1e-6) { min -= 1; max += 1; }
 const yFor = (v) => {
-  let t = (v - min) / (max - min); // 0~1
+  let t = (v - min) / (max - min); // 0~1 (edge 값은 범위를 벗어날 수 있음)
   if (invert) t = 1 - t;
-  return PAD + (1 - t) * (H - PAD * 2);
+  const y = PAD + (1 - t) * (H - PAD * 2);
+  return Math.min(H - PAD, Math.max(PAD, y)); // 범위를 벗어나는 edge 값은 그래프 안쪽 끝에 붙임
 };
 const xStep = (W - PAD * 2) / (values.length - 1 || 1);
+const xFor = (idx) => Math.min(W - PAD, Math.max(PAD, PAD + idx * xStep));
 const coords = pts.map(p => {
   const x = PAD + p.i * xStep;
   const y = yFor(p.v);
   return x.toFixed(1) + ',' + y.toFixed(1);
 });
-const first = coords[0].split(',');
-const last = coords[coords.length - 1].split(',');
-const areaPts = first[0] + ',' + (H - PAD) + ' ' + coords.join(' ') + ' ' + last[0] + ',' + (H - PAD);
+// 핵심(core) 구간 = edge가 아닌 연속 구간 (edge는 양 끝에만 존재)
+const firstCore = edgeSet ? pts.findIndex(p => !isEdge(p)) : 0;
+let lastCore = pts.length - 1;
+if (edgeSet) { while (lastCore > 0 && isEdge(pts[lastCore])) lastCore--; }
+const coreCoords = coords.slice(firstCore, lastCore + 1);
+const first = coreCoords[0].split(',');
+const last = coreCoords[coreCoords.length - 1].split(',');
+const areaPts = first[0] + ',' + (H - PAD) + ' ' + coreCoords.join(' ') + ' ' + last[0] + ',' + (H - PAD);
 // [추가] 평균 기준선(회색 점선). yFor가 invert를 이미 반영하므로 그대로 사용.
 // [수정] "avg" 텍스트 라벨은 카드 안에서 위치를 잡기 애매하고 데이터 선과 겹쳐 보기 불편하다는
 // 피드백으로 제거 — 점선만 남긴다.
 let avgDashSvg = '';
 if (showAvgLine) {
-  const avgVal = pts.reduce((a, p) => a + p.v, 0) / pts.length;
+  const avgVal = scalePts.reduce((a, p) => a + p.v, 0) / scalePts.length;
   const avgY = yFor(avgVal).toFixed(1);
   avgDashSvg = '<line x1="' + PAD + '" y1="' + avgY + '" x2="' + (W - PAD) + '" y2="' + avgY + '" stroke="#888" stroke-width="1" stroke-dasharray="2,2" vector-effect="non-scaling-stroke"></line>';
 }
-// [수정] 최고기록 지점 표시: 세로 점선.
+// [추가] 최고기록 지점 표시: 세로 점선.
 // - 최고값의 ±10% 이내 값이 30초 이상 이어지면 "구간 유지"로 보고 그 구간의 시작~끝에 점선 2개
 // - 그 조건을 못 채우면(순간적으로 스쳐간 값) 실제 최고기록 지점 1곳에만 점선 1개
 // - 점선이 실선(데이터 라인) 위로 삐져나오지 않도록, 그래프 맨 위(y=0)가 아니라 해당 지점의
 //   실제 곡선 y좌표에서 시작해 아래로만 그린다.
+// [수정] edge 구간(출발 첫 구간/끝 자투리)은 최고기록 후보에서 제외.
 let bestLineSvg = '';
 if (highlightBest) {
-  const bestVal = invert ? Math.min(...pts.map(p => p.v)) : Math.max(...pts.map(p => p.v));
+  const bestVal = invert ? Math.min(...scalePts.map(p => p.v)) : Math.max(...scalePts.map(p => p.v));
   const TOL = Math.abs(bestVal) * 0.03;
   const isNearBest = (v) => Math.abs(v - bestVal) <= TOL;
   const MIN_SUSTAIN_SEC = 30;
@@ -2934,7 +3039,7 @@ if (highlightBest) {
   let longestRun = null;   // 시간 정보가 없을 때를 대비한 대체용(포인트 개수 기준)
   let runStart = -1;
   for (let k = 0; k <= pts.length; k++) {
-    const hit = k < pts.length && isNearBest(pts[k].v);
+    const hit = k < pts.length && !isEdge(pts[k]) && isNearBest(pts[k].v);
     if (hit) {
       if (runStart === -1) runStart = k;
     } else if (runStart !== -1) {
@@ -2956,20 +3061,61 @@ if (highlightBest) {
     bestLineSvg = drawDash(qualifiedRun.start) + drawDash(qualifiedRun.end);
   } else {
     // 30초 이상 유지된 구간이 없으면(시간 정보가 없는 경우 포함) 진짜 최고기록 지점 하나만 표시
-    let bestIdx = 0;
-    for (let k = 1; k < pts.length; k++) {
+    let bestIdx = firstCore;
+    for (let k = firstCore + 1; k <= lastCore; k++) {
       const better = invert ? (pts[k].v < pts[bestIdx].v) : (pts[k].v > pts[bestIdx].v);
       if (better) bestIdx = k;
     }
     bestLineSvg = drawDash(bestIdx);
   }
 }
+// [추가] 전/후반 평균선(흰색) + 가운데 세로 점선. 값은 호출부가 지표 계산과 같은 기준으로 넘겨준다.
+let halfSvg = '';
+if (opts && opts.half && !bucketed) {
+  const hf = opts.half;
+  const hline = (r, v) => '<line x1="' + xFor(r[0]).toFixed(1) + '" y1="' + yFor(v).toFixed(1) + '" x2="' + xFor(r[1]).toFixed(1) + '" y2="' + yFor(v).toFixed(1) + '" stroke="#ffffff" stroke-opacity="0.8" stroke-width="1.6" stroke-linecap="round" vector-effect="non-scaling-stroke"></line>';
+  const midIdx = (hf.mid != null) ? hf.mid : ((hf.r1[1] + hf.r2[0]) / 2);
+  halfSvg = '<line x1="' + xFor(midIdx).toFixed(1) + '" y1="' + PAD + '" x2="' + xFor(midIdx).toFixed(1) + '" y2="' + (H - PAD) + '" stroke="#ffffff" stroke-opacity="0.35" stroke-width="1" stroke-dasharray="1,2" vector-effect="non-scaling-stroke"></line>'
+    + hline(hf.r1, hf.v1) + hline(hf.r2, hf.v2);
+}
+// edge 구간은 핵심 선 앞뒤에 흐린 점선으로 이어 붙임
+let edgeSvg = '';
+if (edgeSet) {
+  const faded = (arr) => '<polyline points="' + arr.join(' ') + '" fill="none" stroke="' + colorHex + '" stroke-opacity="0.35" stroke-width="1.4" stroke-dasharray="2,2" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>';
+  if (firstCore > 0) edgeSvg += faded(coords.slice(0, firstCore + 1));
+  if (lastCore < pts.length - 1) edgeSvg += faded(coords.slice(lastCore));
+}
 return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%;height:32px;display:block;margin-top:6px;">'
   + '<polyline points="' + areaPts + '" fill="' + colorHex + '" opacity="0.12" stroke="none"></polyline>'
   + avgDashSvg
   + bestLineSvg
-  + '<polyline points="' + coords.join(' ') + '" fill="none" stroke="' + colorHex + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>'
+  + halfSvg
+  + edgeSvg
+  + '<polyline points="' + coreCoords.join(' ') + '" fill="none" stroke="' + colorHex + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>'
   + '</svg>';
+}
+// [추가 2026-09-19] 그래프 세로 눈금/최고값 계산에서 제외할 경계 구간(양 끝에만 존재):
+//  - 첫 구간: 출발 직후 가속/케이던스 상승 중이라 항상 제외
+//  - 마지막 구간: 70m 미만 자투리이거나, 가운데 구간 중앙값에서 8% 넘게 벗어난 경우(정지 직전 감속 등)
+// 이런 극단값 하나가 나머지 구간을 납작하게 눌러 보이게 하던 문제를 막는다. vals는 그래프에 쓰는 값 배열.
+function getGraphEdgeSet(splits, vals) {
+  const set = new Set();
+  if (!splits || splits.length < 5) return set;
+  set.add(0);
+  const lastIdx = splits.length - 1;
+  const kmLast = parseFloat(splits[lastIdx].km);
+  const kmPrev = parseFloat(splits[lastIdx - 1].km);
+  if (isFinite(kmLast) && isFinite(kmPrev) && (kmLast - kmPrev) < 0.07) {
+    set.add(lastIdx);
+  } else if (vals) {
+    const mid = vals.slice(1, lastIdx).filter(v => typeof v === 'number' && isFinite(v)).sort((x, y) => x - y);
+    const v = vals[lastIdx];
+    if (mid.length >= 3 && typeof v === 'number' && isFinite(v)) {
+      const med = mid[Math.floor(mid.length / 2)];
+      if (med > 0 && Math.abs(v - med) / med > 0.08) set.add(lastIdx);
+    }
+  }
+  return set;
 }
 // [추가] DIAG 미니 그래프 아래에 표시할 거리/시간 라벨 HTML.
 // 전체 거리에 따라 라벨 개수를 3→4→5개로 늘려서, 짧은 러닝에서는 카드 안에서
@@ -3269,7 +3415,7 @@ function buildPersonalFeedback(record, profile, gender, isKo) {
 // ========== 번역 객체 (원본 유지) ==========
 const translations = {
 en: {
-pace: "PACE", dist: "DIST", time: "TIME", avg: "AVG", speed: "SPEED", cadence: "CADENCE", gct: "GCT", flight: "FLIGHT", cal: "KCAL", start: "START", stop: "STOP", resume: "RESUME", reset: "RESET", finish: "FINISH", run: "RUN", history: "HISTORY", historyTab: "REC•SET", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", selLang: "SELECT LANGUAGE", unitLabel: "DISTANCE UNIT", genderLabel: "GENDER", genderMale: "MALE", genderFemale: "FEMALE", autoPauseLabel: "AUTO PAUSE", precisionLogRecordLabel: "RECORD PRECISION LOG WHILE RUNNING", leanAngleToggleLabel: "LEAN ANGLE (CHEST-WORN RUN ONLY)", calibSoundLabel: "CALIBRATION ALERT SOUND", calibSoundOpeningBell: "Open Bell", calibSoundCamBell: "Cam Bell", calibSoundTimeBell: "Time Bell", calibVolumeLabel: "VOLUME", calibPreviewLabel: "Preview sound", metro: "RHYTHM ASSISTANT", clear: "CLEAR ALL HISTORY", confirmClear: "Are you sure?", alertCleared: "History cleared.", clearLogs: "CLEAR ALL LOGS", confirmClearLogs: "Delete all phone precision logs and imported Garmin FIT data? This cannot be undone.", alertLogsCleared: "Log records cleared.", route: "ROUTE", diag: "DIAG", close: "CLOSE", alt: "ALT", mapStart: "START", mapFinish: "FINISH", activityModeLabel: "ACTIVITY MODE", modeRunLabel: "RUN", modeWalkLabel: "WALK", modeTrailLabel: "TRAIL", modeFreerunLabel: "FREE RUN", stepsLabel: "STEPS", spmLabel: "SPM", walksCountLabel: "WALKS COUNT", totalStepsLabel: "TOTAL STEPS", quickModeTitle: "SWITCH MODE", confirmBtnLabel: "CONFIRM", cancelBtnLabel: "CANCEL", onbSubtitle: "Set up your run before you start", onbGoSettings: "GO TO SETTINGS", onbLogRecordLabel: "LOG RECORDING", onbLeanAngleLabel: "LEAN ANGLE", resetConfirmMsg: "Discard this run and go back to start? This cannot be undone.", hSecRunData: "RUN DATA", hSecWalkData: "WALK DATA", hSecBalance: "BALANCE", hSecEtc: "ETC",
+pace: "PACE", dist: "DIST", time: "TIME", avg: "AVG", speed: "SPEED", cadence: "CADENCE", gct: "GCT", flight: "FLIGHT", cal: "KCAL", start: "START", stop: "STOP", resume: "RESUME", reset: "RESET", finish: "FINISH", run: "RUN", history: "HISTORY", historyTab: "REC•SET", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", selLang: "SELECT LANGUAGE", unitLabel: "DISTANCE UNIT", genderLabel: "GENDER", genderMale: "MALE", genderFemale: "FEMALE", autoPauseLabel: "AUTO PAUSE", precisionLogRecordLabel: "RECORD PRECISION LOG WHILE RUNNING", leanAngleToggleLabel: "LEAN ANGLE (CHEST-WORN RUN ONLY)", calibSoundLabel: "CALIBRATION ALERT SOUND", calibSoundOpeningBell: "Open Bell", calibSoundCamBell: "Cam Bell", calibSoundTimeBell: "Time Bell", calibVolumeLabel: "VOLUME", calibPreviewLabel: "Preview sound", metro: "RHYTHM ASSISTANT", clear: "CLEAR ALL HISTORY", confirmClear: "Are you sure?", alertCleared: "History cleared.", clearLogs: "CLEAR ALL LOGS", confirmClearLogs: "Delete all phone precision logs and imported Garmin FIT data? This cannot be undone.", alertLogsCleared: "Log records cleared.", route: "ROUTE", diag: "DIAG", close: "CLOSE", alt: "ALT", mapStart: "START", mapFinish: "FINISH", activityModeLabel: "ACTIVITY MODE", modeRunLabel: "RUN", modeWalkLabel: "WALK", modeTrailLabel: "TRAIL", modeFreerunLabel: "FREE RUN", stepsLabel: "STEPS", spmLabel: "SPM", walksCountLabel: "WALKS COUNT", totalStepsLabel: "TOTAL STEPS", quickModeTitle: "SWITCH MODE", confirmBtnLabel: "CONFIRM", cancelBtnLabel: "CANCEL", onbSubtitle: "Set up your run before you start", onbGoSettings: "GO TO SETTINGS", onbLogRecordLabel: "LOG RECORDING", onbLeanAngleLabel: "LEAN ANGLE", resetConfirmMsg: "Discard this run and go back to start? This cannot be undone.", hSecRunData: "RUN DATA", hSecWalkData: "WALK DATA", hSecBalance: "BALANCE", hSecPacing: "PACING", paceStab: "PACE STABILITY", splitDiff: "SPLIT DIFF", cadDrift: "CADENCE DRIFT", hrDrift: "HR DRIFT", hSecEtc: "ETC",
 powerLabel: "POWER", avgPowerLabel: "AVG POWER", infRunPower: "RUNNING POWER (WATTS)", infRunPowerD: "Estimated from weight, pace, and elevation (not sensor-measured). Watts per kg body weight\n(watts ÷ bodyweight kg = W/kg)\n・Z1 Recovery/Easy: under 12 W/kg\n・Z2 Moderate: 12-14 W/kg\n・Z3 Tempo/Threshold: 14-16 W/kg\n・Z4 Interval/Hard: 16-19 W/kg\n・Z5 Sprint: 19+ W/kg",
 settingsTabApp: "APP", settingsTabCrew: "CREW", settingsTabCalib: "CALIB", sectionGeneral: "GENERAL", sectionProfile: "MY INFO", sectionRunEnv: "RUN SETTINGS", sectionData: "DATA",
 metroTitle: "METRONOME", metroDesc: "Perfect your cadence.", metroAccent: "ACCENT FIRST BEAT", noRec: "NO RECORDS", totalStats: "LIFETIME STATS", runs: "RUNS", autoPaused: "AUTO PAUSED",
@@ -3291,7 +3437,7 @@ infRecovery: "REST & RECOVERY DAYS", infRecoveryD: "Muscles rebuild during rest.
 infInjury: "INJURY WARNING SIGNS", infInjuryD: "Sharp, localized, or one-sided pain that worsens during a run is a warning sign. Stop running and rest; if pain persists more than a few days, consult a medical professional.",
 infRanges: "QUICK REFERENCE RANGES", infRangesD: "Cadence: 170~185 SPM is a common target range. GCT: under ~240ms is generally efficient. Flight time: roughly 30~45% of cycle time. Stride length: about 0.5~0.75m (single step) for recreational runners. These are general guidelines, not strict rules — individual body types vary.",
 infElite: "ELITE VS RECREATIONAL RUNNERS", infEliteD: "Cadence: elite ~180~200 vs recreational ~155~175 SPM. GCT: elite ~150~200 vs recreational ~250~300ms+. Flight time: elite ~35~45% vs recreational ~15~25%. This app's colors follow the recreational scale (170+/160+, ≤270/≤300, 22%+/12%+).",
-infBalance: "UNDERSTANDING BALANCE METRICS", infBalanceD: "GCT/Gyro Balance compare left vs right leg as an L:R ratio (50:50 = perfectly even). A 5~8 point gap is normal; 10+ persistently may signal a muscle imbalance worth checking.",
+infBalance: "UNDERSTANDING BALANCE METRICS", infBalanceD: "GCT/Gyro Balance compare left vs right leg as an L:R ratio (50:50 = perfectly even). A 5~8 point gap is normal; 10+ persistently may signal a muscle imbalance worth checking.", infPacing: "UNDERSTANDING PACING METRICS", infPacingD: "Pace stability is how much your 100 m split pace swings (±sec). Split diff is 2nd-half minus 1st-half pace (negative = negative split). Cadence drift is how much cadence changed in the 2nd half. HR drift is how much heart rate rose in the 2nd half (10+ min runs only).",
   infLean: "UNDERSTANDING LEAN ANGLE", infLeanD: "LEAN ANGLE shows your forward lean, plus total lean and lateral sway alongside. Forward lean: 4-8° good, 8-12° borderline, 12°+ excessive. Lateral sway: under 5° fine, 10°+ may signal weak core/hip stability. It's the angle your center of mass leans forward relative to your ground contact point — ground reaction force, propulsion, and gravity combine to create it. (In the diagnosis page diagram, the lean axis, angle, center of mass, and gravity/propulsion reflect your measured data; the GRF arrow is illustrative only and not measured.)",
 infHeartRate: "HEART RATE & ZONES", infHeartRateD: "Heart rate zones help you train at the right intensity. Zone 1~2 (50~70% max HR) builds aerobic base and aids recovery. Zone 3 (70~80%) improves cardiovascular efficiency. Zone 4~5 (80~100%) develops speed and power but requires adequate recovery time. Max HR is roughly estimated as 220 minus your age.",
 height: "HEIGHT", weight: "WEIGHT",
@@ -3380,7 +3526,7 @@ exitClosedTitle: "App Closed", exitClosedMsg: "Press the Home button<br>to retur
 },
 ko: {
 
-pace: "페이스", dist: "거리", time: "시간", avg: "평균", speed: "속도", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", cal: "칼로리", start: "시작", stop: "정지", resume: "재개", reset: "리셋", finish: "종료", run: "러닝", history: "기록", historyTab: "기록•설정", list: "목록", total: "통계", info: "정보", settings: "설정", selLang: "언어 설정", unitLabel: "거리 단위", genderLabel: "성별", genderMale: "남성", genderFemale: "여성", autoPauseLabel: "자동 멈춤", precisionLogRecordLabel: "러닝 중 정밀 로그 기록", leanAngleToggleLabel: "린각도 추출 (가슴 착용 러닝 전용)", calibSoundLabel: "캘리브레이션 완료 알림음", calibSoundOpeningBell: "오픈벨", calibSoundCamBell: "캠벨", calibSoundTimeBell: "타임벨", calibVolumeLabel: "볼륨", calibPreviewLabel: "소리 미리듣기", metro: "리듬 어시스턴트", clear: "전체 기록 삭제", confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.", clearLogs: "전체 로그 삭제", confirmClearLogs: "폰에 저장된 정밀 로그와 가민 분석실에 가져온 FIT 기록을 모두 삭제할까요? 이 작업은 되돌릴 수 없습니다.", alertLogsCleared: "로그 기록이 삭제되었습니다.", route: "경로", diag: "진단", close: "닫기", alt: "고도", mapStart: "시작", mapFinish: "종료", activityModeLabel: "활동 모드", modeRunLabel: "러닝", modeWalkLabel: "걷기", modeTrailLabel: "트레일", modeFreerunLabel: "프리러닝", stepsLabel: "걸음수", spmLabel: "분당걸음", walksCountLabel: "걷기 횟수", totalStepsLabel: "총 걸음수", quickModeTitle: "모드 전환", confirmBtnLabel: "확인", cancelBtnLabel: "취소", onbSubtitle: "시작하기 전에 러닝 설정을 선택해주세요", onbGoSettings: "설정으로 바로가기", onbLogRecordLabel: "로그 기록", onbLeanAngleLabel: "린각도", resetConfirmMsg: "이번 러닝 기록을 버리고 처음 화면으로 돌아갈까요? 이 작업은 되돌릴 수 없습니다.", hSecRunData: "러닝 데이터", hSecWalkData: "걷기 데이터", hSecBalance: "밸런스", hSecEtc: "기타",
+pace: "페이스", dist: "거리", time: "시간", avg: "평균", speed: "속도", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", cal: "칼로리", start: "시작", stop: "정지", resume: "재개", reset: "리셋", finish: "종료", run: "러닝", history: "기록", historyTab: "기록•설정", list: "목록", total: "통계", info: "정보", settings: "설정", selLang: "언어 설정", unitLabel: "거리 단위", genderLabel: "성별", genderMale: "남성", genderFemale: "여성", autoPauseLabel: "자동 멈춤", precisionLogRecordLabel: "러닝 중 정밀 로그 기록", leanAngleToggleLabel: "린각도 추출 (가슴 착용 러닝 전용)", calibSoundLabel: "캘리브레이션 완료 알림음", calibSoundOpeningBell: "오픈벨", calibSoundCamBell: "캠벨", calibSoundTimeBell: "타임벨", calibVolumeLabel: "볼륨", calibPreviewLabel: "소리 미리듣기", metro: "리듬 어시스턴트", clear: "전체 기록 삭제", confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.", clearLogs: "전체 로그 삭제", confirmClearLogs: "폰에 저장된 정밀 로그와 가민 분석실에 가져온 FIT 기록을 모두 삭제할까요? 이 작업은 되돌릴 수 없습니다.", alertLogsCleared: "로그 기록이 삭제되었습니다.", route: "경로", diag: "진단", close: "닫기", alt: "고도", mapStart: "시작", mapFinish: "종료", activityModeLabel: "활동 모드", modeRunLabel: "러닝", modeWalkLabel: "걷기", modeTrailLabel: "트레일", modeFreerunLabel: "프리러닝", stepsLabel: "걸음수", spmLabel: "분당걸음", walksCountLabel: "걷기 횟수", totalStepsLabel: "총 걸음수", quickModeTitle: "모드 전환", confirmBtnLabel: "확인", cancelBtnLabel: "취소", onbSubtitle: "시작하기 전에 러닝 설정을 선택해주세요", onbGoSettings: "설정으로 바로가기", onbLogRecordLabel: "로그 기록", onbLeanAngleLabel: "린각도", resetConfirmMsg: "이번 러닝 기록을 버리고 처음 화면으로 돌아갈까요? 이 작업은 되돌릴 수 없습니다.", hSecRunData: "러닝 데이터", hSecWalkData: "걷기 데이터", hSecBalance: "밸런스", hSecPacing: "페이싱", paceStab: "페이스 안정성", splitDiff: "전/후반 차", cadDrift: "케이던스 유지", hrDrift: "심박 드리프트", hSecEtc: "기타",
 powerLabel: "파워", avgPowerLabel: "평균 파워", infRunPower: "러닝 파워 (와트)", infRunPowerD: "체중・페이스・고도로 추정한 강도(센서 측정값 아님). 체중 1kg당 와트\n(와트 ÷ 체중kg = W/kg)\n・Z1 회복/이지: 12 W/kg 미만\n・Z2 보통: 12~14 W/kg\n・Z3 템포/역치: 14~16 W/kg\n・Z4 인터벌/하드: 16~19 W/kg\n・Z5 스프린트: 19 W/kg 이상",
 settingsTabApp: "앱설정", settingsTabCrew: "크루", settingsTabCalib: "보정", sectionGeneral: "일반", sectionProfile: "내 정보", sectionRunEnv: "러닝 환경", sectionData: "데이터",
 metroTitle: "메트로놈", metroDesc: "러닝 리듬을 일정하게 유지하세요.", metroAccent: "첫 박자 강조", noRec: "기록 없음", totalStats: "누적 통계", runs: "러닝 횟수", autoPaused: "자동 일시정지",
@@ -3402,7 +3548,7 @@ infRecovery: "휴식 & 회복일", infRecoveryD: "근육은 휴식 중에 회복
 infInjury: "부상 경고 신호", infInjuryD: "러닝 중 악화되는 날카롭고 한쪽에 집중된 통증은 경고 신호입니다. 즉시 멈추고 휴식을 취하고, 며칠 이상 지속되면 전문가의 진단을 받으세요.",
 infRanges: "주요 지표 참고 범위", infRangesD: "케이던스: 일반적으로 170~185 SPM이 권장 범위입니다. GCT: 약 240ms 이하가 효율적인 편입니다. 체공시간: 한 주기의 약 30~45% 수준이 일반적입니다. 보폭: 일반 러너 기준 약 0.5~0.75m(한 걸음 기준)입니다. 이는 참고용 일반 가이드라인이며, 체형과 개인차에 따라 다를 수 있습니다.",
 infElite: "엘리트 vs 일반 러너 비교", infEliteD: "케이던스: 엘리트 180~200 vs 일반 155~175 SPM. GCT: 엘리트 150~200 vs 일반 250~300ms+. 체공시간: 엘리트 35~45% vs 일반 15~25%. 앱의 색상 기준은 일반 러너 기준(170↑/160↑, 270↓/300↓, 22%↑/12%↑)이에요.",
-infBalance: "밸런스 지표 이해하기", infBalanceD: "GCT/자이로 밸런스는 좌우 다리를 L:R 비율로 비교한 값이에요(50:50이 완벽한 균형). 5~8 정도 차이는 자연스럽고, 10 이상이 꾸준히 나오면 근력 불균형을 확인해보세요.",
+infBalance: "밸런스 지표 이해하기", infBalanceD: "GCT/자이로 밸런스는 좌우 다리를 L:R 비율로 비교한 값이에요(50:50이 완벽한 균형). 5~8 정도 차이는 자연스럽고, 10 이상이 꾸준히 나오면 근력 불균형을 확인해보세요.", infPacing: "페이싱 지표 이해하기", infPacingD: "페이스 안정성은 100m 구간 페이스가 얼마나 흔들렸는지(±초), 전/후반 차는 후반 페이스에서 전반 페이스를 뺀 값(마이너스면 네거티브 스플릿)이에요. 케이던스 유지는 후반 케이던스 변화, 심박 드리프트는 후반 심박 상승폭이고 10분 이상 러닝에서만 표시돼요.",
   infLean: "린각도 이해하기", infLeanD: "린각도는 전방 기울기가 메인이고, 총 기울기·측방 흔들림도 함께 보여줘요. 전방 기울기는 4~8도 양호, 8~12도 주의, 12도 초과 과도. 측방 흔들림은 5도 이내 양호, 10도 초과면 코어/고관절 안정성을 체크해보세요. 몸의 무게중심이 지면 접촉점보다 앞으로 얼마나 기울어 있는지를 나타낸 각도로, 착지 시 지면 반력(GRF)과 추진력, 중력이 함께 작용해 전방 기울기를 만듭니다. (진단 페이지 다이어그램의 기울기 축·각도·무게중심·중력/추진력은 실측값 기준이며, GRF 화살표는 개념 설명용으로 측정되지 않습니다.)",
 infHeartRate: "심박수 & 존 가이드", infHeartRateD: "심박수 존은 올바른 강도로 훈련하는 데 도움이 됩니다. 존 1~2 (최대 심박수의 50~70%)는 유산소 기반을 다지고 회복을 돕습니다. 존 3 (70~80%)는 심폐 효율을 향상시킵니다. 존 4~5 (80~100%)는 스피드와 파워를 키우지만 충분한 회복이 필요합니다. 최대 심박수는 220에서 나이를 뺀 값으로 추정합니다.",
 height: "신장", weight: "체중",
@@ -5584,6 +5730,22 @@ if(infoBalanceD) infoBalanceD.innerHTML = buildInfoListRows(isKo ? [
   ['Normal', '5–8 point gap'],
   ['Check needed', '10+ point gap persisting']
 ]);
+const infoPacing = document.getElementById('info-pacing-title');
+if(infoPacing) infoPacing.textContent = t.infPacing;
+const infoPacingD = document.getElementById('info-pacing-desc');
+if(infoPacingD) infoPacingD.innerHTML = buildInfoListRows(isKo ? [
+  ['페이스 안정성', '100m 구간 페이스의 흔들림(±초). 작을수록 일정해요'],
+  ['전/후반 차', '후반−전반 페이스(초/km). 마이너스가 네거티브 스플릿'],
+  ['케이던스 유지', '후반 케이던스의 전반 대비 변화(%). −2% 이내면 양호'],
+  ['심박 드리프트', '후반−전반 심박(bpm). 10분 이상 러닝에서만 표시'],
+  ['참고', 'GPS·걸음 감지·심박 기반이라 착용 위치와 무관해요. 진단 그래프의 흰 선은 전반/후반 평균이고, GPS 오차로 ±7~13초는 정상이에요']
+] : [
+  ['Pace stability', 'Pace swing between 100 m splits (±sec). Smaller = steadier'],
+  ['Split diff', '2nd-half minus 1st-half pace (sec/km). Negative = negative split'],
+  ['Cadence drift', '2nd-half cadence vs 1st half (%). Within −2% is good'],
+  ['HR drift', '2nd-half minus 1st-half HR (bpm). Shown for runs of 10+ min'],
+  ['Note', 'Based on GPS, step detection and HR, so it works at any wear position. White lines in the DIAG graphs are 1st/2nd-half averages; ±7–13 s is normal due to GPS error']
+]);
 const infoLean = document.getElementById('info-lean-title');
 if(infoLean) infoLean.textContent = t.infLean;
 const infoLeanD = document.getElementById('info-lean-desc');
@@ -6538,8 +6700,11 @@ this.buildHrBoxHtml(r, t) +
 '<div class="h-det-box"><div class="h-det-label">' + t.pace + '</div><div class="h-det-val">' + displayPace + '</div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.cadence + '</div><div class="h-det-val" style="color:' + this.getCadenceColor(r.cadence) + '">' + (r.cadence || 0) + '</div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.cal + '</div><div class="h-det-val">' + (r.kcal || 0) + '<span class="c34">' + (r.weightKgSnapshot ? r.weightKgSnapshot.toFixed(1)+'kg' : '') + '</span></div></div>' +
-'<div class="h-det-box"><div class="h-det-label">' + t.gct + '</div><div class="h-det-val" style="color:' + (this.isGctVertUnreliable(r) ? '#aaa' : this.getGctColor(r.gct)) + '">' + (this.isGctVertUnreliable(r) ? '--' : (r.gct || '--')) + ' <span class="u-font-size-fs-xxs">MS</span></div></div>' +
-'<div class="h-det-box"><div class="h-det-label">' + t.flight + '</div><div class="h-det-val" style="color:' + (this.isGctVertUnreliable(r) ? '#aaa' : this.getFlightColor(r.flight)) + '">' + (this.isGctVertUnreliable(r) ? '--' : (r.flight || '--')) + ' <span class="u-font-size-fs-xxs">%</span></div></div>' +
+// [수정] 손/암밴드/프리런은 GCT·FLIGHT 칸을 '--'로 채우지 않고 아예 그리지 않는다
+(this.isGctVertUnreliable(r) ? '' : (
+'<div class="h-det-box"><div class="h-det-label">' + t.gct + '</div><div class="h-det-val" style="color:' + this.getGctColor(r.gct) + '">' + (r.gct || '--') + ' <span class="u-font-size-fs-xxs">MS</span></div></div>' +
+'<div class="h-det-box"><div class="h-det-label">' + t.flight + '</div><div class="h-det-val" style="color:' + this.getFlightColor(r.flight) + '">' + (r.flight || '--') + ' <span class="u-font-size-fs-xxs">%</span></div></div>'
+)) +
 ((() => {
 let strideVal = '--';
 if (r.stride) {
@@ -6560,12 +6725,16 @@ return '<div class="h-det-box"><div class="h-det-label">' + t.stride + '</div><d
 '<div class="h-det-box"><div class="h-det-label">' + (t.alt || 'ALT') + '</div><div class="h-det-val u-color-dddddd">' + (r.alt || '0') + ' <span class="u-font-size-fs-xxs">M</span></div></div>' +
 '</div></div>' +
 // [추가] GCT 밸런스 / 자이로 밸런스 표시 (좌:우 실측값, 새 데이터 행) — 케이던스 밸런스는 제거
+(this.isGyroAccelUnreliable(r) ? '' : (
 '<div class="h-group"><div class="h-group-title">' + t.hSecBalance + '</div><div class="h-group-grid">' +
-'<div class="h-det-box"><div class="h-det-label">' + t.gctBal + '</div><div class="h-det-val u-color-dddddd">' + (this.isGyroAccelUnreliable(r) ? '--' : (r.gctBal || '50:50')) + ' <span class="u-font-size-fs-xxs">L:R</span></div></div>' +
-'<div class="h-det-box"><div class="h-det-label">' + t.gyroBal + '</div><div class="h-det-val u-color-dddddd">' + (this.isGyroAccelUnreliable(r) ? '--' : (r.gyroBal || '50:50')) + ' <span class="u-font-size-fs-xxs">L:R</span></div></div>' +
+'<div class="h-det-box"><div class="h-det-label">' + t.gctBal + '</div><div class="h-det-val u-color-dddddd">' + (r.gctBal || '50:50') + ' <span class="u-font-size-fs-xxs">L:R</span></div></div>' +
+'<div class="h-det-box"><div class="h-det-label">' + t.gyroBal + '</div><div class="h-det-val u-color-dddddd">' + (r.gyroBal || '50:50') + ' <span class="u-font-size-fs-xxs">L:R</span></div></div>' +
 // [수정] 린 각도(가슴 착용 기록에만 표시)를 BALANCE 맨 끝으로 이동
 LeanAngleUI.listDetBoxHtml(r, lang) +
-'</div></div>' +
+'</div></div>'
+)) +
+// [추가] PACING 그룹: 위치와 무관하게 신뢰할 수 있는 지표(페이스 안정성/전후반 차/케이던스 유지/심박 드리프트)
+this.buildPacingGroupHtml(r, t) +
 '<div class="h-group"><div class="h-group-title">' + t.hSecEtc + '</div><div class="h-group-grid">' +
 '<div class="h-det-box"><div class="h-det-label">' + t.altChange + '</div><div class="h-det-val u-color-dddddd">' + ((r.splits && r.splits.length > 0) ? r.splits.reduce((sum,s)=>sum+Math.max(0,s.altDiff||0),0) : 0) + ' <span class="u-font-size-fs-xxs">M</span></div></div>' +
 // [추가] 심박수 평균/최고 + 심박 존 (가민 연동 데이터, 기존 6개 데이터 밑에 추가)
@@ -6582,6 +6751,35 @@ this.buildHrBoxHtml(r, t) +
 '</div>' +
 '</div>';
 }).join('');
+}
+// [추가 2026-09-19] 리스트 카드의 PACING 그룹 (페이스 안정성 / 전·후반 차 / 케이던스 유지 / 심박 드리프트).
+// 계산 가능한 항목만 그리고, 하나도 없으면 그룹 자체를 그리지 않는다(빈 칸 '--' 방지).
+buildPacingGroupHtml(r, t) {
+  const m = calcPacingMetrics(r);
+  const G = 'var(--good)', W = 'var(--warning)', D = 'var(--danger)';
+  const sgn = (v) => v > 0 ? '+' : (v < 0 ? '\u2212' : '');
+  const box = (label, color, valHtml) =>
+    '<div class="h-det-box"><div class="h-det-label">' + label + '</div><div class="h-det-val" style="color:' + color + '">' + valHtml + '</div></div>';
+  let boxes = '';
+  if (m.paceStab) {
+    const c = m.paceStab.cv < 0.05 ? G : m.paceStab.cv < 0.10 ? W : D;
+    boxes += box(t.paceStab || 'PACE STABILITY', c, '\u00b1' + m.paceStab.sec + ' <span class="u-font-size-fs-xxs">S</span>');
+  }
+  if (m.splitDiff != null) {
+    const c = m.splitDiff <= 5 ? G : m.splitDiff <= 15 ? W : D;
+    boxes += box(t.splitDiff || 'SPLIT DIFF', c, sgn(m.splitDiff) + Math.abs(m.splitDiff) + ' <span class="u-font-size-fs-xxs">S/KM</span>');
+  }
+  if (m.cadDrift != null) {
+    const c = m.cadDrift >= -2 ? G : m.cadDrift >= -5 ? W : D;
+    const r1 = Math.round(m.cadDrift * 10) / 10;
+    boxes += box(t.cadDrift || 'CADENCE DRIFT', c, sgn(r1) + Math.abs(r1).toFixed(1) + ' <span class="u-font-size-fs-xxs">%</span>');
+  }
+  if (m.hrDrift != null) {
+    const c = m.hrDrift <= 5 ? G : m.hrDrift <= 10 ? W : D;
+    boxes += box(t.hrDrift || 'HR DRIFT', c, sgn(m.hrDrift) + Math.abs(m.hrDrift) + ' <span class="u-font-size-fs-xxs">BPM</span>');
+  }
+  if (!boxes) return '';
+  return '<div class="h-group"><div class="h-group-title">' + (t.hSecPacing || 'PACING') + '</div><div class="h-group-grid">' + boxes + '</div></div>';
 }
 getCadenceColor(v) { const l = this.getCadenceLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
 // [수정] 프리런·손(hand) 착용 기록은 좌우 밸런스 3종(CADENCE/GCT/GYRO BAL)도 표시하지 않는다.
@@ -7374,26 +7572,50 @@ hrComment = zoneInfo.z <= 2 ? t.diagHrZoneLow
 // 한눈에 오르내림을 볼 수 있도록. 스플릿이 2개 미만이면(짧은 러닝 등) 해당 그래프는 표시 안 함.
 const _splitsForGraph = r.diagSplits || [];
 const _diagSplitTimes = _splitsForGraph.map(s => (typeof s.t_sec === 'number' ? s.t_sec : null));
-const paceSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => paceStrToSeconds(s.pace)), '#00ff88', true, undefined, undefined, _diagSplitTimes);
-const cadSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3) ? s.avgCadence : null)), '#4fc3f7', false, undefined, undefined, _diagSplitTimes);
-const hrSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.avgHr === 'number' ? s.avgHr : null)), '#e53935', false, undefined, undefined, _diagSplitTimes);
+// [추가 2026-09-19] 출발 첫 구간/끝 자투리는 그래프 눈금·최고값에서 제외, 전/후반 평균선 추가
+const _paceVals = _splitsForGraph.map(s => paceStrToSeconds(s.pace));
+const _cadVals = _splitsForGraph.map(s => (typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3) ? s.avgCadence : null));
+const _powVals = _splitsForGraph.map(s => (typeof s.power === 'number' ? s.power : null));
+const _edgePace = getGraphEdgeSet(_splitsForGraph, _paceVals);
+const _edgeCad = getGraphEdgeSet(_splitsForGraph, _cadVals);
+const _edgePow = getGraphEdgeSet(_splitsForGraph, _powVals);
+const _pm = calcPacingMetrics(r);
+const paceSparkSvg = buildSparklineSVG(_paceVals, '#00ff88', true, undefined, undefined, _diagSplitTimes, { edge: _edgePace, half: _pm.paceHalf });
+const cadSparkSvg = buildSparklineSVG(_cadVals, '#4fc3f7', false, undefined, undefined, _diagSplitTimes, { edge: _edgeCad, half: _pm.cadHalf });
+const hrSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.avgHr === 'number' ? s.avgHr : null)), '#e53935', false, undefined, undefined, _diagSplitTimes, { half: _pm.hrHalf });
 const altSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.altTo === 'number' ? s.altTo : null)), '#90a4ae', false, undefined, undefined, _diagSplitTimes);
 // [신규] 구간별 러닝 파워(와트) 그래프. 값이 없는(옛 기록) 구간은 null로 필터링됨.
-const powerSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.power === 'number' ? s.power : null)), '#ffb74d', false, undefined, undefined, _diagSplitTimes);
+const powerSparkSvg = buildSparklineSVG(_powVals, '#ffb74d', false, undefined, undefined, _diagSplitTimes, { edge: _edgePow });
 // [추가] 그래프 아래 거리/시간 축 라벨 (기준선과 함께, v2 스타일)
 const diagAxisLabelsHtml = buildDiagAxisLabelsHtml(_splitsForGraph);
+// [추가 2026-09-19] 그래프 아래 전/후반 안내 한 줄 (흰 선 = 전반/후반 평균)
+const _koN = storage.getLang() === 'ko';
+const _fmtPaceN = (sec) => { const tt = Math.round(sec); return Math.floor(tt / 60) + "'" + String(tt % 60).padStart(2, '0') + '"'; };
+const _sgnN = (v) => v > 0 ? '+' : (v < 0 ? '\u2212' : '');
+const _noteWrap = (txt) => '<div style="font-size:var(--fs-xxs);color:#aaa;font-weight:700;margin-top:6px;">' + txt + '</div>';
+const paceNoteHtml = _pm.paceHalf ? _noteWrap(
+  (_koN ? '전반 ' : '1st half ') + _fmtPaceN(_pm.paceHalf.v1) + ' \u2192 ' + (_koN ? '후반 ' : '2nd half ') + _fmtPaceN(_pm.paceHalf.v2)
+  + ' (' + _sgnN(_pm.splitDiff) + Math.abs(_pm.splitDiff) + (_koN ? '초' : 's') + ')'
+  + (_pm.paceStab ? ' \u00b7 ' + (_koN ? '안정성 \u00b1' : 'stability \u00b1') + _pm.paceStab.sec + (_koN ? '초' : 's') : '')) : '';
+const cadNoteHtml = _pm.cadHalf ? _noteWrap(
+  (_koN ? '전반 ' : '1st ') + Math.round(_pm.cadHalf.v1) + ' \u2192 ' + (_koN ? '후반 ' : '2nd ') + Math.round(_pm.cadHalf.v2) + ' SPM'
+  + ' (' + _sgnN(Math.round(_pm.cadDrift * 10) / 10) + Math.abs(Math.round(_pm.cadDrift * 10) / 10).toFixed(1) + '%)') : '';
+const hrNoteHtml = _pm.hrHalf ? _noteWrap(
+  (_koN ? '전반 ' : '1st ') + Math.round(_pm.hrHalf.v1) + ' \u2192 ' + (_koN ? '후반 ' : '2nd ') + Math.round(_pm.hrHalf.v2) + ' bpm'
+  + ' (' + _sgnN(_pm.hrDrift) + Math.abs(_pm.hrDrift) + ')') : '';
+
 const totalAltGainForDiag = _splitsForGraph.length > 0 ? _splitsForGraph.reduce((sum,s)=>sum+Math.max(0,s.altDiff||0),0) : 0;
 // [추가] HR처럼 "평균 / 최고"로 보여주기 위한 케이던스·페이스 최고값.
 // 순간 최고 케이던스/페이스를 러닝 중 별도로 저장하지 않으므로, 100m 구간(diagSplits)
 // 단위 평균들 중 최고값(케이던스는 최댓값, 페이스는 가장 빠른=초/km가 가장 작은 값)으로 근사.
 // [수정] 자투리 등 샘플 수가 너무 적은(3개 미만) 구간은 순간 노이즈 하나로도 평균이 크게
 // 흔들릴 수 있어 최고값 후보에서 제외한다(케이던스 최고값이 비정상적으로 튀어 보이던 원인).
-const _cadPeakVals = _splitsForGraph.filter(s => typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3)).map(s => s.avgCadence);
+const _cadPeakVals = _splitsForGraph.filter((s, i) => !_edgeCad.has(i) && typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3)).map(s => s.avgCadence);
 const cadPeakForDiag = _cadPeakVals.length ? Math.max(..._cadPeakVals) : null;
-const _pacePeakSecs = _splitsForGraph.map(s => paceStrToSeconds(s.pace)).filter(v => typeof v === 'number');
+const _pacePeakSecs = _splitsForGraph.filter((s, i) => !_edgePace.has(i)).map(s => paceStrToSeconds(s.pace)).filter(v => typeof v === 'number');
 const pacePeakSecForDiag = _pacePeakSecs.length ? Math.min(..._pacePeakSecs) : null;
 // [신규] 구간 최고 파워(와트) — PACE/CAD와 동일하게 100m 구간 값들 중 최댓값으로 근사.
-const _powerPeakVals = _splitsForGraph.map(s => s.power).filter(v => typeof v === 'number' && isFinite(v));
+const _powerPeakVals = _splitsForGraph.filter((s, i) => !_edgePow.has(i)).map(s => s.power).filter(v => typeof v === 'number' && isFinite(v));
 const powerPeakForDiag = _powerPeakVals.length ? Math.max(..._powerPeakVals) : null;
 function _fmtPeakPaceStr(sec) {
   if (sec == null) return null;
@@ -7407,14 +7629,14 @@ contentArea.innerHTML =
 '<div class="diag-card"><div class="diag-label">' + (t.time||'TIME') + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.time||'--') + '</div></div>' +
 '<div style="margin-top:6px;font-size:var(--fs-sm);color:#aaa;font-weight:700;">' + (t.speed||'SPEED') + ' : ' + (() => { const p=r.avgPace||r.pace; if(p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60); return this.currentUnit==='mile'?(kmh*0.621371).toFixed(1)+' mi/h':kmh.toFixed(1)+' km/h';} return '--'; })() + '</div>' +
 '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + (pacePeakDisplay ? (' / ' + pacePeakDisplay) : '') + ' <span class="c44">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div>' + paceSparkSvg + (paceSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + (pacePeakDisplay ? (' / ' + pacePeakDisplay) : '') + ' <span class="c44">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div>' + paceSparkSvg + (paceSparkSvg ? diagAxisLabelsHtml + paceNoteHtml : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.powerLabel || "POWER") + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + (powerPeakForDiag != null ? (' / ' + powerPeakForDiag) : '') + ' <span class="c44">W</span></div><div class="diag-ref">' + (t.powerZoneLabel || 'POWER ZONE') + ': ' + powerZoneDisplay + '</div></div><div class="diag-tip">' + powerComment + '</div>' + powerSparkSvg + (powerSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.cadence ? this.getCadenceColor(r.cadence) : '#aaa') + '">CAD: ' + (r.cadence || 0) + (cadPeakForDiag != null ? (' / ' + cadPeakForDiag) : '') + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div>' + cadSparkSvg + (cadSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.cadence ? this.getCadenceColor(r.cadence) : '#aaa') + '">CAD: ' + (r.cadence || 0) + (cadPeakForDiag != null ? (' / ' + cadPeakForDiag) : '') + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div>' + cadSparkSvg + (cadSparkSvg ? diagAxisLabelsHtml + cadNoteHtml : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getStrideColor(strideNumForFeedback, diagProfile) + '">' + strideVal + '</div><div class="diag-ref">Ref: 0.5~0.75m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (!_gctUntrusted && r.gct && r.gct !== '--' ? this.getGctColor(r.gct) : '#aaa') + '">GCT: ' + (_gctUntrusted ? '--' : r.gct) + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagBalanceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (_gctFlightHidden ? '#aaa' : this.getBalanceColor(r.gctBal)) + '">GCT ' + (_gctFlightHidden ? '--' : (r.gctBal || '--')) + ' <span style="font-size:var(--fs-xs);color:#aaa">L:R</span></div><div class="diag-ref">GYRO ' + (_gctFlightHidden ? '--' : (r.gyroBal || '--')) + '</div></div><div class="diag-tip">' + diagFeedback.balance + '</div><div style="font-size:var(--fs-xs);color:#888;font-weight:600;line-height:1.5;margin-top:8px;padding-top:8px;border-top:1px solid #222;">' + (t.diagBalanceExplain || '') + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagFlightLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (isNaN(flightNum)?'#aaa':this.getFlightColor(flightNum)) + '">' + flightVal + (flightVal!=='--'?' %':'') + '</div><div class="diag-ref">Ref: 30~45%</div></div><div class="diag-tip">' + flightComment + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagHrLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + hrColor + '">' + hrMainVal + '</div><div class="diag-ref">' + t.hrZoneLabel + ': ' + hrZoneDisplay + '</div></div><div class="diag-tip">' + hrComment + '</div>' + hrSparkSvg + (hrSparkSvg ? diagAxisLabelsHtml : '') + '</div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagHrLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + hrColor + '">' + hrMainVal + '</div><div class="diag-ref">' + t.hrZoneLabel + ': ' + hrZoneDisplay + '</div></div><div class="diag-tip">' + hrComment + '</div>' + hrSparkSvg + (hrSparkSvg ? diagAxisLabelsHtml + hrNoteHtml : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagAltLabel || "GPS ALTITUDE") + '</div><div class="diag-val-group"><div class="diag-main-val">' + (altSparkSvg ? ('+' + totalAltGainForDiag.toFixed(0) + ' <span class="c44">M</span>') : '--') + '</div></div>' + (altSparkSvg ? (altSparkSvg + diagAxisLabelsHtml) : '<div class="diag-tip">' + (t.diagAltNoData || '') + '</div>') + '</div>' +
 // [추가] 린각도: 해당 기록에 데이터가 있을 때만 카드+다이어그램 노출 (LeanAngleUI.has()로 게이팅, 계산/판정 로직은 모듈만 사용)
 (LeanAngleUI.has(r) ?
