@@ -2805,11 +2805,19 @@ function calcPacingMetrics(record) {
   // 그래프의 흐린 구간·케이던스/심박 전후반 평균과 같은 기준이 되어 숫자와 그래프(흰 선 시작점)가 일치한다.
   // 끝의 짧은 자투리(70m 미만) / 정지 직전 감속 구간도 그래프의 흐린 점선(getGraphEdgeSet)과 같은 규칙으로 제외한다.
   // (자투리를 포함하면 10~30m가 몇 초 걸린 값이 후반 평균을 크게 끌어올려 그래프의 흰 선이 최저점 아래로 붙는 문제가 있었음)
-  // 제외하고 남는 거리가 0.4km 미만인 짧은 러닝은 값이 사라지지 않도록 예전처럼 전체 구간을 사용한다.
+  // [수정 2026-09-25] "자투리를 뺐다가 다시 포함"하는 기준을 거리(0.4km)가 아니라 그래프
+  // (buildSparklineSVG 3058줄)와 똑같이 "자투리 뺀 나머지가 3개 미만이면 자투리를 다시 포함"으로 통일한다.
+  // 기준이 서로 다르면(예: 0.8km 안팎의 짧은 러닝) 평균 계산은 자투리를 빼고 그래프 스케일은 자투리를
+  // 포함하는(혹은 그 반대) 상태가 생겨, 흰 전/후반 평균선이 다시 그래프 범위 밖으로 밀려나는 문제가
+  // 재발한다. 케이던스/심박 쪽도 같은 규칙을 쓰도록 아래 trimEdge로 공용화했다.
+  const trimEdge = (arr, edgeSet, keyOf) => {
+    if (!edgeSet || !edgeSet.size) return arr;
+    const core = arr.filter(o => !edgeSet.has(keyOf(o)));
+    return core.length >= 3 ? core : arr;
+  };
   const _edgeForHalf = getGraphEdgeSet(sp, sp.map(s => paceStrToSeconds(s.pace)), leadPace);
-  const coreSegs = valid.filter(g => g.idx >= leadPace && !_edgeForHalf.has(g.idx));
-  const coreKm0 = coreSegs.reduce((a, g) => a + g.dkm, 0);
-  const useSegs = coreKm0 >= 0.4 ? coreSegs : valid;
+  const leadSegs = valid.filter(g => g.idx >= leadPace);
+  const useSegs = trimEdge(leadSegs, _edgeForHalf, g => g.idx);
   const useKm = useSegs.reduce((a, g) => a + g.dkm, 0);
   const useT = useSegs.reduce((a, g) => a + g.dt, 0);
   if (useKm >= 0.4) {
@@ -2832,6 +2840,10 @@ function calcPacingMetrics(record) {
   }
 
   // 3) 케이던스 유지, 4) 심박 드리프트: 출발 직후 일정 시간(케이던스 30초/심박 60초, GRAPH_LEAD_SEC) 이내 구간(케이던스/심박이 올라가는 중)을 빼고 전반/후반 평균 비교
+  // [수정 2026-09-25] 페이스와 같은 이유로 끝의 자투리/이상치 구간도 각 그래프(_edgeCad/_edgeHr)와 같은
+  // 기준(getGraphEdgeSet)으로 제외한다. 예전에는 시작 구간만 뺐어서, 마지막 스플릿이 짧거나 튀는 값이면
+  // 평균에는 포함되고 그래프 y축 스케일에서는 빠져, 흰 전/후반 평균선이 그래프 위/아래 끝에 눌러붙는
+  // 문제가 페이스와 똑같이 발생했다.
   const half2 = (arr) => { const n = Math.floor(arr.length / 2); return [arr.slice(0, n), arr.slice(arr.length - n)]; };
   const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
   // 원본 구간 인덱스(i)를 함께 들고 다녀야 그래프에 전/후반 선을 정확히 그릴 수 있다
@@ -2841,12 +2853,14 @@ function calcPacingMetrics(record) {
     const va = avg(a.map(o => o.v)), vb = avg(b.map(o => o.v));
     return { v1: va, v2: vb, r1: [a[0].i, a[a.length - 1].i], r2: [b[0].i, b[b.length - 1].i], mid: null };
   };
-  const cadArr = pick(s => typeof s.avgCadence === 'number' && s.avgCadence > 0 && (s.cadN == null || s.cadN >= 3), 'avgCadence', leadCad);
+  const _edgeForCad = getGraphEdgeSet(sp, sp.map(s => (typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3) ? s.avgCadence : null)), leadCad);
+  const cadArr = trimEdge(pick(s => typeof s.avgCadence === 'number' && s.avgCadence > 0 && (s.cadN == null || s.cadN >= 3), 'avgCadence', leadCad), _edgeForCad, o => o.i);
   if (cadArr.length >= 4) {
     out.cadHalf = halfInfo(cadArr);
     out.cadDrift = ((out.cadHalf.v2 - out.cadHalf.v1) / out.cadHalf.v1) * 100;
   }
-  const hrArr = pick(s => typeof s.avgHr === 'number' && s.avgHr > 0, 'avgHr', leadHr);
+  const _edgeForHr = getGraphEdgeSet(sp, sp.map(s => (typeof s.avgHr === 'number' ? s.avgHr : null)), leadHr);
+  const hrArr = trimEdge(pick(s => typeof s.avgHr === 'number' && s.avgHr > 0, 'avgHr', leadHr), _edgeForHr, o => o.i);
   if (hrArr.length >= 4 && totalT >= 600) { // 10분 미만은 워밍업 심박 상승이 지배적이라 드리프트로 보지 않음
     out.hrHalf = halfInfo(hrArr);
     out.hrDrift = Math.round(out.hrHalf.v2 - out.hrHalf.v1);
