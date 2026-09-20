@@ -2729,6 +2729,30 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
+// [추가 2026-09-19] 출발 직후 제외 구간을 "구간 개수"가 아니라 "출발 후 경과 시간" 기준으로 통일.
+// 페이스/케이던스/심박 그래프의 흐린(edge) 표시와 calcPacingMetrics의 전·후반 평균/안정성이
+// 같은 규칙을 쓰도록 한 곳에서 관리한다. 구간의 시작 시각이 minSec 미만이면 그 구간까지 제외(최소 1개).
+//  - pace/cad: 30초 (GPS 속도·걸음 케이던스는 출발 후 10~20초면 안정됨)
+//  - hr: 60초 (심박은 반응이 느려 출발 후 1~2분간 계속 오름)
+// 기준을 바꾸고 싶으면 아래 숫자만 고치면 된다.
+const GRAPH_LEAD_SEC = { pace: 30, cad: 30, hr: 60 };
+function getLeadExcludeCount(splits, minSec) {
+  if (!splits || !splits.length) return 1;
+  let prevKm = 0, prevT = 0, cnt = 0;
+  for (let i = 0; i < splits.length; i++) {
+    if (prevT >= minSec) break; // 이 구간의 시작 시각(= 이전 구간 끝 시각)이 이미 기준을 넘었으면 포함
+    cnt++;
+    const sp_ = splits[i];
+    const km = parseFloat(sp_.km);
+    let curT = null;
+    if (typeof sp_.t_sec === 'number') curT = sp_.t_sec;
+    else { const ps = paceStrToSeconds(sp_.pace); if (ps != null && isFinite(km)) curT = prevT + ps * (km - prevKm); }
+    if (isFinite(km)) prevKm = km;
+    if (curT == null) break; // 시간을 알 수 없는 옛 기록은 최소 제외(1개)만 적용
+    prevT = curT;
+  }
+  return Math.max(1, cnt);
+}
 // [추가 2026-09-19] 페이싱 지표 4종: 페이스 안정성 / 전·후반 페이스 차 / 케이던스 유지 / 심박 드리프트.
 // 모두 record.diagSplits(100m 구간 기록: km 누적, t_sec, pace, avgCadence, cadN, avgHr)만으로 계산한다.
 // GPS·걸음 감지·심박에서 나오는 값이라 착용 위치(손/암밴드/프리런 포함)와 무관하게 믿을 수 있다.
@@ -2737,6 +2761,10 @@ function calcPacingMetrics(record) {
   const out = { paceStab: null, splitDiff: null, cadDrift: null, hrDrift: null, paceHalf: null, cadHalf: null, hrHalf: null };
   const sp = (record && Array.isArray(record.diagSplits)) ? record.diagSplits : [];
   if (sp.length < 4) return out;
+  // [수정 2026-09-19] 출발 직후 제외 구간: 개수 고정(1개/2개) → 출발 후 경과 시간 기준(GRAPH_LEAD_SEC)
+  const leadPace = getLeadExcludeCount(sp, GRAPH_LEAD_SEC.pace);
+  const leadCad = getLeadExcludeCount(sp, GRAPH_LEAD_SEC.cad);
+  const leadHr = getLeadExcludeCount(sp, GRAPH_LEAD_SEC.hr);
   // 구간(dkm, dt) 목록: 누적 km 차이 + t_sec 차이 (t_sec가 없는 옛 기록은 페이스 문자열로 대체)
   const segs = [];
   let prevKm = 0, prevT = 0;
@@ -2756,9 +2784,9 @@ function calcPacingMetrics(record) {
   const totalKm = valid.reduce((a, g) => a + g.dkm, 0);
   const totalT  = valid.reduce((a, g) => a + g.dt, 0);
 
-  // 1) 페이스 안정성: 첫 구간(출발 가속)과 70m 미만 자투리를 뺀 100m 구간 페이스의 표준편차(초/km).
+  // 1) 페이스 안정성: 출발 직후(GRAPH_LEAD_SEC.pace 이내) 구간(출발 가속)과 70m 미만 자투리를 뺀 100m 구간 페이스의 표준편차(초/km).
   //    중앙값 ±3·MAD 밖의 튀는 값(GPS 순간 오차)은 제외.
-  const paces = valid.slice(1).filter(g => g.dkm >= 0.07).map(g => g.dt / g.dkm);
+  const paces = valid.filter(g => g.idx >= leadPace && g.dkm >= 0.07).map(g => g.dt / g.dkm);
   if (paces.length >= 5) {
     const sorted = [...paces].sort((a, b) => a - b);
     const med = sorted[Math.floor(sorted.length / 2)];
@@ -2773,10 +2801,18 @@ function calcPacingMetrics(record) {
   }
 
   // 2) 전/후반 페이스 차: 총 거리의 절반 지점에서 시간을 보간해 (후반 − 전반) 초/km. 음수 = 네거티브 스플릿(후반이 빠름)
-  if (totalKm >= 0.4) {
-    const half = totalKm / 2;
+  // [수정 2026-09-19] 출발 직후(GRAPH_LEAD_SEC.pace 이내) 구간은 가속 중이라 전/후반 평균에서 제외한다.
+  // 그래프의 흐린 구간·케이던스/심박 전후반 평균과 같은 기준이 되어 숫자와 그래프(흰 선 시작점)가 일치한다.
+  // 제외하고 남는 거리가 0.4km 미만인 짧은 러닝은 값이 사라지지 않도록 예전처럼 전체 구간을 사용한다.
+  const coreSegs = valid.filter(g => g.idx >= leadPace);
+  const coreKm0 = coreSegs.reduce((a, g) => a + g.dkm, 0);
+  const useSegs = coreKm0 >= 0.4 ? coreSegs : valid;
+  const useKm = useSegs.reduce((a, g) => a + g.dkm, 0);
+  const useT = useSegs.reduce((a, g) => a + g.dt, 0);
+  if (useKm >= 0.4) {
+    const half = useKm / 2;
     let accKm = 0, accT = 0, tHalf = null, midIdx = null;
-    for (const g of valid) {
+    for (const g of useSegs) {
       if (accKm + g.dkm >= half) {
         const f = (half - accKm) / g.dkm;
         tHalf = accT + g.dt * f;
@@ -2786,28 +2822,28 @@ function calcPacingMetrics(record) {
       accKm += g.dkm; accT += g.dt;
     }
     if (tHalf != null) {
-      const v1 = tHalf / half, v2 = (totalT - tHalf) / half;
+      const v1 = tHalf / half, v2 = (useT - tHalf) / half;
       out.splitDiff = Math.round(v2 - v1);
-      out.paceHalf = { v1, v2, r1: [0, midIdx], r2: [midIdx, valid[valid.length - 1].idx], mid: midIdx };
+      out.paceHalf = { v1, v2, r1: [useSegs[0].idx, midIdx], r2: [midIdx, useSegs[useSegs.length - 1].idx], mid: midIdx };
     }
   }
 
-  // 3) 케이던스 유지, 4) 심박 드리프트: 출발 직후 2개 구간(케이던스/심박이 올라가는 중)을 빼고 전반/후반 평균 비교
+  // 3) 케이던스 유지, 4) 심박 드리프트: 출발 직후 일정 시간(케이던스 30초/심박 60초, GRAPH_LEAD_SEC) 이내 구간(케이던스/심박이 올라가는 중)을 빼고 전반/후반 평균 비교
   const half2 = (arr) => { const n = Math.floor(arr.length / 2); return [arr.slice(0, n), arr.slice(arr.length - n)]; };
   const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
   // 원본 구간 인덱스(i)를 함께 들고 다녀야 그래프에 전/후반 선을 정확히 그릴 수 있다
-  const pick = (test, key) => sp.map((s, i) => ({ i, v: s[key], s })).filter(o => o.i >= 2 && test(o.s));
+  const pick = (test, key, lead) => sp.map((s, i) => ({ i, v: s[key], s })).filter(o => o.i >= lead && test(o.s));
   const halfInfo = (arr) => {
     const [a, b] = half2(arr);
     const va = avg(a.map(o => o.v)), vb = avg(b.map(o => o.v));
     return { v1: va, v2: vb, r1: [a[0].i, a[a.length - 1].i], r2: [b[0].i, b[b.length - 1].i], mid: null };
   };
-  const cadArr = pick(s => typeof s.avgCadence === 'number' && s.avgCadence > 0 && (s.cadN == null || s.cadN >= 3), 'avgCadence');
+  const cadArr = pick(s => typeof s.avgCadence === 'number' && s.avgCadence > 0 && (s.cadN == null || s.cadN >= 3), 'avgCadence', leadCad);
   if (cadArr.length >= 4) {
     out.cadHalf = halfInfo(cadArr);
     out.cadDrift = ((out.cadHalf.v2 - out.cadHalf.v1) / out.cadHalf.v1) * 100;
   }
-  const hrArr = pick(s => typeof s.avgHr === 'number' && s.avgHr > 0, 'avgHr');
+  const hrArr = pick(s => typeof s.avgHr === 'number' && s.avgHr > 0, 'avgHr', leadHr);
   if (hrArr.length >= 4 && totalT >= 600) { // 10분 미만은 워밍업 심박 상승이 지배적이라 드리프트로 보지 않음
     out.hrHalf = halfInfo(hrArr);
     out.hrDrift = Math.round(out.hrHalf.v2 - out.hrHalf.v1);
@@ -3046,10 +3082,13 @@ const areaPts = first[0] + ',' + (H - PAD) + ' ' + coreCoords.join(' ') + ' ' + 
 // [추가] 평균 기준선(회색 점선). yFor가 invert를 이미 반영하므로 그대로 사용.
 // [수정] "avg" 텍스트 라벨은 카드 안에서 위치를 잡기 애매하고 데이터 선과 겹쳐 보기 불편하다는
 // 피드백으로 제거 — 점선만 남긴다.
+// [추가 2026-09-19] 확대 화면 라벨용: 아래 블록들이 이미 계산하는 좌표를 모아둔다(새 계산 없음).
+const _lay = { avgY: null, best: [], half: null };
 let avgDashSvg = '';
 if (showAvgLine) {
   const avgVal = scalePts.reduce((a, p) => a + p.v, 0) / scalePts.length;
   const avgY = yFor(avgVal).toFixed(1);
+  _lay.avgY = parseFloat(avgY);
   avgDashSvg = '<line x1="' + PAD + '" y1="' + avgY + '" x2="' + (W - PAD) + '" y2="' + avgY + '" stroke="#888" stroke-width="1" stroke-dasharray="2,2" vector-effect="non-scaling-stroke"></line>';
 }
 // [추가] 최고기록 지점 표시: 세로 점선.
@@ -3090,6 +3129,7 @@ if (highlightBest) {
   const drawDash = (idx) => '<line x1="' + xAt(idx) + '" y1="' + yAt(idx) + '" x2="' + xAt(idx) + '" y2="' + H + '" stroke="#FFD60A" stroke-width="1" stroke-dasharray="2,2" vector-effect="non-scaling-stroke"></line>';
   if (qualifiedRun && qualifiedRun.end > qualifiedRun.start) {
     bestLineSvg = drawDash(qualifiedRun.start) + drawDash(qualifiedRun.end);
+    _lay.best = [{ x: parseFloat(xAt(qualifiedRun.start)), y: parseFloat(yAt(qualifiedRun.start)) }, { x: parseFloat(xAt(qualifiedRun.end)), y: parseFloat(yAt(qualifiedRun.end)) }];
   } else {
     // 30초 이상 유지된 구간이 없으면(시간 정보가 없는 경우 포함) 진짜 최고기록 지점 하나만 표시
     let bestIdx = firstCore;
@@ -3098,6 +3138,7 @@ if (highlightBest) {
       if (better) bestIdx = k;
     }
     bestLineSvg = drawDash(bestIdx);
+    _lay.best = [{ x: parseFloat(xAt(bestIdx)), y: parseFloat(yAt(bestIdx)) }];
   }
 }
 // [추가] 전/후반 평균선(흰색) + 가운데 세로 점선. 값은 호출부가 지표 계산과 같은 기준으로 넘겨준다.
@@ -3108,6 +3149,7 @@ if (opts && opts.half && !bucketed) {
   const midIdx = (hf.mid != null) ? hf.mid : ((hf.r1[1] + hf.r2[0]) / 2);
   halfSvg = '<line x1="' + xFor(midIdx).toFixed(1) + '" y1="' + PAD + '" x2="' + xFor(midIdx).toFixed(1) + '" y2="' + (H - PAD) + '" stroke="#ffffff" stroke-opacity="0.35" stroke-width="1" stroke-dasharray="1,2" vector-effect="non-scaling-stroke"></line>'
     + hline(hf.r1, hf.v1) + hline(hf.r2, hf.v2);
+  _lay.half = { r1: [xFor(hf.r1[0]), xFor(hf.r1[1])], r2: [xFor(hf.r2[0]), xFor(hf.r2[1])], mid: xFor(midIdx), v1: hf.v1, v2: hf.v2 };
 }
 // edge 구간은 핵심 선 앞뒤에 흐린 점선으로 이어 붙임
 let edgeSvg = '';
@@ -3120,6 +3162,9 @@ if (edgeSet) {
 // viewBox 좌표계(H=32)는 그대로 두고 CSS 높이만 늘리면, preserveAspectRatio="none" +
 // vector-effect="non-scaling-stroke" 조합 덕분에 선 굵기는 그대로 유지된 채 세로로 확대되어 그려진다.
 const svgHeightPx = (opts && opts.heightPx) || 32;
+// [추가 2026-09-19] opts.onLayout: 확대 화면에서 HTML 라벨을 얹을 수 있도록 "이미 계산된" 좌표(viewBox W×H 기준)만 넘겨준다.
+// 콜백을 넘기지 않으면(작은 카드 등 기존 호출) 아무 일도 하지 않는다.
+if (opts && typeof opts.onLayout === 'function') opts.onLayout({ W: W, H: H, avgY: _lay.avgY, best: _lay.best, half: _lay.half });
 return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%;height:' + svgHeightPx + 'px;display:block;margin-top:6px;">'
   + '<polyline points="' + areaPts + '" fill="' + colorHex + '" opacity="0.12" stroke="none"></polyline>'
   + avgDashSvg
@@ -3155,6 +3200,45 @@ function getGraphEdgeSet(splits, vals, leadCount) {
     }
   }
   return set;
+}
+// [추가 2026-09-19] 확대 그래프 위에 얹는 글자 라벨: 전반/후반 평균(위쪽 괄호), 평균, 최고(유지)구간, 방향(빠름/느림 등).
+// 그래프 SVG는 preserveAspectRatio="none"이라 SVG 안에 글씨를 넣으면 찌그러지므로, HTML 라벨을
+// viewBox 좌표의 퍼센트 위치(x/W, y/H)로 얹는다. 좌표는 buildSparklineSVG(onLayout)가 계산한 값을 그대로 쓴다.
+// lay가 없으면(그래프 없음 등) svg를 그대로 돌려준다. 최저(WORST) 지점은 출발 구간 영향이 커서 일부러 표시하지 않는다.
+function buildDiagGraphFsPlotHtml(svg, lay, o) {
+  if (!lay) return svg;
+  const W = lay.W, H = lay.H, ko = o.ko, fmt = o.fmt;
+  const pctX = (x) => (x / W * 100).toFixed(2) + '%';
+  const pctY = (y) => (y / H * 100).toFixed(2) + '%';
+  const tag = 'position:absolute;white-space:nowrap;font-size:var(--fs-xs);font-weight:900;line-height:1.2;padding:1px 4px;border-radius:4px;background:rgba(17,17,17,0.78);';
+  let head = '';
+  if (lay.half) {
+    const seg = (r, txt) => '<div style="position:absolute;top:0;left:' + pctX(r[0]) + ';width:' + ((r[1] - r[0]) / W * 100).toFixed(2) + '%;text-align:center;white-space:nowrap;font-size:var(--fs-xs);font-weight:900;color:#e6e6e6;">' + txt + '<i style="display:block;height:5px;margin:3px 2px 0;border:1px solid rgba(255,255,255,0.5);border-top:none;"></i></div>';
+    head = '<div style="position:relative;height:28px;">'
+      + seg(lay.half.r1, (ko ? '전반 평균 ' : '1st half avg ') + fmt(lay.half.v1))
+      + seg(lay.half.r2, (ko ? '후반 평균 ' : '2nd half avg ') + fmt(lay.half.v2))
+      + '</div>';
+  }
+  let tags = '';
+  if (lay.avgY != null && o.avgVal != null) {
+    tags += '<div style="' + tag + 'right:2px;top:' + pctY(lay.avgY) + ';transform:translateY(-100%);color:#a0a0a0;">' + (ko ? '평균 ' : 'AVG ') + fmt(o.avgVal) + '</div>';
+  }
+  if (lay.best && lay.best.length) {
+    if (lay.best.length >= 2) {
+      const mid = (lay.best[0].x + lay.best[lay.best.length - 1].x) / 2;
+      tags += '<div style="' + tag + 'left:' + pctX(mid) + ';bottom:3px;transform:translateX(-50%);color:#FFD60A;">' + (ko ? '최고 유지구간' : 'Best stretch') + '</div>';
+    } else {
+      const bx = lay.best[0].x;
+      const side = bx > W * 0.6 ? ('right:' + pctX(W - bx) + ';margin-right:4px;') : ('left:' + pctX(bx) + ';margin-left:4px;');
+      tags += '<div style="' + tag + side + 'bottom:3px;color:#FFD60A;">' + (ko ? '최고 ' : 'Best ') + fmt(o.bestVal) + '</div>';
+    }
+  }
+  const hintTop = o.invert ? (ko ? '빠름 ▲' : 'Fast ▲') : (ko ? '높음 ▲' : 'High ▲');
+  const hintBot = o.invert ? (ko ? '느림 ▼' : 'Slow ▼') : (ko ? '낮음 ▼' : 'Low ▼');
+  tags += '<div style="' + tag + 'left:2px;top:0;color:#888;">' + hintTop + '</div><div style="' + tag + 'left:2px;bottom:0;color:#888;">' + hintBot + '</div>';
+  // svg는 margin-top:6px 로 그려지므로(flow-root로 감쌈) 라벨 레이어도 top:6px, 높이는 그래프 렌더 높이와 동일
+  return '<div>' + head + '<div style="position:relative;display:flow-root;">' + svg
+    + '<div style="position:absolute;left:0;right:0;top:6px;height:' + o.heightPx + 'px;pointer-events:none;">' + tags + '</div></div></div>';
 }
 // [추가] DIAG 미니 그래프 아래에 표시할 거리/시간 라벨 HTML.
 // 전체 거리에 따라 라벨 개수를 3→4→5개로 늘려서, 짧은 러닝에서는 카드 안에서
@@ -7616,11 +7700,12 @@ const _paceVals = _splitsForGraph.map(s => paceStrToSeconds(s.pace));
 const _cadVals = _splitsForGraph.map(s => (typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3) ? s.avgCadence : null));
 const _hrVals = _splitsForGraph.map(s => (typeof s.avgHr === 'number' ? s.avgHr : null));
 const _powVals = _splitsForGraph.map(s => (typeof s.power === 'number' ? s.power : null));
-const _edgePace = getGraphEdgeSet(_splitsForGraph, _paceVals);
-// [수정 2026-09-19] 케이던스·심박은 calcPacingMetrics의 전/후반 평균이 초반 2구간(i>=2)을 뺴고
-// 계산되므로, 그래프의 흐린 edge 표시도 leadCount=2로 맞춰 흰 평균선 시작점과 일치시킨다.
-const _edgeCad = getGraphEdgeSet(_splitsForGraph, _cadVals, 2);
-const _edgeHr = getGraphEdgeSet(_splitsForGraph, _hrVals, 2);
+const _edgePace = getGraphEdgeSet(_splitsForGraph, _paceVals, getLeadExcludeCount(_splitsForGraph, GRAPH_LEAD_SEC.pace));
+// [수정 2026-09-19] 케이던스·심박은 calcPacingMetrics의 전/후반 평균이 초반 구간을 뺴고
+// 계산되므로, 그래프의 흐린 edge 표시도 같은 시간 기준(GRAPH_LEAD_SEC)으로 맞춰 흰 평균선 시작점과 일치시킨다.
+// [수정 2026-09-19] 페이스도 같은 규칙(30초)으로 통일 — 페이스/케이던스 30초, 심박 60초.
+const _edgeCad = getGraphEdgeSet(_splitsForGraph, _cadVals, getLeadExcludeCount(_splitsForGraph, GRAPH_LEAD_SEC.cad));
+const _edgeHr = getGraphEdgeSet(_splitsForGraph, _hrVals, getLeadExcludeCount(_splitsForGraph, GRAPH_LEAD_SEC.hr));
 const _edgePow = getGraphEdgeSet(_splitsForGraph, _powVals);
 const _pm = calcPacingMetrics(r);
 const paceSparkSvg = buildSparklineSVG(_paceVals, '#00ff88', true, undefined, undefined, _diagSplitTimes, { edge: _edgePace, half: _pm.paceHalf });
@@ -16116,7 +16201,7 @@ let vals, color, invert, edge, half, label, fmt, noteHtml;
 if (metricKey === 'pace') {
   vals = splits.map(s => paceStrToSeconds(s.pace));
   color = '#00ff88'; invert = true;
-  edge = getGraphEdgeSet(splits, vals);
+  edge = getGraphEdgeSet(splits, vals, getLeadExcludeCount(splits, GRAPH_LEAD_SEC.pace));
   half = pm.paceHalf;
   label = t.diagPaceLabel;
   fmt = (v) => { if (v == null || !isFinite(v)) return '--'; const sec = Math.round(v); let str = Math.floor(sec / 60) + "'" + String(sec % 60).padStart(2, '0') + '"'; if (this.currentUnit === 'mile') str = this.convertPaceToUnit(str, 'mile'); return str; };
@@ -16126,7 +16211,7 @@ if (metricKey === 'pace') {
 } else if (metricKey === 'cadence') {
   vals = splits.map(s => (typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3) ? s.avgCadence : null));
   color = '#4fc3f7'; invert = false;
-  edge = getGraphEdgeSet(splits, vals, 2);
+  edge = getGraphEdgeSet(splits, vals, getLeadExcludeCount(splits, GRAPH_LEAD_SEC.cad));
   half = pm.cadHalf;
   label = t.diagCadLabel;
   fmt = (v) => (v == null || !isFinite(v)) ? '--' : (Math.round(v) + ' SPM');
@@ -16135,7 +16220,7 @@ if (metricKey === 'pace') {
 } else if (metricKey === 'hr') {
   vals = splits.map(s => (typeof s.avgHr === 'number' ? s.avgHr : null));
   color = '#e53935'; invert = false;
-  edge = getGraphEdgeSet(splits, vals, 2);
+  edge = getGraphEdgeSet(splits, vals, getLeadExcludeCount(splits, GRAPH_LEAD_SEC.hr));
   half = pm.hrHalf;
   label = t.diagHrLabel;
   fmt = (v) => (v == null || !isFinite(v)) ? '--' : (Math.round(v) + ' BPM');
@@ -16158,7 +16243,8 @@ if (metricKey === 'pace') {
   fmt = (v) => (v == null || !isFinite(v)) ? '--' : (Math.round(v) + ' M');
   noteHtml = '';
 } else { return; }
-const svg = buildSparklineSVG(vals, color, invert, true, true, times, { edge: edge, half: half, heightPx: 220 });
+let lay = null;
+const svg = buildSparklineSVG(vals, color, invert, true, true, times, { edge: edge, half: half, heightPx: 220, onLayout: (L) => { lay = L; } });
 if (!svg) return;
 const axisHtml = buildDiagAxisLabelsHtml(splits);
 // 세부 지표: 작은 카드엔 없던 평균/최고/최저/구간 수/총 소요시간을 계산해 보여준다.
@@ -16183,7 +16269,10 @@ const noteEl = document.getElementById('diag-graph-fs-note');
 const statsEl = document.getElementById('diag-graph-fs-stats');
 if (titleEl) titleEl.textContent = label;
 if (subEl) subEl.textContent = this.formatRecordDateTimeLocalized(r.date) + (r.dist ? (' \u00b7 ' + r.dist + ' km') : '');
-if (svgWrapEl) svgWrapEl.innerHTML = svg;
+// [추가 2026-09-19] 그래프 위에 글자 라벨 얹기(평균/최고는 아래 세부 지표와 같은 유효 구간 기준)
+const _lblAvg = validVals.length ? validVals.reduce((a, b) => a + b, 0) / validVals.length : null;
+const _lblBest = validVals.length ? (invert ? Math.min(...validVals) : Math.max(...validVals)) : null;
+if (svgWrapEl) svgWrapEl.innerHTML = buildDiagGraphFsPlotHtml(svg, lay, { ko: koLang, fmt: fmt, invert: invert, heightPx: 220, avgVal: _lblAvg, bestVal: _lblBest });
 if (axisEl) axisEl.innerHTML = axisHtml;
 if (noteEl) noteEl.innerHTML = noteHtml;
 if (statsEl) statsEl.innerHTML = statsHtml;
