@@ -2736,6 +2736,10 @@ function escapeHtml(str) {
 //  - hr: 60초 (심박은 반응이 느려 출발 후 1~2분간 계속 오름)
 // 기준을 바꾸고 싶으면 아래 숫자만 고치면 된다.
 const GRAPH_LEAD_SEC = { pace: 30, cad: 30, hr: 60 };
+// [추가 2026-09-25] 미니/확대 그래프 최소 스케일 폭(평균값 대비 %). buildSparklineSVG의 minRangePct로
+// 전달되어, 실제 변화폭이 이 비율보다 작으면 그래프가 세로로 꽉 차 보이지 않게 완충한다. 페이스가
+// 케이던스처럼 "비슷한 %는 비슷하게" 보이도록 세 지표를 같은 비율로 맞췄다.
+const GRAPH_MIN_RANGE_PCT = { pace: 0.08, cad: 0.08, hr: 0.08 };
 function getLeadExcludeCount(splits, minSec) {
   if (!splits || !splits.length) return 1;
   let prevKm = 0, prevT = 0, cnt = 0;
@@ -3074,6 +3078,25 @@ const scalePts = edgeSet ? pts.filter(p => !isEdge(p)) : pts;
 const W = 100, H = 32, PAD = 2; // [수정] 기준선이 덜 답답해 보이도록 높이 26→32
 let min = Math.min(...scalePts.map(p => p.v));
 let max = Math.max(...scalePts.map(p => p.v));
+// [추가 2026-09-25] 최소 스케일 폭: 지금까지는 이번 러닝의 실제 최저~최고값을 무조건 그래프 세로
+// 폭 꽉 채워서 그렸다. 그래서 케이던스가 17 SPM 차이 나든, 페이스가 겨우 10초/km 차이 나든 그래프
+// 에서는 똑같이 끝에서 끝까지 요동치는 것처럼 보여 작은 변화가 실제보다 과장돼 보이는 문제가 있었다.
+// [수정 2026-09-25] opts.minRangePct: 페이스(초)·케이던스(SPM)·심박(bpm)처럼 단위가 전혀 다른 지표를
+// "비슷한 %만큼 변했으면 그래프도 비슷하게 출렁이도록" 맞추려면 고정 숫자보다 평균값 대비 비율이
+// 낫다(예: 8% → 케이던스 평균 172 SPM이면 최소 13.8 SPM 폭, 페이스 평균 4'57"=297초면 최소 23.8초
+// 폭으로 잡아서, 실제 변화가 그보다 작으면 중앙 정렬해 늘린 뒤 스케일을 계산한다 — 변화가 작을수록
+// 그래프도 가운데 근처에서 덜 요동친다). opts.minRange는 단위 그대로 고정 폭이 필요할 때(예: 고도) 쓴다.
+// 어느 쪽이든 실제 데이터 범위를 항상 포함하도록 확장만 하므로 그래프가 잘리는 일은 없다.
+let scaleFloor = (opts && opts.minRange) || 0;
+if (opts && opts.minRangePct) {
+  const avgAll = scalePts.reduce((a, p) => a + p.v, 0) / scalePts.length;
+  scaleFloor = Math.max(scaleFloor, Math.abs(avgAll) * opts.minRangePct);
+}
+if (scaleFloor && (max - min) < scaleFloor) {
+  const mid = (max + min) / 2;
+  min = mid - scaleFloor / 2;
+  max = mid + scaleFloor / 2;
+}
 if (max - min < 1e-6) { min -= 1; max += 1; }
 const yFor = (v) => {
   let t = (v - min) / (max - min); // 0~1 (edge 값은 범위를 벗어날 수 있음)
@@ -7727,9 +7750,9 @@ const _edgeCad = getGraphEdgeSet(_splitsForGraph, _cadVals, getLeadExcludeCount(
 const _edgeHr = getGraphEdgeSet(_splitsForGraph, _hrVals, getLeadExcludeCount(_splitsForGraph, GRAPH_LEAD_SEC.hr));
 const _edgePow = getGraphEdgeSet(_splitsForGraph, _powVals);
 const _pm = calcPacingMetrics(r);
-const paceSparkSvg = buildSparklineSVG(_paceVals, '#00ff88', true, undefined, undefined, _diagSplitTimes, { edge: _edgePace, half: _pm.paceHalf });
-const cadSparkSvg = buildSparklineSVG(_cadVals, '#4fc3f7', false, undefined, undefined, _diagSplitTimes, { edge: _edgeCad, half: _pm.cadHalf });
-const hrSparkSvg = buildSparklineSVG(_hrVals, '#e53935', false, undefined, undefined, _diagSplitTimes, { edge: _edgeHr, half: _pm.hrHalf });
+const paceSparkSvg = buildSparklineSVG(_paceVals, '#00ff88', true, undefined, undefined, _diagSplitTimes, { edge: _edgePace, half: _pm.paceHalf, minRangePct: GRAPH_MIN_RANGE_PCT.pace });
+const cadSparkSvg = buildSparklineSVG(_cadVals, '#4fc3f7', false, undefined, undefined, _diagSplitTimes, { edge: _edgeCad, half: _pm.cadHalf, minRangePct: GRAPH_MIN_RANGE_PCT.cad });
+const hrSparkSvg = buildSparklineSVG(_hrVals, '#e53935', false, undefined, undefined, _diagSplitTimes, { edge: _edgeHr, half: _pm.hrHalf, minRangePct: GRAPH_MIN_RANGE_PCT.hr });
 const altSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.altTo === 'number' ? s.altTo : null)), '#90a4ae', false, undefined, undefined, _diagSplitTimes);
 // [신규] 구간별 러닝 파워(와트) 그래프. 값이 없는(옛 기록) 구간은 null로 필터링됨.
 const powerSparkSvg = buildSparklineSVG(_powVals, '#ffb74d', false, undefined, undefined, _diagSplitTimes, { edge: _edgePow });
@@ -16216,12 +16239,13 @@ const t = translations[lang];
 const koLang = lang === 'ko';
 const times = splits.map(s => (typeof s.t_sec === 'number' ? s.t_sec : null));
 const pm = calcPacingMetrics(r);
-let vals, color, invert, edge, half, label, fmt, noteHtml;
+let vals, color, invert, edge, half, label, fmt, noteHtml, minRangePct;
 if (metricKey === 'pace') {
   vals = splits.map(s => paceStrToSeconds(s.pace));
   color = '#00ff88'; invert = true;
   edge = getGraphEdgeSet(splits, vals, getLeadExcludeCount(splits, GRAPH_LEAD_SEC.pace));
   half = pm.paceHalf;
+  minRangePct = GRAPH_MIN_RANGE_PCT.pace;
   label = t.diagPaceLabel;
   fmt = (v) => { if (v == null || !isFinite(v)) return '--'; const sec = Math.round(v); let str = Math.floor(sec / 60) + "'" + String(sec % 60).padStart(2, '0') + '"'; if (this.currentUnit === 'mile') str = this.convertPaceToUnit(str, 'mile'); return str; };
   noteHtml = pm.paceHalf ? ((koLang ? '전반 ' : '1st half ') + fmt(pm.paceHalf.v1) + ' \u2192 ' + (koLang ? '후반 ' : '2nd half ') + fmt(pm.paceHalf.v2)
@@ -16232,6 +16256,7 @@ if (metricKey === 'pace') {
   color = '#4fc3f7'; invert = false;
   edge = getGraphEdgeSet(splits, vals, getLeadExcludeCount(splits, GRAPH_LEAD_SEC.cad));
   half = pm.cadHalf;
+  minRangePct = GRAPH_MIN_RANGE_PCT.cad;
   label = t.diagCadLabel;
   fmt = (v) => (v == null || !isFinite(v)) ? '--' : (Math.round(v) + ' SPM');
   noteHtml = pm.cadHalf ? ((koLang ? '전반 ' : '1st ') + Math.round(pm.cadHalf.v1) + ' \u2192 ' + (koLang ? '후반 ' : '2nd ') + Math.round(pm.cadHalf.v2) + ' SPM'
@@ -16241,6 +16266,7 @@ if (metricKey === 'pace') {
   color = '#e53935'; invert = false;
   edge = getGraphEdgeSet(splits, vals, getLeadExcludeCount(splits, GRAPH_LEAD_SEC.hr));
   half = pm.hrHalf;
+  minRangePct = GRAPH_MIN_RANGE_PCT.hr;
   label = t.diagHrLabel;
   fmt = (v) => (v == null || !isFinite(v)) ? '--' : (Math.round(v) + ' BPM');
   noteHtml = pm.hrHalf ? ((koLang ? '전반 ' : '1st ') + Math.round(pm.hrHalf.v1) + ' \u2192 ' + (koLang ? '후반 ' : '2nd ') + Math.round(pm.hrHalf.v2) + ' bpm'
@@ -16263,7 +16289,7 @@ if (metricKey === 'pace') {
   noteHtml = '';
 } else { return; }
 let lay = null;
-const svg = buildSparklineSVG(vals, color, invert, true, true, times, { edge: edge, half: half, heightPx: 220, onLayout: (L) => { lay = L; } });
+const svg = buildSparklineSVG(vals, color, invert, true, true, times, { edge: edge, half: half, minRangePct: minRangePct, heightPx: 220, onLayout: (L) => { lay = L; } });
 if (!svg) return;
 const axisHtml = buildDiagAxisLabelsHtml(splits);
 // 세부 지표: 작은 카드엔 없던 평균/최고/최저/구간 수/총 소요시간을 계산해 보여준다.
