@@ -3345,6 +3345,11 @@ const DEFAULT_PROFILE_FACTORS_BY_POS = {
 // 4개 위치 모두 바뀌지만, 이 상수는 절대 코드로 자동 갱신되지 않는 고정 1.0이다.
 // RESET 버튼이 "커밋된 기본값이 마음에 안 들면 진짜 최초 상태(1.0)로" 되돌리는 용도로 이 상수를 참조한다.
 const FACTORY_DEFAULT_FACTORS = { stride: 1.0, gps: 1.0, cad: 1.0, pace: 1.0 };
+// [추가 2026-09-20] "모션 전용" 위치 목록. 프리런은 GCT/수직진동(=motionCalibOverrides)만 보정 슬롯을 갖고,
+// 보폭/GPS거리/케이던스/페이스 보정계수 슬롯은 없다 — 프리런의 코어 지표(케이던스·거리·페이스)는
+// 네이티브 걸음센서/GPS 그대로 유지하기 위함. 위치별 보정계수 맵(...ByPos)에는 이 위치를 절대 쓰지 않는다.
+const MOTION_ONLY_POS = ['freerun'];
+function isMotionOnlyPos(pos) { return MOTION_ONLY_POS.indexOf(pos) >= 0; }
 // [추가 2026-08-21] gctFallbackRatio만 예외적으로 "진짜 팩토리 원점"이 있다 — Malisoux 2019
 // (레크리에이션 러너 860명 평균 듀티팩터, 남 39%/여 41%)에 근거한 인구평균값 0.40으로,
 // 특정 폰/사용자 실측이 아닌 독립적 연구값이라 FACTORY_DEFAULT_FACTORS(1.0)와 같은 자격을 가짐.
@@ -3378,8 +3383,14 @@ const FACTORY_MOTION_PROFILES = {
   // 순수 실측 기반이라 groundThreshold/impactThreshold와 같은 성격의 경험적 튜닝값.
   chest:   { groundThreshold: 10.05, impactThreshold: 11.6, gctFallbackRatio: 0.303, vertScale: 0.447, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
   waist:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.46, vertScale: 0.38, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
-  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.467, vertScale: 0, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 600, nativeRescueEnabled: false, stepTrigger: 'native' },
+  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.467, vertScale: 0, minStepInterval: 230, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정 2026-09-20] hand/freerun과 동일하게 vertEnabled:false로 통일 — 3개 위치 모두 "위치 전용 실측 검증 전까진 꺼두고 데이터만 쌓는다" 원칙으로 맞춤
   hand:    { groundThreshold: 11.75, impactThreshold: 9.87, gctFallbackRatio: 0.497, vertScale: 0, minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: true, stepTrigger: 'native' }, // [수정 2026-09-13] nativeRescueEnabled 원래 의도(손 위치에서만 true)대로 복원 — 아래 DEVICE_MOTION_PROFILES와 동일하게 수정
+  // [추가 2026-09-20] 5번째 슬롯(프리런) — 프리런 세션 전용 내부 모션 인스턴스(app.freerunMotion)가 쓰는 값.
+  // 화면/리스트엔 GCT·수직진동을 노출하지 않고 정밀 로그에만 기록하며, 가민 분석실에서 다른 4개 위치와
+  // 똑같이 비교/보정할 수 있다. 보정값은 motionCalibOverrides 의 프리런 전용 키에만 저장되므로
+  // [추가 2026-09-20] chest/waist/armband/hand 에는 절대 영향이 없다. vertScale은 hand/armband와
+  // 동일하게 0으로 리셋(이전엔 허리 커밋값 0.511을 시드로 빌려왔었음) — 프리런 전용 실측이 쌓이면 켠다.
+  freerun: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0, minStepInterval: 230, vertEnabled: false, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정 2026-09-20] hand/armband과 동일하게 vertEnabled:false·vertScale:0으로 리셋 — 프리런 전용 실측 검증 전까진 꺼두고 원시 진폭만 쌓는다
 };
 // [리팩토링 2026-08-21] 위치별 모션 프로파일(gctFallbackRatio 등)이 이 파일 3곳
 // (여기 / applyDevicePos()의 profiles / DEVICE_PROFILE_DEFAULTS)에 각각 하드코딩
@@ -3395,7 +3406,7 @@ const FACTORY_MOTION_PROFILES = {
 const DEVICE_MOTION_PROFILES = {
   chest:   { groundThreshold: 10.05, impactThreshold: 11.6, gctFallbackRatio: 0.36, vertScale: 0.492, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-08-29] SETTINGS > SHOW CURRENT DATA에서 확인한 이번 캘리브레이션 최종 적용값(노란색)을 코드 기본값으로 커밋: groundThreshold 11→10.05, impactThreshold 10.5→11.6, gctFallbackRatio 0.40→0.36, vertScale 0.511→0.492. rotRejectThreshold는 이번 캘리브레이션에서 변경 없음(220 유지).
   waist:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0.511, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-08-21] 허리 위치의 신호 패턴이 가슴과 크게 다르지 않다는 판단 하에, 팩토리 기본값을 가슴과 완전히 통일
-  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0.511, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-08-21] 암밴드 위치의 신호 패턴이 가슴과 크게 다르지 않다는 판단 하에, 팩토리 기본값을 가슴과 완전히 통일
+  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0, minStepInterval: 230, vertEnabled: false, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] 8/21에 가슴 값(0.511)을 그대로 빌려와 vertEnabled:true로 켜뒀던 걸 되돌림 — hand/freerun과 동일하게 vertEnabled:false·vertScale:0으로 리셋하고, 암밴드 전용 가민 대조 데이터가 충분히 쌓이면 그때 다시 켠다. gctFallbackRatio/ground/impact 등 GCT 쪽 보정값은 이 변경과 무관하게 그대로 유지.
   // [수정] 손에 들고 뛸 때는 자체 가속도/자이로 임계값 알고리즘으로 걸음을 "직접 판정"하지 않고
   // 안드로이드 표준 방식(TYPE_STEP_DETECTOR)을 걸음 판정의 주(主) 신호로 쓴다. groundThreshold/
   // impactThreshold/rotRejectThreshold는 이제 걸음을 세는 데 쓰이지 않고 GCT 추정 등 보조 계산에만
@@ -3410,6 +3421,8 @@ const DEVICE_MOTION_PROFILES = {
   // 잘 안 되는 위치라 인구평균보다 "이 로그에서 폴백만 걸러 가민과 맞춘 값"이 더 정확한 시작점.
   // gctFilterDelayMs 보정과는 독립적인 별개 수정(폴백 경로는 필터를 거치지 않음).
   hand:    { groundThreshold: 11.75, impactThreshold: 9.87, gctFallbackRatio: 0.43, vertScale: 0, minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: true, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-08-29] SETTINGS > SHOW CURRENT DATA에서 확인한 이번 캘리브레이션 최종 적용값(노란색)을 코드 기본값으로 커밋: groundThreshold 13.5→11.75, impactThreshold 14→9.87, gctFallbackRatio 0.51(2026-08-26 필터지연 수정 시점 잠정치)→0.43(실제 캘리브레이션 랩 결과로 대체). vertScale/rotRejectThreshold는 변경 없음.
+  // [추가 2026-09-20] 프리런 전용 슬롯 (위 FACTORY 표 주석 참고). 허리 커밋값으로 시드, 이후 독립적으로 보정됨.
+  freerun: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0, minStepInterval: 230, vertEnabled: false, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] 허리 커밋값(0.511)을 시드로 빌려와 vertEnabled:true였던 걸 되돌림 — hand/armband과 동일하게 꺼두고 프리런 전용 데이터로 새로 검증한다. GCT 쪽(gctFallbackRatio 등)은 그대로.
 };
 // [삭제 2026-08-22] 예전엔 APP_DEFAULT_MOTION_PROFILES(=DEVICE_MOTION_PROFILES 별칭)라는
 // 이름으로 "앱 기본값 보기" 화면과 "SHOW CURRENT DATA"의 커밋값 칼럼이 같은 걸 참조했는데,
@@ -3473,10 +3486,12 @@ prevPaceCorrectionFactor: curPace, // [추가]
 savedAt: new Date().toISOString()
 };
 prof.motionCalibOverrides[pos] = override;
+if (!isMotionOnlyPos(pos)) { // [추가] 프리런 같은 모션 전용 슬롯은 보정계수 맵에 아무것도 쓰지 않는다
 if (suggestion.strideFactor != null) prof.strideCorrectionFactorByPos[pos] = suggestion.strideFactor;
 if (suggestion.gpsDistFactor != null) prof.gpsDistCorrectionFactorByPos[pos] = suggestion.gpsDistFactor;
 if (suggestion.cadFactor != null) prof.cadCorrectionFactorByPos[pos] = suggestion.cadFactor;
 if (suggestion.paceFactor != null) prof.paceCorrectionFactorByPos[pos] = suggestion.paceFactor; // [추가]
+}
 // calcStride() 등이 읽는 플랫 필드는 "지금 실제로 착용 중인 위치"일 때만 갱신 —
 // 예를 들어 지금 가슴을 차고 있는데 손 위치 보정값을 적용했다고 해서 지금 러닝에
 // 손 보정계수가 끼어들면 안 되기 때문.
@@ -3824,7 +3839,7 @@ exitClosedTitle: "앱 종료됨", exitClosedMsg: "홈 버튼을 눌러<br>홈 �
 function getPosLabelMap(langOrIsKo) {
 const isKo = typeof langOrIsKo === 'boolean' ? langOrIsKo : langOrIsKo === 'ko';
 const tt = translations[isKo ? 'ko' : 'en'];
-return { chest: tt.devposChest, waist: tt.devposWaist, armband: tt.devposArmband, hand: tt.devposHand };
+return { chest: tt.devposChest, waist: tt.devposWaist, armband: tt.devposArmband, hand: tt.devposHand, freerun: tt.modeFreerunLabel };
 }
 // [수정] 활동모드 명사 라벨(트레일러닝/프리러닝 등)이 2곳(SNS 공유카드/크루피드 공유텍스트)에서
 // 표기가 어긋나 있던 것(트레일런/프리런 vs 트레일러닝/프리러닝)을 앱 전체 표기(modeFreerunLabel 등)와
@@ -4046,8 +4061,8 @@ downsampled = true;
 }
 const list = this.loadPrecisionLogs();
 // [추가] isFreerun: 프리런은 착용 위치가 devicePos에 기록되지 않으므로(null),
-// 목록 표시에서만 "FREE RUN" 배지를 보여주기 위한 표시 전용 플래그. 캘리브레이션/자가보정
-// 로직은 여전히 devicePos(null)만 보고 동작하므로 건드리지 않음.
+// 이 플래그로 "FREE RUN" 로그임을 구분한다. [수정 2026-09-20] 가민 분석실은 이제 이 플래그를
+// 5번째 위치('freerun')로 취급해 GCT/수직진동을 비교·보정한다(다른 4개 위치와 독립).
 list.unshift({ id: 'plog_' + Date.now(), savedAt: new Date().toISOString(), log: finalLog, downsampled: downsampled, devicePos: devicePos || null, isFreerun: activityMode === 'freerun' });
 // [수정] localStorage 용량 보호 + "지난 로그가 쌓여봐야 소용없다"는 사용 패턴 반영.
 // 기존 30개 → 최근 10개까지만 보관 (그 이상은 오래돼서 비교 의미가 떨어짐).
@@ -4110,7 +4125,7 @@ if (!entry || !entry.log || !entry.log.length) {
 alert(isKo ? '로그를 찾을 수 없습니다.' : 'Could not find this log.');
 return;
 }
-const csvStr = this.buildPrecisionCsv(entry.log, entry.devicePos);
+const csvStr = this.buildPrecisionCsv(entry.log, entry.isFreerun ? 'freerun' : entry.devicePos); // [수정] 프리런 로그는 device_pos에 'freerun'으로 남겨 재가져오기 시에도 구분
 const d = new Date(entry.savedAt);
 // [수정] 파일명이 'precision-log-2026-07-19-214457'처럼 너무 길어진다는 피드백에 따라
 // 화면에 표시되는 순서번호(#1, #2...)를 그대로 재사용해 짧게 축약. 연도는 생략(월일만).
@@ -4118,7 +4133,7 @@ const d = new Date(entry.savedAt);
 const numStr = String(idx + 1).padStart(2, '0');
 const dateStr = String(d.getMonth() + 1).padStart(2,'0') + String(d.getDate()).padStart(2,'0'); // MMDD, 연도 생략
 const timeStr = d.toTimeString().slice(0,8).replace(/:/g,'');
-const posSuffix = entry.devicePos ? ('.' + entry.devicePos) : '';
+const posSuffix = entry.isFreerun ? '.freerun' : (entry.devicePos ? ('.' + entry.devicePos) : '');
 const fileName = 'log-' + numStr + '.' + dateStr + '.' + timeStr + posSuffix + '.csv';
 this.downloadCsvFile(csvStr, fileName);
 }
@@ -6250,7 +6265,7 @@ const isKo = lang === 'ko';
 const prof = storage.loadProfile();
 const curPos = (prof && prof.devicePos) || 'chest';
 const POS_LABEL = getPosLabelMap(isKo);
-const order = ['chest', 'waist', 'armband', 'hand'];
+const order = ['chest', 'waist', 'armband', 'hand', 'freerun'];
 let html = '<div class="c69">';
 html += '<div class="c37">' +
   (isKo ? '보정을 한 번도 적용하지 않았을 때 앱이 실제로 쓰는 기본값입니다.' : 'These are the raw defaults the app uses before any calibration is applied.') +
@@ -6267,7 +6282,11 @@ html += 'gctFallbackRatio: <b class="u-color-fff">' + (m.gctFallbackRatio * 100)
 html += 'vertScale: <b class="u-color-fff">' + m.vertScale + '</b><br>';
 html += 'groundThreshold: <b class="u-color-fff">' + m.groundThreshold + '</b> / impactThreshold: <b class="u-color-fff">' + m.impactThreshold + '</b><br>';
 html += 'rotRejectThreshold: <b class="u-color-fff">' + m.rotRejectThreshold + '</b> / minStepInterval: <b class="u-color-fff">' + m.minStepInterval + 'ms</b><br>';
+if (isMotionOnlyPos(pos)) {
+html += (isKo ? '보정계수 없음 — 케이던스·거리·페이스는 네이티브/GPS 그대로 (GCT·수직진동만 보정)' : 'No correction factors — cadence, distance and pace stay native/GPS (only GCT and vertical oscillation are calibrated)');
+} else {
 html += (isKo ? '보정계수' : 'factors') + ' — stride: <b class="u-color-fff">' + f.stride.toFixed(2) + '</b>, gps: <b class="u-color-fff">' + f.gps.toFixed(2) + '</b>, cad: <b class="u-color-fff">' + f.cad.toFixed(2) + '</b>, pace: <b class="u-color-fff">' + f.pace.toFixed(2) + '</b>';
+}
 html += '</div></div>';
 });
 html += '</div>';
@@ -6295,7 +6314,7 @@ const isKo = lang === 'ko';
 const prof = storage.loadProfile();
 const curPos = (prof && prof.devicePos) || 'chest';
 const POS_LABEL = getPosLabelMap(isKo);
-const order = ['chest', 'waist', 'armband', 'hand'];
+const order = ['chest', 'waist', 'armband', 'hand', 'freerun'];
 const overridesMap = prof.motionCalibOverrides || {};
 const factorMapKeys = { stride: 'strideCorrectionFactorByPos', gps: 'gpsDistCorrectionFactorByPos', cad: 'cadCorrectionFactorByPos', pace: 'paceCorrectionFactorByPos' };
 
@@ -6389,15 +6408,19 @@ order.forEach(function(pos) {
   html += row('rotRejectThreshold', committedMotion.rotRejectThreshold, prevMotion && prevMotion.rotRejectThreshold, curMotion.rotRejectThreshold);
   html += row('groundThreshold', committedMotion.groundThreshold, prevMotion && prevMotion.groundThreshold, curMotion.groundThreshold);
   html += row('impactThreshold', committedMotion.impactThreshold, prevMotion && prevMotion.impactThreshold, curMotion.impactThreshold);
+  if (isMotionOnlyPos(pos)) {
+    html += '<div style="color:#666;">' + (isKo ? '보정계수 없음 (케이던스·거리·페이스는 네이티브/GPS 그대로)' : 'No correction factors (cadence, distance and pace stay native/GPS)') + '</div>';
+  } else {
   html += row((isKo ? '보폭계수 stride' : 'stride'), committedFactors.stride, prevFactors && prevFactors.stride, curFactors.stride, function(v){ return v.toFixed(3); });
   html += row('gps', committedFactors.gps, prevFactors && prevFactors.gps, curFactors.gps, function(v){ return v.toFixed(3); });
   html += row((isKo ? '케이던스 cad' : 'cad'), committedFactors.cad, prevFactors && prevFactors.cad, curFactors.cad, function(v){ return v.toFixed(3); });
   html += row('pace', committedFactors.pace, prevFactors && prevFactors.pace, curFactors.pace, function(v){ return v.toFixed(3); });
+  }
   html += '</div></div>';
 });
 
 if (!anyChanged) {
-  html += '<div style="color:#5fd18a; font-size:var(--fs-xxs); margin-top:6px;">' + (isKo ? '4개 위치 모두 커밋된 기본값과 동일합니다 (변경 없음).' : 'All 4 positions match the committed defaults (no changes).') + '</div>';
+  html += '<div style="color:#5fd18a; font-size:var(--fs-xxs); margin-top:6px;">' + (isKo ? '5개 위치 모두 커밋된 기본값과 동일합니다 (변경 없음).' : 'All 5 positions match the committed defaults (no changes).') + '</div>';
 }
 
 html += '</div>';
@@ -8500,6 +8523,10 @@ this.vertAmplitudeCount++;
 // getVertRatio()의 러닝 전체 누적 평균과 달리, 가민 FIT의 초당 값과 같은
 // 시간 해상도로 비교 가능하도록 스텝마다 즉시 갱신한다. 손에 들고 있으면(vertEnabled=false) null 유지.
 this.lastStepVertOscCm = this.vertEnabled ? +(amplitude * this.vertScale).toFixed(2) : null;
+// [추가] 표시/분석용 vertScale 적용값과 별개로, 손모드(vertEnabled=false)에서도
+// 항상 원시 진폭(가속도 단위, 스케일 미적용)을 기록해둔다 — 화면/리스트엔 절대 노출 안 하고
+// 가민 대조 정밀 로그(precisionLog)에만 실어 사후 분석용으로만 쓴다.
+this.lastStepVertAmplitudeRaw = +amplitude.toFixed(3);
 }
 this.vertMin = Infinity;
 this.vertMax = -Infinity;
@@ -8572,10 +8599,12 @@ let currentGCT = Math.round(measuredGCT);
 // 평균을 내다 보니 "평균의 평균"이 되어 초반 페이스 변화에 거의 반응하지
 // 않고 값이 과거 쪽으로 계속 눌려있는 문제가 있었음.
 result.gct = currentGCT;
+this.lastStepGctMs = currentGCT; // [추가] UI(getTxt) 의존 없이 값을 읽기 위한 인스턴스 프로퍼티 — freerunMotion처럼 화면에 노출 안 되는 인스턴스에서도 정밀 로그용으로 값을 가져올 수 있게 함
 // [수정] flight%도 GCT와 짝 맞춰 gctCycleTime 기준으로 계산. 원본 cycleTime(배치 아티팩트로
 // 짧을 수 있음)을 그대로 쓰면 currentGCT가 gctCycleTime 기준으로 보정된 뒤에도 분모만
 // 옛날처럼 짧아서 flight%가 음수로 튀는 모순이 생김.
 result.flight = Math.round(((gctCycleTime - currentGCT) / gctCycleTime) * 100);
+this.lastStepFlightPct = result.flight; // [추가] freerunMotion 등 UI 미노출 인스턴스용
 
 // 러닝 시작부터의 누적 평균은 계속 별도로 유지(다른 곳에서 필요할 수 있어 보관만 함).
 this.gctAccumulator += currentGCT;
@@ -9615,6 +9644,12 @@ activityMode: 'run', walkSteps: 0, walkStepTimes: [], walkSpmSamples: []
 };
 this.map = null; this.marker = null; this.polyline = null; this.timer = null;
 this.motion = new MotionManager((data) => this.updateMetrics(data));
+// [추가] 프리런 전용 내부 계산기 — this.motion과 완전히 분리된 별도 인스턴스.
+// 콜백을 no-op으로 둬서 화면/리스트의 어떤 UI 요소도 절대 건드리지 않고,
+// 오직 정밀 로그(가민 대조용) 기록만을 위해 자이로/가속도를 내부적으로 처리한다.
+// this.motion과 상태(EMA/카운터/캘리브레이션)를 절대 공유하지 않으므로, 프리런 기록이
+// 실제 허리/가슴/손/암밴드 착용 런의 캘리브레이션 제안값에 영향을 줄 수 없다.
+this.freerunMotion = new MotionManager(() => {});
 this.walkMotion = new WalkStepDetector((data) => this.updateWalkMetrics(data));
 // [신규] 가슴 착용 러닝 전용 린각도 추출기. motion/walkMotion과 완전 분리된 독립 인스턴스 —
 // 걸음 감지/케이던스 등 기존 지표 계산 경로에는 전혀 관여하지 않는다.
@@ -10518,6 +10553,10 @@ if (this.state.activityMode === 'walk') return;
 if (!storage.getPrecisionLogEnabled()) return;
 if (!this.state.precisionLog) this.state.precisionLog = [];
 const getTxt = (id) => { const el = document.getElementById(id); return el ? el.textContent.trim() : ''; };
+// [추가] 프리런은 this.motion을 전혀 건드리지 않고 별도 인스턴스(freerunMotion)로만
+// 계산하므로, 아래 gct/vert/gyro/rot 등 모션 파생 필드는 이 alias를 통해 세션에 맞는
+// 인스턴스에서 읽는다 (걷기/러닝/트레일 등은 기존과 동일하게 this.motion 그대로 사용).
+const _fm = (this.state.activityMode === 'freerun') ? this.freerunMotion : this.motion;
 // [추가] 가민 워치 데이터와의 정밀 대조를 위한 실제 시각 / GPS 좌표 / 정확도
 // (기존엔 "러닝 시작 후 경과초"만 있어서, 앱과 워치를 정확히 동시에 누르지 않으면
 //  시간축이 어긋나 비교가 부정확했음 → 실제 시각(timestamp)으로 정렬 가능하게 함)
@@ -10528,8 +10567,8 @@ const gpsAcc = (this.state.lastGpsAccuracy != null) ? this.state.lastGpsAccuracy
 // [추가] 자이로스코프 기반 회전 노이즈 필터의 현재 누적값(deg/s, 마지막 걸음 이후 최대 회전각속도).
 // 걸음 사이 임의 시점에 샘플링되므로 "그 순간까지의 최대값" 스냅샷이며, 자이로가 없는
 // 기기/네이티브 경로 미지원 시에는 0으로 남아있는 게 정상(필터 비활성 상태와 동일).
-const rotPeakDps = (this.motion && typeof this.motion.rotPeakSinceLastStep === 'number')
-  ? this.motion.rotPeakSinceLastStep.toFixed(1) : '';
+const rotPeakDps = (_fm && typeof _fm.rotPeakSinceLastStep === 'number')
+  ? _fm.rotPeakSinceLastStep.toFixed(1) : '';
 // [추가] 가민 FIT의 초당 step_length / vertical_oscillation과 비교하기 위한 필드.
 // 기존엔 이 두 값이 러닝 종료 시 딱 한 번만(요약 카드용) 계산되고 초당 로그엔 없었음.
 // - stepLengthM: 아래 "구간평균 + 순간공식 병행(상보 필터)" 방식으로 계산한 최종 보폭(m).
@@ -10581,13 +10620,13 @@ if (stepLengthWindowM != null && stepLengthInstantM != null) {
 } else if (stepLengthInstantM != null) {
   stepLengthM = stepLengthInstantM.toFixed(2);
 }
-const vertOscMm = (this.motion && this.motion.lastStepVertOscCm != null)
-  ? (this.motion.lastStepVertOscCm * 10).toFixed(1) : '';
+const vertOscMm = (_fm && _fm.lastStepVertOscCm != null)
+  ? (_fm.lastStepVertOscCm * 10).toFixed(1) : '';
 // [추가] 좌우 판별 진단용: 가장 최근 완료된 스텝 1회의 축별 부호 있는 자이로 평균(deg/s).
 // alpha/beta/gamma 중 어느 축이 실제 좌우와 상관관계가 있는지 실측으로 확인하기 위한 원시값.
-const gyroA = (this.motion && this.motion.lastStepGyroA != null) ? this.motion.lastStepGyroA : '';
-const gyroB = (this.motion && this.motion.lastStepGyroB != null) ? this.motion.lastStepGyroB : '';
-const gyroG = (this.motion && this.motion.lastStepGyroG != null) ? this.motion.lastStepGyroG : '';
+const gyroA = (_fm && _fm.lastStepGyroA != null) ? _fm.lastStepGyroA : '';
+const gyroB = (_fm && _fm.lastStepGyroB != null) ? _fm.lastStepGyroB : '';
+const gyroG = (_fm && _fm.lastStepGyroG != null) ? _fm.lastStepGyroG : '';
 // [추가] 안드로이드 네이티브 걸음 센서 교차검증용 누적값 스냅샷.
 // stepDetectorCnt: TYPE_STEP_DETECTOR 누적 이벤트 수(러닝 시작부터 지금까지).
 // stepCounterSteps: TYPE_STEP_COUNTER 기준, 러닝 시작 이후 OS가 센 걸음수.
@@ -10616,7 +10655,7 @@ const logSpeedKmh = (_windowDistM > 0 && _winElapsedSec > 0)
 // [수정 2026-09-01] 이번 로그 초 동안 새로 커밋된 스텝이 있었는지 확인.
 // gctCount는 commitStep()에서 GCT가 실제로 계산될 때만(즉 새 스텝이 확정될 때만)
 // 증가하므로, 직전 로그 시점 값과 같다면 이번 초엔 새 스텝이 없었다는 뜻이다.
-const _curGctCount = (this.motion && typeof this.motion.gctCount === 'number') ? this.motion.gctCount : null;
+const _curGctCount = (_fm && typeof _fm.gctCount === 'number') ? _fm.gctCount : null;
 const _hasNewStepThisSample = (_curGctCount == null) || (_curGctCount !== this.state.lastLoggedGctCount);
 if (_curGctCount != null) this.state.lastLoggedGctCount = _curGctCount;
 this.state.precisionLog.push({
@@ -10628,12 +10667,15 @@ gpsAcc: gpsAcc,
 distKm: this.state.totalDist ? this.state.totalDist.toFixed(3) : '0.000',
 speedKmh: logSpeedKmh,
 cadence: getTxt('cadence'),
-gctMs: _hasNewStepThisSample ? getTxt('gct') : '--',
-flightPct: getTxt('flight'),
+gctMs: !_hasNewStepThisSample ? '--' : (this.state.activityMode === 'freerun' ? ((_fm && _fm.lastStepGctMs != null) ? _fm.lastStepGctMs : '--') : getTxt('gct')),
+flightPct: this.state.activityMode === 'freerun' ? ((_fm && _fm.lastStepFlightPct != null) ? _fm.lastStepFlightPct : '') : getTxt('flight'),
 stepLengthM: stepLengthM,
 stepLengthWindowM: stepLengthWindowM != null ? stepLengthWindowM.toFixed(2) : '', // [추가] 구간평균 원본(디버그/재튜닝용)
 stepLengthInstantM: stepLengthInstantM != null ? stepLengthInstantM.toFixed(2) : '', // [추가] 순간공식 원본(디버그/재튜닝용)
 vertOscMm: vertOscMm,
+// [추가] 손모드 등에서 표시/분석용 vertOscMm이 null로 비어도, 원시 진폭은 항상 남겨둔다
+// (리스트/메인 화면에는 절대 출력 안 함 — 가민 대조 정밀 로그 내부 필드 전용).
+vertOscRaw: (_fm && _fm.lastStepVertAmplitudeRaw != null) ? _fm.lastStepVertAmplitudeRaw : '',
 altM: (typeof this.state.currentAlt === 'number') ? this.state.currentAlt : '', // [추가] GPS 기반 현재 고도(m) 스냅샷
 // [수정] getTxt('hr-val')/getTxt('hr-zone-val')로 화면 텍스트를 그대로 긁어오면,
 // 심박계 미연결 시 이 요소가 POWER(와트)/POWER ZONE 대체 표시로 바뀌어 있는 경우
@@ -10651,12 +10693,12 @@ stepDetectorCnt: stepDetectorCnt,
 stepCounterSteps: stepCounterSteps,
 // [추가 2026-08-15] 가민분석실 GCT 오차 원인 진단용: 이 시점까지 실측 성공/폴백 발동 누적 횟수.
 // 두 값의 비율로 "이 러닝에서 GCT가 실측 기반인지 듀티팩터 폴백 기반인지"를 사후 판별할 수 있다.
-gctMeasuredCnt: (this.motion && typeof this.motion.gctMeasuredCount === 'number') ? this.motion.gctMeasuredCount : '',
-gctFallbackCnt: (this.motion && typeof this.motion.gctFallbackCount === 'number') ? this.motion.gctFallbackCount : '',
+gctMeasuredCnt: (_fm && typeof _fm.gctMeasuredCount === 'number') ? _fm.gctMeasuredCount : '',
+gctFallbackCnt: (_fm && typeof _fm.gctFallbackCount === 'number') ? _fm.gctFallbackCount : '',
 // [추가 2026-09-13] 이 시점까지 GCT 클램프(50ms 하한/상한)가 발동한 누적 횟수.
 // 실측/폴백 어느 경로든 계산 결과가 정상 범위를 벗어나면 여기에 잡힌다 — 세션 간
 // groundThreshold/impactThreshold 제안 게이팅(computeGctClampedFrac)에 사용.
-gctClampedCnt: (this.motion && typeof this.motion.gctClampedCount === 'number') ? this.motion.gctClampedCount : '',
+gctClampedCnt: (_fm && typeof _fm.gctClampedCount === 'number') ? _fm.gctClampedCount : '',
 leanAngleDeg: leanAngleDeg,
 leanForwardDeg: leanForwardDeg, // [추가]
 leanLateralDeg: leanLateralDeg  // [추가]
@@ -10701,9 +10743,11 @@ this.motionListenerAttached = true;
 }
 handleDeviceMotionEvent(e) {
 if (!this.state.isRunning || this.state.isPaused) return;
-// [신규] 프리러닝은 자이로/가속도 입력 자체를 처리하지 않음(GCT/FLIGHT/밸런스 계산 비활성화).
-// 케이던스/거리/페이스/보폭 등 코어 지표는 네이티브 스텝 감지기+GPS로만 산출되므로 영향 없음.
-if (this.state.activityMode === "freerun") { /* no-op: gyro/accel disabled */ }
+// [수정] 프리러닝도 이제 완전한 no-op이 아니라, 화면에는 절대 노출하지 않는 별도
+// 인스턴스(freerunMotion, 프리런 전용 프로필 기준)로 자이로/가속도를 내부적으로만 처리한다.
+// 케이던스/거리/페이스/보폭 등 화면에 보이는 코어 지표는 여전히 네이티브 스텝 감지기+GPS로만
+// 산출되므로 전혀 영향 없음 — 값은 오직 정밀 로그(가민 대조용) 기록에만 쓰인다.
+if (this.state.activityMode === "freerun") { if (this.freerunMotion) this.freerunMotion.handleMotion(e); }
 else if (this.state.activityMode === "walk") { this.walkMotion.handleMotion(e); } else { this.motion.handleMotion(e); }
 if (this.leanTracker) this.leanTracker.handleMotion(e); // [신규] 린각도 추출기: 완전 분리된 별도 경로, 걸음 감지에는 관여하지 않음
 if (!this.state.isAutoPaused && typeof this.maybeLogPrecisionSample === 'function') { this.maybeLogPrecisionSample(); }
@@ -10803,6 +10847,44 @@ if (ui.dom.flight) ui.dom.flight.textContent = '0';
 if (this.state.activityMode === 'freerun') {
 if (ui.dom.gct) ui.dom.gct.textContent = '--';
 if (ui.dom.flight) ui.dom.flight.textContent = '--';
+// [추가] 화면/리스트엔 계속 "--"로 고정해두되, 내부적으로는 별도 인스턴스(freerunMotion)를
+// 프리런 전용 프로필(DEVICE_MOTION_PROFILES.freerun)로 리셋해 가민 대조용 정밀 로그만 조용히 채운다. this.motion은
+// 건드리지 않으므로 실제 착용 위치 캘리브레이션 데이터엔 전혀 영향 없음.
+if (this.freerunMotion) {
+this.freerunMotion.reset();
+// [주의] app.motion.applyDevicePos()를 그대로 쓰지 않는다 — 그 메서드는 부수효과로
+// storage.saveProfile()을 호출해 전역 stride/gps/cad/pace 보정계수 캐시를 "지금 넘긴 위치"
+// 기준으로 덮어쓴다. 여기서 그걸 그대로 썼다간, 실제 저장된 착용 위치가 예를 들어 hand인데도
+// 프리런을 시작할 때마다 그 캐시가 waist 값으로 덮여써져서, 다음 실제 hand 러닝이 잘못된
+// 보정계수로 시작하는 문제가 생긴다. 그래서 필요한 필드만 직접 복사하고 저장소엔 쓰지 않는다.
+const _wp = DEVICE_MOTION_PROFILES.freerun || DEVICE_MOTION_PROFILES.waist; // [수정 2026-09-20] 프리런 전용 슬롯 사용(허리 값과 분리)
+this.freerunMotion.groundThreshold = _wp.groundThreshold;
+this.freerunMotion.impactThreshold = _wp.impactThreshold;
+this.freerunMotion.gctFallbackRatio = _wp.gctFallbackRatio;
+this.freerunMotion.vertScale = _wp.vertScale;
+this.freerunMotion.minStepInterval = _wp.minStepInterval;
+this.freerunMotion.vertEnabled = _wp.vertEnabled;
+this.freerunMotion.rotRejectThreshold = _wp.rotRejectThreshold;
+this.freerunMotion.gctFilterDelayMs = _wp.gctFilterDelayMs;
+this.freerunMotion.nativeRescueEnabled = !!_wp.nativeRescueEnabled;
+this.freerunMotion.useNativeStepTrigger = (_wp.stepTrigger === 'native');
+try {
+  const _ov = (storage.loadProfile().motionCalibOverrides || {}).freerun; // 읽기만 함 [수정 2026-09-20] 프리런 전용 보정값 — 저장소엔 절대 쓰지 않음
+  if (_ov) {
+    if (typeof _ov.gctFallbackRatio === 'number') this.freerunMotion.gctFallbackRatio = _ov.gctFallbackRatio;
+    if (typeof _ov.rotRejectThreshold === 'number') this.freerunMotion.rotRejectThreshold = _ov.rotRejectThreshold;
+    if (typeof _ov.vertScale === 'number') this.freerunMotion.vertScale = _ov.vertScale;
+    if (typeof _ov.groundThreshold === 'number') this.freerunMotion.groundThreshold = _ov.groundThreshold;
+    if (typeof _ov.impactThreshold === 'number') this.freerunMotion.impactThreshold = _ov.impactThreshold;
+    if (typeof _ov.gctFilterDelayMs === 'number') this.freerunMotion.gctFilterDelayMs = _ov.gctFilterDelayMs;
+  }
+} catch (e) {}
+this.freerunMotion.baseGroundThreshold = this.freerunMotion.groundThreshold;
+this.freerunMotion.baseImpactThreshold = this.freerunMotion.impactThreshold;
+this.freerunMotion.calibDone = false;
+this.freerunMotion.calibStartTime = null;
+this.freerunMotion.calibForceSamples = [];
+}
 }
 if(ui.dom.pauseStatus) ui.dom.pauseStatus.classList.remove('is-open');
 if(ui.dom.btnStart) ui.dom.btnStart.classList.add('hidden');
@@ -13687,7 +13769,8 @@ const garmin = (function () {
         // 쓸 수 있게 한다 (예전엔 이 필드가 파싱조차 안 돼서 항상 비어있었음).
         const rowWithPos = log.find(r => r.devicePos);
         const importedDevicePos = rowWithPos ? rowWithPos.devicePos : null;
-        const entry = { id: 'pcmp_' + Date.now(), savedAt: new Date().toISOString(), log: log, imported: true, devicePos: importedDevicePos, fileName: file.name || null };
+        const importedIsFreerun = importedDevicePos === 'freerun'; // [추가] 프리런 로그는 isFreerun 플래그로 복원(devicePos는 null 유지)
+        const entry = { id: 'pcmp_' + Date.now(), savedAt: new Date().toISOString(), log: log, imported: true, devicePos: importedIsFreerun ? null : importedDevicePos, isFreerun: importedIsFreerun, fileName: file.name || null };
         list.unshift(entry);
         savePrecLogImportsList(list.slice(0, MAX_PRECLOG_IMPORTS));
         if (selectedPrecLogIds.indexOf(entry.id) < 0) selectedPrecLogIds.push(entry.id); // [수정] 방금 불러온 로그를 다중선택 배열에 추가
@@ -13743,7 +13826,7 @@ const garmin = (function () {
     dropdown.innerHTML = logs.map((l, idx) => {
       const dateLabel = fmtDate(new Date(l.savedAt).getTime()) + ' · ' + l.log.length + (isKo ? '개' : ' rows');
       const nameLabel = l.fileName ? (escapeHtml(l.fileName) + ' · ') : '';
-      const posLabelDl = l.devicePos ? (posShortMapDl[l.devicePos] || l.devicePos) : '';
+      const posLabelDl = l.isFreerun ? (posShortMapDl.freerun || 'FREE RUN') : (l.devicePos ? (posShortMapDl[l.devicePos] || l.devicePos) : '');
       const firstLine = nameLabel + dateLabel;
       const label = firstLine + (posLabelDl ? ('<br>' + posLabelDl) : '');
       const mark = selectedPrecLogIds.indexOf(l.id) >= 0 ? '✓ ' : '';
@@ -13760,7 +13843,7 @@ const garmin = (function () {
         const isSelected = selectedPrecLogIds.indexOf(l.id) >= 0;
         const dateTimeStr = fmtDate(new Date(l.savedAt).getTime());
         const rowsStr = l.log.length + (isKo ? '개' : ' rows');
-        const posBadge = l.devicePos ? ' <span class="c27">· ' + (posShortCard[l.devicePos] || l.devicePos) + '</span>' : '';
+        const posBadge = l.isFreerun ? ' <span class="c27">· F</span>' : (l.devicePos ? ' <span class="c27">· ' + (posShortCard[l.devicePos] || l.devicePos) + '</span>' : '');
         const fileBadge = l.fileName ? ' <span class="c26">· ' + escapeHtml(l.fileName) + '</span>' : '';
         const orderBadge = '<span class="c09">#' + (idx + 1) + '</span> ';
         const selectBtn = '<label class="c24">'
@@ -14175,6 +14258,13 @@ const garmin = (function () {
     const total = (m || 0) + (fb || 0);
     return total > 0 ? cl / total : null;
   }
+  // [추가 2026-09-20] 정밀 로그가 어느 "위치 슬롯"의 로그인지. 프리런 로그(isFreerun, 또는 CSV로 가져온
+  // device_pos='freerun')는 5번째 슬롯 'freerun', 그 외엔 기록된 devicePos(없으면 null).
+  function logPosOf(p) {
+    if (!p) return null;
+    if (p.isFreerun || p.devicePos === 'freerun') return 'freerun';
+    return p.devicePos || null;
+  }
   function precLastDistKm(log) {
     const last = log.length ? log[log.length - 1] : null;
     return (last && last.distKm != null) ? parseFloat(last.distKm) : null;
@@ -14190,6 +14280,9 @@ const garmin = (function () {
     let garminItems = list.filter(i => selectedIds.indexOf(i.id) >= 0);
     const precLogs = getCombinedPrecLogs();
     let precItems = precLogs.filter(l => selectedPrecLogIds.indexOf(l.id) >= 0);
+    // [수정 2026-09-20] 예전엔 프리런 로그를 여기서 차단했지만, 이제 프리런은 가민 분석실의 5번째 위치
+    // ('freerun')라서 GCT/수직진동을 다른 4개 위치와 똑같이 비교·보정할 수 있다. 보정값은 프리런 전용
+    // 슬롯에만 저장되고, 다른 위치 로그와 섞어 선택하면 아래 위치 불일치 경고가 뜬다.
     // [추가] 시간축 정렬: 가민 1개 + 정밀 로그 1개(가장 흔한 1:1 비교)일 때만 적용.
     // 가민을 먼저 켜고 폰을 늦게 시작했거나, 가민을 먼저 끄고 폰이 걷기 상태로 더
     // 기록된 경우, 겹치지 않는 구간(정지 타이밍 어긋남)이 평균에 섞여 실제로는 없는
@@ -14245,10 +14338,13 @@ const garmin = (function () {
     // 저장/적용될지 안내 문구를 만든다. 아래 lastSuggestion.devicePos에도 그대로 재사용.
     const posLabelMapLocal = getPosLabelMap(isKo);
     const posLabel = (p) => posLabelMapLocal[p] || p;
-    const precDevicePosList = precItems.map(p => p.devicePos).filter(d => d);
+    const precDevicePosList = precItems.map(p => logPosOf(p)).filter(d => d);
     const distinctPrecPos = precDevicePosList.filter((d, i) => precDevicePosList.indexOf(d) === i);
     const resolvedDevicePos = precDevicePosList[0]
       || (function () { try { return storage.loadProfile().devicePos || 'chest'; } catch (e) { return 'chest'; } })();
+    // [추가 2026-09-20] 프리런 슬롯은 GCT/수직진동(모션 값)만 보정한다 — 케이던스/거리/페이스는 네이티브
+    // 센서·GPS 그대로 두므로 보폭·GPS거리·케이던스·페이스 보정계수 제안은 아래에서 모두 비활성화한다.
+    const isFreerunPos = isMotionOnlyPos(resolvedDevicePos);
     const posMismatchWarningHtml = distinctPrecPos.length > 1
       ? '<div style="background:rgba(255,68,68,0.12); border:1px solid var(--danger); border-radius:8px; padding:10px 12px; margin-bottom:10px; font-size:var(--fs-xs); color:#ffb3b3; font-weight:700; line-height:1.6;">'
         + '⚠ ' + (isKo
@@ -14278,8 +14374,26 @@ const garmin = (function () {
       + (resolvedDevicePos === 'hand'
         ? '<div style="font-size:var(--fs-xxs); color:#ffcc66; font-weight:600; margin-bottom:10px; line-height:1.5;">'
           + (isKo
-            ? '⚠️ 손(HAND) 위치는 팔 스윙 때문에 수직진동(VERT OSC) 자체를 계산하지 않습니다(의도된 동작, 오류 아님). 아래 표에서 PHONE 값이 "--"로 나오는 게 정상이며, GCT도 팔 스윙 특성상 가슴 위치와 반대 방향(과소측정)으로 어긋나는 경향이 있어 보정계수가 별도로 관리됩니다.'
-            : '⚠️ At the HAND position, vertical oscillation (VERT OSC) is not calculated at all because of arm swing (this is intentional, not a bug). PHONE showing "--" below is expected, and GCT also tends to skew the opposite direction from chest (underestimated) due to arm-swing characteristics, so its calibration is tracked separately.')
+            ? '⚠️ 손(HAND) 위치는 팔 스윙 때문에 수직진동(VERT OSC)이 화면·기록에는 절대 표시되지 않습니다(의도된 동작, 오류 아님). 아래 표에서 PHONE 값이 "--"로 나오는 게 정상이며, GCT도 팔 스윙 특성상 가슴 위치와 반대 방향(과소측정)으로 어긋나는 경향이 있어 보정계수가 별도로 관리됩니다. 다만 아래 vertScale 항목은 뜰 수 있는데, 이건 화면 노출과 무관하게 데이터 분석·향후 활용을 위해 원시 진폭을 가민과 대조해 계산한 값입니다.'
+            : '⚠️ At the HAND position, vertical oscillation (VERT OSC) is never shown on screen or in records because of arm swing (this is intentional, not a bug). PHONE showing "--" below is expected, and GCT also tends to skew the opposite direction from chest (underestimated) due to arm-swing characteristics, so its calibration is tracked separately. A vertScale suggestion may still appear below, though — that\'s computed from raw amplitude vs. Garmin for data-analysis/future use only, independent of what\'s ever shown on screen.')
+          + '</div>'
+        : '')
+      // [추가 2026-09-20] 암밴드도 손과 동일한 원칙(vertEnabled:false)으로 리셋 — 8/21에 가슴
+      // 값을 빌려와 켜뒀던 걸 되돌리고, 암밴드 전용 실측이 충분히 쌓일 때까지는 꺼둔 상태로
+      // 데이터만 축적한다. 손과 달리 "팔 스윙 때문에 원천적으로 못 잰다"가 아니라 "암밴드
+      // 전용 값으로 검증되기 전까지는 잠정 대기"라는 점이 달라서 문구를 구분했다.
+      + (resolvedDevicePos === 'armband'
+        ? '<div style="font-size:var(--fs-xxs); color:#ffcc66; font-weight:600; margin-bottom:10px; line-height:1.5;">'
+          + (isKo
+            ? '⚠️ 암밴드(ARMBAND) 위치는 수직진동(VERT OSC)을 화면·기록에 표시하지 않도록 방금 되돌렸습니다(이전엔 가슴 값을 빌려와 표시 중이었음). 아래 표에서 PHONE 값이 "--"로 나오는 게 정상이며, 아래 vertScale 항목은 데이터 분석·향후 활용을 위해 원시 진폭을 가민과 대조해 계산한 값입니다. 손과 동일하게, 암밴드 전용 실측이 충분히 쌓이면 그때 다시 켤 예정입니다.'
+            : '⚠️ At the ARMBAND position, vertical oscillation (VERT OSC) has just been reverted to never show on screen or in records (it previously borrowed chest\'s value and displayed it). PHONE showing "--" below is expected, and the vertScale suggestion below is computed from raw amplitude vs. Garmin for data-analysis/future use only. Same as HAND, it can be re-enabled once enough armband-specific data has accumulated.')
+          + '</div>'
+        : '')
+      + (isFreerunPos
+        ? '<div style="font-size:var(--fs-xxs); color:#7fd3ff; font-weight:600; margin-bottom:10px; line-height:1.5;">'
+          + (isKo
+            ? 'ℹ️ 프리런(FREE RUN)은 GCT·수직진동을 화면/리스트에 표시하지 않고 내부 계산값만 로그에 기록합니다. 이 슬롯은 GCT·수직진동 값(gctFallbackRatio · groundThreshold · impactThreshold · vertScale)만 비교/보정하며, 케이던스·거리·페이스는 네이티브 걸음센서/GPS 그대로라 보정하지 않습니다. 보정값은 프리런 전용으로 저장되어 가슴/허리/암밴드/손에는 영향이 없어요. [수정 2026-09-20] vertScale은 손/암밴드와 동일하게 0·vertEnabled:false로 리셋했습니다 — 이전엔 허리 값을 시드로 빌려왔었는데, 이제 프리런 전용 실측으로 새로 검증합니다.'
+            : 'ℹ️ Free Run never shows GCT or vertical oscillation on screen or in the list. They are calculated internally and only written to the log. This slot compares and calibrates the GCT / vertical oscillation values only (gctFallbackRatio, groundThreshold, impactThreshold, vertScale). Cadence, distance and pace stay as measured by the native step sensor and GPS, so they are not calibrated. Values are saved for Free Run only and never affect chest, waist, armband or hand. [Updated 2026-09-20] vertScale was reset to 0 with vertEnabled:false, same as hand/armband — it previously seeded from waist\'s value, and is now being re-verified with Free-Run-specific data instead.')
           + '</div>'
         : '');
 
@@ -14372,6 +14486,12 @@ const garmin = (function () {
 
     const phoneAvgVertMm = avgArr(precItems.map(p => avgFromPrecLog(p.log, 'vertOscMm')));
     const vertDiffPct = (phoneAvgVertMm && garminAvgVertMm) ? ((phoneAvgVertMm - garminAvgVertMm) / garminAvgVertMm * 100) : null;
+    // [추가 2026-09-20] 손(HAND)은 vertEnabled:false라서 vertOscMm이 항상 비어 있어 위
+    // phoneAvgVertMm으로는 절대 비교가 안 된다. 반면 vertScale 미적용 원시 진폭(vertOscRaw)은
+    // vertEnabled와 무관하게 스텝마다 항상 정밀 로그에 기록되고 있으므로(8528줄), 이걸로
+    // 가민과 직접 비교해 최초 vertScale을 계산해낸다. 어디까지나 캘리브레이션 랩(데이터 분석)
+    // 전용이며, hand의 vertEnabled는 그대로 false로 둬서 실제 화면/기록에는 절대 노출되지 않는다.
+    const phoneAvgVertAmplitudeRaw = avgArr(precItems.map(p => avgFromPrecLog(p.log, 'vertOscRaw')));
 
     // [추가] 페이스 비교. 정밀 로그엔 순간속도(speedKmh)만 있으므로 평균속도로 변환한 뒤
     // 가민의 avgPaceSecPerKm(전체 평균 페이스, sec/km)과 같은 단위로 맞춰 비교한다.
@@ -14497,16 +14617,23 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // [추가] 수직진동(vertScale)과 보폭(strideCorrectionFactor) 제안값. VERT는 GCT와 동일하게
     // GCT_VERT_STEP_FRACTION(50%)을, 보폭은 기존 일반 비율(20%)을 유지.
     const suggestedVertScale = (curVertScale != null && curVertScale > 0 && phoneAvgVertMm && garminAvgVertMm && vertDiffPct != null)
-      ? Math.round(curVertScale * stepRatio(garminAvgVertMm / phoneAvgVertMm, GCT_VERT_STEP_FRACTION) * 1000) / 1000 : null;
-    const suggestedStrideFactor = (phoneAvgStepMm && garminAvgStepMm && stepDiffPct != null)
+      ? Math.round(curVertScale * stepRatio(garminAvgVertMm / phoneAvgVertMm, GCT_VERT_STEP_FRACTION) * 1000) / 1000
+      // [추가 2026-09-20] curVertScale이 0(손/hand — 아직 한 번도 보정된 적 없는 상태)이면 위
+      // 비율 방식은 "0 × 오차비율"이라 항상 0만 나와서 못 쓴다. 대신 vertScale 미적용 원시
+      // 진폭(phoneAvgVertAmplitudeRaw)과 가민 mm값을 직접 나눠 최초 vertScale을 산출한다.
+      // (vertOscMm = 진폭 × vertScale × 10이므로 역으로 vertScale = 가민mm ÷ (진폭 × 10))
+      : ((curVertScale === 0 && phoneAvgVertAmplitudeRaw && garminAvgVertMm)
+          ? Math.round((garminAvgVertMm / (phoneAvgVertAmplitudeRaw * 10)) * 1000) / 1000
+          : null);
+    const suggestedStrideFactor = (!isFreerunPos && phoneAvgStepMm && garminAvgStepMm && stepDiffPct != null)
       ? Math.round(curStrideFactor * stepRatio(garminAvgStepMm / phoneAvgStepMm, GENERAL_STEP_FRACTION) * 1000) / 1000 : null;
     // [추가] GPS 거리 보정계수 제안값. 화면에 찍히는 실제 거리·페이스에 직접 반영되는
     // 값이라 일반 항목(20%)보다 더 보수적인 8%만 반영.
-    const suggestedGpsDistFactor = (phoneDistanceKm && garminDistanceKm && distDiffPct != null)
+    const suggestedGpsDistFactor = (!isFreerunPos && phoneDistanceKm && garminDistanceKm && distDiffPct != null)
       ? Math.round(curGpsDistFactor * stepRatio(garminDistanceKm / phoneDistanceKm, GPS_STEP_FRACTION) * 1000) / 1000 : null;
     // [추가] 케이던스 보정계수 제안값. gpsDistCorrectionFactor와 다르게 화면 표시값에만
     // 영향(네이티브 원시 걸음 판정엔 영향 없음)이라 일반 항목과 동일하게 20% 반영.
-    const suggestedCadFactor = (phoneAvgCadence && garminAvgCadence && cadDiffPct != null)
+    const suggestedCadFactor = (!isFreerunPos && phoneAvgCadence && garminAvgCadence && cadDiffPct != null)
       ? Math.round(curCadFactor * stepRatio(garminAvgCadence / phoneAvgCadence, GENERAL_STEP_FRACTION) * 1000) / 1000 : null;
     // [추가] 페이스 전용 보정계수(paceCorrectionFactor) 제안값. gpsDistCorrectionFactor와
     // 별개로 존재하며, 거리(totalDist)는 그대로 두고 화면/기록에 찍히는 페이스에만 곱해진다.
@@ -14518,7 +14645,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // [수정] 오차가 1% 미만이면 항목 자체가 안 보여서 실시간 페이스를 수동으로 미세조정할
     // 방법이 없었음 — 다른 항목과 달리 페이스는 오차 크기와 무관하게 항상 표를 띄워서
     // 사용자가 언제든 값을 확인/수동 입력할 수 있게 함(제안값이 현재값과 거의 같아도 노출).
-    const suggestedPaceFactor = (phoneAvgPaceSec && garminAvgPaceSec && paceDiffPct != null)
+    const suggestedPaceFactor = (!isFreerunPos && phoneAvgPaceSec && garminAvgPaceSec && paceDiffPct != null)
       ? Math.round(curPaceFactor * stepRatio(phoneAvgPaceSec / garminAvgPaceSec, GPS_STEP_FRACTION) * 1000) / 1000 : null;
 
     // [추가] "권장 보정수치를 적용하면" 예상되는 값 — 실제로 앱 설정(gctFallbackRatio,
@@ -14897,6 +15024,13 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       return;
     }
     const list = loadPendingCalib();
+    // [추가 2026-09-20] 프리런 결과와 다른 위치 결과가 한 대기목록에 섞이면 평균이 서로 오염되므로 차단.
+    if (list.some(i => isMotionOnlyPos(i.devicePos) !== isMotionOnlyPos(sel.devicePos))) {
+      alert(isKo
+        ? '⚠ 저장된 비교 결과 중에 다른 위치의 결과가 있어 함께 저장할 수 없어요 (프리런은 다른 위치와 분리). 먼저 평균 적용하거나 대기목록을 비워주세요.'
+        : 'Saved results already contain another position, so this one cannot be added (Free Run is kept separate from the other positions). Apply the average or clear the list first.');
+      return;
+    }
     if (list.length >= MAX_PENDING_CALIB) {
       alert(isKo ? '대기목록은 최대 ' + MAX_PENDING_CALIB + '개까지 저장할 수 있습니다. 먼저 평균 적용하거나 항목을 삭제하세요.' : 'You can save up to ' + MAX_PENDING_CALIB + ' results. Apply the average or delete an item first.');
       return;
@@ -15221,7 +15355,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // [수정] 보정값 저장 슬롯이 위치별로 나뉘어서, 가슴/손 등 여러 위치에 동시에
     // 보정값이 적용돼 있을 수 있다. 각 위치마다 카드를 따로 그리고, RESET/스니펫/다운로드
     // 버튼도 그 위치(pos)를 명시해서 그 위치의 슬롯에만 영향을 준다.
-    const positions = ['chest', 'waist', 'armband', 'hand'];
+    const positions = ['chest', 'waist', 'armband', 'hand', 'freerun'];
     const activePositions = positions.filter(p => overridesMap[p]);
 
     const undoOnlyPositions = positions.filter(p => hasUndoFor(p)); // [수정] 위치별로 남아있는 되돌리기 스냅샷 전부 표시
@@ -15292,7 +15426,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         + '<button style="margin-top:8px; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.copySnippet(\'' + escapedSnippet + '\')">' + (isKo ? '스니펫 복사' : 'COPY SNIPPET') + '</button>'
         + undoBtnHtml(pos)
         + '<button class="c33" onclick="garmin.resetCalibration(\'' + pos + '\')">' + (isKo ? posLabel + '만 기본값으로 초기화' : 'RESET ' + posLabel + ' ONLY TO DEFAULT') + '</button>'
-        + '<button style="margin-top:8px; background:transparent; color:var(--primary); border:1px solid #445544; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.applyCommittedDefault(\'' + pos + '\')">' + (isKo ? '최신 커밋된 기본값으로 갈아타기' : 'SWITCH TO LATEST COMMITTED DEFAULT') + '</button>'
+        + (isMotionOnlyPos(pos) ? '' : '<button style="margin-top:8px; background:transparent; color:var(--primary); border:1px solid #445544; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.applyCommittedDefault(\'' + pos + '\')">' + (isKo ? '최신 커밋된 기본값으로 갈아타기' : 'SWITCH TO LATEST COMMITTED DEFAULT') + '</button>')
         + '</div>';
     }).join('')
       // [수정] undo 스냅샷은 있는데 지금 override 카드가 없는 위치(예: RESET으로 이미 지워짐)들도
@@ -15333,7 +15467,12 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       + ', gctFallbackRatio: ' + finalGct + ', vertScale: ' + finalVert + ', minStepInterval: ' + base.minStepInterval
       + ', vertEnabled: ' + base.vertEnabled + ', rotRejectThreshold: ' + finalRot
       + ', nativeRescueEnabled: ' + (!!base.nativeRescueEnabled)
-      + ', stepTrigger: \'' + (base.stepTrigger || 'native') + '\' }';
+      + ', stepTrigger: \'' + (base.stepTrigger || 'native') + '\''
+      // [수정 2026-09-20] gctFilterDelayMs가 patch 텍스트에서 통째로 빠져 있던 버그 수정 —
+      // DOWNLOAD PATCHED HTML로 받은 파일을 코드에 반영하면 이 필드가 사라져서 필터 지연
+      // 보정(8547줄)이 무효화됐었다. base(DEVICE_PROFILE_DEFAULTS)에서 그대로 이어받는다.
+      + (typeof base.gctFilterDelayMs === 'number' ? ', gctFilterDelayMs: ' + base.gctFilterDelayMs : '')
+      + ' }';
   }
 
   // [추가] 현재 배포된(GitHub Pages) 페이지 자신의 원본 HTML을 fetch로 그대로 읽어와서,
@@ -15400,7 +15539,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       // [수정 2026-08-19] chest만 patch하던 것을 4개 위치 전부로 확장 — 커밋 한 번으로
       // waist/armband/hand도 "신규 설치 유저의 기본 시작값"이 되도록. FACTORY_DEFAULT_FACTORS는
       // 항상 1.0 고정이라 여기서 절대 건드리지 않는다(RESET이 참조하는 진짜 출고값 보존).
-      if (pos && curProf) {
+      if (pos && curProf && !isMotionOnlyPos(pos)) { // [추가] 프리런은 보정계수 표(DEFAULT_PROFILE_FACTORS_BY_POS)에 행이 없다
         const factorsVarIdx = html.indexOf('const DEFAULT_PROFILE_FACTORS_BY_POS = {');
         if (factorsVarIdx !== -1) {
           const newFactorsObj = '{ stride: ' + curProf.strideCorrectionFactor.toFixed(3)
@@ -15463,7 +15602,9 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       const overridesMap = prof.motionCalibOverrides || {};
       // [수정] 위치별 버튼 두 개 → 버튼 하나로 통합. 가슴/손 등 보정값이 적용된 위치를
       // 전부 모아서 patches 배열로 만들고, 한 번의 다운로드로 같은 파일에 함께 반영한다.
-      const positions = ['chest', 'waist', 'armband', 'hand'];
+      // [수정 2026-09-20] 프리런(freerun)이 목록에서 빠져 있어서, 프리런 세션의 보정값은
+      // 아무리 캘리브레이션을 맞춰도 DOWNLOAD PATCHED HTML에 절대 반영되지 않던 버그 수정.
+      const positions = ['chest', 'waist', 'armband', 'hand', 'freerun'];
       const patches = [];
       const patchedPositions = [];
       positions.forEach(function (pos) {
@@ -15520,6 +15661,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       }
       // [수정 2026-08-08] 옛날에 저장된 되돌리기 스냅샷(이번 수정 이전)에 prev*Factor가
       // 없을 수 있으니, 그 경우의 폴백도 무조건 1.0이 아니라 위치별 코드 기본값으로.
+      if (!isMotionOnlyPos(pos)) { // [추가] 프리런은 보정계수 슬롯이 없으므로 계수 복원 생략(모션 override만 복원)
       const _undoDefFactors = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || { stride: 1.0, gps: 1.0, cad: 1.0, pace: 1.0 };
       prof.strideCorrectionFactorByPos[pos] = (typeof undo.prevStrideCorrectionFactor === 'number' && undo.prevStrideCorrectionFactor > 0) ? undo.prevStrideCorrectionFactor : _undoDefFactors.stride;
       prof.gpsDistCorrectionFactorByPos[pos] = (typeof undo.prevGpsDistCorrectionFactor === 'number' && undo.prevGpsDistCorrectionFactor > 0) ? undo.prevGpsDistCorrectionFactor : _undoDefFactors.gps;
@@ -15531,6 +15673,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         prof.gpsDistCorrectionFactor = prof.gpsDistCorrectionFactorByPos[pos];
         prof.cadCorrectionFactor = prof.cadCorrectionFactorByPos[pos];
         prof.paceCorrectionFactor = prof.paceCorrectionFactorByPos[pos]; // [추가]
+      }
       }
       delete undos[pos]; // [수정] 이 위치의 되돌리기 스냅샷만 지운다 (다른 위치는 그대로 유지)
       prof.motionCalibUndos = undos;
@@ -15570,6 +15713,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       // 위치별 슬롯이므로 이 pos에 대해서만 초기화하고 다른 위치는 그대로 둔다.
       ensureCalibFactorMaps(prof);
       const defFactors = FACTORY_DEFAULT_FACTORS;
+      if (!isMotionOnlyPos(pos)) { // [추가] 프리런은 보정계수 슬롯이 없어 모션 override만 초기화
       prof.strideCorrectionFactorByPos[pos] = defFactors.stride;
       prof.gpsDistCorrectionFactorByPos[pos] = defFactors.gps;
       prof.cadCorrectionFactorByPos[pos] = defFactors.cad;
@@ -15579,6 +15723,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         prof.gpsDistCorrectionFactor = defFactors.gps;
         prof.cadCorrectionFactor = defFactors.cad;
         prof.paceCorrectionFactor = defFactors.pace; // [추가]
+      }
       }
       // [수정 2026-08-22] 예전엔 gctFallbackRatio만 별도 상수로 고정 override하고 나머지
       // 필드(ground/impact/vertScale/rot)는 override 없이 "지금 커밋된 DEVICE_MOTION_PROFILES
@@ -15625,6 +15770,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
   function applyCommittedDefault(pos) {
     const isKo = isKoLang();
     try {
+      if (isMotionOnlyPos(pos)) return; // [추가] 프리런은 보정계수 슬롯이 없어 갈아탈 대상이 없다
       const prof = storage.loadProfile();
       const defFactors = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || FACTORY_DEFAULT_FACTORS;
       ensureCalibFactorMaps(prof);
@@ -15704,6 +15850,15 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         }
       });
 
+      // [추가 2026-09-20] 모션 전용 슬롯(프리런): 보정계수 슬롯 없이 motionCalibOverrides만 동일한 규칙으로 복원/제거.
+      MOTION_ONLY_POS.forEach(pos => {
+        if (backup && backup.overrides && backup.overrides[pos]) {
+          prof.motionCalibOverrides[pos] = backup.overrides[pos];
+        } else {
+          delete prof.motionCalibOverrides[pos];
+        }
+      });
+
       if (backup) delete prof._preFactoryResetBackup; // 1회성 복원 — 사용 후 스냅샷 소모
       storage.saveProfile(prof);
 
@@ -15713,8 +15868,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
 
       renderCalibStatus(isKo);
       const msg = backup
-        ? (isKo ? '4개 위치 모두 팩토리 리셋 직전의 캘리브레이션 값(오버라이드 포함)으로 완전히 복원되었습니다.' : 'All 4 positions fully restored to the calibration values (including overrides) from right before the factory reset.')
-        : (isKo ? '4개 위치 모두 커밋+다운로드 시점의 캘리브레이션 값(보정계수 4종 + 모션 오버라이드 초기화)으로 복원되었습니다.' : 'All 4 positions restored to the calibration values as of commit/download (4 factors reset + motion overrides cleared).');
+        ? (isKo ? '5개 위치(프리런 포함) 모두 팩토리 리셋 직전의 캘리브레이션 값(오버라이드 포함)으로 완전히 복원되었습니다.' : 'All 5 positions (including Free Run) fully restored to the calibration values (including overrides) from right before the factory reset.')
+        : (isKo ? '5개 위치(프리런 포함) 모두 커밋+다운로드 시점의 캘리브레이션 값(보정계수 4종 + 모션 오버라이드 초기화)으로 복원되었습니다.' : 'All 5 positions (including Free Run) restored to the calibration values as of commit/download (4 factors reset + motion overrides cleared).');
       alert(msg);
     } catch (err) {
       alert((isKo ? '복원 중 오류: ' : 'Restore error: ') + err.message);
@@ -15728,8 +15883,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
   async function resetCalibrationAllPos() {
     const isKo = isKoLang();
     const msg = isKo
-      ? '4개 위치(가슴/허리/암밴드/손) 보정계수를 모두 팩토리 기본값(1.0, 보정없음)으로 초기화할까요?\n\n필요하면 바로 위 "현재 캘리브레이션으로 되돌아가기" 버튼으로 지금 값 그대로(오버라이드 포함) 다시 복원할 수 있습니다.'
-      : 'Reset the correction factors for all 4 positions (chest/waist/armband/hand) to factory defaults (1.0, no correction)?\n\nYou can fully restore the current values (including overrides) with the "RESTORE CURRENT CALIBRATION" button right above this if needed.';
+      ? '5개 위치(가슴/허리/암밴드/손/프리런) 보정값을 모두 팩토리 기본값(보정없음)으로 초기화할까요?\n\n필요하면 바로 위 "현재 캘리브레이션으로 되돌아가기" 버튼으로 지금 값 그대로(오버라이드 포함) 다시 복원할 수 있습니다.'
+      : 'Reset the calibration for all 5 positions (chest/waist/armband/hand/free run) to factory defaults (no correction)?\n\nYou can fully restore the current values (including overrides) with the "RESTORE CURRENT CALIBRATION" button right above this if needed.';
     if (!(await appConfirm(msg))) return;
     try {
       const prof = storage.loadProfile();
@@ -15745,6 +15900,12 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
           cad: prof.cadCorrectionFactorByPos[pos] != null ? prof.cadCorrectionFactorByPos[pos] : FACTORY_DEFAULT_FACTORS.cad,
           pace: prof.paceCorrectionFactorByPos[pos] != null ? prof.paceCorrectionFactorByPos[pos] : FACTORY_DEFAULT_FACTORS.pace
         };
+        if (prof.motionCalibOverrides[pos]) {
+          backup.overrides[pos] = JSON.parse(JSON.stringify(prof.motionCalibOverrides[pos]));
+        }
+      });
+      // [추가 2026-09-20] 모션 전용 슬롯(프리런)의 현재 override도 리셋 직전 스냅샷에 포함 → [복원] 버튼으로 되돌릴 수 있게.
+      MOTION_ONLY_POS.forEach(pos => {
         if (prof.motionCalibOverrides[pos]) {
           backup.overrides[pos] = JSON.parse(JSON.stringify(prof.motionCalibOverrides[pos]));
         }
@@ -15780,6 +15941,19 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         // 지워야 "커밋값 → 예전값 → 리셋값" 3단계 잔상 없이 깔끔하게 출고값으로 보인다.
         if (prof.motionCalibUndos) delete prof.motionCalibUndos[pos];
       });
+      // [추가 2026-09-20] 모션 전용 슬롯(프리런): 다른 위치와 동일하게 FACTORY_MOTION_PROFILES(냉동 출고표) 값으로 고정 override.
+      MOTION_ONLY_POS.forEach(pos => {
+        delete prof.motionCalibOverrides[pos];
+        const factoryP = FACTORY_MOTION_PROFILES[pos] || FACTORY_MOTION_PROFILES.chest;
+        prof.motionCalibOverrides[pos] = {
+          groundThreshold: factoryP.groundThreshold,
+          impactThreshold: factoryP.impactThreshold,
+          gctFallbackRatio: factoryP.gctFallbackRatio,
+          vertScale: factoryP.vertScale,
+          rotRejectThreshold: factoryP.rotRejectThreshold
+        };
+        if (prof.motionCalibUndos) delete prof.motionCalibUndos[pos];
+      });
       storage.saveProfile(prof);
 
       if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
@@ -15790,7 +15964,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       const resultBox = document.getElementById('garmin-calib-result');
       if (resultBox) resultBox.innerHTML = '';
       lastSuggestion = null;
-      alert(isKo ? '4개 위치(가슴/허리/암밴드/손) 모두 팩토리 기본값(보정없음)으로 초기화되었습니다.' : 'All 4 positions (chest/waist/armband/hand) reset to factory defaults (no correction).');
+      alert(isKo ? '5개 위치(가슴/허리/암밴드/손/프리런) 모두 팩토리 기본값(보정없음)으로 초기화되었습니다.' : 'All 5 positions (chest/waist/armband/hand/free run) reset to factory defaults (no correction).');
     } catch (err) {
       alert((isKo ? '초기화 중 오류: ' : 'Reset error: ') + err.message);
     }
