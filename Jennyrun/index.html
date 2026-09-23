@@ -10247,7 +10247,19 @@ try {
 let timeDelta = (fixTime - (this.state.lastPosTimestamp || fixTime)) / 1000;
 // maxJump: 순간 최대 이동 거리 (칼만 스무딩으로 이상치 많이 걸러짐)
 let maxJump = 0.18;
-if (d > 0.002 && d < maxJump) {
+// [보완] minJump를 고정 2m 대신 이번 fix의 GPS 정확도에 비례해 동적으로 설정.
+// accuracy가 나쁠수록(숫자 큼) 같은 2m 이동도 노이즈일 확률이 높고, 반대로
+// accuracy가 좋을 때(5m 이하)는 2m도 유효한 저속 이동일 수 있음.
+// 하한 1m, 상한 8m으로 클램프해서 극단값(accuracy=999 등)이 과도하게 막지 않게 함.
+const minJump = Math.max(0.001, Math.min(0.008, accuracy * 0.00015));
+// [보완] 순간 역산 속도가 비현실적이면(예: 도로/트레일에서 45km/h 초과) GPS 튐으로
+// 판단해 거리에 반영하지 않음. maxJump(절대 거리)만으로는 fix 간격이 짧을 때
+// 걸러지지 않는 경우가 있어, 속도 기준을 추가로 둠. timeDelta<=0(중복/역행 타임스탬프)
+// 이거나 매우 짧으면(0.2초 미만) 나눗셈이 불안정해지므로 이 필터는 건너뜀.
+const impliedSpeedKmh = (timeDelta > 0.2) ? (d / (timeDelta / 3600)) : 0;
+const maxPlausibleSpeedKmh = (ui.currentActivityMode === 'trail') ? 40 : 45;
+const speedImplausible = impliedSpeedKmh > maxPlausibleSpeedKmh;
+if (d > minJump && d < maxJump && !speedImplausible) {
 // [추가] 속도 블렌딩용: 이번 GPS 갱신에서의 이동거리/경과시간을 저장
 // (아래 페이스 계산 블록에서 coords.speed와 블렌딩할 때 사용)
 this._lastDeltaDist = d;
