@@ -13752,6 +13752,7 @@ const garmin = (function () {
 
   let selectedIds = []; // [수정] 캘리브레이션 비교 기준 가민 기록 id 목록 (체크박스 다중선택, 기존엔 단일 selectedId)
   let selectedPrecLogIds = []; // [수정] 캘리브레이션 비교 기준 정밀 로그 id 목록 (체크박스 다중선택, 기존엔 단일 selectedPrecLogId)
+  let autoMatchedGarminByPrecLogId = {}; // [추가 2026-09-23] 정밀로그 id -> 자동매칭으로 같이 체크된 가민 id. 로그 해제 시 이 매핑을 보고 같이 해제(수동으로 직접 체크한 가민은 안 건드림).
   // ── 체크박스 선택 상태 / 화면 렌더링 ──
   function toggleGarminSelect(id) { // [추가] 가민 기록 체크박스 토글
     const idx = selectedIds.indexOf(id);
@@ -13768,8 +13769,8 @@ const garmin = (function () {
   // 갖고 있는 실제 시작~종료 시각(precLogTimeRangeMs/garminTimeRangeMs, 위 컴페어 정렬에도
   // 쓰이는 것과 동일한 함수)으로 직접 비교해 "겹치는 시간대" 또는 "가장 가까운 시간대"의
   // 가민 기록을 찾는다. 자동저장 로그#N 체크 시, 같은 시간대의 가민 기록도 자동으로 함께 체크.
-  // 체크 해제 시엔 가민 쪽을 건드리지 않음(사용자가 가민 쪽에서 직접 고른 조합을 지우지 않기
-  // 위해) — 시간대가 겹치는 가민 기록이 없으면(10분 넘게 떨어져 있으면) 아예 매칭하지 않음.
+  // (해제 시 연동 동작은 아래 togglePrecLogSelectAutoMatch 참고) — 시간대가 겹치는 가민
+  // 기록이 없으면(10분 넘게 떨어져 있으면) 아예 매칭하지 않음.
   const AUTO_MATCH_MAX_GAP_MS = 10 * 60 * 1000; // 겹치는 게 없을 때, 이 이상 떨어져 있으면 매칭 포기
   function findBestGarminMatchByTime(precLog) {
     const pr = precLogTimeRangeMs(precLog);
@@ -13789,6 +13790,11 @@ const garmin = (function () {
     if (bestScore > AUTO_MATCH_MAX_GAP_MS) return null; // 겹침도 없고 너무 멀리 떨어져 있으면 매칭 포기
     return best;
   }
+  // [수정 2026-09-23] 체크 시엔 시간대 매칭되는 가민 기록을 같이 체크하고 어떤 로그↔가민
+  // 조합인지 autoMatchedGarminByPrecLogId에 기록해둔다. 해제 시엔 그 기록을 보고 같이
+  // 체크됐던 가민 기록도 같이 해제 — 단, 다른 선택된 로그가 같은 가민 기록에 매칭돼 있으면
+  // (같은 가민 파일이 여러 로그와 겹치는 경우) 그 로그를 위해 남겨둔다. 사용자가 가민 쪽
+  // 체크박스를 직접 눌러서 고른 항목은 이 매핑에 없으므로 해제 연동 대상이 아니다.
   function togglePrecLogSelectAutoMatch(id) {
     const wasSelected = selectedPrecLogIds.indexOf(id) >= 0;
     const pIdx = selectedPrecLogIds.indexOf(id);
@@ -13798,7 +13804,20 @@ const garmin = (function () {
       try { autoLogs = (typeof storage !== 'undefined') ? storage.loadPrecisionLogs() : []; } catch (e) {}
       const precItem = autoLogs.find(l => l.id === id) || getCombinedPrecLogs().find(l => l.id === id);
       const match = precItem ? findBestGarminMatchByTime(precItem.log) : null;
-      if (match && selectedIds.indexOf(match.id) < 0) selectedIds.push(match.id);
+      if (match) {
+        autoMatchedGarminByPrecLogId[id] = match.id;
+        if (selectedIds.indexOf(match.id) < 0) selectedIds.push(match.id);
+      }
+    } else {
+      const matchedGid = autoMatchedGarminByPrecLogId[id];
+      delete autoMatchedGarminByPrecLogId[id];
+      if (matchedGid) {
+        const stillNeeded = selectedPrecLogIds.some(pid => autoMatchedGarminByPrecLogId[pid] === matchedGid);
+        if (!stillNeeded) {
+          const gIdx = selectedIds.indexOf(matchedGid);
+          if (gIdx >= 0) selectedIds.splice(gIdx, 1);
+        }
+      }
     }
     render();
   }
