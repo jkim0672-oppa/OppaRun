@@ -9668,13 +9668,34 @@ function avgFromPrecLogStepWeighted(log, field) {
 // 케이던스를 역산(총 실측 걸음수 ÷ 총 시간) — 리스트 카드의 avgCadence(steps/seconds*60)와
 // 동일한 "실측값 우선" 원칙. 여러 로그면 로그별로 계산한 뒤 평균한다(원본 행을
 // 이어붙이면 첫/끝 행 기준 계산이 깨지므로 로그를 합치지 않음).
+// [수정 2026-09-22] 가민은 정지 상태에선 레코드를 아예 안 찍어서 단순평균 시 그
+// 죽은 시간이 분모에 안 들어가는데, 폰은 START~STOP 전체 경과시간을 분모로 써서
+// 대기 시간이 그대로 평균을 깎아먹던 문제 수정. duration을 "카운트가 처음 증가한
+// 시점 ~ 마지막으로 증가한 시점"으로 좁혀서, 가민처럼 실제 걷고 있던 구간만 분모에
+// 반영한다. (avgFromPrecLog는 record.cadence 표시값과의 일관성 때문에 건드리지 않음 —
+// 이 함수는 runCalibrationCompare 전용이라 여기서만 분리해서 고침)
+function computeOsCadenceField(log, field) {
+  let firstV = null, lastV = null, startT = null, endT = null, prevV = null, prevT = null;
+  for (const r of log) {
+    const v = parseFloat(r[field]);
+    const t = parseFloat(r.t);
+    if (isNaN(v) || isNaN(t)) continue;
+    if (firstV == null) firstV = v;
+    if (prevV != null && v > prevV) {
+      if (startT == null) startT = prevT; // 카운트가 처음 증가하기 직전 시점
+      endT = t; // 카운트가 마지막으로 증가한 시점
+    }
+    lastV = v; prevV = v; prevT = t;
+  }
+  if (firstV == null || lastV == null || startT == null || endT == null) return null;
+  const dur = Math.max(1, endT - startT);
+  return (lastV - firstV) / dur * 60;
+}
 function computeOsCadence(log) {
-  const first = log.length ? log[0] : null;
-  const last = log.length ? log[log.length - 1] : null;
-  const dur = (first && last) ? Math.max(1, (parseFloat(last.t) - parseFloat(first.t))) : null;
-  const sd = (dur && last && last.stepDetectorCnt !== '' && last.stepDetectorCnt != null) ? (parseFloat(last.stepDetectorCnt) / dur * 60) : null;
-  const sc = (dur && last && last.stepCounterSteps !== '' && last.stepCounterSteps != null) ? (parseFloat(last.stepCounterSteps) / dur * 60) : null;
-  return { sd, sc };
+  return {
+    sd: computeOsCadenceField(log, 'stepDetectorCnt'),
+    sc: computeOsCadenceField(log, 'stepCounterSteps'),
+  };
 }
 // [추가] 가민 비교(runCalibrationCompare)용 시간축 정렬: 가민을 먼저 켜고 폰을 늦게
 // 시작하거나(머리 쪽 어긋남), 가민을 먼저 끄고 폰이 걷기 상태로 몇 초 더 기록되는
@@ -10468,6 +10489,11 @@ storage.saveTempSession(this.state);
 updateMetrics(data) {
 if (this.state.isRunning && !this.state.isPaused && !this.state.isAutoPaused) {
 this.state.steps++;
+// [추가 2026-09-22] 활성 걸음 구간(첫 걸음~마지막 걸음) 추적 — onFinish()의 avgCadence가
+// START~STOP 전체시간 대신 이 구간을 분모로 쓸 수 있게 함.
+const _stepAtSec = this.getElapsedSeconds();
+if (this.state.firstStepAtSec == null) this.state.firstStepAtSec = _stepAtSec;
+this.state.lastStepAtSec = _stepAtSec;
 // [수정] 원래 onNativeStep()에서 게이트/일시정지 체크보다 먼저 무조건 증가시키던
 // nativeStepDetectorTotalCount(정밀 로그의 stepDetectorCnt 컬럼 소스)를 여기로 이동.
 // 일시정지 중 오탐이나 80ms 중복게이트에 걸러진 이벤트까지 로그 걸음수에 새고 있어서,
@@ -10883,6 +10909,11 @@ this.state.startTimestamp = Date.now();
 this.state.pausedMs = 0;
 this.state.pauseStartedAt = null;
 this.state.steps = 0;
+// [추가 2026-09-22] LIST/TOTAL에 찍히는 실측 케이던스(avgCadence)의 분모를 START~STOP
+// 전체시간 대신 "실제로 걸음이 감지되던 구간"으로 좁히기 위한 타임스탬프. computeOsCadence()의
+// 비교용 수정(정지 대기시간이 분모에 껴서 평균이 깎이던 문제)과 동일한 원칙을 실기록에도 적용.
+this.state.firstStepAtSec = null;
+this.state.lastStepAtSec = null;
 this.state.pathCoords = [];
 const calResetEl = document.getElementById('cal-val');
 if (calResetEl) calResetEl.textContent = '0';
@@ -11207,11 +11238,19 @@ const calculatedPowerWkg = (calculatedPower != null && weightKg > 0) ? Math.roun
 // STRIDE에 이미 적용한 "모델 추정치보다 실측값 우선" 원칙을 CADENCE에도 동일하게
 // 적용: 총 걸음수÷총시간(실측)을 우선 사용하고, 걸음 데이터가 부족한 예외 상황에서만
 // 트림 평균으로 폴백.
-const avgCadence = (this.state.seconds > 0 && this.state.steps > 0)
-  ? Math.round((this.state.steps / this.state.seconds) * 60)
-  : (this.state.cadenceSamples && this.state.cadenceSamples.length > 0)
-    ? trimmedMeanCadence(this.state.cadenceSamples)
-    : 0;
+// [수정 2026-09-22] 정지 대기시간이 분모에 껴서 평균이 깎이던 문제(computeOsCadence()와 동일
+// 원인)를 실기록에도 반영. 걸음이 실제로 감지된 구간(firstStepAtSec~lastStepAtSec)이 있으면
+// 그 구간을 우선 분모로 쓰고, 없을 때만(구버전 임시저장 복구 등) 기존 전체시간 방식으로 폴백.
+const _activeStepDur = (this.state.firstStepAtSec != null && this.state.lastStepAtSec != null)
+  ? Math.max(1, this.state.lastStepAtSec - this.state.firstStepAtSec)
+  : null;
+const avgCadence = (_activeStepDur && this.state.steps > 0)
+  ? Math.round((this.state.steps / _activeStepDur) * 60)
+  : (this.state.seconds > 0 && this.state.steps > 0)
+    ? Math.round((this.state.steps / this.state.seconds) * 60)
+    : (this.state.cadenceSamples && this.state.cadenceSamples.length > 0)
+      ? trimmedMeanCadence(this.state.cadenceSamples)
+      : 0;
 // [수정 2026-08-16] 기존엔 raw per-step 값(totalGct/stepCount, 스무딩 이전)을 그대로
 // 평균 냈는데, DIAG/캘리브레이션 화면은 정밀 로그(화면에 스무딩되어 찍힌 값)를 스텝
 // 가중평균한 값을 보여줘서 같은 러닝인데도 리스트 카드와 DIAG 숫자가 어긋났음. 이제
@@ -14549,11 +14588,14 @@ const garmin = (function () {
     // [수정] 폰 쪽: 체크된 로그마다 avgFromPrecLog()로 평균을 낸 뒤, 그 결과들을 다시 평균한다.
     // (로그 원본 행을 이어붙이지 않음 — 서로 다른 러닝이 섞여 아래 stepDetector류 계산이 깨지는 것 방지)
     // [수정 2026-07-31] 기존엔 avgFromPrecLog('cadence')로 매초 순간값을 단순평균했는데,
-    // 이는 onFinish()에 저장되는 실제 기록용 avgCadence(총걸음수÷총시간, 실측 우선 원칙)와
-    // 계산방식이 달라 같은 러닝인데도 서로 다른 숫자가 나오는 문제가 있었음. 모든 착용위치가
-    // 이제 stepTrigger:'native'라 폰의 실제 케이던스 소스 자체가 stepDetectorCnt와 동일하므로,
-    // 아래 computeOsCadence()가 이미 계산해두는 stepDetectorCadence(총 stepDetectorCnt÷총시간)를
-    // 그대로 재사용해 일관성을 맞춘다.
+    // 이는 onFinish()에 저장되는 실제 기록용 avgCadence와 계산방식이 달라 같은 러닝인데도
+    // 서로 다른 숫자가 나오는 문제가 있었음. 모든 착용위치가 이제 stepTrigger:'native'라
+    // 폰의 실제 케이던스 소스 자체가 stepDetectorCnt와 동일하므로, 아래 computeOsCadence()가
+    // 이미 계산해두는 stepDetectorCadence를 그대로 재사용해 일관성을 맞춘다.
+    // [수정 2026-09-22] computeOsCadence()가 분모를 "카운트 활성 구간"으로 좁히는 쪽으로
+    // 바뀌면서, onFinish()의 avgCadence도 firstStepAtSec~lastStepAtSec 구간으로 동일하게
+    // 좁혔음(총걸음수÷총시간 방식은 정지 대기시간이 껴서 낮게 나오는 문제가 있었음) — 두 값이
+    // 계속 같은 원칙으로 계산되도록 유지.
     const osVals = precItems.map(p => computeOsCadence(p.log));
     const stepDetectorCadence = avgArr(osVals.map(v => v.sd));
     const stepCounterCadence = avgArr(osVals.map(v => v.sc));
