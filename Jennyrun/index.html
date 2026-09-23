@@ -13763,6 +13763,45 @@ const garmin = (function () {
     if (idx >= 0) selectedPrecLogIds.splice(idx, 1); else selectedPrecLogIds.push(id);
     render();
   }
+  // [수정 2026-09-23] 번호(#N) 매칭 → 실제 시각 매칭으로 변경. 가민 파일을 다 안 가져왔거나
+  // 순서가 하나라도 밀리면 번호 매칭은 엉뚱한 러닝을 골라버리므로, 각 정밀 로그/가민 기록이
+  // 갖고 있는 실제 시작~종료 시각(precLogTimeRangeMs/garminTimeRangeMs, 위 컴페어 정렬에도
+  // 쓰이는 것과 동일한 함수)으로 직접 비교해 "겹치는 시간대" 또는 "가장 가까운 시간대"의
+  // 가민 기록을 찾는다. 자동저장 로그#N 체크 시, 같은 시간대의 가민 기록도 자동으로 함께 체크.
+  // 체크 해제 시엔 가민 쪽을 건드리지 않음(사용자가 가민 쪽에서 직접 고른 조합을 지우지 않기
+  // 위해) — 시간대가 겹치는 가민 기록이 없으면(10분 넘게 떨어져 있으면) 아예 매칭하지 않음.
+  const AUTO_MATCH_MAX_GAP_MS = 10 * 60 * 1000; // 겹치는 게 없을 때, 이 이상 떨어져 있으면 매칭 포기
+  function findBestGarminMatchByTime(precLog) {
+    const pr = precLogTimeRangeMs(precLog);
+    if (!pr) return null;
+    const gList = loadImports();
+    let best = null, bestScore = Infinity;
+    gList.forEach(g => {
+      const gr = garminTimeRangeMs(g);
+      if (!gr) return;
+      const overlapStart = Math.max(pr.startMs, gr.startMs);
+      const overlapEnd = Math.min(pr.endMs, gr.endMs);
+      // 겹치는 구간이 있으면 겹치는 만큼(클수록 더 좋음) 음수 점수로, 없으면 간격(양수, 작을수록 좋음)으로.
+      const score = (overlapEnd > overlapStart) ? -(overlapEnd - overlapStart) : Math.max(gr.startMs - pr.endMs, pr.startMs - gr.endMs);
+      if (score < bestScore) { bestScore = score; best = g; }
+    });
+    if (!best) return null;
+    if (bestScore > AUTO_MATCH_MAX_GAP_MS) return null; // 겹침도 없고 너무 멀리 떨어져 있으면 매칭 포기
+    return best;
+  }
+  function togglePrecLogSelectAutoMatch(id) {
+    const wasSelected = selectedPrecLogIds.indexOf(id) >= 0;
+    const pIdx = selectedPrecLogIds.indexOf(id);
+    if (pIdx >= 0) selectedPrecLogIds.splice(pIdx, 1); else selectedPrecLogIds.push(id);
+    if (!wasSelected) {
+      let autoLogs = [];
+      try { autoLogs = (typeof storage !== 'undefined') ? storage.loadPrecisionLogs() : []; } catch (e) {}
+      const precItem = autoLogs.find(l => l.id === id) || getCombinedPrecLogs().find(l => l.id === id);
+      const match = precItem ? findBestGarminMatchByTime(precItem.log) : null;
+      if (match && selectedIds.indexOf(match.id) < 0) selectedIds.push(match.id);
+    }
+    render();
+  }
   let lastSuggestion = null; // [추가] 마지막 비교에서 계산된 제안값 (APPLY 버튼이 참조)
   let lastCompareData = null; // [추가] 마지막 비교의 전체 수치(리포트 저장용). appliedFields/appliedAt은 실제 적용 시 채워짐.
   let lastPreviewRaw = null; // [추가] "보정 적용 후 예상 그래프"를 수동 입력값 기준으로 실시간 재계산하기 위한 원시 실측값/현재 계수 스냅샷 (updateProjectedPreview 참고)
@@ -14067,7 +14106,7 @@ const garmin = (function () {
       // [수정] FIT 가져오기/설정 탭 PRECISION LOGS 카드와 동일한 garmin-import-item 스타일로 통일.
       // COMPARE와 DELETE를 세로로 쌓지 않고 가로로 나란히 배치해 오터치를 줄임.
       const selectBtn = '<label class="c24">'
-        + '<input type="checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="garmin.togglePrecLogSelect(\'' + l.id + '\')" class="c11">'
+        + '<input type="checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="garmin.togglePrecLogSelectAutoMatch(\'' + l.id + '\')" class="c11">'
         + (isKo ? '비교 선택' : 'COMPARE') + '</label>';
       return '<div class="garmin-import-item u-border-color-primary"' + (isSelected ? '' : '') + '>'
         + '<div class="garmin-import-item-head">'
@@ -16308,7 +16347,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     saveTextFileNative(reportStr, fileName, 'text/plain;charset=utf-8', isKo);
   }
 
-  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, togglePrecLogSelect, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
+  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, togglePrecLogSelect, togglePrecLogSelectAutoMatch, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
