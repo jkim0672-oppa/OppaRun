@@ -2203,8 +2203,8 @@ function generateRunCardCanvas(data, isKo) {
 
     ctx.font = '19px Arial, sans-serif';
     ctx.fillStyle = GRAY;
-    const recordNounKo = activityModeCard === 'walk' ? '걷기 기록' : activityModeCard === 'trail' ? '트레일러닝 기록' : '러닝 기록';
-    const recordNounEn = activityModeCard === 'walk' ? 'Walk Record' : activityModeCard === 'trail' ? 'Trail Run Record' : 'Running Record';
+    const recordNounKo = activityModeCard === 'walk' ? '걷기 기록' : activityModeCard === 'trail' ? '트레일러닝 기록' : activityModeCard === 'freerun' ? '프리러닝 기록' : '러닝 기록';
+    const recordNounEn = activityModeCard === 'walk' ? 'Walk Record' : activityModeCard === 'trail' ? 'Trail Run Record' : activityModeCard === 'freerun' ? 'Free Run Record' : 'Running Record';
     const subLabel = (isKo ? recordNounKo : recordNounEn) + (data.dateStr ? '  ·  ' + data.dateStr : '') + (data.location ? '  ·  📍 ' + data.location : '');
     ctx.fillText(subLabel, PAD, nameY + 28);
 
@@ -3859,12 +3859,11 @@ return { chest: tt.devposChest, waist: tt.devposWaist, armband: tt.devposArmband
 // 표기가 어긋나 있던 것(트레일런/프리런 vs 트레일러닝/프리러닝)을 앱 전체 표기(modeFreerunLabel 등)와
 // 맞춰 "트레일러닝"/"프리러닝"으로 통일하고 하나로 통합. '러닝/런'처럼 기본 러닝 명사만 문맥에 따라
 // 다른 곳(님의 러닝 vs OOO's 런)은 runWord 인자로 그대로 유지.
-// [수정] 크루 배지/제목이 런/트레일/걷기 3종류로 통일됨에 따라 freerun도 '러닝'으로 합침
 function getActivityNounKo(mode, runWord) {
-return mode === 'walk' ? '걷기' : mode === 'trail' ? '트레일러닝' : (runWord || '러닝');
+return mode === 'walk' ? '걷기' : mode === 'trail' ? '트레일러닝' : mode === 'freerun' ? '프리러닝' : (runWord || '러닝');
 }
 function getActivityNounEn(mode, runWord) {
-return mode === 'walk' ? 'Walk' : mode === 'trail' ? 'Trail Run' : (runWord || 'Run');
+return mode === 'walk' ? 'Walk' : mode === 'trail' ? 'Trail Run' : mode === 'freerun' ? 'Free Run' : (runWord || 'Run');
 }
 // [리팩토링] 네이티브 다운로드 브릿지(AndroidDownload) 우선 사용 + 폴백 로직이 4곳(전체 백업
 // JSON/정밀로그 CSV/패치된 HTML/캘리브레이션 리포트 TXT)에 조금씩 다른 형태로 복붙돼 있던 것을
@@ -10187,19 +10186,15 @@ this.state.seconds = this.getElapsedSeconds();
 //    한 번도 안 잡혔는지"도 함께 확인해서, 둘 중 하나라도 정지를
 //    가리키면 저속/정지로 판단하도록 보강. 모션 권한이 없는 기기는
 //    lastStepTime이 계속 0이라 자동으로 기존 GPS 속도 방식으로만 동작함.
-// [추가] 설정에서 자동 멈춤을 껐거나, 걷기 모드일 경우 아래 판정 로직 자체를 건너뜀
-// (걷기 모드는 저속 이동이 정상 상태이므로 자동 멈춤이 오히려 방해가 됨)
-// [추가 2026-08-29] 린각도 캘리브레이션 대기 구간(착용 대기 6초+정지 자세 캡처 4초=
-// START 후 10초)도 함께 건너뜀. leanTracker.handleMotion() 자체는 이미 오토포즈와
-// 무관하게 항상 호출되도록 되어있었지만(9940번째 줄 부근 주석 참고), 정밀로그 기록
-// (maybeLogPrecisionSample)과 GCT/케이던스 계산(motion.handleMotion)은 여전히
-// isAutoPaused에 묶여있어서 "캘리브레이션을 위해 가만히 서 있는 행동 자체가 오토포즈를
-// 유발해 그 구간 로그가 통째로 비는" 문제가 있었음 — 소비처마다 따로 막을 게 아니라
-// isAutoPaused 자체가 이 구간에서 켜지지 않게 판정 단계에서 걷기 모드와 동일하게 예외 처리.
+// [추가] 설정에서 자동 멈춤을 껐거나 린각도 캘리브레이션 대기 구간이면 판정 로직 자체를 건너뜀.
+// [수정 2026-09-24] 걷기 모드는 더 이상 무조건 건너뛰지 않음 — 아래 else 블록에서 걷기 전용
+// 낮은 임계값(러닝의 2.2km/h 대신 1.0km/h)과 더 긴 대기시간(2초 대신 4초)으로 판정해서,
+// 정상 걷기 속도는 안 건드리면서 "진짜 멈춤"(신호 대기 등)만 잡아내도록 함. 이제 걷기 시작
+// 팝업의 "자동 멈춤 ON/OFF" 토글이 걷기 모드에서도 실제로 동작함.
 const inLeanCalibWindow = !!(this.leanTracker && this.leanTracker.enabled &&
   this.leanTracker.sessionStartTime &&
   (Date.now() - this.leanTracker.sessionStartTime) < (this.leanTracker.WEAR_DELAY_MS + this.leanTracker.CALIB_MS));
-if (!this.state.autoPauseEnabled || ui.currentActivityMode === 'walk' || inLeanCalibWindow) {
+if (!this.state.autoPauseEnabled || inLeanCalibWindow) {
 this.state.lowSpeedStartTime = null;
 if (this.state.isAutoPaused) {
 this.state.isAutoPaused = false;
@@ -10215,12 +10210,18 @@ if(ui.dom.pauseStatus) ui.dom.pauseStatus.classList.remove('is-open');
 } else {
 // [추가] TRAIL 모드는 오르막/너덜길에서 속도가 크게 떨어지거나 GPS가 잠깐 튀는 구간이
 // 잦으므로, 정지 판정까지 대기 시간을 도로 러닝보다 길게 잡아 오판을 줄임.
+// [추가 2026-09-24] 걷기 모드는 정상 보행 속도(3~6km/h)가 러닝 임계값(2.2km/h)보다
+// 낮게도 나올 수 있어 임계값을 1.0km/h로 낮추고, 대기시간도 4초로 늘려 신호 대기 중
+// 잠깐 움찔거리는 정도로는 오탐이 안 나게 함.
 const isTrailMode = ui.currentActivityMode === 'trail';
+const isWalkMode = ui.currentActivityMode === 'walk';
 const rawSpeedKmhForPause = (p.coords.speed || 0) * 3.6;
+const stepHaltThresholdMs = isWalkMode ? 3000 : 1800;
 const stepsHaltedRecently = this.motion && this.motion.lastStepTime > 0 &&
-  (Date.now() - this.motion.lastStepTime) > 1800;
-const looksStoppedNow = (rawSpeedKmhForPause < 2.2) || stepsHaltedRecently;
-const autoPauseDelayMs = isTrailMode ? 5000 : 2000;
+  (Date.now() - this.motion.lastStepTime) > stepHaltThresholdMs;
+const lowSpeedThresholdKmh = isWalkMode ? 1.0 : 2.2;
+const looksStoppedNow = (rawSpeedKmhForPause < lowSpeedThresholdKmh) || stepsHaltedRecently;
+const autoPauseDelayMs = isTrailMode ? 5000 : (isWalkMode ? 4000 : 2000);
 if (looksStoppedNow) {
 if (!this.state.lowSpeedStartTime) this.state.lowSpeedStartTime = Date.now();
 else if ((Date.now() - this.state.lowSpeedStartTime) > autoPauseDelayMs && !this.state.isAutoPaused) {
@@ -11311,16 +11312,20 @@ this.pushDiagSplitIfNeeded();
 const _now = new Date();
 const _h = _now.getHours();
 const _isKo = storage.getLang() === 'ko';
-// [수정] 크루 배지가 런/트레일/걷기 3종류로 통일됨에 따라, 프리러닝도 제목 자동생성에서
-// 더 이상 '프리러닝'으로 구분 표시하지 않고 일반 '러닝' 제목을 씀 (트레일은 계속 구분)
+// [수정] 트레일/프리러닝 모드는 제목에도 구분 표시 (예: '아침 러닝' → '아침 트레일러닝' / '아침 프리러닝')
 const _isTrailTitle = this.state.activityMode === 'trail';
+const _isFreerunTitle = this.state.activityMode === 'freerun';
 const _autoTitle = _isKo
   ? (_isTrailTitle
       ? (_h>=5&&_h<11?'아침 트레일러닝':_h>=11&&_h<17?'오후 트레일러닝':_h>=17&&_h<21?'저녁 트레일러닝':'야간 트레일러닝')
-      : (_h>=5&&_h<11?'아침 러닝':_h>=11&&_h<17?'오후 러닝':_h>=17&&_h<21?'저녁 러닝':'야간 러닝'))
+      : _isFreerunTitle
+        ? (_h>=5&&_h<11?'아침 프리러닝':_h>=11&&_h<17?'오후 프리러닝':_h>=17&&_h<21?'저녁 프리러닝':'야간 프리러닝')
+        : (_h>=5&&_h<11?'아침 러닝':_h>=11&&_h<17?'오후 러닝':_h>=17&&_h<21?'저녁 러닝':'야간 러닝'))
   : (_isTrailTitle
       ? (_h>=5&&_h<11?'Morning Trail Run':_h>=11&&_h<17?'Afternoon Trail Run':_h>=17&&_h<21?'Evening Trail Run':'Night Trail Run')
-      : (_h>=5&&_h<11?'Morning Run':_h>=11&&_h<17?'Afternoon Run':_h>=17&&_h<21?'Evening Run':'Night Run'));
+      : _isFreerunTitle
+        ? (_h>=5&&_h<11?'Morning Free Run':_h>=11&&_h<17?'Afternoon Free Run':_h>=17&&_h<21?'Evening Free Run':'Night Free Run')
+        : (_h>=5&&_h<11?'Morning Run':_h>=11&&_h<17?'Afternoon Run':_h>=17&&_h<21?'Evening Run':'Night Run'));
 // [수정] 보폭 스냅샷: 총거리÷총걸음수 기반 실측값 우선, 걸음 데이터 없을 때만 모델 추정 폴백.
 // (러닝/걷기 공용 buildStrideSnapshot()으로 통합 — 아래 onFinish/finishWalk 리팩토링 참고)
 const _strideSnap = this.buildStrideSnapshot(this.state.stepCount, avgCadence, avgPaceSec, this.state.runDevicePos);
@@ -13067,12 +13072,13 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
       // [수정] RUN/WALK/TRAIL/FREE RUN 배지 (과거 기록엔 activity_mode가 없으므로 'run'으로 간주)
       const activityMode = r.activity_mode || 'run';
       const isKoFeed = storage.getLang() === 'ko';
-      // [수정] 크루 피드 배지는 런/트레일/걷기 3종류로만 통일 (freerun도 '러닝' 배지로 합침)
       const modeBadge = activityMode === 'walk'
         ? { label: isKoFeed ? '걷기' : 'WALK', bg: '#eef2ff', color: '#4338ca' }
         : activityMode === 'trail'
           ? { label: isKoFeed ? '트레일' : 'TRAIL', bg: '#fff7ed', color: '#c2410c' }
-          : { label: isKoFeed ? '러닝' : 'RUN', bg: '#e8f5e9', color: '#2e7d32' };
+          : activityMode === 'freerun'
+            ? { label: isKoFeed ? '프리러닝' : 'FREE RUN', bg: '#f0fdf4', color: '#15803d' }
+            : { label: isKoFeed ? '러닝' : 'RUN', bg: '#e8f5e9', color: '#2e7d32' };
 
       const commentsHTML = recordComments.map(c => `
         <div style="display:flex; justify-content:space-between; align-items:flex-start; padding:8px 0; border-bottom:1px solid #f0f0f0;">
