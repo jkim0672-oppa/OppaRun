@@ -2899,6 +2899,22 @@ function calcPacingMetrics(record) {
   }
   return out;
 }
+// [추가 2026-09-25] LIST 카드용 "리트림된" 평균 케이던스. finishRun() 저장 시점에 한 번 계산해
+// record.cadenceTrimmed로 저장해둔다. DIAG 확대그래프(openDiagGraphFullscreen)의 AVG 통계와
+// 완전히 같은 계산(출발 직후 GRAPH_LEAD_SEC.cad초 제외 + getGraphEdgeSet의 끝 자투리/이상치 제외
+// 후 단순 평균)이라, LIST 카드 숫자와 그래프 AVG 숫자가 항상 일치한다.
+// 주의: record.cadence(걸음수÷활성구간, 실측값)는 STRIDE/PR/효율점수 등 다른 계산이 참조하고
+// 있어 그대로 둔다 — 이 함수는 화면 표시 전용 보조 필드를 만들 뿐, record.cadence는 건드리지 않음.
+function computeTrimmedCadenceAvg(diagSplits) {
+  const sp = Array.isArray(diagSplits) ? diagSplits : [];
+  if (sp.length < 3) return null;
+  const vals = sp.map(s => (typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3) ? s.avgCadence : null));
+  const lead = getLeadExcludeCount(sp, GRAPH_LEAD_SEC.cad);
+  const edge = getGraphEdgeSet(sp, vals, lead);
+  const validVals = vals.filter((v, i) => typeof v === 'number' && isFinite(v) && !edge.has(i));
+  if (!validVals.length) return null;
+  return Math.round(validVals.reduce((a, b) => a + b, 0) / validVals.length);
+}
 // [분리] 케이던스 점수: 170~185 최적 (calcEffScore / calcEffScoreSimple 공용)
 function _effCadScore(cadence) {
   if (cadence >= 170 && cadence <= 185) return 100;
@@ -6994,7 +7010,7 @@ this.buildHrBoxHtml(r, t) +
 ) : (
 '<div class="h-group"><div class="h-group-title">' + t.hSecRunData + '</div><div class="h-group-grid">' +
 '<div class="h-det-box"><div class="h-det-label">' + t.pace + '</div><div class="h-det-val">' + displayPace + '</div></div>' +
-'<div class="h-det-box"><div class="h-det-label">' + t.cadence + '</div><div class="h-det-val" style="color:' + this.getCadenceColor(r.cadence) + '">' + (r.cadence || 0) + '</div></div>' +
+'<div class="h-det-box"><div class="h-det-label">' + t.cadence + '</div><div class="h-det-val" style="color:' + this.getCadenceColor((r.cadenceTrimmed != null ? r.cadenceTrimmed : r.cadence)) + '">' + ((r.cadenceTrimmed != null ? r.cadenceTrimmed : r.cadence) || 0) + '</div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.cal + '</div><div class="h-det-val">' + (r.kcal || 0) + '<span class="c34">' + (r.weightKgSnapshot ? r.weightKgSnapshot.toFixed(1)+'kg' : '') + '</span></div></div>' +
 // [수정] 손/암밴드/프리런은 GCT·FLIGHT 칸을 '--'로 채우지 않고 아예 그리지 않는다
 (this.isGctVertUnreliable(r) ? '' : (
@@ -11404,6 +11420,10 @@ dist: this.state.totalDist.toFixed(2),
 time: ui.dom.time ? ui.dom.time.textContent : "00:00",
 avgPace: ui.dom.avgPace ? ui.dom.avgPace.textContent : INVALID_PACE,
 cadence: avgCadence,
+// [추가 2026-09-25] LIST 카드 표시 전용 리트림 케이던스(그래프 AVG와 동일 계산). null이면
+// (구간 데이터 부족 등) LIST 카드가 기존처럼 cadence로 폴백한다. record.cadence 자체는
+// STRIDE/PR/효율점수 계산과의 일관성을 위해 그대로 둔다(위 computeTrimmedCadenceAvg 주석 참고).
+cadenceTrimmed: computeTrimmedCadenceAvg(this.state.diagSplits),
 gct: avgGct,
 flight: avgFlight,
 gctBal: balance.gctBal,
