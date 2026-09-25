@@ -4625,6 +4625,9 @@ if (freerunBtn) freerunBtn.textContent = t.modeFreerunLabel;
 this._pendingMode = this.currentActivityMode || 'run';
 this._pendingDevicePos = storage.loadProfile().devicePos;
 this._pendingLeanAngle = this.currentLeanAngleEnabled;
+// [추가] 로그 기록도 린각도와 동일하게 "펜딩" 값으로 관리 - 모드를 왔다갔다 해도
+// 마지막으로 골라둔 값을 기억했다가, 다시 사용 가능한 모드로 돌아오면 그대로 복원한다.
+this._pendingPrecisionLog = this.currentPrecisionLogEnabled;
 if (runBtn) runBtn.classList.toggle('active', this._pendingMode === 'run');
 if (walkBtn) walkBtn.classList.toggle('active', this._pendingMode === 'walk');
 if (trailBtn) trailBtn.classList.toggle('active', this._pendingMode === 'trail');
@@ -4661,6 +4664,14 @@ if (runBtn) runBtn.classList.toggle('active', mode === 'run');
 if (walkBtn) walkBtn.classList.toggle('active', mode === 'walk');
 if (trailBtn) trailBtn.classList.toggle('active', mode === 'trail');
 if (freerunBtn) freerunBtn.classList.toggle('active', mode === 'freerun');
+// [수정] 걷기 모드를 고르면 로그 기록/린각도는 "펜딩 값은 그대로 기억한 채" 화면에만 OFF로
+// 표시한다(showQuickDevicePosStep/disableQuickLeanAngleToggle이 처리). 펜딩 값 자체를 지우지
+// 않기 때문에, 나중에 다시 사용 가능한 모드/위치로 돌아오면 마지막으로 골라둔 값이 그대로
+// 복원된다. 메트로놈은 모드/위치와 무관하게 항상 사용 가능한 기능이라 "기억-복원" 대상이
+// 아니므로, 걷기에서는 지금까지처럼 즉시 정지만 시킨다.
+if (mode === 'walk') {
+if (typeof metro !== 'undefined' && metro.isPlaying) metro.stop();
+}
 this.showQuickDevicePosStep();
 }
 // [수정] 퀵 팝업 2단계: 폰 착용 위치 확인. WALK/FREE RUN은 착용 위치와 무관하게 동작하므로
@@ -4732,10 +4743,18 @@ if (section) section.classList.remove('disabled');
 }
 // [수정] 가슴이 아닌 위치를 골랐을 때 린각도 섹션을 숨기지 않고 흐리게 비활성화만 한다
 // (팝업 높이가 위치에 따라 커졌다 작아졌다 하는 것을 방지).
+// [수정] 이전 위치에서 ON으로 골라뒀던 상태가 "ON인데 흐리게"로 보여 헷갈리는 문제가 있어,
+// 비활성 상태에서는 버튼 표시만 OFF로 강제한다. _pendingLeanAngle 값 자체는 건드리지
+// 않으므로, 다시 가슴+러닝/트레일로 돌아오면 showQuickLeanAngleToggle()이 그 값을 그대로
+// 복원해서 보여준다.
 disableQuickLeanAngleToggle() {
 const t = translations[storage.getLang()] || translations['en'];
 const title = document.getElementById('quick-lean-angle-title');
 if (title) title.textContent = t.onbLeanAngleLabel;
+const onBtn = document.getElementById('quick-lean-angle-on');
+const offBtn = document.getElementById('quick-lean-angle-off');
+if (onBtn) onBtn.classList.remove('active');
+if (offBtn) offBtn.classList.add('active');
 const section = document.getElementById('quick-lean-angle-section');
 if (section) section.classList.add('disabled');
 }
@@ -4753,6 +4772,12 @@ if (offBtn) offBtn.classList.toggle('active', enabled !== true);
 quickConfirmModeSwitch() {
 const mode = this._pendingMode || this.currentActivityMode || 'run';
 this.setActivityMode(mode);
+// [추가] 로그 기록: 걷기가 아닌 모드로 확정될 때만 펜딩 값을 실제로 적용한다.
+// 걷기로 확정되는 경우엔 위 setActivityMode() 안의 updatePrecisionLogAvailability()가
+// 이미 실제 값을 강제로 OFF 처리했으므로 여기선 따로 건드리지 않는다(펜딩 값은 보존됨).
+if (this._isWalkGated(mode)) {
+this.setPrecisionLogRecording(this._pendingPrecisionLog === true);
+}
 if (mode === 'run' || mode === 'trail') {
 const pos = this._pendingDevicePos || storage.loadProfile().devicePos;
 this.setDevicePos(pos);
@@ -4762,24 +4787,26 @@ this.setLeanAngleEnabled(this._pendingLeanAngle === true);
 }
 this.closeQuickModeSwitch();
 }
-// [신규] 퀵 팝업의 자동멈춤/로그기록/메트로놈 토글 - 설정으로 들어가지 않고 바로 켜고 끌 수 있게 함.
-// 기존 토글 함수를 그대로 재사용하므로(setAutoPause/setPrecisionLogRecording/metro.toggle 내부에서
-// 이 팝업의 DOM도 함께 갱신) 설정 페이지와 항상 동기화되고, 팝업은 닫지 않아 연속으로 여러 개를 켤 수 있음.
+// [신규] 퀵 팝업의 자동멈춤/메트로놈 토글 - 설정으로 들어가지 않고 바로 켜고 끌 수 있게 함.
+// 기존 토글 함수를 그대로 재사용하므로(setAutoPause/metro.toggle 내부에서 이 팝업의 DOM도
+// 함께 갱신) 설정 페이지와 항상 동기화되고, 팝업은 닫지 않아 연속으로 여러 개를 켤 수 있음.
+// 자동멈춤/메트로놈은 모드에 따라 막히는 기능이 아니라서 "기억-복원"이 필요 없어 그대로 라이브 적용한다.
 quickToggleAutoPause() {
 this.toggleAutoPause();
 }
+// [수정] 로그 기록은 걷기 모드에서 막히는 기능이라 린각도와 동일하게 "펜딩" 값으로만 바꾼다.
+// 실제 저장은 CONFIRM에서만 일어나므로, 걷기를 눌러봤다가 다시 러닝/트레일로 돌아와도
+// 이전에 꺼두거나 켜둔 값이 그대로 복원된다.
 quickTogglePrecisionLog() {
-// [수정] 확정된 currentActivityMode가 아니라, 팝업에 지금 보이는 펜딩 모드(_pendingMode) 기준으로
-// 걷기 여부를 판단해야 함. CONFIRM 누르기 전에도 방금 고른 러닝/트레일에서 바로 켤 수 있도록 함.
-if (!this._isWalkGated(this._pendingMode)) return;
-this.setPrecisionLogRecording(!this.currentPrecisionLogEnabled);
+if (!this._isWalkGated(this._pendingMode)) return; // 걷기 모드에서는 비활성 상태이므로 무시
+this._pendingPrecisionLog = !this._pendingPrecisionLog;
+this.syncQuickTogglesUI();
 }
 quickToggleMetro() {
-// [수정] 로그 기록과 동일하게, 팝업에 지금 보이는 펜딩 모드가 걷기면 무시
-if (!this._isWalkGated(this._pendingMode)) return;
 metro.toggle();
 }
-// [신규] 퀵 팝업 2단계를 열 때 자동멈춤/로그기록/메트로놈 박스를 현재 저장값 기준으로 동기화.
+// [신규] 퀵 팝업 2단계를 열 때 자동멈춤/메트로놈 박스는 현재 저장값 기준으로, 로그기록 박스는
+// 펜딩 값 + 현재 모드의 사용 가능 여부(_isWalkGated) 기준으로 동기화한다.
 syncQuickTogglesUI() {
 const t = translations[storage.getLang()] || translations['en'];
 const apLabel = document.getElementById('quick-label-autopause');
@@ -4792,20 +4819,19 @@ const apBox = document.getElementById('quick-autopause-switch');
 const apStatus = document.getElementById('quick-autopause-status');
 if (apBox) apBox.classList.toggle('active', this.currentAutoPause === true);
 if (apStatus) apStatus.textContent = this.currentAutoPause ? 'ON' : 'OFF';
+// [수정] 로그기록은 펜딩 값을 쓰되, 걷기 모드처럼 사용 불가한 상태에서는 펜딩 값과 무관하게
+// 항상 OFF로 표시 + 흐리게 + 클릭 차단한다. 펜딩 값 자체는 지우지 않아 나중에 복원 가능.
+const logAvailable = this._isWalkGated(this._pendingMode);
 const logBox = document.getElementById('quick-precision-log-switch');
 const logStatus = document.getElementById('quick-precision-log-status');
-if (logBox) logBox.classList.toggle('active', this.currentPrecisionLogEnabled === true);
-if (logStatus) logStatus.textContent = this.currentPrecisionLogEnabled ? 'ON' : 'OFF';
+if (logBox) {
+logBox.classList.toggle('active', logAvailable && this._pendingPrecisionLog === true);
+logBox.style.opacity = logAvailable ? '1' : '0.6';
+logBox.style.pointerEvents = logAvailable ? 'auto' : 'none';
+logBox.style.cursor = logAvailable ? 'pointer' : 'not-allowed';
+}
+if (logStatus) logStatus.textContent = (logAvailable && this._pendingPrecisionLog === true) ? 'ON' : 'OFF';
 this.updateQuickMetroBtn();
-// [추가] 펜딩 모드가 걷기면 로그 기록/메트로놈 버튼을 설정 페이지와 동일하게 흐리게+클릭 차단
-const pendingAvailable = this._isWalkGated(this._pendingMode);
-const metroBox = document.getElementById('quick-metro-switch');
-[logBox, metroBox].forEach(box => {
-if (!box) return;
-box.style.opacity = pendingAvailable ? '1' : '0.6';
-box.style.pointerEvents = pendingAvailable ? 'auto' : 'none';
-box.style.cursor = pendingAvailable ? 'pointer' : 'not-allowed';
-});
 }
 updateWalkDisplay(data) {
 if (data.steps !== undefined && this.dom.cadence) this.dom.cadence.textContent = data.steps;
@@ -4891,10 +4917,6 @@ setActivityMode(mode) {
 // 이 값은 향후 걷기 전용 통계/화면 분기에 사용되며, 기본값은 'run'이라 기존 동작은 그대로 유지됨.
 this.currentActivityMode = mode;
 storage.setActivityMode(mode);
-// [추가] 걷기 모드로 바뀌면 로그 기록과 동일하게 메트로놈도 켜져 있으면 자동으로 끔
-if (mode === 'walk' && typeof metro !== 'undefined' && metro.isPlaying) {
-metro.stop();
-}
 const runBtn = document.getElementById('mode-run');
 const walkBtn = document.getElementById('mode-walk');
 const trailBtn = document.getElementById('mode-trail');
@@ -4903,15 +4925,6 @@ if (runBtn) runBtn.classList.toggle('active', mode === 'run');
 if (walkBtn) walkBtn.classList.toggle('active', mode === 'walk');
 if (trailBtn) trailBtn.classList.toggle('active', mode === 'trail');
 if (freerunBtn) freerunBtn.classList.toggle('active', mode === 'freerun');
-// [추가] 온보딩 화면의 활동 모드 하이라이트도 함께 동기화 (퀵 팝업과 동일한 패턴)
-const onbRunBtn = document.getElementById('onb-mode-run');
-const onbWalkBtn = document.getElementById('onb-mode-walk');
-const onbTrailBtn = document.getElementById('onb-mode-trail');
-const onbFreerunBtn = document.getElementById('onb-mode-freerun');
-if (onbRunBtn) onbRunBtn.classList.toggle('active', mode === 'run');
-if (onbWalkBtn) onbWalkBtn.classList.toggle('active', mode === 'walk');
-if (onbTrailBtn) onbTrailBtn.classList.toggle('active', mode === 'trail');
-if (onbFreerunBtn) onbFreerunBtn.classList.toggle('active', mode === 'freerun');
 // [수정] 걷기 모드로 전환/유지될 때 설정 페이지의 기기 착용 위치 하이라이트도
 // 온보딩과 동일하게 즉시 꺼지도록 동기화 (러닝/트레일 복귀 시엔 저장된 위치로 복원)
 this.updateDevicePosUI(storage.loadProfile().devicePos);
@@ -5212,11 +5225,6 @@ const quickBox = document.getElementById('quick-precision-log-switch');
 const quickStatus = document.getElementById('quick-precision-log-status');
 if (quickBox) quickBox.classList.toggle('active', enabled === true);
 if (quickStatus) quickStatus.textContent = enabled ? 'ON' : 'OFF';
-// [추가] 온보딩 화면의 로그 기록 토글도 함께 동기화
-const onbBox = document.getElementById('onb-precision-log-switch');
-const onbStatus = document.getElementById('onb-precision-log-status');
-if (onbBox) onbBox.classList.toggle('active', enabled === true);
-if (onbStatus) onbStatus.textContent = enabled ? 'ON' : 'OFF';
 }
 // [수정] 설정 페이지: 폰위치 선택은 걷기+프리러닝 모드에서는 필요 없으므로 비활성화(흐리게 + 클릭 차단)
 updatePosAvailability() {
@@ -5254,11 +5262,6 @@ const quickOnBtn = document.getElementById('quick-lean-angle-on');
 const quickOffBtn = document.getElementById('quick-lean-angle-off');
 if (quickOnBtn) quickOnBtn.classList.toggle('active', enabled === true);
 if (quickOffBtn) quickOffBtn.classList.toggle('active', enabled !== true);
-// [추가] 온보딩 화면의 린각도 토글도 함께 동기화
-const onbBox = document.getElementById('onb-lean-angle-switch');
-const onbStatus = document.getElementById('onb-lean-angle-status');
-if (onbBox) onbBox.classList.toggle('active', enabled === true);
-if (onbStatus) onbStatus.textContent = enabled ? 'ON' : 'OFF';
 }
 // [추가] 캘리브레이션 완료 알림음 종류 선택 (beep/whistle/chime 중 하나, pill 버튼 방식)
 // 고르자마자 바로 소리를 들려줘서 어떤 소리인지 바로 알 수 있게 함
@@ -5312,11 +5315,6 @@ const quickBox = document.getElementById('quick-autopause-switch');
 const quickStatus = document.getElementById('quick-autopause-status');
 if(quickBox) quickBox.classList.toggle('active', enabled === true);
 if(quickStatus) quickStatus.textContent = enabled ? 'ON' : 'OFF';
-// [추가] 온보딩 화면의 자동멈춤 토글도 함께 동기화
-const onbBox = document.getElementById('onb-autopause-switch');
-const onbStatus = document.getElementById('onb-autopause-status');
-if(onbBox) onbBox.classList.toggle('active', enabled === true);
-if(onbStatus) onbStatus.textContent = enabled ? 'ON' : 'OFF';
 // 러닝 중 끄면 즉시 오토포즈 해제 (화면에 남아있는 정지 표시 제거)
 if (typeof app !== 'undefined' && app && app.state) {
 app.state.autoPauseEnabled = enabled;
@@ -6288,9 +6286,6 @@ const isWalk = this.currentActivityMode === 'walk' || this.currentActivityMode =
 ['chest','waist','armband','hand'].forEach(id => {
 const el = document.getElementById('devpos-' + id);
 if(el) el.classList.toggle('active', !isWalk && id === pos);
-// [추가] 온보딩 화면의 기기 착용 위치 하이라이트도 함께 동기화
-const onbEl = document.getElementById('onb-devpos-' + id);
-if(onbEl) onbEl.classList.toggle('active', !isWalk && id === pos);
 });
 const warningEl = document.getElementById('device-pos-warning');
 if(!warningEl) return;
