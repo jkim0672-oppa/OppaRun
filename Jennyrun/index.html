@@ -2915,6 +2915,22 @@ function computeTrimmedCadenceAvg(diagSplits) {
   if (!validVals.length) return null;
   return Math.round(validVals.reduce((a, b) => a + b, 0) / validVals.length);
 }
+// [추가 2026-09-25] 페이스판(위 케이던스와 동일 원리). DIAG 확대그래프 PACE의 AVG와 같은 계산으로,
+// 출발 직후 가속 구간(GRAPH_LEAD_SEC.pace초)과 끝 자투리/이상치 구간을 뺀 평균 페이스(초/km)를
+// "M'SS\"" 형식 문자열로 반환한다. 단위(mile) 변환은 저장하지 않고 표시 시점에 convertPaceToUnit로
+// 처리(record.avgPace와 동일한 저장 관례). record.avgPace(총거리÷총시간, 실측값)는 KM/H·칼로리·PR
+// 계산이 참조하므로 그대로 둔다 — 이 함수도 화면 표시 전용 보조 필드(paceTrimmed)만 만든다.
+function computeTrimmedPaceAvg(diagSplits) {
+  const sp = Array.isArray(diagSplits) ? diagSplits : [];
+  if (sp.length < 3) return null;
+  const vals = sp.map(s => paceStrToSeconds(s.pace));
+  const lead = getLeadExcludeCount(sp, GRAPH_LEAD_SEC.pace);
+  const edge = getGraphEdgeSet(sp, vals, lead);
+  const validVals = vals.filter((v, i) => typeof v === 'number' && isFinite(v) && !edge.has(i));
+  if (!validVals.length) return null;
+  const sec = Math.round(validVals.reduce((a, b) => a + b, 0) / validVals.length);
+  return Math.floor(sec / 60) + "'" + String(sec % 60).padStart(2, '0') + '"';
+}
 // [분리] 케이던스 점수: 170~185 최적 (calcEffScore / calcEffScoreSimple 공용)
 function _effCadScore(cadence) {
   if (cadence >= 170 && cadence <= 185) return 100;
@@ -6955,6 +6971,18 @@ let displayPace = r.avgPace || r.pace || INVALID_PACE;
 if(displayPace !== INVALID_PACE && this.currentUnit === 'mile') {
 displayPace = this.convertPaceToUnit(displayPace, 'mile');
 }
+// [추가 2026-09-25] cadenceTrimmed가 없는 과거 기록(이 필드가 생기기 전에 저장됨)도 diagSplits만
+// 있으면 그 자리에서 즉석으로 같은 방식으로 계산해서 보여준다 — 별도 저장소 마이그레이션 없이
+// 렌더링 시점에만 자연스럽게 "소급 적용"되는 방식(저장된 기록 자체는 건드리지 않아 더 안전함).
+const _listCadenceTrimmed = (r.cadenceTrimmed != null) ? r.cadenceTrimmed : computeTrimmedCadenceAvg(r.diagSplits);
+const _listCadence = (_listCadenceTrimmed != null) ? _listCadenceTrimmed : r.cadence;
+// [추가 2026-09-25] 페이스도 케이던스와 동일한 원리 — 러닝(걷기 제외) PACE 칸만 리트림 값으로
+// 표시. 걷기 카드의 PACE(displayPace)는 그대로 전체 세션 값을 유지한다.
+const _listPaceTrimmed = (r.paceTrimmed != null) ? r.paceTrimmed : computeTrimmedPaceAvg(r.diagSplits);
+let _listPace = _listPaceTrimmed || displayPace;
+if(_listPaceTrimmed && this.currentUnit === 'mile') {
+_listPace = this.convertPaceToUnit(_listPaceTrimmed, 'mile');
+}
 // [추가] 착용 위치 배지: 어느 위치로 뛴 기록인지 제목 옆에서 바로 구분 가능하게 표시 (가민분석실 정밀로그 목록과 동일한 색/스타일)
 const hPosLabelMap = getPosLabelMap(lang);
 const hPosBadge = r.devicePos ? ' <span style="color:#7fd3ff; font-weight:700; font-size:var(--fs-xs);">· ' + (hPosLabelMap[r.devicePos] || r.devicePos) + '</span>' : '';
@@ -7009,8 +7037,8 @@ this.buildHrBoxHtml(r, t) +
 '</div></div>'
 ) : (
 '<div class="h-group"><div class="h-group-title">' + t.hSecRunData + '</div><div class="h-group-grid">' +
-'<div class="h-det-box"><div class="h-det-label">' + t.pace + '</div><div class="h-det-val">' + displayPace + '</div></div>' +
-'<div class="h-det-box"><div class="h-det-label">' + t.cadence + '</div><div class="h-det-val" style="color:' + this.getCadenceColor((r.cadenceTrimmed != null ? r.cadenceTrimmed : r.cadence)) + '">' + ((r.cadenceTrimmed != null ? r.cadenceTrimmed : r.cadence) || 0) + '</div></div>' +
+'<div class="h-det-box"><div class="h-det-label">' + t.pace + '</div><div class="h-det-val">' + _listPace + '</div></div>' +
+'<div class="h-det-box"><div class="h-det-label">' + t.cadence + '</div><div class="h-det-val" style="color:' + this.getCadenceColor(_listCadence) + '">' + (_listCadence || 0) + '</div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.cal + '</div><div class="h-det-val">' + (r.kcal || 0) + '<span class="c34">' + (r.weightKgSnapshot ? r.weightKgSnapshot.toFixed(1)+'kg' : '') + '</span></div></div>' +
 // [수정] 손/암밴드/프리런은 GCT·FLIGHT 칸을 '--'로 채우지 않고 아예 그리지 않는다
 (this.isGctVertUnreliable(r) ? '' : (
@@ -11419,6 +11447,10 @@ date: new Date().toLocaleString(),
 dist: this.state.totalDist.toFixed(2),
 time: ui.dom.time ? ui.dom.time.textContent : "00:00",
 avgPace: ui.dom.avgPace ? ui.dom.avgPace.textContent : INVALID_PACE,
+// [추가 2026-09-25] LIST 카드 표시 전용 리트림 페이스(그래프 AVG와 동일 계산, km 기준 문자열).
+// null이면 LIST 카드가 기존처럼 avgPace로 폴백한다. record.avgPace 자체는 KM/H·칼로리·PR
+// 계산과의 일관성을 위해 그대로 둔다(위 computeTrimmedPaceAvg 주석 참고).
+paceTrimmed: computeTrimmedPaceAvg(this.state.diagSplits),
 cadence: avgCadence,
 // [추가 2026-09-25] LIST 카드 표시 전용 리트림 케이던스(그래프 AVG와 동일 계산). null이면
 // (구간 데이터 부족 등) LIST 카드가 기존처럼 cadence로 폴백한다. record.cadence 자체는
