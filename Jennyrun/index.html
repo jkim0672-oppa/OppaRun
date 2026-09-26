@@ -4125,6 +4125,73 @@ if (typeof garmin !== 'undefined' && garmin.clearAllSilent) garmin.clearAllSilen
 alert(translations[lang].alertLogsCleared);
 }
 }
+// [수정 2026-09-25] 세팅 화면 버튼은 필요 없다는 피드백 반영 — UI에는 노출하지 않고,
+// 콘솔(크롬 원격 디버깅 등)에서 직접 호출하는 개발자 전용 함수로 둔다.
+// storage.previewCadenceMigration(): 저장 안 하고 예전값→새값만 console.table로 확인(dry-run).
+// storage.applyCadenceMigration(): 확인 후 실제로 history에 반영하고 싶을 때만 호출.
+// 매칭 방식은 기존과 동일 — record.id와 정밀로그 id('plog_'+Date.now())가 둘 다 생성 시점의
+// Date.now()라는 점을 이용해 가장 가까운 타임스탬프로 매칭(같은 러닝 종료 시 record.id 저장
+// 직후 savePrecisionLog가 호출되므로 보통 수백ms 이내, 30초까지 허용). 정밀 로그는 최근 10개만
+// 보관되므로, 그보다 오래된 기록은 매칭되는 로그가 없어 preview에도 matched:false로만 표시된다.
+_matchPrecisionLogForRecord(rec, plogs, toleranceMs) {
+let best = null, bestDiff = Infinity;
+for (const p of plogs) {
+if (!p || typeof p.id !== 'string' || !p.log || p.log.length < 5) continue;
+const pTime = parseInt(p.id.replace('plog_', ''), 10);
+if (isNaN(pTime) || typeof rec.id !== 'number') continue;
+const diff = Math.abs(pTime - rec.id);
+if (diff < bestDiff) { bestDiff = diff; best = p; }
+}
+return (best && bestDiff <= toleranceMs) ? best : null;
+}
+previewCadenceMigration() {
+const history = this.loadHistory();
+const plogs = this.loadPrecisionLogs();
+const MATCH_TOLERANCE_MS = 30000;
+const rows = history.map(rec => {
+const best = this._matchPrecisionLogForRecord(rec, plogs, MATCH_TOLERANCE_MS);
+if (!best) return { date: rec.date, title: rec.title, oldCadence: rec.cadence, newCadence: null, matched: false };
+const newCadence = computeOsCadenceField(best.log, 'stepDetectorCnt');
+return { date: rec.date, title: rec.title, oldCadence: rec.cadence, newCadence: newCadence != null ? Math.round(newCadence) : null, matched: newCadence != null };
+});
+console.table(rows);
+return rows;
+}
+applyCadenceMigration() {
+const history = this.loadHistory();
+const plogs = this.loadPrecisionLogs();
+const MATCH_TOLERANCE_MS = 30000;
+let updatedCount = 0;
+const newHistory = history.map(rec => {
+const best = this._matchPrecisionLogForRecord(rec, plogs, MATCH_TOLERANCE_MS);
+if (!best) return rec;
+const newCadence = computeOsCadenceField(best.log, 'stepDetectorCnt');
+if (newCadence == null) return rec;
+const updatedRec = Object.assign({}, rec);
+let changed = false;
+const roundedCadence = Math.round(newCadence);
+if (updatedRec.cadence !== roundedCadence) { updatedRec.cadence = roundedCadence; changed = true; }
+if (Array.isArray(updatedRec.diagSplits) && updatedRec.diagSplits.length) {
+let prevT = 0;
+updatedRec.diagSplits = updatedRec.diagSplits.map(s => {
+const toSec = (typeof s.t_sec === 'number') ? s.t_sec : prevT;
+const seg = computeDiagSegmentCadenceFromPrecLog(best.log, prevT, toSec);
+prevT = toSec;
+if (seg == null) return s;
+changed = true;
+return Object.assign({}, s, { avgCadence: Math.round(seg.cadence), cadN: seg.n });
+});
+}
+if (changed) updatedCount++;
+return updatedRec;
+});
+localStorage.setItem(this.HISTORY_KEY, JSON.stringify(newHistory));
+if (typeof ui !== 'undefined') {
+if (ui.updateHistoryList) ui.updateHistoryList();
+if (ui.updateTotalStats) ui.updateTotalStats();
+}
+console.log('[migrateCadence] updated ' + updatedCount + ' / ' + history.length + ' records (' + (history.length - updatedCount) + ' had no matching precision log).');
+}
 buildPrecisionCsv(log, devicePos) {
 // [수정] device_pos 컬럼 추가: 이 로그 전체가 어느 착용 위치(chest/waist/armband/hand)로
 // 뛴 러닝인지 매 행에 동일한 값으로 남겨서, export한 CSV만 봐도 확인 가능하게 함.
@@ -9772,6 +9839,52 @@ function computeOsCadence(log) {
     sc: computeOsCadenceField(log, 'stepCounterSteps'),
   };
 }
+// [추가 2026-09-25] 정밀 로그의 cadence 컬럼을 화면 실시간 표시값(cadSmoothed, 라이브 스무딩 알고리즘)이
+// 아니라 stepDetectorCnt 증가분 기반으로 재계산해 저장 — LIST(record.cadence)/DIAG AVG(위 수정)/
+// 가민분석실 PHONE이 전부 stepDetectorCnt 기준인데 로그 파일의 cadence 컬럼만 다른 방식이라
+// CSV를 직접 열어봤을 때 세 곳과 안 맞아 혼란스러웠던 부분. 화면 실시간 표시 자체(반응성 목적)는
+// 그대로 두고, 로그에 "찍히는 값"만 최근 windowSec초 구간의 실측 걸음수 증가로 재계산한다.
+// 러닝 시작 직후처럼 히스토리가 부족하면 null을 반환해 호출부에서 기존 화면표시값으로 폴백시킨다.
+function computeRecentLogCadence(precisionLog, curStepCnt, curT, windowSec) {
+  if (curStepCnt === '' || curStepCnt == null || isNaN(parseFloat(curStepCnt))) return null;
+  if (!precisionLog || !precisionLog.length) return null;
+  const targetT = curT - windowSec;
+  let ref = null;
+  for (let i = precisionLog.length - 1; i >= 0; i--) {
+    const row = precisionLog[i];
+    const t = parseFloat(row.t);
+    if (isNaN(t)) continue;
+    ref = row; // 가장 오래된(가장 이른) 후보로 계속 갱신 — 아래에서 targetT 이하를 찾으면 멈춤
+    if (t <= targetT) break;
+  }
+  if (!ref) return null;
+  const refStepCnt = parseFloat(ref.stepDetectorCnt);
+  const refT = parseFloat(ref.t);
+  if (isNaN(refStepCnt) || isNaN(refT)) return null;
+  const dt = curT - refT;
+  if (dt < 2) return null; // 너무 짧으면(러닝 시작 직후 등) 노이즈 위험 — 폴백
+  const dSteps = parseFloat(curStepCnt) - refStepCnt;
+  if (dSteps < 0) return null;
+  return (dSteps / dt) * 60;
+}
+// [수정 2026-09-25] DIAG 그래프(diagSplits.avgCadence)가 LIST(record.cadence)/가민분석실
+// PHONE 케이던스와 서로 다른 케이던스였던 원인: diagSplits는 실시간 스무딩 샘플
+// (diagCadenceSamples, cadSmoothed)의 단순평균을 써왔고, LIST/가민분석실은 정밀 로그의
+// stepDetectorCnt 증가분(computeOsCadenceField)을 씀 — 계산 방식 자체가 완전히 분리돼 있었음.
+// 100m(자투리 포함) 구간을 정밀 로그의 t(초) 범위로 잘라 동일한 방식으로 계산해 DIAG도
+// LIST/가민분석실과 같은 소스를 쓰도록 통일한다. 정밀 로그가 없거나(설정 꺼짐) 구간 내
+// 샘플이 너무 적으면(중간에 걸음 증가가 한 번도 없어 null) 기존 diagCadenceSamples
+// 평균으로 폴백 — 호출부에서 처리.
+function computeDiagSegmentCadenceFromPrecLog(precisionLog, fromSec, toSec) {
+  if (!precisionLog || precisionLog.length < 2) return null;
+  const seg = precisionLog.filter(r => {
+    const t = parseFloat(r.t);
+    return !isNaN(t) && t >= fromSec && t <= toSec;
+  });
+  if (seg.length < 2) return null;
+  const cadence = computeOsCadenceField(seg, 'stepDetectorCnt');
+  return cadence != null ? { cadence: cadence, n: seg.length } : null;
+}
 // [추가] 가민 비교(runCalibrationCompare)용 시간축 정렬: 가민을 먼저 켜고 폰을 늦게
 // 시작하거나(머리 쪽 어긋남), 가민을 먼저 끄고 폰이 걷기 상태로 몇 초 더 기록되는
 // 경우(꼬리 쪽 어긋남) 둘 다, 실제로는 "두 기기가 동시에 기록 중이던 구간"만 비교해야
@@ -10382,7 +10495,9 @@ let dMin = Math.floor(diagPaceSecPerKm / 60);
 let dSec = Math.round(diagPaceSecPerKm % 60);
 let diagPaceStr = dMin + "'" + String(dSec).padStart(2,'0') + '"';
 const _diagCadArr = this.state.diagCadenceSamples || [];
-const _diagAvgCad = _diagCadArr.length > 0 ? Math.round(_diagCadArr.reduce((a,b)=>a+b,0) / _diagCadArr.length) : null;
+const _diagPrecCad = computeDiagSegmentCadenceFromPrecLog(this.state.precisionLog, this.state.lastDiagSeconds, this.state.seconds);
+const _diagAvgCad = _diagPrecCad != null ? Math.round(_diagPrecCad.cadence) : (_diagCadArr.length > 0 ? Math.round(_diagCadArr.reduce((a,b)=>a+b,0) / _diagCadArr.length) : null);
+const _diagCadN = _diagPrecCad != null ? _diagPrecCad.n : _diagCadArr.length;
 const _diagHrArr = this.state.diagHrSamples || [];
 const _diagAvgHr = _diagHrArr.length > 0 ? Math.round(_diagHrArr.reduce((a,b)=>a+b,0) / _diagHrArr.length) : null;
 // [신규] 구간별(100m) 러닝 파워(와트) — DIAG 그래프용. 세션 평균과 동일한 calculateRunningPower()를
@@ -10390,7 +10505,7 @@ const _diagAvgHr = _diagHrArr.length > 0 ? Math.round(_diagHrArr.reduce((a,b)=>a
 const _diagProf = storage.loadProfile();
 const _diagWeightKg = _diagProf.wu === 'lb' ? _diagProf.w * 0.453592 : _diagProf.w;
 const _diagPower = ui.calculateRunningPower(_diagWeightKg, DIAG_SPLIT_INTERVAL_KM, diagPaceSecPerKm, (this.state.lastDiagAlt == null ? 0 : Math.max(0, this.state.currentAlt - this.state.lastDiagAlt)));
-this.state.diagSplits.push({ km: diagTargetKm, t_sec: this.state.seconds, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: (this.state.lastDiagAlt == null ? 0 : this.state.currentAlt - this.state.lastDiagAlt), avgCadence: _diagAvgCad, cadN: _diagCadArr.length, avgHr: _diagAvgHr, power: _diagPower });
+this.state.diagSplits.push({ km: diagTargetKm, t_sec: this.state.seconds, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: (this.state.lastDiagAlt == null ? 0 : this.state.currentAlt - this.state.lastDiagAlt), avgCadence: _diagAvgCad, cadN: _diagCadN, avgHr: _diagAvgHr, power: _diagPower });
 this.state.lastDiagCheckpoint = diagTargetKm;
 this.state.lastDiagSeconds = this.state.seconds;
 this.state.lastDiagAlt = this.state.currentAlt;
@@ -10894,6 +11009,9 @@ if (_curGctCount != null) this.state.lastLoggedGctCount = _curGctCount;
 // 걷기 모드는 정밀 로그를 남기지 않으므로 제외. 가슴/허리는 기존 경로(getTxt) 그대로.
 const _gctInternalLog = this.state.activityMode === 'freerun'
   || ((this.state.runDevicePos === 'hand' || this.state.runDevicePos === 'armband') && this.state.activityMode !== 'walk');
+// [추가 2026-09-25] 로그 cadence 컬럼용 stepDetectorCnt 기반 재계산(위 computeRecentLogCadence 참고).
+// 화면 실시간 표시는 그대로 getTxt('cadence')를 쓰되, 로그에는 이 값을 우선 저장.
+const _logCadence = computeRecentLogCadence(this.state.precisionLog, stepDetectorCnt, this.state.seconds, 8);
 this.state.precisionLog.push({
 t: this.state.seconds,
 timestamp: nowIso,
@@ -10902,7 +11020,7 @@ lng: lng,
 gpsAcc: gpsAcc,
 distKm: this.state.totalDist ? this.state.totalDist.toFixed(3) : '0.000',
 speedKmh: logSpeedKmh,
-cadence: getTxt('cadence'),
+cadence: _logCadence != null ? Math.round(_logCadence) : getTxt('cadence'),
 gctMs: !_hasNewStepThisSample ? '--' : (_gctInternalLog ? ((_fm && _fm.lastStepGctMs != null) ? _fm.lastStepGctMs : '--') : getTxt('gct')), // [수정 2026-09-21] 원래 조건: this.state.activityMode === 'freerun'
 flightPct: _gctInternalLog ? ((_fm && _fm.lastStepFlightPct != null) ? _fm.lastStepFlightPct : '') : getTxt('flight'), // [수정 2026-09-21] 원래 조건: this.state.activityMode === 'freerun'
 stepLengthM: stepLengthM,
@@ -11245,7 +11363,9 @@ let dMin = Math.floor(diagPaceSecPerKm / 60);
 let dSec = Math.round(diagPaceSecPerKm % 60);
 let diagPaceStr = dMin + "'" + String(dSec).padStart(2,'0') + '"';
 const _diagCadArr2 = this.state.diagCadenceSamples || [];
-const _diagAvgCad2 = _diagCadArr2.length > 0 ? Math.round(_diagCadArr2.reduce((a,b)=>a+b,0) / _diagCadArr2.length) : null;
+const _diagPrecCad2 = computeDiagSegmentCadenceFromPrecLog(this.state.precisionLog, this.state.lastDiagSeconds, this.state.seconds);
+const _diagAvgCad2 = _diagPrecCad2 != null ? Math.round(_diagPrecCad2.cadence) : (_diagCadArr2.length > 0 ? Math.round(_diagCadArr2.reduce((a,b)=>a+b,0) / _diagCadArr2.length) : null);
+const _diagCadN2 = _diagPrecCad2 != null ? _diagPrecCad2.n : _diagCadArr2.length;
 const _diagHrArr2 = this.state.diagHrSamples || [];
 const _diagAvgHr2 = _diagHrArr2.length > 0 ? Math.round(_diagHrArr2.reduce((a,b)=>a+b,0) / _diagHrArr2.length) : null;
 // [신규] 구간별(자투리) 러닝 파워(와트) — 실제 남은 거리(diagSegmentKm) 기준으로 계산해
@@ -11253,7 +11373,7 @@ const _diagAvgHr2 = _diagHrArr2.length > 0 ? Math.round(_diagHrArr2.reduce((a,b)
 const _diagProf2 = storage.loadProfile();
 const _diagWeightKg2 = _diagProf2.wu === 'lb' ? _diagProf2.w * 0.453592 : _diagProf2.w;
 const _diagPower2 = ui.calculateRunningPower(_diagWeightKg2, diagSegmentKm, diagPaceSecPerKm, (this.state.lastDiagAlt == null ? 0 : Math.max(0, this.state.currentAlt - this.state.lastDiagAlt)));
-this.state.diagSplits.push({ km: parseFloat(this.state.totalDist).toFixed(2), t_sec: this.state.seconds, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: (this.state.lastDiagAlt == null ? 0 : this.state.currentAlt - this.state.lastDiagAlt), avgCadence: _diagAvgCad2, cadN: _diagCadArr2.length, avgHr: _diagAvgHr2, power: _diagPower2 });
+this.state.diagSplits.push({ km: parseFloat(this.state.totalDist).toFixed(2), t_sec: this.state.seconds, pace: diagPaceStr, altTo: this.state.currentAlt, altDiff: (this.state.lastDiagAlt == null ? 0 : this.state.currentAlt - this.state.lastDiagAlt), avgCadence: _diagAvgCad2, cadN: _diagCadN2, avgHr: _diagAvgHr2, power: _diagPower2 });
 this.state.diagCadenceSamples = [];
 this.state.diagHrSamples = [];
 }
@@ -16838,9 +16958,22 @@ if (!svg) return;
 const axisHtml = buildDiagAxisLabelsHtml(splits);
 // 세부 지표: 작은 카드엔 없던 평균/최고/최저/구간 수/총 소요시간을 계산해 보여준다.
 const validVals = vals.filter((v, i) => typeof v === 'number' && isFinite(v) && !edge.has(i));
+// [수정 2026-09-25] AVG를 구간(100m, 고정거리)별 값의 단순평균으로 내면, 구간마다 실제
+// 소요시간이 달라 시간가중 평균인 LIST/가민분석실 값과 어긋남 — 페이스/케이던스가 빠른
+// 구간은 짧고 느린 구간(워밍업 등)은 긴데도 구간 수 기준으로 동일 가중치를 주기 때문.
+// (LIST 168 / 가민분석실 PHONE 171인데 이 화면 AVG만 173으로 튀던 원인.) 레코드에 이미
+// 있는 공식 값(정밀 로그 기반, LIST와 동일 소스)이 있으면 그걸 그대로 쓰고, 없는 지표
+// (고도 등)만 기존 방식(구간값 단순평균)으로 폴백. BEST/WORST는 "구간 중 최고/최저"라는
+// 의미 자체가 개별 구간 값 기준이라 그대로 둔다.
+const _officialAvg = metricKey === 'cadence' ? (typeof r.cadence === 'number' ? r.cadence : null)
+  : metricKey === 'pace' ? paceStrToSeconds(r.avgPace)
+  : metricKey === 'hr' ? (typeof r.avgHr === 'number' ? r.avgHr : null)
+  : metricKey === 'power' ? (typeof r.power === 'number' ? r.power : null)
+  : null;
+const _hasOfficialAvg = _officialAvg != null && isFinite(_officialAvg);
 let statsHtml = '';
 if (validVals.length) {
-  const avg = validVals.reduce((a, b) => a + b, 0) / validVals.length;
+  const avg = _hasOfficialAvg ? _officialAvg : (validVals.reduce((a, b) => a + b, 0) / validVals.length);
   const mn = Math.min(...validVals), mx = Math.max(...validVals);
   const bestVal = invert ? mn : mx, worstVal = invert ? mx : mn;
   let totalT = null;
@@ -16859,7 +16992,8 @@ const statsEl = document.getElementById('diag-graph-fs-stats');
 if (titleEl) titleEl.textContent = label;
 if (subEl) subEl.textContent = this.formatRecordDateTimeLocalized(r.date) + (r.dist ? (' \u00b7 ' + r.dist + ' km') : '');
 // [추가 2026-09-19] 그래프 위에 글자 라벨 얹기(평균/최고는 아래 세부 지표와 같은 유효 구간 기준)
-const _lblAvg = validVals.length ? validVals.reduce((a, b) => a + b, 0) / validVals.length : null;
+// [수정 2026-09-25] 위 AVG와 동일한 이유로 공식 값을 우선 사용해 스탯카드/그래프 라벨이 서로도 어긋나지 않게 함.
+const _lblAvg = _hasOfficialAvg ? _officialAvg : (validVals.length ? validVals.reduce((a, b) => a + b, 0) / validVals.length : null);
 const _lblBest = validVals.length ? (invert ? Math.min(...validVals) : Math.max(...validVals)) : null;
 if (svgWrapEl) svgWrapEl.innerHTML = buildDiagGraphFsPlotHtml(svg, lay, { ko: koLang, fmt: fmt, invert: invert, heightPx: 190, avgVal: _lblAvg, bestVal: _lblBest });
 if (axisEl) axisEl.innerHTML = axisHtml;
