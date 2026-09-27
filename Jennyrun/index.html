@@ -1994,8 +1994,27 @@ alt="runner"/>
   <div id="avatar-hint" class="c38">This photo will be shown on your community posts</div>
 </div>
 <div class="settings-group">
+  <div class="settings-label" id="label-follow-stats">FOLLOW</div>
+  <div id="follow-stats-row" onclick="community.openFollowStats()" style="display:flex; align-items:center; justify-content:space-between; background:#2a2a2a; border:1.5px solid #444; padding:14px; border-radius:12px; cursor:pointer;">
+    <span id="follow-stats-text" style="font-size:var(--fs-base); color:#fff; font-weight:800;">Following 0 · Followers 0</span>
+    <span style="color:#666; font-size:var(--fs-md);">›</span>
+  </div>
+</div>
+<div class="settings-group">
   <div class="settings-label" id="label-blocked-users">BLOCKED USERS</div>
   <div id="blocked-users-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+</div>
+<!-- [추가 2026-09-26] 팔로잉/팔로워 숫자 탭 → 이름 목록 모달. 차단목록과 같은 카드 스타일 재사용. -->
+<div id="follow-stats-modal" class="custom-confirm-overlay">
+<div class="custom-confirm-box" style="max-height:80vh; display:flex; flex-direction:column;">
+<div class="custom-confirm-msg u-margin-bottom-14px">FOLLOW</div>
+<div class="unit-toggle-row" style="margin-bottom:12px;">
+<div id="follow-stats-tab-following" class="unit-btn active" onclick="community.switchFollowStatsTab('following')">Following <span id="follow-stats-tab-following-count"></span></div>
+<div id="follow-stats-tab-followers" class="unit-btn" onclick="community.switchFollowStatsTab('followers')">Followers <span id="follow-stats-tab-followers-count"></span></div>
+</div>
+<div id="follow-stats-list" style="display:flex; flex-direction:column; gap:8px; overflow-y:auto; flex:1;"></div>
+<button class="btn-confirm-act btn-confirm-cancel u-margin-top-14px" style="width:100%;" onclick="community.closeFollowStats()">CLOSE</button>
+</div>
 </div>
 <!-- 프로필 사진 위치 조절 모달 -->
 <div id="avatar-editor-modal" class="avatar-editor-modal">
@@ -5555,6 +5574,7 @@ if (target === 'app') {
 this.renderPrecisionLogList(); // [수정] 정밀 로그 리스트 갱신
 } else if (target === 'crew') {
 community.renderBlockedList();
+community.renderFollowStats();
 } else if (target === 'calib') {
 // [추가] 보정설정 탭: 트랙 캘리브레이션 현재값 + 자가보정(거리/케이던스) 로그 목록 갱신
 this.updateCalibFactorDisplay();
@@ -12596,7 +12616,7 @@ class CommunityManager {
       const uid = await this.ensureUserId();
       if (userId === uid) return;
       if (!(this.followingIds && this.followingIds.has(userId))) {
-        await _sb.from('follows').insert({ follower_id: uid, following_id: userId, following_nickname: nickname || '' });
+        await _sb.from('follows').insert({ follower_id: uid, following_id: userId, following_nickname: nickname || '', follower_nickname: this.getNickname() || '' });
       }
     } catch(e) { console.warn('followUser failed', e); }
     await this.renderFeed();
@@ -12615,6 +12635,67 @@ class CommunityManager {
     await this.renderFeed();
     const container2 = document.getElementById('community-list');
     if (container2) container2.scrollTop = scrollTop;
+  }
+
+  // [추가 2026-09-26] CREW 설정 페이지의 "Following N · Followers M" 표시 + 탭하면 뜨는 이름 목록.
+  // follows 테이블에 follower_nickname 컬럼이 있어야 팔로워 이름이 나온다(없으면 'Runner'로 폴백).
+  async loadFollowStats() {
+    try {
+      const uid = await this.ensureUserId();
+      const [{ data: followingData }, { data: followerData }] = await Promise.all([
+        _sb.from('follows').select('following_id, following_nickname').eq('follower_id', uid),
+        _sb.from('follows').select('follower_id, follower_nickname').eq('following_id', uid)
+      ]);
+      this.followingList = followingData || [];
+      this.followingIds = new Set(this.followingList.map(f => f.following_id));
+      this.followerList = followerData || [];
+    } catch(e) {
+      console.warn('loadFollowStats failed', e);
+      this.followingList = this.followingList || [];
+      this.followingIds = this.followingIds || new Set();
+      this.followerList = this.followerList || [];
+    }
+  }
+
+  async renderFollowStats() {
+    await this.loadFollowStats();
+    const textEl = document.getElementById('follow-stats-text');
+    if (textEl) textEl.textContent = `Following ${this.followingList.length} · Followers ${this.followerList.length}`;
+  }
+
+  openFollowStats() {
+    const modal = document.getElementById('follow-stats-modal');
+    if (modal) modal.classList.add('is-open');
+    this.switchFollowStatsTab('following');
+  }
+
+  closeFollowStats() {
+    const modal = document.getElementById('follow-stats-modal');
+    if (modal) modal.classList.remove('is-open');
+  }
+
+  switchFollowStatsTab(tab) {
+    const tabFollowingBtn = document.getElementById('follow-stats-tab-following');
+    const tabFollowersBtn = document.getElementById('follow-stats-tab-followers');
+    if (tabFollowingBtn) tabFollowingBtn.classList.toggle('active', tab === 'following');
+    if (tabFollowersBtn) tabFollowersBtn.classList.toggle('active', tab === 'followers');
+    const cFollowing = document.getElementById('follow-stats-tab-following-count');
+    const cFollowers = document.getElementById('follow-stats-tab-followers-count');
+    if (cFollowing) cFollowing.textContent = '(' + (this.followingList ? this.followingList.length : 0) + ')';
+    if (cFollowers) cFollowers.textContent = '(' + (this.followerList ? this.followerList.length : 0) + ')';
+    const wrap = document.getElementById('follow-stats-list');
+    if (!wrap) return;
+    const list = tab === 'following' ? (this.followingList || []) : (this.followerList || []);
+    if (list.length === 0) {
+      wrap.innerHTML = `<div style="font-size:var(--fs-xs); color:#666; font-weight:700;">${tab === 'following' ? 'Not following anyone yet.' : 'No followers yet.'}</div>`;
+      return;
+    }
+    wrap.innerHTML = list.map(f => {
+      const nick = tab === 'following' ? (f.following_nickname || 'Runner') : (f.follower_nickname || 'Runner');
+      return `<div style="display:flex; align-items:center; background:#2a2a2a; border:1.5px solid #444; padding:12px 14px; border-radius:12px;">
+        <span style="font-size:var(--fs-base); color:#fff; font-weight:800;">${escapeHtml(nick)}</span>
+      </div>`;
+    }).join('');
   }
 
   async renderBlockedList() {
