@@ -1022,7 +1022,7 @@ filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
 .tab-bar .tab-btn { flex: 1; background: none; border: none; color: #999; font-size:var(--fs-lg); font-weight: 900; cursor: pointer; letter-spacing: 1px; }
 .tab-bar .tab-btn.active { color: var(--primary); text-decoration: underline; text-underline-offset: 8px; }
 /* ===== 진단(RUN DIAGNOSIS) / 메트로놈 / 히스토리 상세 공통 뷰 ===== */
-#diag-view, #metronome-view, #detail-view { position: fixed; top: 0; left: 0; width: 100%; bottom: var(--tabbar-h); background: var(--bg); z-index: 5000; flex-direction: column; overflow-y: auto; }
+#diag-view, #metronome-view, #detail-view, #follow-list-view { position: fixed; top: 0; left: 0; width: 100%; bottom: var(--tabbar-h); background: var(--bg); z-index: 5000; flex-direction: column; overflow-y: auto; }
 /* [수정] DIAG 화면은 헤더(RUN DIAGNOSIS 타이틀)가 스크롤에 딸려 올라가면서, 헤더가 사라진 뒤
    그 아래 카드(PACE 등)가 화면 맨 위 — 즉 폰 상태창(시계/배터리) 영역까지 스크롤되어 올라가
    서로 겹쳐 보이는 문제가 있었음. 바깥 컨테이너 자체는 더 이상 스크롤하지 않게 하고,
@@ -1270,6 +1270,8 @@ overflow-x: auto; white-space: nowrap; -ms-overflow-style: none; scrollbar-width
 .diag-view.is-open { display:flex; }
 .metronome-view { display:none; }
 .metronome-view.is-open { display:flex; }
+.follow-list-view { display:none; }
+.follow-list-view.is-open { display:flex; }
 .sub-page.is-open { display:flex; }
 .dropdown-options.is-open, .precision-dropdown-options.is-open { display:block; }
 .btn-clear-garmin-fit-only { background:#2a2a1a; color:var(--warning); border:1.5px solid #665533; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-sm); margin-top:14px; display:none; }
@@ -1645,6 +1647,14 @@ transform: scale(0.97) !important; background: #00b368 !important; color: #fff !
 <button id="btn-metro-toggle" class="btn-act metro-start-stop-btn metro-toggle-btn metro-state-start" onclick="metro.toggle()">START</button>
 </div>
 </div>
+<!-- [추가 2026-09-27] 팔로잉/팔로워 이름 목록 전체화면. CREW 설정의 Following/Followers 박스에서 진입. -->
+<div id="follow-list-view" class="follow-list-view">
+<button id="btn-follow-list-close" class="close-detail" onclick="community.closeFollowList()">CLOSE</button>
+<div class="diag-header">
+<div id="follow-list-title" class="c40">FOLLOWING (0)</div>
+</div>
+<div id="follow-list-content" style="display:flex; flex-direction:column; gap:8px; padding:0 15px;"></div>
+</div>
 <!-- ===== RUN 메인 화면 (대시보드 카드 + START/STOP 컨트롤) ===== -->
 <div id="run-view" class="main-content" style="padding-bottom: calc(var(--tabbar-h) + var(--bottom-inset) - 5px)">
 <div class="dashboard">
@@ -1996,10 +2006,9 @@ alt="runner"/>
 <div class="settings-group">
   <div class="settings-label" id="label-follow-stats">FOLLOW</div>
   <div class="unit-toggle-row">
-    <div id="follow-stats-tab-following" class="unit-btn c56 active" onclick="community.switchFollowStatsTab('following')">Following <span id="follow-stats-following-count" style="margin-left:4px;">0</span></div>
-    <div id="follow-stats-tab-followers" class="unit-btn c56" onclick="community.switchFollowStatsTab('followers')">Followers <span id="follow-stats-followers-count" style="margin-left:4px;">0</span></div>
+    <div id="follow-stats-tab-following" class="unit-btn c56" onclick="community.openFollowList('following')">Following</div>
+    <div id="follow-stats-tab-followers" class="unit-btn c56" onclick="community.openFollowList('followers')">Followers</div>
   </div>
-  <div id="follow-stats-list" style="display:flex; flex-direction:column; gap:8px; margin-top:10px;"></div>
 </div>
 <div class="settings-group">
   <div class="settings-label" id="label-blocked-users">BLOCKED USERS</div>
@@ -12646,34 +12655,38 @@ class CommunityManager {
     }
   }
 
+  // [수정 2026-09-27] 설정 페이지에는 더 이상 카운트/목록을 인라인으로 안 두고,
+  // Following/Followers 박스는 순수 진입 버튼 역할만 함 → 데이터만 미리 로드해둔다.
   async renderFollowStats() {
     await this.loadFollowStats();
-    const followingCountEl = document.getElementById('follow-stats-following-count');
-    const followersCountEl = document.getElementById('follow-stats-followers-count');
-    if (followingCountEl) followingCountEl.textContent = this.followingList.length;
-    if (followersCountEl) followersCountEl.textContent = this.followerList.length;
-    this.switchFollowStatsTab(this._followStatsTab || 'following');
   }
 
-  switchFollowStatsTab(tab) {
+  async openFollowList(tab) {
     this._followStatsTab = tab;
-    const tabFollowingBtn = document.getElementById('follow-stats-tab-following');
-    const tabFollowersBtn = document.getElementById('follow-stats-tab-followers');
-    if (tabFollowingBtn) tabFollowingBtn.classList.toggle('active', tab === 'following');
-    if (tabFollowersBtn) tabFollowersBtn.classList.toggle('active', tab === 'followers');
-    const wrap = document.getElementById('follow-stats-list');
-    if (!wrap) return;
+    await this.loadFollowStats();
+    const view = document.getElementById('follow-list-view');
+    const titleEl = document.getElementById('follow-list-title');
+    const wrap = document.getElementById('follow-list-content');
     const list = tab === 'following' ? (this.followingList || []) : (this.followerList || []);
-    if (list.length === 0) {
-      wrap.innerHTML = `<div style="font-size:var(--fs-xs); color:#666; font-weight:700;">${tab === 'following' ? 'Not following anyone yet.' : 'No followers yet.'}</div>`;
-      return;
+    if (titleEl) titleEl.textContent = (tab === 'following' ? 'FOLLOWING' : 'FOLLOWERS') + ' (' + list.length + ')';
+    if (wrap) {
+      if (list.length === 0) {
+        wrap.innerHTML = `<div style="font-size:var(--fs-xs); color:#666; font-weight:700;">${tab === 'following' ? 'Not following anyone yet.' : 'No followers yet.'}</div>`;
+      } else {
+        wrap.innerHTML = list.map(f => {
+          const nick = tab === 'following' ? (f.following_nickname || 'Runner') : (f.follower_nickname || 'Runner');
+          return `<div style="display:flex; align-items:center; background:#2a2a2a; border:1.5px solid #444; padding:12px 14px; border-radius:12px;">
+            <span style="font-size:var(--fs-base); color:#fff; font-weight:800;">${escapeHtml(nick)}</span>
+          </div>`;
+        }).join('');
+      }
     }
-    wrap.innerHTML = list.map(f => {
-      const nick = tab === 'following' ? (f.following_nickname || 'Runner') : (f.follower_nickname || 'Runner');
-      return `<div style="display:flex; align-items:center; background:#2a2a2a; border:1.5px solid #444; padding:12px 14px; border-radius:12px;">
-        <span style="font-size:var(--fs-base); color:#fff; font-weight:800;">${escapeHtml(nick)}</span>
-      </div>`;
-    }).join('');
+    if (view) view.classList.add('is-open');
+  }
+
+  closeFollowList() {
+    const view = document.getElementById('follow-list-view');
+    if (view) view.classList.remove('is-open');
   }
 
   async renderBlockedList() {
@@ -17024,12 +17037,16 @@ const _hasOfficialAvg = _officialAvg != null && isFinite(_officialAvg);
 let statsHtml = '';
 if (validVals.length) {
   const avg = _hasOfficialAvg ? _officialAvg : (validVals.reduce((a, b) => a + b, 0) / validVals.length);
-  const mn = Math.min(...validVals), mx = Math.max(...validVals);
-  const bestVal = invert ? mn : mx, worstVal = invert ? mx : mn;
+  const mx = Math.max(...validVals);
+  const bestVal = invert ? Math.min(...validVals) : mx;
   let totalT = null;
   for (let k = times.length - 1; k >= 0; k--) { if (typeof times[k] === 'number') { totalT = times[k]; break; } }
+  // [수정 2026-09-27] WORST(최저)는 출발 구간(점선, 통계 제외) 영향이 커서 AVG(전체 평균, 점선 포함)보다
+  // 더 빠른 값이 나오는 모순이 생길 수 있어 제거. 대신 총 거리를 보여준다.
+  const totalDistKm = parseFloat(r.dist) || 0;
+  const totalDistStr = this.currentUnit === 'mile' ? (totalDistKm * 0.621371).toFixed(2) + ' MI' : totalDistKm.toFixed(2) + ' KM';
   const stat = (labelTxt, valTxt) => '<div class="diag-graph-fs-stat"><div class="diag-graph-fs-stat-label">' + labelTxt + '</div><div class="diag-graph-fs-stat-val">' + valTxt + '</div></div>';
-  statsHtml = stat(koLang ? '평균' : 'AVG', fmt(avg)) + stat(koLang ? '최고' : 'BEST', fmt(bestVal)) + stat(koLang ? '최저' : 'WORST', fmt(worstVal))
+  statsHtml = stat(koLang ? '평균' : 'AVG', fmt(avg)) + stat(koLang ? '최고' : 'BEST', fmt(bestVal)) + stat(koLang ? '총 거리' : 'TOTAL DIST', totalDistStr)
     + stat(koLang ? '구간 수' : 'SPLITS', String(validVals.length))
     + (totalT != null ? stat(koLang ? '총 시간' : 'TOTAL TIME', fmtDiagAxisTime(totalT)) : '');
 }
@@ -17407,6 +17424,12 @@ UIManager.prototype.stopRoutePlayback = function() {
     const metronomeView = document.getElementById('metronome-view');
     if (metronomeView && getComputedStyle(metronomeView).display !== 'none') {
       if (ui) { ui.closeMetronome(); ui.showTab('history'); }
+      return;
+    }
+    // [추가 2026-09-27] 팔로잉/팔로워 목록 화면이 열려있으면 → 설정 페이지로 복귀 (metronome-view와 동일 패턴)
+    const followListView = document.getElementById('follow-list-view');
+    if (followListView && getComputedStyle(followListView).display !== 'none') {
+      if (typeof community !== 'undefined') community.closeFollowList();
       return;
     }
     // [추가] 앱 알림창(app-alert-overlay)이 열려있으면 → OK 누른 것과 동일하게 닫음
