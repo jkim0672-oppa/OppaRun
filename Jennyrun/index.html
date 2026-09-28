@@ -13082,16 +13082,13 @@ class CommunityManager {
     try {
       const uid = await this.ensureUserId();
       const prefs = this.getNotifPrefs();
-      const { error } = await _sb.from('push_tokens').upsert({
-        token: token,
-        user_id: uid,
-        platform: 'android',
-        notif_follow: !!prefs.follow,
-        notif_like: !!prefs.like,
-        notif_comment: !!prefs.comment,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'token' });
-      if (error) console.warn('push_tokens upsert failed', error);
+      const { error } = await _sb.rpc('register_push_token', {
+        p_token: token,
+        p_follow: !!prefs.follow,
+        p_like: !!prefs.like,
+        p_comment: !!prefs.comment
+      });
+      if (error) console.warn('register_push_token failed', error);
     } catch(e) { console.warn('savePushToken error', e); }
   }
 
@@ -13232,6 +13229,7 @@ class CommunityManager {
         this.userId = newUser.id;
       }
       localStorage.setItem(this.EMAIL_KEY, this.pendingEmail);
+      this.reRegisterPushToken();
       this.pendingEmail = null;
       this.pendingIsExistingLogin = false;
       const codeInput = document.getElementById('email-code-input');
@@ -13254,8 +13252,16 @@ class CommunityManager {
     localStorage.removeItem(this.USER_ID_KEY);
     this.userId = null;
     await this.ensureUserId();
+    this.reRegisterPushToken();
     this.refreshEmailUI();
     this.refreshAvatarPreview();
+  }
+  // [푸시] 계정(uid)이 바뀌었을 때 저장된 FCM 토큰을 새 계정으로 다시 등록
+  reRegisterPushToken() {
+    try {
+      const tk = this._fcmToken || localStorage.getItem('jennyRunFcmToken');
+      if (tk) this.savePushToken(tk);
+    } catch(e) {}
   }
   // 이메일 연결 해제 (이 기기는 다시 새로운 익명 계정으로 전환됨)
   async signOutEmail() {
