@@ -1066,6 +1066,21 @@ filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
 .unit-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
 .crew-manager-grid { display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:10px; }
 .crew-manager-grid .unit-btn { padding:16px 8px; }
+/* [추가] CREW 설정 7개 박스 터치 피드백 - 가민 'COMPARE SELECTED' 버튼(.btn-run-calib-compare)과 동일한 로직 */
+.crew-manager-grid .unit-btn { transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1); }
+.crew-manager-grid .unit-btn:active { transform: scale(0.97) !important; background: #00b368 !important; color: #fff !important; border-color: var(--primary); }
+/* [추가] 크루 피드 카드 세부 지표: 4열 고정 그리드 (지표 개수와 상관없이 칸 너비 동일, 남는 칸은 왼쪽부터 채움) */
+.crew-stat-grid { display:grid; grid-template-columns:repeat(4, 1fr); border-bottom:1px solid #f5f5f5; padding:2px 0 6px; margin-bottom:14px; }
+.crew-stat-cell { text-align:center; padding:6px 2px 2px; min-width:0; }
+.crew-stat-cell:not(:nth-child(4n)) { border-right:1px solid #f0f0f0; }
+.crew-stat-cell:nth-child(n+5) { border-top:1px solid #f5f5f5; margin-top:6px; }
+/* [추가] 팔로잉/팔로워/차단/뮤트 목록: 한 줄 3칸 (아바타 + 이름) */
+.user-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; padding:0 15px; }
+.user-grid-msg { grid-column:1 / -1; font-size:var(--fs-xs); color:#666; font-weight:700; }
+.user-chip { background:#2a2a2a; border:1.5px solid #444; border-radius:12px; padding:12px 6px 10px; display:flex; flex-direction:column; align-items:center; gap:7px; min-width:0; }
+.user-chip-avatar { width:48px; height:48px; border-radius:50%; overflow:hidden; display:flex; align-items:center; justify-content:center; font-size:var(--fs-lg); font-weight:900; color:#fff; flex-shrink:0; }
+.user-chip-name { font-size:var(--fs-sm); color:#fff; font-weight:800; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.user-chip-btn { background:none; border:1px solid #444; color:#00ff88; font-size:var(--fs-xxs); padding:4px 10px; border-radius:8px; font-weight:800; cursor:pointer; }
 .gender-toggle-row { display: flex; gap: 10px; margin-top: 10px; }
 .gender-btn { flex: 1; padding: 13px 12px; background: #2a2a2a; border: 1.5px solid #444; border-radius: 12px; color: #aaa; font-weight: 900; font-size:var(--fs-base); text-align: center; cursor: pointer; }
 .gender-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
@@ -1668,7 +1683,7 @@ transform: scale(0.97) !important; background: #00b368 !important; color: #fff !
 <div id="follow-list-title" class="view-title-sm">FOLLOWING</div>
 <div id="follow-list-count" style="color:#666; font-size:var(--fs-xs); margin-top:3px;">0</div>
 </div>
-<div id="follow-list-content" style="display:flex; flex-direction:column; gap:8px; padding:0 15px;"></div>
+<div id="follow-list-content" class="user-grid"></div>
 </div>
 <!-- [추가 2026-09-27] 차단 목록 전체화면. CREW 설정의 BLOCKED USERS 박스에서 진입. Following/Followers와 동일한 패턴. -->
 <div id="blocked-list-view" class="follow-list-view">
@@ -1677,7 +1692,7 @@ transform: scale(0.97) !important; background: #00b368 !important; color: #fff !
 <div id="blocked-list-title" class="view-title-sm">BLOCKED USERS</div>
 <div id="blocked-list-count" style="color:#666; font-size:var(--fs-xs); margin-top:3px;">0</div>
 </div>
-<div id="blocked-list-content" style="display:flex; flex-direction:column; gap:8px; padding:0 15px;"></div>
+<div id="blocked-list-content" class="user-grid"></div>
 </div>
 <!-- [추가] 내가 쓴 글 관리 전체화면. CREW 설정의 MY POSTS 박스에서 진입. -->
 <div id="my-posts-view" class="follow-list-view">
@@ -1695,7 +1710,7 @@ transform: scale(0.97) !important; background: #00b368 !important; color: #fff !
 <div id="muted-list-title" class="view-title-sm">MUTED USERS</div>
 <div id="muted-list-count" style="color:#666; font-size:var(--fs-xs); margin-top:3px;">0</div>
 </div>
-<div id="muted-list-content" style="display:flex; flex-direction:column; gap:8px; padding:0 15px;"></div>
+<div id="muted-list-content" class="user-grid"></div>
 </div>
 <!-- [추가] 크루원 검색 전체화면. 닉네임으로 찾아서 바로 팔로우. -->
 <div id="user-search-view" class="follow-list-view">
@@ -12748,29 +12763,64 @@ class CommunityManager {
     await this.loadFollowStats();
   }
 
+  // [추가] 팔로잉/팔로워/차단/뮤트 목록 공통: 아바타 + 이름 칩 (한 줄 3칸)
+  // 아바타는 records 테이블의 최신 기록에서 user_id로 조회 (없으면 이니셜 원형)
+  _userChipHtml(userId, nick, actionHtml) {
+    const url = this._avatarCache && this._avatarCache[userId];
+    const inner = url ? `<img src="${escapeHtml(url)}" class="c29">` : escapeHtml(this.getInitial(nick));
+    const bg = url ? '#333' : this.getAvatarColor(userId);
+    return `<div class="user-chip">
+      <div class="user-chip-avatar" style="background:${bg};">${inner}</div>
+      <div class="user-chip-name">${escapeHtml(nick)}</div>
+      ${actionHtml || ''}
+    </div>`;
+  }
+
+  async _ensureAvatars(ids, onDone) {
+    if (!this._avatarCache) this._avatarCache = {};
+    const missing = [...new Set((ids || []).filter(Boolean))].filter(id => !(id in this._avatarCache));
+    if (!missing.length) return;
+    try {
+      const { data } = await _sb.from('records').select('user_id, avatar_url, created_at')
+        .in('user_id', missing).order('created_at', { ascending: false }).limit(1000);
+      const seen = new Set();
+      for (const r of (data || [])) {
+        if (seen.has(r.user_id)) continue;
+        seen.add(r.user_id);
+        this._avatarCache[r.user_id] = r.avatar_url || null;
+      }
+    } catch(e) { console.warn('_ensureAvatars failed', e); }
+    missing.forEach(id => { if (!(id in this._avatarCache)) this._avatarCache[id] = null; });
+    if (onDone) onDone();
+  }
+
+  renderFollowListContent() {
+    const tab = this._followStatsTab;
+    const wrap = document.getElementById('follow-list-content');
+    const list = tab === 'following' ? (this.followingList || []) : (this.followerList || []);
+    if (!wrap) return;
+    if (list.length === 0) {
+      wrap.innerHTML = `<div class="user-grid-msg">${tab === 'following' ? 'Not following anyone yet.' : 'No followers yet.'}</div>`;
+      return;
+    }
+    wrap.innerHTML = list.map(f => tab === 'following'
+      ? this._userChipHtml(f.following_id, f.following_nickname || 'Runner')
+      : this._userChipHtml(f.follower_id, f.follower_nickname || 'Runner')
+    ).join('');
+  }
+
   async openFollowList(tab) {
     this._followStatsTab = tab;
     await this.loadFollowStats();
     const view = document.getElementById('follow-list-view');
     const titleEl = document.getElementById('follow-list-title');
     const countEl = document.getElementById('follow-list-count');
-    const wrap = document.getElementById('follow-list-content');
     const list = tab === 'following' ? (this.followingList || []) : (this.followerList || []);
     if (titleEl) titleEl.textContent = tab === 'following' ? 'FOLLOWING' : 'FOLLOWERS';
     if (countEl) countEl.textContent = list.length + (list.length === 1 ? ' person' : ' people');
-    if (wrap) {
-      if (list.length === 0) {
-        wrap.innerHTML = `<div style="font-size:var(--fs-xs); color:#666; font-weight:700;">${tab === 'following' ? 'Not following anyone yet.' : 'No followers yet.'}</div>`;
-      } else {
-        wrap.innerHTML = list.map(f => {
-          const nick = tab === 'following' ? (f.following_nickname || 'Runner') : (f.follower_nickname || 'Runner');
-          return `<div style="display:flex; align-items:center; background:#2a2a2a; border:1.5px solid #444; padding:12px 14px; border-radius:12px;">
-            <span style="font-size:var(--fs-base); color:#fff; font-weight:800;">${escapeHtml(nick)}</span>
-          </div>`;
-        }).join('');
-      }
-    }
+    this.renderFollowListContent();
     if (view) view.classList.add('is-open');
+    this._ensureAvatars(list.map(f => tab === 'following' ? f.following_id : f.follower_id), () => this.renderFollowListContent());
   }
 
   closeFollowList() {
@@ -12800,15 +12850,12 @@ class CommunityManager {
     if (countEl) countEl.textContent = list.length + (list.length === 1 ? ' person' : ' people');
     if (!wrap) return;
     if (list.length === 0) {
-      wrap.innerHTML = `<div style="font-size:var(--fs-xs); color:#666; font-weight:700;">${t.noBlockedUsers || 'No blocked users.'}</div>`;
+      wrap.innerHTML = `<div class="user-grid-msg">${t.noBlockedUsers || 'No blocked users.'}</div>`;
       return;
     }
-    wrap.innerHTML = list.map(b => `
-      <div style="display:flex; align-items:center; justify-content:space-between; background:#2a2a2a; border:1.5px solid #444; padding:12px 14px; border-radius:12px;">
-        <span style="font-size:var(--fs-base); color:#fff; font-weight:800;">${escapeHtml(b.blocked_nickname || 'Runner')}</span>
-        <button onclick="community.unblockUser('${b.blocked_id}')" style="background:none; border:1px solid #444; color:#00ff88; font-size:var(--fs-xs); padding:6px 12px; border-radius:8px; font-weight:800; cursor:pointer;">${t.unblock || 'Unblock'}</button>
-      </div>
-    `).join('');
+    wrap.innerHTML = list.map(b => this._userChipHtml(b.blocked_id, b.blocked_nickname || 'Runner',
+      `<button class="user-chip-btn" onclick="community.unblockUser('${b.blocked_id}')">${t.unblock || 'Unblock'}</button>`)).join('');
+    this._ensureAvatars(list.map(b => b.blocked_id), () => this.renderBlockedListContent());
   }
 
   async openBlockedList() {
@@ -12938,15 +12985,12 @@ class CommunityManager {
     if (countEl) countEl.textContent = list.length + (list.length === 1 ? ' person' : ' people');
     if (!wrap) return;
     if (list.length === 0) {
-      wrap.innerHTML = `<div style="font-size:var(--fs-xs); color:#666; font-weight:700;">No muted users.</div>`;
+      wrap.innerHTML = `<div class="user-grid-msg">No muted users.</div>`;
       return;
     }
-    wrap.innerHTML = list.map(m => `
-      <div style="display:flex; align-items:center; justify-content:space-between; background:#2a2a2a; border:1.5px solid #444; padding:12px 14px; border-radius:12px;">
-        <span style="font-size:var(--fs-base); color:#fff; font-weight:800;">${escapeHtml(m.muted_nickname || 'Runner')}</span>
-        <button onclick="community.unmuteUser('${m.muted_id}')" style="background:none; border:1px solid #444; color:#00ff88; font-size:var(--fs-xs); padding:6px 12px; border-radius:8px; font-weight:800; cursor:pointer;">Unmute</button>
-      </div>
-    `).join('');
+    wrap.innerHTML = list.map(m => this._userChipHtml(m.muted_id, m.muted_nickname || 'Runner',
+      `<button class="user-chip-btn" onclick="community.unmuteUser('${m.muted_id}')">Unmute</button>`)).join('');
+    this._ensureAvatars(list.map(m => m.muted_id), () => this.renderMutedListContent());
   }
 
   async openMutedList() {
@@ -13762,6 +13806,39 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
       const effValColorCard = !hasEffCard ? '#111'
         : ((r.eff_score >= 80) ? CrewStatColor.GOOD : CrewStatColor.BAD);
       const effLabelCard = effIsSimpleCard ? (t.crewEffSimple || 'EFF (SIMPLE)') : (t.crewEff || 'EFF');
+      // [수정] 세부 지표를 하나의 배열로 모아 4열 그리드에 순서대로 채움 (러닝/트레일/프리런/걷기 공통)
+      const _nn = v => v !== undefined && v !== null;
+      const _sc = (label, val, unit, color) => `<div class="crew-stat-cell"><div class="u-label-xxs-dim">${label}</div><div class="u-card-stat-value"${color ? ` style="color:${color};"` : ''}>${val}${unit ? `<span class="u-label-xxs-999"> ${unit}</span>` : ''}</div></div>`;
+      const _hrCell = _nn(r.avg_hr) ? _sc(t.hrAvgMax||'HR', r.avg_hr + '/' + (_nn(r.max_hr) ? r.max_hr : r.avg_hr), '', '#e53935') : '';
+      const _statCells = [];
+      if (r.activity_mode === 'walk') {
+        _statCells.push(
+          _sc(t.stepsLabel||'STEPS', r.steps || '--', ''),
+          _sc(t.spmLabel||'SPM', r.walk_spm || '--', ''),
+          _sc(t.stride||'STRIDE', r.stride_m || '--', 'm'),
+          _sc(t.alt||'ALT', _nn(r.alt) ? r.alt : '--', 'm'),
+          _hrCell,
+          _sc(t.cal||'KCAL', _nn(r.kcal) ? r.kcal : '--', 'kcal')
+        );
+        if (r.hr_zone) _statCells.push(_sc(t.hrZoneLabel||'HR ZONE', r.hr_zone, '', CrewStatColor.hrZoneColor(r.hr_zone)));
+      } else {
+        _statCells.push(
+          _sc(t.cadence||'CADENCE', r.cadence || '--', 'spm', CrewStatColor.cadence(r.cadence)),
+          _sc(t.gct||'GCT', r.gct_ms || '--', 'ms', CrewStatColor.gct(r.gct_ms)),
+          _sc(t.flight||'FLIGHT', _nn(r.flight_pct) ? r.flight_pct : '--', '%', CrewStatColor.flight(r.flight_pct)),
+          _sc(t.stride||'STRIDE', _nn(r.stride_m) ? r.stride_m : '--', 'm'),
+          _sc(t.alt||'ALT', _nn(r.alt) ? r.alt : '--', 'm')
+        );
+        if (LeanAngleUI.ENABLED && r.avg_lean_angle_deg != null) {
+          _statCells.push(_sc(LeanAngleUI.label(storage.getLang()), LeanAngleUI.fmtPrimary(r.avg_lean_angle_deg, r.avg_lean_forward_deg), '', LeanAngleUI.colorForPrimaryCrew(r.avg_lean_angle_deg, r.avg_lean_forward_deg) || '#111'));
+        }
+        _statCells.push(_sc(t.cal||'KCAL', _nn(r.kcal) ? r.kcal : '--', 'kcal'));
+        if (_nn(r.power_w)) _statCells.push(_sc(t.powerLabel||'POWER', r.power_w, 'W', (typeof ui !== 'undefined') ? ui.getPowerColor(r.power_wkg) : '#111'));
+        if (r.hr_zone) _statCells.push(_sc(t.hrZoneLabel||'HR ZONE', r.hr_zone, '', CrewStatColor.hrZoneColor(r.hr_zone)));
+        if (hasEffCard) _statCells.push(_sc(effLabelCard, r.eff_score, '/100', effValColorCard));
+        _statCells.push(_hrCell);
+      }
+      const _statGridHtml = _statCells.filter(Boolean).join('');
       // [수정] RUN/WALK/TRAIL/FREE RUN 배지 (과거 기록엔 activity_mode가 없으므로 'run'으로 간주)
       const activityMode = r.activity_mode || 'run';
       const isKoFeed = storage.getLang() === 'ko';
@@ -13834,101 +13911,8 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
           </div>
         </div>
 
-        <!-- 세부 지표 (B-fix 컴팩트: 4열 x 2줄) -->
-        <div style="border-bottom:1px solid #f5f5f5; padding:6px 0; margin-bottom:14px;">
-          ${activityMode === 'walk' ? `
-          <div class="c55">
-          <div class="u-stat-cell">
-            <div class="u-label-xxs-dim">${t.stepsLabel||'STEPS'}</div>
-            <div class="u-card-stat-value">${r.steps || '--'}</div>
-          </div>
-          <div class="u-stat-cell">
-            <div class="u-label-xxs-dim">${t.spmLabel||'SPM'}</div>
-            <div class="u-card-stat-value">${r.walk_spm || '--'}</div>
-          </div>
-          <div class="u-stat-cell">
-            <div class="u-label-xxs-dim">${t.stride||'STRIDE'}</div>
-            <div class="u-card-stat-value">${r.stride_m || '--'}<span class="u-label-xxs-999"> m</span></div>
-          </div>
-          <div class="c03">
-            <div class="u-label-xxs-dim">${t.alt||'ALT'}</div>
-            <div class="u-card-stat-value">${(r.alt !== undefined && r.alt !== null) ? r.alt : '--'}<span class="u-label-xxs-999"> m</span></div>
-          </div>
-          </div>
-          ` : `
-          <div class="c55">
-          <div class="u-stat-cell">
-            <div class="u-label-xxs-dim">${t.cadence||'CADENCE'}</div>
-            <div class="u-card-stat-value" style="color:${CrewStatColor.cadence(r.cadence)};">${r.cadence || '--'}<span class="u-label-xxs-999"> spm</span></div>
-          </div>
-          <div class="u-stat-cell">
-            <div class="u-label-xxs-dim">${t.gct||'GCT'}</div>
-            <div class="u-card-stat-value" style="color:${CrewStatColor.gct(r.gct_ms)};">${r.gct_ms || '--'}<span class="u-label-xxs-999"> ms</span></div>
-          </div>
-          <div class="u-stat-cell">
-            <div class="u-label-xxs-dim">${t.flight||'FLIGHT'}</div>
-            <div class="u-card-stat-value" style="color:${CrewStatColor.flight(r.flight_pct)};">${(r.flight_pct !== undefined && r.flight_pct !== null) ? r.flight_pct : '--'}<span class="u-label-xxs-999"> %</span></div>
-          </div>
-          <div class="c03">
-            <div class="u-label-xxs-dim">${t.stride||'STRIDE'}</div>
-            <div class="u-card-stat-value">${(r.stride_m !== undefined && r.stride_m !== null) ? r.stride_m : '--'}<span class="u-label-xxs-999"> m</span></div>
-          </div>
-          </div>
-          <div style="display:flex;">
-          <div class="u-stat-cell">
-            <div class="u-label-xxs-dim">${t.alt||'ALT'}</div>
-            <div class="u-card-stat-value">${(r.alt !== undefined && r.alt !== null) ? r.alt : '--'}<span class="u-label-xxs-999"> m</span></div>
-          </div>
-          ${(LeanAngleUI.ENABLED && r.avg_lean_angle_deg != null) ? (() => {
-            const primaryColor = LeanAngleUI.colorForPrimaryCrew(r.avg_lean_angle_deg, r.avg_lean_forward_deg) || '#111';
-            return '<div class="u-stat-cell">'
-              + '<div class="u-label-xxs-dim">' + LeanAngleUI.label(storage.getLang()) + '</div>'
-              + '<div class="u-card-stat-value" style="color:' + primaryColor + ';">' + LeanAngleUI.fmtPrimary(r.avg_lean_angle_deg, r.avg_lean_forward_deg) + '</div>'
-              + '</div>';
-          })() : ''}
-          <div style="flex:1; text-align:center; ${(r.hr_zone || (r.power_w !== undefined && r.power_w !== null)) ? 'border-right:1px solid #f0f0f0;' : ''} padding:2px; min-width:0;">
-            <div class="u-label-xxs-dim">${t.cal||'KCAL'}</div>
-            <div class="u-card-stat-value">${(r.kcal !== undefined && r.kcal !== null) ? r.kcal : '--'}<span class="u-label-xxs-999"> kcal</span></div>
-          </div>
-          ${(r.power_w !== undefined && r.power_w !== null) ? `<div style="flex:1; text-align:center; ${r.hr_zone ? 'border-right:1px solid #f0f0f0;' : ''} padding:2px; min-width:0;">
-            <div class="u-label-xxs-dim">${t.powerLabel||'POWER'}</div>
-            <div class="u-card-stat-value" style="color:${(typeof ui !== 'undefined') ? ui.getPowerColor(r.power_wkg) : '#111'};">${r.power_w}<span class="u-label-xxs-999"> W</span></div>
-          </div>` : ''}
-          ${r.hr_zone ? `<div class="c03">
-            <div class="u-label-xxs-dim">${t.hrZoneLabel||'HR ZONE'}</div>
-            <div class="u-card-stat-value" style="color:${CrewStatColor.hrZoneColor(r.hr_zone)};">${r.hr_zone}</div>
-          </div>` : ''}
-          </div>
-          ${(hasEffCard || (r.avg_hr !== undefined && r.avg_hr !== null)) ? `<div class="c23">
-          ${hasEffCard ? `<div class="${(r.avg_hr !== undefined && r.avg_hr !== null) ? 'u-stat-cell' : 'c03'}">
-            <div class="u-label-xxs-dim">${effLabelCard}</div>
-            <div class="u-card-stat-value" style="color:${effValColorCard};">${r.eff_score}<span class="u-label-xxs-999"> / 100</span></div>
-          </div>` : ''}
-          ${(r.avg_hr !== undefined && r.avg_hr !== null) ? `<div class="c03">
-            <div class="u-label-xxs-dim">${t.hrAvgMax||'HR'}</div>
-            <div class="c43">${r.avg_hr + ' / ' + ((r.max_hr !== undefined && r.max_hr !== null) ? r.max_hr : r.avg_hr)}<span class="u-label-xxs-999"> BPM</span></div>
-          </div>` : ''}
-          </div>` : ''}
-          `}
-          ${activityMode === 'walk' ? `
-          ${(r.avg_hr !== undefined && r.avg_hr !== null) ? `<div class="c23">
-          <div class="c03">
-            <div class="u-label-xxs-dim">${t.hrAvgMax||'HR'}</div>
-            <div class="c43">${r.avg_hr + ' / ' + ((r.max_hr !== undefined && r.max_hr !== null) ? r.max_hr : r.avg_hr)}<span class="u-label-xxs-999"> BPM</span></div>
-          </div>
-          </div>` : ''}
-          <div class="c23">
-          <div style="flex:1; text-align:center; ${r.hr_zone ? 'border-right:1px solid #f0f0f0;' : ''} padding:2px; min-width:0;">
-            <div class="u-label-xxs-dim">${t.cal||'KCAL'}</div>
-            <div class="u-card-stat-value">${(r.kcal !== undefined && r.kcal !== null) ? r.kcal : '--'}<span class="u-label-xxs-999"> kcal</span></div>
-          </div>
-          ${r.hr_zone ? `<div class="c03">
-            <div class="u-label-xxs-dim">${t.hrZoneLabel||'HR ZONE'}</div>
-            <div class="u-card-stat-value" style="color:${CrewStatColor.hrZoneColor(r.hr_zone)};">${r.hr_zone}</div>
-          </div>` : ''}
-          </div>
-          ` : ``}
-        </div>
+        <!-- 세부 지표 (4열 고정 그리드: 러닝/트레일/프리런/걷기 공통) -->
+        <div class="crew-stat-grid">${_statGridHtml}</div>
 
         <!-- 이미지/지도 -->
         ${r.photo_url ? `<div style="margin-bottom:12px; border-radius:10px; overflow:hidden;"><img src="${r.photo_url}" loading="lazy" style="width:100%; max-height:280px; object-fit:cover; display:block;"></div>` : ''}
