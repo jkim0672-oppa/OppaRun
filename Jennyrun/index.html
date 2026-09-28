@@ -17142,24 +17142,56 @@ const app = new OppaRunApp();
 const community = new CommunityManager();
 
 // [키보드] 크루 피드 댓글 입력창이 키보드에 가려지지 않게 처리
+// [수정] 원인: WebView가 리사이즈되지 않으면 list 전체 높이(키보드 뒤 포함) 기준으로 center 스크롤이 되어
+//        입력창이 화면 중앙 = 키보드 윗선에 걸림. → 키보드 위 '보이는 영역' 기준으로 직접 스크롤 계산.
 (function () {
   const isCommentInput = (el) => !!el && el.tagName === 'INPUT' && /^comment-input-/.test(el.id || '');
   const list = () => document.getElementById('community-list');
+  const KB_FALLBACK = 0.48;   // 키보드 높이를 감지 못할 때 화면 대비 추정 비율 (삼성 키보드+툴바 ≈ 45%)
+  const MARGIN = 16;          // 입력창 아래 여백(px)
   let basePad = null;
-  function kbHeight() {
+  let baseH = window.innerHeight;
+
+  // 키보드 위 '보이는 영역'의 바닥 y(viewport 좌표)와, 추가 패딩이 필요한 높이
+  // 우선순위: 1) 네이티브가 알려준 실제 IME 높이  2) 웹뷰/비주얼뷰포트 축소량  3) 추정치
+  let nativeKb = 0;
+  window.onNativeKeyboardHeight = function (cssPx) {
+    nativeKb = Math.max(0, Number(cssPx) || 0);
+    const el = document.activeElement;
+    if (nativeKb > 0 && isCommentInput(el)) reveal(el);
+  };
+  function visibleInfo() {
+    baseH = Math.max(baseH, window.innerHeight);
+    if (window.innerHeight < baseH - 80) {
+      // 웹뷰 자체가 리사이즈됨: 레이아웃 바닥이 곧 키보드 윗선
+      return { bottom: window.innerHeight, extraPad: 0 };
+    }
+    if (nativeKb > 0) return { bottom: baseH - nativeKb, extraPad: nativeKb };
     const vv = window.visualViewport;
-    const diff = vv ? Math.round(window.innerHeight - vv.height - vv.offsetTop) : 0;
-    return diff > 80 ? diff : Math.round(window.innerHeight * 0.45);
+    const vvBottom = vv ? (vv.offsetTop + vv.height) : window.innerHeight;
+    if (vvBottom < baseH - 80) return { bottom: vvBottom, extraPad: baseH - vvBottom };
+    const kb = Math.round(baseH * KB_FALLBACK);
+    return { bottom: baseH - kb, extraPad: kb };
   }
+
   function reveal(el) {
     const l = list();
     if (!l) return;
+    const info = visibleInfo();
     if (basePad === null) basePad = l.style.paddingBottom || '';
-    l.style.paddingBottom = 'calc(' + kbHeight() + 'px + var(--tabbar-h) + 20px)';
-    setTimeout(function () {
-      try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
-    }, 250);
+    l.style.paddingBottom = 'calc(' + info.extraPad + 'px + var(--tabbar-h) + 20px)';
+    const run = function () {
+      const i2 = visibleInfo();
+      const row = el.parentElement || el;
+      const delta = row.getBoundingClientRect().bottom - (i2.bottom - MARGIN);
+      if (delta > 1) {
+        try { l.scrollBy({ top: delta, behavior: 'smooth' }); } catch (e) { l.scrollTop += delta; }
+      }
+    };
+    setTimeout(run, 120);
+    setTimeout(run, 400);   // 키보드 애니메이션 종료 후 한 번 더 보정
   }
+
   document.addEventListener('focusin', function (e) {
     if (isCommentInput(e.target)) reveal(e.target);
   });
