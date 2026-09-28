@@ -17183,28 +17183,38 @@ const community = new CommunityManager();
     const run = function () {
       const i2 = visibleInfo();
       const row = el.parentElement || el;
-      // 어느 조상이 스크롤 컨테이너든 동작하도록 scrollIntoView + scroll-margin 사용.
-      // (community-list가 아니라 상위 컨테이너가 스크롤되는 구조여도 대응)
-      // 컨테이너 바닥 = 뷰포트 바닥 → 키보드 높이 + 여백만큼 띄워서 행의 바닥이 키보드 윗선에 오게 함
+      const target = i2.bottom - MARGIN;              // 행의 바닥이 와야 할 y (viewport 좌표)
+      const rb0 = row.getBoundingClientRect().bottom;
+      const st0 = l.scrollTop;
+      const delta = rb0 - target;
+      if (delta > 1) {
+        l.scrollTop = st0 + delta;                    // 즉시 스크롤 (smooth 애니메이션 충돌 방지)
+        if (Math.abs(l.scrollTop - st0) < 1) {        // 리스트가 스크롤 안 되면 조상 스크롤로 폴백
+          row.style.scrollMarginBottom = (Math.max(0, Math.round(window.innerHeight - i2.bottom)) + MARGIN) + 'px';
+          try { row.scrollIntoView({ block: 'end' }); } catch (e) {}
+        }
+      }
       // [디버그] 확인 후 이 블록(KB_DEBUG)은 삭제해도 됨. 배지가 안 뜨면 새 index.html이 아직 적용 안 된 것.
       if (window.KB_DEBUG !== false) {
         let d = document.getElementById('kb-debug');
         if (!d) {
           d = document.createElement('div');
           d.id = 'kb-debug';
-          d.style.cssText = 'position:fixed;top:40px;left:4px;z-index:2147483647;background:rgba(0,0,0,.8);color:#0f0;font:11px monospace;padding:3px 6px;border-radius:4px;pointer-events:none;';
+          d.style.cssText = 'position:fixed;top:40px;left:4px;z-index:2147483647;background:rgba(0,0,0,.85);color:#0f0;font:11px monospace;padding:3px 6px;border-radius:4px;pointer-events:none;white-space:pre;';
           document.body.appendChild(d);
         }
-        d.textContent = 'nativeKb=' + nativeKb + ' inner=' + window.innerHeight + ' base=' + baseH + ' bottom=' + Math.round(i2.bottom);
+        const rb1 = row.getBoundingClientRect().bottom;
+        d.textContent = 'kb=' + nativeKb + ' inner=' + window.innerHeight + ' vis=' + Math.round(i2.bottom) +
+          '\nrowB ' + Math.round(rb0) + '->' + Math.round(rb1) + ' tgt=' + Math.round(target) +
+          '\nst ' + Math.round(st0) + '->' + Math.round(l.scrollTop) + ' room=' + Math.round(l.scrollHeight - l.clientHeight - st0) +
+          ' listB=' + Math.round(l.getBoundingClientRect().bottom);
         clearTimeout(d._t);
-        d._t = setTimeout(function () { d.remove(); }, 6000);
+        d._t = setTimeout(function () { d.remove(); }, 8000);
       }
-      const gap = Math.max(0, Math.round(window.innerHeight - i2.bottom)) + MARGIN;
-      row.style.scrollMarginBottom = gap + 'px';
-      try { row.scrollIntoView({ block: 'end', behavior: 'smooth' }); } catch (e) { row.scrollIntoView(false); }
     };
-    setTimeout(run, 120);
-    setTimeout(run, 400);   // 키보드 애니메이션 종료 후 한 번 더 보정
+    setTimeout(run, 100);
+    setTimeout(run, 350);   // 키보드 애니메이션 종료 후 보정
+    setTimeout(run, 700);
   }
 
   document.addEventListener('focusin', function (e) {
