@@ -13057,6 +13057,56 @@ class CommunityManager {
       comment: !!document.getElementById('notif-toggle-comment')?.checked
     };
     try { localStorage.setItem(this.NOTIF_PREFS_KEY, JSON.stringify(prefs)); } catch(e) {}
+    this.applyNotifPrefsToNative(prefs);
+    this.syncNotifPrefsToServer(prefs);
+  }
+
+  // [푸시] 꺼둔 알림 종류는 폰에서 안 뜨도록 네이티브(AndroidPushBridge)에 전달
+  // ⚠️ Kotlin 쪽 시그니처가 setNotifEnabled(type: String, enabled: Boolean)라고 가정함. 다르면 여기만 수정.
+  applyNotifPrefsToNative(prefs) {
+    prefs = prefs || this.getNotifPrefs();
+    try {
+      if (window.AndroidPushBridge && typeof window.AndroidPushBridge.setNotifEnabled === 'function') {
+        window.AndroidPushBridge.setNotifEnabled('follow', !!prefs.follow);
+        window.AndroidPushBridge.setNotifEnabled('like', !!prefs.like);
+        window.AndroidPushBridge.setNotifEnabled('comment', !!prefs.comment);
+      }
+    } catch(e) { console.warn('setNotifEnabled failed', e); }
+  }
+
+  // [푸시] FCM 토큰을 Supabase push_tokens에 저장 (유저 ID + 토큰 + 알림 설정)
+  async savePushToken(token) {
+    if (!token) return;
+    this._fcmToken = token;
+    try { localStorage.setItem('jennyRunFcmToken', token); } catch(e) {}
+    try {
+      const uid = await this.ensureUserId();
+      const prefs = this.getNotifPrefs();
+      const { error } = await _sb.from('push_tokens').upsert({
+        token: token,
+        user_id: uid,
+        platform: 'android',
+        notif_follow: !!prefs.follow,
+        notif_like: !!prefs.like,
+        notif_comment: !!prefs.comment,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'token' });
+      if (error) console.warn('push_tokens upsert failed', error);
+    } catch(e) { console.warn('savePushToken error', e); }
+  }
+
+  // 알림 설정이 바뀌면 서버의 토큰 행에도 반영 (Edge Function이 이 값을 보고 발송 여부 결정)
+  async syncNotifPrefsToServer(prefs) {
+    const token = this._fcmToken || (function(){ try { return localStorage.getItem('jennyRunFcmToken'); } catch(e) { return null; } })();
+    if (!token) return;
+    try {
+      await _sb.from('push_tokens').update({
+        notif_follow: !!prefs.follow,
+        notif_like: !!prefs.like,
+        notif_comment: !!prefs.comment,
+        updated_at: new Date().toISOString()
+      }).eq('token', token);
+    } catch(e) { console.warn('syncNotifPrefsToServer error', e); }
   }
 
   openNotifSettings() {
@@ -17084,6 +17134,17 @@ function initHoldToStop() {
 }
 const app = new OppaRunApp();
 const community = new CommunityManager();
+
+// [푸시] MainActivity(Kotlin)가 FCM 토큰을 받으면 호출하는 전역 함수
+window.onNativeFcmToken = function (token) {
+  try { community.savePushToken(token); } catch (e) { console.error('onNativeFcmToken error', e); }
+};
+// 앱 시작 시: 저장된 알림 설정을 네이티브에 다시 적용 + 이전에 받은 토큰 재등록
+try {
+  community.applyNotifPrefsToNative();
+  const _savedFcm = localStorage.getItem('jennyRunFcmToken');
+  if (_savedFcm) community.savePushToken(_savedFcm);
+} catch (e) {}
 window.onload = () => {
 app.init();
 initHoldToStop(); // [추가] STOP 버튼 꾹 누르기 인터랙션 바인딩
