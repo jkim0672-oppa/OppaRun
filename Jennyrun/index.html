@@ -17141,6 +17141,46 @@ function initHoldToStop() {
 const app = new OppaRunApp();
 const community = new CommunityManager();
 
+// [키보드] 크루 피드 댓글 입력창이 키보드에 가려지지 않게 처리
+(function () {
+  const isCommentInput = (el) => !!el && el.tagName === 'INPUT' && /^comment-input-/.test(el.id || '');
+  const list = () => document.getElementById('community-list');
+  let basePad = null;
+  function kbHeight() {
+    const vv = window.visualViewport;
+    const diff = vv ? Math.round(window.innerHeight - vv.height - vv.offsetTop) : 0;
+    return diff > 80 ? diff : Math.round(window.innerHeight * 0.45);
+  }
+  function reveal(el) {
+    const l = list();
+    if (!l) return;
+    if (basePad === null) basePad = l.style.paddingBottom || '';
+    l.style.paddingBottom = 'calc(' + kbHeight() + 'px + var(--tabbar-h) + 20px)';
+    setTimeout(function () {
+      try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
+    }, 250);
+  }
+  document.addEventListener('focusin', function (e) {
+    if (isCommentInput(e.target)) reveal(e.target);
+  });
+  document.addEventListener('focusout', function (e) {
+    if (!isCommentInput(e.target)) return;
+    setTimeout(function () {
+      const l = list();
+      if (l && basePad !== null && !isCommentInput(document.activeElement)) {
+        l.style.paddingBottom = basePad;
+        basePad = null;
+      }
+    }, 200);
+  });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', function () {
+      const el = document.activeElement;
+      if (isCommentInput(el)) reveal(el);
+    });
+  }
+})();
+
 // [푸시] MainActivity(Kotlin)가 FCM 토큰을 받으면 호출하는 전역 함수
 window.onNativeFcmToken = function (token) {
   try { community.savePushToken(token); } catch (e) { console.error('onNativeFcmToken error', e); }
