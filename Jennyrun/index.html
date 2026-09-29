@@ -12387,25 +12387,34 @@ class CommunityManager {
     if (removeBtn) removeBtn.classList.add('is-open');
     if (editBadge) editBadge.classList.add('is-open');
     // 업로드가 늦거나 실패해도 사진이 사라지지 않도록 우선 로컬에 저장 (이미 확대/이동이 반영된 최종본)
-    localStorage.setItem(this.AVATAR_KEY, dataUrl);
-    localStorage.removeItem(this.AVATAR_POS_KEY);
+    // [수정] 기기 저장공간(localStorage)이 가득 차면 setItem이 예외를 던져 저장/업로드가 통째로 멈췄음 → 실패해도 계속 진행
+    try {
+      localStorage.setItem(this.AVATAR_KEY, dataUrl);
+      localStorage.removeItem(this.AVATAR_POS_KEY);
+    } catch (e) { console.warn('아바타 로컬 저장 실패(저장공간 부족?)', e); }
     closeModal(modal);
     this._closeEditor();
 
+    // [수정] 서버 업로드가 실패해도 조용히 넘어가서 "된 것처럼" 보였음 → 실패 원인을 화면에 알림
+    const ko = storage.getLang() === 'ko';
+    const fail = async (why) => {
+      console.warn('프로필 사진 업로드 실패:', why);
+      await appAlert((ko ? '프로필 사진을 서버에 저장하지 못했어요. 다른 사람에게는 이전 사진이 보여요.' : "Couldn't save your photo to the server. Others will still see your previous photo.") + (why ? '\n(' + why + ')' : ''));
+    };
     try {
       const uid = await this.ensureUserId();
-      if (!uid) return; // 로그인 전에는 기기에만 저장(위에서 이미 저장됨)
+      if (!uid) { await appAlert(this._t().loginRequiredAlert); return; }
       const path = 'avatars/' + uid + '.jpg';
       const { error: upErr } = await _sb.storage.from('run-photos').upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
-      if (upErr) { console.warn('프로필 사진 업로드 실패:', upErr.message); return; }
+      if (upErr) { await fail(upErr.message); return; }
       const { data } = _sb.storage.from('run-photos').getPublicUrl(path);
       const url = (data && data.publicUrl) ? (data.publicUrl + '?t=' + Date.now()) : null;
-      if (!url) { console.warn('프로필 사진 URL 생성 실패'); return; }
-      localStorage.setItem(this.AVATAR_KEY, url);
+      if (!url) { await fail('URL'); return; }
+      try { localStorage.setItem(this.AVATAR_KEY, url); } catch (e) { console.warn('아바타 URL 저장 실패', e); }
       this.refreshAvatarPreview();
       try { await _sb.rpc('set_avatar', { p_url: url }); } catch(e2) {}
     } catch(e) {
-      console.warn('프로필 사진 업로드 예외:', e.message);
+      await fail(e && e.message);
     }
   }
 
