@@ -12991,12 +12991,12 @@ class CommunityManager {
       const dist = (r.distance_km || 0).toFixed(2) + ' km';
       const date = new Date(r.created_at).toLocaleDateString();
       const title = escapeHtml(r.title || 'Run');
-      return `<div style="display:flex; align-items:center; justify-content:space-between; background:#2a2a2a; border:1.5px solid #444; padding:12px 14px; border-radius:12px; gap:10px;">
-        <div style="min-width:0;">
+      return `<div onclick="community.openMyPost('${r.id}')" style="display:flex; align-items:center; justify-content:space-between; background:#2a2a2a; border:1.5px solid #444; padding:12px 14px; border-radius:12px; gap:10px; cursor:pointer;">
+        <div style="min-width:0; flex:1;">
           <div style="font-size:var(--fs-base); color:#fff; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${title}</div>
           <div style="font-size:var(--fs-xxs); color:#888; margin-top:2px;">${date} · ${dist}</div>
         </div>
-        <button onclick="community.deleteMyPost('${r.id}')" style="flex-shrink:0; background:none; border:1px solid #663333; color:#e57373; font-size:var(--fs-xs); padding:6px 12px; border-radius:8px; font-weight:800; cursor:pointer;">Delete</button>
+        <button onclick="event.stopPropagation(); community.deleteMyPost('${r.id}')" style="flex-shrink:0; background:none; border:1px solid #663333; color:#e57373; font-size:var(--fs-xs); padding:6px 12px; border-radius:8px; font-weight:800; cursor:pointer;">Delete</button>
       </div>`;
     }).join('');
   }
@@ -14214,6 +14214,36 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
     await this._loadProfile(15);
   }
 
+  _renderSingleHeader() {
+    const te = document.getElementById('user-profile-bar-title');
+    if (te) te.textContent = storage.getLang() === 'ko' ? '게시글' : 'POST';
+    ['user-profile-head', 'user-profile-stats', 'user-profile-feed-title'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.innerHTML = '';
+    });
+  }
+
+  // [추가] MY POSTS 목록에서 글 하나를 눌러 열기 (프로필 화면을 '글 1개 모드'로 재사용 → 좋아요/댓글/지도 동작 동일)
+  async openMyPost(recordId) {
+    const view = document.getElementById('user-profile-view');
+    if (!view || !recordId) return;
+    const uid = await this.ensureUserId();
+    if (!uid) return;
+    this._profileStack = [];
+    this._profileRecords = [];
+    this._profile = {
+      userId: uid, uid, nick: this.getNickname() || 'Runner', avatarUrl: this.getAvatarUrl() || null,
+      followers: [], following: [], counts: null, stats: null,
+      loaded: 0, done: true, loading: false, failed: false, status: 'ok', single: recordId
+    };
+    ['user-profile-stats', 'user-profile-feed-title', 'user-profile-feed', 'user-profile-more'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.innerHTML = '';
+    });
+    this._renderSingleHeader();
+    view.classList.add('is-open');
+    view.scrollTop = 0;
+    await this._loadProfile(1);
+  }
+
   closeUserProfile() {
     const view = document.getElementById('user-profile-view');
     if (view) view.classList.remove('is-open');
@@ -14227,6 +14257,8 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
     // 프로필 안에서 좋아요/댓글이 바뀌었을 수 있으니 뒤에 깔린 크루 피드도 최신화
     const cv = document.getElementById('community-view');
     if (cv && !cv.classList.contains('hidden')) this.renderFeed();
+    const mpv = document.getElementById('my-posts-view');
+    if (mpv && mpv.classList.contains('is-open')) this.loadMyPosts().then(() => this.renderMyPostsContent());
   }
 
   // 하드웨어 뒤로가기: 이전에 보던 프로필이 있으면 그리로, 없으면 닫기
@@ -14276,6 +14308,17 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
         return;
       }
 
+      // [추가] MY POSTS에서 글 하나를 눌러 연 경우: 헤더/통계 없이 그 글 카드 1장만 표시
+      if (p.single) {
+        const one = await this._fetchProfilePage(p.userId, 0, 1, p.single);
+        if (!alive()) return;
+        this._renderSingleHeader();
+        await this._appendProfileCards(one, true);
+        if (!alive()) return;
+        p.loaded = one.length; p.done = true;
+        this._renderProfileMore();
+        return;
+      }
       const [fw, fg, statRows, pageRows] = await Promise.all([
         _sb.from('follows').select('follower_id, follower_nickname').eq('following_id', p.userId),
         _sb.from('follows').select('following_id, following_nickname').eq('follower_id', p.userId),
@@ -14328,10 +14371,12 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
   }
 
   // 피드 카드용 상세 조회 (loadFeed 와 같은 컬럼)
-  async _fetchProfilePage(userId, from, count) {
-    const { data, error } = await _sb.from('records')
+  async _fetchProfilePage(userId, from, count, recordId) {
+    let q = _sb.from('records')
       .select('id, nickname, avatar_url, location_name, title, activity_mode, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, splits, photo_url, message, avg_hr, max_hr, hr_zone, steps, walk_spm, stride_m, kcal, power_w, power_wkg, avg_lean_angle_deg, avg_lean_forward_deg, avg_lean_lateral_deg')
-      .eq('user_id', userId)
+      .eq('user_id', userId);
+    if (recordId) q = q.eq('id', recordId);
+    const { data, error } = await q
       .order('created_at', { ascending: false })
       .range(from, from + count - 1);
     if (error) throw error;
