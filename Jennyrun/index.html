@@ -2160,7 +2160,7 @@ alt="runner"/>
     <div id="my-posts-tab" class="unit-btn c56" onclick="community.openMyPosts()">MY POSTS</div>
     <div id="muted-users-tab" class="unit-btn c56" onclick="community.openMutedList()">MUTED USERS</div>
     <div id="find-crew-tab" class="unit-btn c56" onclick="community.openUserSearch()">SEARCH CREW</div>
-    <div id="notif-settings-tab" class="unit-btn c56" style="grid-column: 1 / -1;" onclick="community.openNotifSettings()">NOTIFICATION SETTINGS</div>
+    <div id="notif-settings-tab" class="unit-btn c56" style="display:none; grid-column: 1 / -1;" onclick="community.openNotifSettings()">NOTIFICATION SETTINGS</div>
   </div>
 </div>
 <!-- 프로필 사진 위치 조절 모달 -->
@@ -12066,6 +12066,8 @@ class CommunityManager {
     this.NICKNAME_KEY = 'jennyRunNickname';
     this.USER_ID_KEY = 'jennyRunUserId';
     this.AVATAR_KEY = 'jennyRunAvatarUrl';
+    // [푸시 중지] false = 알림 설정 숨김 + 토큰 서버 등록 안 함 + 네이티브 알림 전부 끔. 다시 쓰려면 true 로.
+    this.PUSH_ENABLED = false;
     this.AVATAR_POS_KEY = 'jennyRunAvatarPos';
     this.EMAIL_KEY = 'jennyRunEmail';
     this.userId = null;
@@ -13216,6 +13218,7 @@ class CommunityManager {
   // ⚠️ Kotlin 쪽 시그니처가 setNotifEnabled(type: String, enabled: Boolean)라고 가정함. 다르면 여기만 수정.
   applyNotifPrefsToNative(prefs) {
     prefs = prefs || this.getNotifPrefs();
+    if (!this.PUSH_ENABLED) prefs = { follow: false, like: false, comment: false };
     try {
       if (window.AndroidPushBridge && typeof window.AndroidPushBridge.setNotifEnabled === 'function') {
         window.AndroidPushBridge.setNotifEnabled('follow', !!prefs.follow);
@@ -13227,7 +13230,7 @@ class CommunityManager {
 
   // [푸시] FCM 토큰을 Supabase push_tokens에 저장 (유저 ID + 토큰 + 알림 설정)
   async savePushToken(token) {
-    if (!token) return;
+    if (!token || !this.PUSH_ENABLED) return;
     this._fcmToken = token;
     try { localStorage.setItem('jennyRunFcmToken', token); } catch(e) {}
     try {
@@ -13246,6 +13249,7 @@ class CommunityManager {
 
   // 알림 설정이 바뀌면 서버의 토큰 행에도 반영 (Edge Function이 이 값을 보고 발송 여부 결정)
   async syncNotifPrefsToServer(prefs) {
+    if (!this.PUSH_ENABLED) return;
     const token = this._fcmToken || (function(){ try { return localStorage.getItem('jennyRunFcmToken'); } catch(e) { return null; } })();
     if (!token) return;
     try {
@@ -13259,6 +13263,7 @@ class CommunityManager {
   }
 
   openNotifSettings() {
+    if (!this.PUSH_ENABLED) return;
     const prefs = this.getNotifPrefs();
     const fEl = document.getElementById('notif-toggle-follow');
     const lEl = document.getElementById('notif-toggle-like');
