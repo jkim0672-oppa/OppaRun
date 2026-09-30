@@ -1753,7 +1753,7 @@ transform: scale(0.97) !important; background: #00b368 !important; color: #fff !
 </div>
 <!-- [추가] 내가 쓴 글 관리 전체화면. CREW 설정의 MY POSTS 박스에서 진입. -->
 <div id="my-posts-view" class="follow-list-view">
-<button id="btn-my-posts-close" class="close-detail" onclick="community.closeMyPosts()">CLOSE</button>
+<button id="btn-my-posts-close" class="close-detail" onclick="community.backMyPosts()">CLOSE</button>
 <div class="diag-header">
 <div id="my-posts-title" class="view-title-sm">MY POSTS</div>
 </div>
@@ -3867,7 +3867,7 @@ crewMorning: "Morning Run", crewAfternoon: "Afternoon Run", crewEvening: "Evenin
 crewTab: "CREW",
 crewDist: "Distance", crewTime: "Time", crewPace: "Pace", crewEff: "Efficiency", crewEffSimple: "Eff (simple)", crewMe: "Me", editTitle: "EDIT TITLE",
 crewFollow: "Follow", crewFollowing: "Following", crewUnfollow: "Unfollow", crewFollowers: "Followers",
-myPostsUnit: "posts", myPostsUnit1: "post", myPostsEmpty: "You haven't posted anything yet.", myPostsMore: "LOAD MORE", myPostsRemain: "left", posTagSum: "TOTAL", posTagAvg: "AVG", crewManageLabel: "MANAGE CREW", crewMgrFollowing: "FOLLOWING", crewMgrFollowers: "FOLLOWERS", crewMgrMyPosts: "MY POSTS", crewMgrMuted: "MUTED USERS", crewMgrSearch: "SEARCH CREW", crewMgrNotif: "NOTIFICATIONS",
+myPostsBack: "BACK", myPostsUnit: "posts", myPostsUnit1: "post", myPostsEmpty: "You haven't posted anything yet.", myPostsMore: "LOAD MORE", myPostsRemain: "left", posTagSum: "TOTAL", posTagAvg: "AVG", crewManageLabel: "MANAGE CREW", crewMgrFollowing: "FOLLOWING", crewMgrFollowers: "FOLLOWERS", crewMgrMyPosts: "MY POSTS", crewMgrMuted: "MUTED USERS", crewMgrSearch: "SEARCH CREW", crewMgrNotif: "NOTIFICATIONS",
 blockedUsersLabel: "BLOCKED USERS", noBlockedUsers: "No blocked users.", unblock: "Unblock",
 notifTitle: "NOTIFICATIONS", notifEmpty: "No notifications yet.", notifClearAll: "Clear all", notifClearConfirm: "Delete all notifications?", notifFailed: "Couldn't load notifications. Please check your connection and try again.",
 notifFollow: "started following you", notifLike: "liked your run", notifComment: "commented", notifCount: "notifications",
@@ -3981,7 +3981,7 @@ crewMorning: "아침 러닝", crewAfternoon: "오후 러닝", crewEvening: "저�
 crewTab: "크루",
 crewDist: "거리", crewTime: "시간", crewPace: "페이스", crewEff: "효율", crewEffSimple: "효율(간이)", crewMe: "나", editTitle: "제목 수정",
 crewFollow: "팔로우", crewFollowing: "팔로잉", crewUnfollow: "언팔로우", crewFollowers: "팔로워",
-myPostsUnit: "개의 글", myPostsUnit1: "개의 글", myPostsEmpty: "아직 올린 글이 없어요.", myPostsMore: "더 보기", myPostsRemain: "남음", posTagSum: "합계", posTagAvg: "평균", crewManageLabel: "크루 관리", crewMgrFollowing: "팔로잉", crewMgrFollowers: "팔로워", crewMgrMyPosts: "내 글", crewMgrMuted: "뮤트 목록", crewMgrSearch: "크루 검색", crewMgrNotif: "알림",
+myPostsBack: "뒤로", myPostsUnit: "개의 글", myPostsUnit1: "개의 글", myPostsEmpty: "아직 올린 글이 없어요.", myPostsMore: "더 보기", myPostsRemain: "남음", posTagSum: "합계", posTagAvg: "평균", crewManageLabel: "크루 관리", crewMgrFollowing: "팔로잉", crewMgrFollowers: "팔로워", crewMgrMyPosts: "내 글", crewMgrMuted: "뮤트 목록", crewMgrSearch: "크루 검색", crewMgrNotif: "알림",
 blockedUsersLabel: "차단 목록", noBlockedUsers: "차단한 사용자가 없습니다.", unblock: "차단 해제",
 notifTitle: "알림", notifEmpty: "아직 알림이 없습니다.", notifClearAll: "전체 삭제", notifClearConfirm: "모든 알림을 삭제할까요?", notifFailed: "알림을 불러오지 못했어요. 연결 상태를 확인하고 다시 시도해주세요.",
 notifFollow: "님이 팔로우했어요", notifLike: "님이 내 기록에 좋아요를 눌렀어요", notifComment: "님이 댓글", notifCount: "개",
@@ -13002,69 +13002,149 @@ class CommunityManager {
     return this.myPosts;
   }
 
+  // ===== [추가] MY POSTS: 월별 달력(날짜 아래 그날 글 개수) → 날짜를 누르면 그날 글 카드 목록 =====
+  _mpFmtDur(sec) {
+    sec = Math.round(sec || 0);
+    if (sec <= 0) return '--';
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), ss = sec % 60;
+    const p2 = (n) => String(n).padStart(2, '0');
+    return h > 0 ? (h + ':' + p2(m) + ':' + p2(ss)) : (m + ':' + p2(ss));
+  }
+
+  _mpFmtPace(dur, km) {
+    if (!dur || !km || km <= 0) return '--';
+    const spk = Math.round(dur / km);
+    return Math.floor(spk / 60) + ':' + String(spk % 60).padStart(2, '0') + ' /km';
+  }
+
   renderMyPostsContent() {
     const t = this._t();
+    const isKo = storage.getLang() === 'ko';
     const titleEl = document.getElementById('my-posts-title');
     const countEl = document.getElementById('my-posts-count');
     const closeEl = document.getElementById('btn-my-posts-close');
     const wrap = document.getElementById('my-posts-content');
     const list = this.myPosts || [];
+    const unit = (n) => (n === 1 ? t.myPostsUnit1 : t.myPostsUnit) || 'posts';
+    if (!wrap) return;
+
+    // 날짜별로 묶기 (기기 현지 날짜 기준)
+    const keyOf = (d) => d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+    const byDay = {};
+    list.forEach(r => { const k = keyOf(new Date(r.created_at)); (byDay[k] = byDay[k] || []).push(r); });
+
+    // ── 날짜 선택 화면: 그날 글을 큰 카드로 ──
+    if (this.myPostsDay) {
+      const arr = byDay[this.myPostsDay] || [];
+      if (!arr.length) { this.myPostsDay = null; this.renderMyPostsContent(); return; }
+      const pt = this.myPostsDay.split('-').map(Number);
+      if (titleEl) titleEl.textContent = new Date(pt[0], pt[1] - 1, pt[2]).toLocaleDateString();
+      if (closeEl) closeEl.textContent = t.myPostsBack || 'BACK';
+      if (countEl) countEl.textContent = arr.length + ' ' + unit(arr.length);
+      wrap.innerHTML = arr.map(r => {
+        const km = r.distance_km || 0;
+        const time = new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const title = escapeHtml(r.title || 'Run');
+        const boxes = [
+          [t.dist || 'DIST', km.toFixed(2) + ' km'],
+          [t.time || 'TIME', this._mpFmtDur(r.duration_sec)],
+          [t.pace || 'PACE', this._mpFmtPace(r.duration_sec, km)]
+        ];
+        return `<div class="garmin-import-item" onclick="community.openMyPost('${r.id}')" style="cursor:pointer;">
+        <div class="garmin-import-item-head">
+          <div style="min-width:0; flex:1;">
+            <div class="garmin-import-item-title" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${title}</div>
+            <div style="font-size:var(--fs-xxs); color:#888; margin-top:2px;">${time}</div>
+          </div>
+          <div class="garmin-import-item-del" onclick="event.stopPropagation(); community.deleteMyPost('${r.id}')">${t.deleteBtn || 'DELETE'}</div>
+        </div>
+        <div class="garmin-import-grid">${boxes.map(b => `<div class="garmin-import-box"><div class="garmin-import-box-label">${b[0]}</div><div class="garmin-import-box-val">${b[1]}</div></div>`).join('')}</div>
+      </div>`;
+      }).join('');
+      return;
+    }
+
+    // ── 달력 화면 ──
     if (titleEl) titleEl.textContent = t.crewMgrMyPosts || 'MY POSTS';
     if (closeEl) closeEl.textContent = t.close || 'CLOSE';
-    if (countEl) countEl.textContent = list.length + ' ' + ((list.length === 1 ? t.myPostsUnit1 : t.myPostsUnit) || 'posts');
-    if (!wrap) return;
+    if (countEl) countEl.textContent = list.length + ' ' + unit(list.length);
     if (list.length === 0) {
       wrap.innerHTML = `<div style="font-size:var(--fs-xs); color:#666; font-weight:700;">${t.myPostsEmpty || "You haven't posted anything yet."}</div>`;
       return;
     }
-    // [추가] 한 번에 20개만 보여주고 '더 보기'로 20개씩 추가 (글이 많아져도 화면이 끝없이 길어지지 않음)
-    if (!this.myPostsShown) this.myPostsShown = 20;
-    const shown = list.slice(0, this.myPostsShown);
-    const fmtDur = (sec) => {
-      sec = Math.round(sec || 0);
-      if (sec <= 0) return '--';
-      const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), ss = sec % 60;
-      const p2 = (n) => String(n).padStart(2, '0');
-      return h > 0 ? (h + ':' + p2(m) + ':' + p2(ss)) : (m + ':' + p2(ss));
-    };
-    const fmtPaceKm = (dur, km) => {
-      if (!dur || !km || km <= 0) return '--';
-      const spk = Math.round(dur / km);
-      return Math.floor(spk / 60) + ':' + String(spk % 60).padStart(2, '0') + '/km';
-    };
-    let html = shown.map(r => {
-      const km = r.distance_km || 0;
-      const date = new Date(r.created_at).toLocaleDateString();
-      const title = escapeHtml(r.title || 'Run');
-      const dot = '<span style="color:#555;"> · </span>';
-      const meta = '<span style="color:#888;">' + date + '</span>' + dot
-        + '<span style="color:#fff;">' + km.toFixed(2) + ' km</span>' + dot
-        + '<span style="color:#fff;">' + fmtDur(r.duration_sec) + '</span>' + dot
-        + '<span style="color:#fff;">' + fmtPaceKm(r.duration_sec, km) + '</span>';
-      return `<div class="garmin-import-item" onclick="community.openMyPost('${r.id}')" style="cursor:pointer; padding:8px 12px; margin-top:6px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-          <div style="min-width:0; flex:1;">
-            <div class="garmin-import-item-title" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${title}</div>
-            <div style="font-size:var(--fs-xs); font-weight:800; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${meta}</div>
-          </div>
-          <div class="garmin-import-item-del" onclick="event.stopPropagation(); community.deleteMyPost('${r.id}')">${t.deleteBtn || 'DELETE'}</div>
-        </div>
+    const now = new Date();
+    if (!this.myPostsMonth) this.myPostsMonth = { y: now.getFullYear(), m: now.getMonth() };
+    const y = this.myPostsMonth.y, m = this.myPostsMonth.m;
+
+    // 이동 가능 범위: 가장 오래된 글의 달 ~ 이번 달
+    let minTs = Infinity;
+    list.forEach(r => { const ts = new Date(r.created_at).getTime(); if (ts < minTs) minTs = ts; });
+    const minD = new Date(minTs);
+    const prevOff = (y * 12 + m) <= (minD.getFullYear() * 12 + minD.getMonth());
+    const nextOff = (y * 12 + m) >= (now.getFullYear() * 12 + now.getMonth());
+
+    // 이 달 요약
+    let nCnt = 0, sumKm = 0, sumSec = 0;
+    list.forEach(r => {
+      const d = new Date(r.created_at);
+      if (d.getFullYear() === y && d.getMonth() === m) { nCnt++; sumKm += (r.distance_km || 0); sumSec += (r.duration_sec || 0); }
+    });
+    const summary = [
+      [t.posCount || 'COUNT', nCnt],
+      [t.dist || 'DIST', sumKm.toFixed(1) + ' km'],
+      [t.time || 'TIME', this._mpFmtDur(sumSec)]
+    ];
+
+    const monthNames = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+    const monthLabel = isKo ? (y + '년 ' + (m + 1) + '월') : (monthNames[m] + ' ' + y);
+    const wdNames = isKo ? ['일','월','화','수','목','금','토'] : ['S','M','T','W','T','F','S'];
+
+    const navBtn = (label, off, delta) => `<button onclick="community.shiftMyPostsMonth(${delta})" style="width:44px; height:36px; background:#1a1a1a; border:1.5px solid #2a3a2f; color:var(--primary); font-size:18px; font-weight:900; border-radius:10px; cursor:pointer; ${off ? 'opacity:0.25; pointer-events:none;' : ''}">${label}</button>`;
+    let html = `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+      ${navBtn('‹', prevOff, -1)}
+      <div style="font-size:var(--fs-md); font-weight:900; color:#fff;">${monthLabel}</div>
+      ${navBtn('›', nextOff, 1)}
+    </div>`;
+    html += `<div class="garmin-import-grid" style="margin-bottom:12px;">${summary.map(b => `<div class="garmin-import-box"><div class="garmin-import-box-label">${b[0]}</div><div class="garmin-import-box-val">${b[1]}</div></div>`).join('')}</div>`;
+    html += `<div style="display:grid; grid-template-columns:repeat(7, 1fr); gap:4px; margin-bottom:4px;">${wdNames.map(w => `<div style="text-align:center; font-size:var(--fs-xxs); color:#999; font-weight:900;">${w}</div>`).join('')}</div>`;
+
+    const firstDow = new Date(y, m, 1).getDay();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    let cells = '';
+    for (let i = 0; i < firstDow; i++) cells += '<div></div>';
+    for (let d = 1; d <= daysInMonth; d++) {
+      const key = y + '-' + (m + 1) + '-' + d;
+      const n = (byDay[key] || []).length;
+      const isToday = (y === now.getFullYear() && m === now.getMonth() && d === now.getDate());
+      const border = isToday ? '2px solid var(--primary)' : (n > 0 ? '1.5px solid #2a3a2f' : '1px solid #2a2a2a');
+      const click = n > 0 ? ` onclick="community.openMyPostsDay('${key}')"` : '';
+      html += `<div${click} style="display:flex; flex-direction:column; align-items:center; height:54px; padding:5px 0 0; background:${n > 0 ? '#1a1a1a' : '#111'}; border:${border}; border-radius:10px; ${n > 0 ? 'cursor:pointer;' : ''}">
+        <div style="font-size:var(--fs-xs); font-weight:800; color:${n > 0 ? '#fff' : '#666'};">${d}</div>
+        <div style="flex:1; display:flex; align-items:center; font-size:var(--fs-md); font-weight:900; color:var(--primary);">${n > 0 ? n : ''}</div>
       </div>`;
-    }).join('');
-    const remain = list.length - shown.length;
-    if (remain > 0) {
-      html += `<button onclick="community.showMoreMyPosts()" style="margin-top:8px; background:#1a1a1a; border:1.5px solid #2a3a2f; color:#00ff88; font-size:var(--fs-xs); font-weight:800; padding:12px; border-radius:12px; cursor:pointer;">${t.myPostsMore || 'LOAD MORE'} (${remain} ${t.myPostsRemain || 'left'})</button>`;
     }
+    html += `<div style="display:grid; grid-template-columns:repeat(7, 1fr); gap:4px;">${cells}</div>`;
     wrap.innerHTML = html;
   }
 
-  showMoreMyPosts() {
-    this.myPostsShown = (this.myPostsShown || 20) + 20;
+  shiftMyPostsMonth(delta) {
+    if (!this.myPostsMonth) return;
+    const d = new Date(this.myPostsMonth.y, this.myPostsMonth.m + delta, 1);
+    this.myPostsMonth = { y: d.getFullYear(), m: d.getMonth() };
     this.renderMyPostsContent();
   }
 
+  openMyPostsDay(key) {
+    this.myPostsDay = key;
+    this.renderMyPostsContent();
+    const wrap = document.getElementById('my-posts-content');
+    if (wrap) wrap.scrollTop = 0;
+  }
+
   async openMyPosts() {
-    this.myPostsShown = 20;
+    this.myPostsDay = null;
+    const now = new Date();
+    this.myPostsMonth = { y: now.getFullYear(), m: now.getMonth() };
     await this.loadMyPosts();
     this.renderMyPostsContent();
     const mpWrap = document.getElementById('my-posts-content');
@@ -13073,7 +13153,20 @@ class CommunityManager {
     if (view) view.classList.add('is-open');
   }
 
+  // CLOSE/BACK 버튼: 날짜 화면이면 달력으로, 달력 화면이면 닫기
+  backMyPosts() {
+    if (this.myPostsDay) {
+      this.myPostsDay = null;
+      this.renderMyPostsContent();
+      const wrap = document.getElementById('my-posts-content');
+      if (wrap) wrap.scrollTop = 0;
+    } else {
+      this.closeMyPosts();
+    }
+  }
+
   closeMyPosts() {
+    this.myPostsDay = null;
     const view = document.getElementById('my-posts-view');
     if (view) view.classList.remove('is-open');
   }
