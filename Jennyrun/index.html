@@ -1334,6 +1334,10 @@ overflow-x: auto; white-space: nowrap; -ms-overflow-style: none; scrollbar-width
    크루 설정 화면의 섹션 라벨과 균형이 맞도록 한 단계 낮춰 정리함. */
 .view-title-sm { font-size: var(--fs-lg); font-weight: 900; color: var(--primary); }
 .follow-list-view .diag-header { padding-bottom: 10px; margin-bottom: 14px; }
+/* [추가] 크루 관리 확장 페이지(팔로잉/팔로워/차단/내 글/뮤트/검색/알림): 바깥은 스크롤하지 않고
+   헤더(CLOSE·제목·개수)는 고정, 아래 데이터 영역만 스크롤 */
+#follow-list-view, #blocked-list-view, #my-posts-view, #muted-list-view, #user-search-view, #notif-list-view { overflow-y: hidden; }
+#follow-list-content, #blocked-list-content, #my-posts-content, #muted-list-content, #user-search-content, #notif-list-content { flex: 1 1 0; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; align-content: start; padding-bottom: 20px; }
 .list-count-line { color:#666; font-size:var(--fs-xs); font-weight:700; padding:0 15px; margin:-4px 0 10px; }
 /* 크루원 검색창: 결과 카드(#2a2a2a)와 구별되도록 초록 테두리 + 알약 모양 + 돋보기 */
 .user-search-box { position:relative; padding:0 15px; margin-bottom:14px; }
@@ -13013,8 +13017,8 @@ class CommunityManager {
       wrap.innerHTML = `<div style="font-size:var(--fs-xs); color:#666; font-weight:700;">${t.myPostsEmpty || "You haven't posted anything yet."}</div>`;
       return;
     }
-    // [추가] 한 번에 10개만 보여주고 '더 보기'로 10개씩 추가 (글이 많아져도 화면이 끝없이 길어지지 않음)
-    if (!this.myPostsShown) this.myPostsShown = 10;
+    // [추가] 한 번에 20개만 보여주고 '더 보기'로 20개씩 추가 (글이 많아져도 화면이 끝없이 길어지지 않음)
+    if (!this.myPostsShown) this.myPostsShown = 20;
     const shown = list.slice(0, this.myPostsShown);
     const fmtDur = (sec) => {
       sec = Math.round(sec || 0);
@@ -13026,26 +13030,25 @@ class CommunityManager {
     const fmtPaceKm = (dur, km) => {
       if (!dur || !km || km <= 0) return '--';
       const spk = Math.round(dur / km);
-      return Math.floor(spk / 60) + ':' + String(spk % 60).padStart(2, '0') + ' /km';
+      return Math.floor(spk / 60) + ':' + String(spk % 60).padStart(2, '0') + '/km';
     };
     let html = shown.map(r => {
       const km = r.distance_km || 0;
       const date = new Date(r.created_at).toLocaleDateString();
       const title = escapeHtml(r.title || 'Run');
-      const boxes = [
-        [t.dist || 'DIST', km.toFixed(2) + ' km'],
-        [t.time || 'TIME', fmtDur(r.duration_sec)],
-        [t.pace || 'PACE', fmtPaceKm(r.duration_sec, km)]
-      ];
-      return `<div class="garmin-import-item" onclick="community.openMyPost('${r.id}')" style="cursor:pointer;">
-        <div class="garmin-import-item-head">
+      const dot = '<span style="color:#555;"> · </span>';
+      const meta = '<span style="color:#888;">' + date + '</span>' + dot
+        + '<span style="color:#fff;">' + km.toFixed(2) + ' km</span>' + dot
+        + '<span style="color:#fff;">' + fmtDur(r.duration_sec) + '</span>' + dot
+        + '<span style="color:#fff;">' + fmtPaceKm(r.duration_sec, km) + '</span>';
+      return `<div class="garmin-import-item" onclick="community.openMyPost('${r.id}')" style="cursor:pointer; padding:8px 12px; margin-top:6px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
           <div style="min-width:0; flex:1;">
             <div class="garmin-import-item-title" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${title}</div>
-            <div style="font-size:var(--fs-xxs); color:#888; margin-top:2px;">${date}</div>
+            <div style="font-size:var(--fs-xs); font-weight:800; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${meta}</div>
           </div>
           <div class="garmin-import-item-del" onclick="event.stopPropagation(); community.deleteMyPost('${r.id}')">${t.deleteBtn || 'DELETE'}</div>
         </div>
-        <div class="garmin-import-grid">${boxes.map(b => `<div class="garmin-import-box"><div class="garmin-import-box-label">${b[0]}</div><div class="garmin-import-box-val">${b[1]}</div></div>`).join('')}</div>
       </div>`;
     }).join('');
     const remain = list.length - shown.length;
@@ -13056,14 +13059,16 @@ class CommunityManager {
   }
 
   showMoreMyPosts() {
-    this.myPostsShown = (this.myPostsShown || 10) + 10;
+    this.myPostsShown = (this.myPostsShown || 20) + 20;
     this.renderMyPostsContent();
   }
 
   async openMyPosts() {
-    this.myPostsShown = 10;
+    this.myPostsShown = 20;
     await this.loadMyPosts();
     this.renderMyPostsContent();
+    const mpWrap = document.getElementById('my-posts-content');
+    if (mpWrap) mpWrap.scrollTop = 0;
     const view = document.getElementById('my-posts-view');
     if (view) view.classList.add('is-open');
   }
