@@ -1754,7 +1754,7 @@ transform: scale(0.97) !important; background: #00b368 !important; color: #fff !
 <div id="my-posts-title" class="view-title-sm">MY POSTS</div>
 </div>
 <div id="my-posts-count" class="list-count-line">0</div>
-<div id="my-posts-content" style="display:flex; flex-direction:column; gap:8px; padding:0 15px;"></div>
+<div id="my-posts-content" style="display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:0 15px 20px;"></div>
 </div>
 <!-- [추가] 뮤트 목록 전체화면. 차단과 달리 상대는 모르게 내 피드에서만 숨김. -->
 <div id="muted-list-view" class="follow-list-view">
@@ -3863,7 +3863,7 @@ crewMorning: "Morning Run", crewAfternoon: "Afternoon Run", crewEvening: "Evenin
 crewTab: "CREW",
 crewDist: "Distance", crewTime: "Time", crewPace: "Pace", crewEff: "Efficiency", crewEffSimple: "Eff (simple)", crewMe: "Me", editTitle: "EDIT TITLE",
 crewFollow: "Follow", crewFollowing: "Following", crewUnfollow: "Unfollow", crewFollowers: "Followers",
-posTagSum: "TOTAL", posTagAvg: "AVG", crewManageLabel: "MANAGE CREW", crewMgrFollowing: "FOLLOWING", crewMgrFollowers: "FOLLOWERS", crewMgrMyPosts: "MY POSTS", crewMgrMuted: "MUTED USERS", crewMgrSearch: "SEARCH CREW", crewMgrNotif: "NOTIFICATIONS",
+myPostsUnit: "posts", myPostsUnit1: "post", myPostsEmpty: "You haven't posted anything yet.", myPostsMore: "LOAD MORE", myPostsRemain: "left", posTagSum: "TOTAL", posTagAvg: "AVG", crewManageLabel: "MANAGE CREW", crewMgrFollowing: "FOLLOWING", crewMgrFollowers: "FOLLOWERS", crewMgrMyPosts: "MY POSTS", crewMgrMuted: "MUTED USERS", crewMgrSearch: "SEARCH CREW", crewMgrNotif: "NOTIFICATIONS",
 blockedUsersLabel: "BLOCKED USERS", noBlockedUsers: "No blocked users.", unblock: "Unblock",
 notifTitle: "NOTIFICATIONS", notifEmpty: "No notifications yet.", notifClearAll: "Clear all", notifClearConfirm: "Delete all notifications?", notifFailed: "Couldn't load notifications. Please check your connection and try again.",
 notifFollow: "started following you", notifLike: "liked your run", notifComment: "commented", notifCount: "notifications",
@@ -3977,7 +3977,7 @@ crewMorning: "아침 러닝", crewAfternoon: "오후 러닝", crewEvening: "저�
 crewTab: "크루",
 crewDist: "거리", crewTime: "시간", crewPace: "페이스", crewEff: "효율", crewEffSimple: "효율(간이)", crewMe: "나", editTitle: "제목 수정",
 crewFollow: "팔로우", crewFollowing: "팔로잉", crewUnfollow: "언팔로우", crewFollowers: "팔로워",
-posTagSum: "합계", posTagAvg: "평균", crewManageLabel: "크루 관리", crewMgrFollowing: "팔로잉", crewMgrFollowers: "팔로워", crewMgrMyPosts: "내 글", crewMgrMuted: "뮤트 목록", crewMgrSearch: "크루 검색", crewMgrNotif: "알림",
+myPostsUnit: "개의 글", myPostsUnit1: "개의 글", myPostsEmpty: "아직 올린 글이 없어요.", myPostsMore: "더 보기", myPostsRemain: "남음", posTagSum: "합계", posTagAvg: "평균", crewManageLabel: "크루 관리", crewMgrFollowing: "팔로잉", crewMgrFollowers: "팔로워", crewMgrMyPosts: "내 글", crewMgrMuted: "뮤트 목록", crewMgrSearch: "크루 검색", crewMgrNotif: "알림",
 blockedUsersLabel: "차단 목록", noBlockedUsers: "차단한 사용자가 없습니다.", unblock: "차단 해제",
 notifTitle: "알림", notifEmpty: "아직 알림이 없습니다.", notifClearAll: "전체 삭제", notifClearConfirm: "모든 알림을 삭제할까요?", notifFailed: "알림을 불러오지 못했어요. 연결 상태를 확인하고 다시 시도해주세요.",
 notifFollow: "님이 팔로우했어요", notifLike: "님이 내 기록에 좋아요를 눌렀어요", notifComment: "님이 댓글", notifCount: "개",
@@ -12999,32 +12999,47 @@ class CommunityManager {
   }
 
   renderMyPostsContent() {
+    const t = this._t();
     const titleEl = document.getElementById('my-posts-title');
     const countEl = document.getElementById('my-posts-count');
+    const closeEl = document.getElementById('btn-my-posts-close');
     const wrap = document.getElementById('my-posts-content');
     const list = this.myPosts || [];
-    if (titleEl) titleEl.textContent = 'MY POSTS';
-    if (countEl) countEl.textContent = list.length + (list.length === 1 ? ' post' : ' posts');
+    if (titleEl) titleEl.textContent = t.crewMgrMyPosts || 'MY POSTS';
+    if (closeEl) closeEl.textContent = t.close || 'CLOSE';
+    if (countEl) countEl.textContent = list.length + ' ' + ((list.length === 1 ? t.myPostsUnit1 : t.myPostsUnit) || 'posts');
     if (!wrap) return;
     if (list.length === 0) {
-      wrap.innerHTML = `<div style="font-size:var(--fs-xs); color:#666; font-weight:700;">You haven't posted anything yet.</div>`;
+      wrap.innerHTML = `<div style="grid-column:1 / -1; font-size:var(--fs-xs); color:#666; font-weight:700;">${t.myPostsEmpty || "You haven't posted anything yet."}</div>`;
       return;
     }
-    wrap.innerHTML = list.map(r => {
+    // [추가] 한 번에 20개만 보여주고 '더 보기'로 20개씩 추가 (글이 많아져도 화면이 끝없이 길어지지 않음)
+    if (!this.myPostsShown) this.myPostsShown = 20;
+    const shown = list.slice(0, this.myPostsShown);
+    let html = shown.map(r => {
       const dist = (r.distance_km || 0).toFixed(2) + ' km';
       const date = new Date(r.created_at).toLocaleDateString();
       const title = escapeHtml(r.title || 'Run');
-      return `<div onclick="community.openMyPost('${r.id}')" style="display:flex; align-items:center; justify-content:space-between; background:#2a2a2a; border:1.5px solid #444; padding:12px 14px; border-radius:12px; gap:10px; cursor:pointer;">
-        <div style="min-width:0; flex:1;">
-          <div style="font-size:var(--fs-base); color:#fff; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${title}</div>
-          <div style="font-size:var(--fs-xxs); color:#888; margin-top:2px;">${date} · ${dist}</div>
-        </div>
-        <button onclick="event.stopPropagation(); community.deleteMyPost('${r.id}')" style="flex-shrink:0; background:none; border:1px solid #663333; color:#e57373; font-size:var(--fs-xs); padding:6px 12px; border-radius:8px; font-weight:800; cursor:pointer;">Delete</button>
+      return `<div onclick="community.openMyPost('${r.id}')" style="position:relative; background:#2a2a2a; border:1.5px solid #444; padding:10px 32px 10px 12px; border-radius:12px; cursor:pointer; min-width:0;">
+        <div style="font-size:var(--fs-sm); color:#fff; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${title}</div>
+        <div style="font-size:var(--fs-xxs); color:#888; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${date} · ${dist}</div>
+        <button aria-label="${t.deleteBtn || 'DELETE'}" onclick="event.stopPropagation(); community.deleteMyPost('${r.id}')" style="position:absolute; top:6px; right:6px; width:24px; height:24px; background:none; border:1px solid #663333; color:#e57373; font-size:12px; line-height:1; border-radius:8px; font-weight:800; cursor:pointer; padding:0;">✕</button>
       </div>`;
     }).join('');
+    const remain = list.length - shown.length;
+    if (remain > 0) {
+      html += `<button onclick="community.showMoreMyPosts()" style="grid-column:1 / -1; background:#2a2a2a; border:1.5px solid #444; color:#00ff88; font-size:var(--fs-xs); font-weight:800; padding:12px; border-radius:12px; cursor:pointer;">${t.myPostsMore || 'LOAD MORE'} (${remain} ${t.myPostsRemain || 'left'})</button>`;
+    }
+    wrap.innerHTML = html;
+  }
+
+  showMoreMyPosts() {
+    this.myPostsShown = (this.myPostsShown || 20) + 20;
+    this.renderMyPostsContent();
   }
 
   async openMyPosts() {
+    this.myPostsShown = 20;
     await this.loadMyPosts();
     this.renderMyPostsContent();
     const view = document.getElementById('my-posts-view');
