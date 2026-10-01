@@ -2899,6 +2899,25 @@ const DIAG_SPLIT_INTERVAL_KM = 0.1;
 // record 객체를 받아서 0~100 점수 반환. 데이터 없으면 null 반환.
 // [추가] 크루 피드 등에서 사용자 입력(닉네임/메시지/타이틀 등)을 innerHTML에 넣기 전
 // HTML 특수문자를 이스케이프해서 XSS(스크립트 삽입)를 막기 위한 공용 헬퍼
+// [추가] 현재 앱 언어가 한국어인지 / 인원수 문구를 언어에 맞게 (한·영 혼용 방지)
+function _koNow() { try { return storage.getLang() === 'ko'; } catch (e) { return true; } }
+function fmtPersonCount(n) { return _koNow() ? (n + '명') : (n + (n === 1 ? ' person' : ' people')); }
+// [추가] 자동 생성된 기본 제목("야간 러닝"/"Night Run" 등)을 현재 앱 언어로 맞춰 표시.
+// 저장된 제목은 기록 당시 언어로 박혀 있어 언어를 바꾸면 한/영이 섞여 보였음 → 표시 시점에 변환.
+// 사용자가 직접 지은 제목은 패턴에 안 맞으므로 그대로 둔다.
+function localizeRunTitle(title) {
+  if (!title) return title;
+  var isKo = true; try { isKo = storage.getLang() === 'ko'; } catch (e) {}
+  var T = [['아침','Morning'],['오후','Afternoon'],['저녁','Evening'],['야간','Night']];
+  var M = [['러닝','Run'],['트레일러닝','Trail Run'],['프리러닝','Free Run'],['걷기','Walk']];
+  var m = String(title).match(/^(아침|오후|저녁|야간) (러닝|트레일러닝|프리러닝|걷기)$/) ||
+          String(title).match(/^(Morning|Afternoon|Evening|Night) (Run|Trail Run|Free Run|Walk)$/);
+  if (!m) return title;
+  var ti = T.findIndex(function (x) { return x[0] === m[1] || x[1] === m[1]; });
+  var mi = M.findIndex(function (x) { return x[0] === m[2] || x[1] === m[2]; });
+  if (ti < 0 || mi < 0) return title;
+  return isKo ? (T[ti][0] + ' ' + M[mi][0]) : (T[ti][1] + ' ' + M[mi][1]);
+}
 function escapeHtml(str) {
   if (str === null || str === undefined) return '';
   return String(str)
@@ -7108,7 +7127,7 @@ const hPosBadge = r.devicePos ? ' <span style="color:#7fd3ff; font-weight:700; f
 return '<div class="history-item">' +
 '<div class="h-top-row">' +
 '<div style="display:flex;flex-direction:column;gap:2px">' +
-'<div style="font-size:var(--fs-md);font-weight:900;color:#fff;">' + escapeHtml(r.title || (t.crewMorning)) + hPosBadge + '</div>' +
+'<div style="font-size:var(--fs-md);font-weight:900;color:#fff;">' + escapeHtml(localizeRunTitle(r.title) || (t.crewMorning)) + hPosBadge + '</div>' +
 '<div class="h-date" style="margin-bottom:0">' + escapeHtml(this.formatRecordDateTimeLocalized(r.date)) + '</div>' +
 '</div>' +
 '<div class="h-actions">' +
@@ -12391,7 +12410,7 @@ class CommunityManager {
     if (saveLabel) saveLabel.textContent = originalSaveText;
 
     if (!blob) {
-      await appAlert('사진 처리에 실패했어요. 다시 시도해주세요.');
+      await appAlert(_koNow() ? '사진 처리에 실패했어요. 다시 시도해주세요.' : 'Failed to process the photo. Please try again.');
       return;
     }
 
@@ -12901,8 +12920,8 @@ class CommunityManager {
     const titleEl = document.getElementById('follow-list-title');
     const countEl = document.getElementById('follow-list-count');
     const list = tab === 'following' ? (this.followingList || []) : (this.followerList || []);
-    if (titleEl) titleEl.textContent = tab === 'following' ? 'FOLLOWING' : 'FOLLOWERS';
-    if (countEl) countEl.textContent = list.length + (list.length === 1 ? ' person' : ' people');
+    if (titleEl) titleEl.textContent = (tab === 'following' ? this._profileLabels().following : this._profileLabels().followers).toUpperCase();
+    if (countEl) countEl.textContent = fmtPersonCount(list.length);
     this.renderFollowListContent();
     if (view) view.classList.add('is-open');
     this._ensureAvatars(list.map(f => tab === 'following' ? f.following_id : f.follower_id), () => this.renderFollowListContent());
@@ -12938,8 +12957,8 @@ class CommunityManager {
     const view = document.getElementById('follow-list-view');
     const titleEl = document.getElementById('follow-list-title');
     const countEl = document.getElementById('follow-list-count');
-    if (titleEl) titleEl.textContent = 'FOLLOWERS';
-    if (countEl) countEl.textContent = rows.length + (rows.length === 1 ? ' person' : ' people');
+    if (titleEl) titleEl.textContent = this._profileLabels().followers.toUpperCase();
+    if (countEl) countEl.textContent = fmtPersonCount(rows.length);
     this.renderFollowListContent();
     if (view) view.classList.add('is-open');
     this._ensureAvatars(rows.map(f => f.follower_id), () => this.renderFollowListContent());
@@ -12964,7 +12983,7 @@ class CommunityManager {
     const wrap = document.getElementById('blocked-list-content');
     const list = this.blockedList || [];
     if (titleEl) titleEl.textContent = t.blockedUsersLabel || 'BLOCKED USERS';
-    if (countEl) countEl.textContent = list.length + (list.length === 1 ? ' person' : ' people');
+    if (countEl) countEl.textContent = fmtPersonCount(list.length);
     if (!wrap) return;
     if (list.length === 0) {
       wrap.innerHTML = `<div class="user-grid-msg">${t.noBlockedUsers || 'No blocked users.'}</div>`;
@@ -13047,7 +13066,7 @@ class CommunityManager {
       wrap.innerHTML = arr.map(r => {
         const km = r.distance_km || 0;
         const time = new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const title = escapeHtml(r.title || 'Run');
+        const title = escapeHtml(localizeRunTitle(r.title) || 'Run');
         const boxes = [
           [t.dist || 'DIST', km.toFixed(2) + ' km'],
           [t.time || 'TIME', this._mpFmtDur(r.duration_sec)],
@@ -13219,8 +13238,8 @@ class CommunityManager {
     const countEl = document.getElementById('muted-list-count');
     const wrap = document.getElementById('muted-list-content');
     const list = this.mutedList || [];
-    if (titleEl) titleEl.textContent = 'MUTED USERS';
-    if (countEl) countEl.textContent = list.length + (list.length === 1 ? ' person' : ' people');
+    if (titleEl) titleEl.textContent = _koNow() ? '뮤트 목록' : 'MUTED USERS';
+    if (countEl) countEl.textContent = fmtPersonCount(list.length);
     if (!wrap) return;
     if (list.length === 0) {
       wrap.innerHTML = `<div class="user-grid-msg">No muted users.</div>`;
@@ -13625,12 +13644,12 @@ async compressPhoto(file) {
       const compressed = await this.compressPhoto(photoFile);
       const path = uid + '/' + recordId + '.jpg';
       const { error: upErr } = await _sb.storage.from('run-photos').upload(path, compressed, { upsert: true, contentType: 'image/jpeg' });
-      if (upErr) { await appAlert('사진 업로드 실패: ' + upErr.message); return null; }
+      if (upErr) { await appAlert((_koNow() ? '사진 업로드 실패: ' : 'Photo upload failed: ') + upErr.message); return null; }
       const { data } = _sb.storage.from('run-photos').getPublicUrl(path);
       const url = (data && data.publicUrl) || null;
-      if (!url) { await appAlert('URL 생성 실패'); return null; }
+      if (!url) { await appAlert(_koNow() ? 'URL 생성 실패' : 'Failed to create URL'); return null; }
       return url;
-    } catch(e) { await appAlert('사진 업로드 예외: ' + e.message); return null; }
+    } catch(e) { await appAlert((_koNow() ? '사진 업로드 예외: ' : 'Photo upload error: ') + e.message); return null; }
   }
 
   // [수정] 4번째 인자가 기존엔 includeRoute(boolean) 하나였는데, 크루 카드 지표별
@@ -13745,7 +13764,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
         await appAlert(isKo ? '크루 업로드에 실패했습니다. 잠시 후 다시 시도해주세요.' : 'Failed to upload to crew. Please try again later.');
       }
     } catch(e) {
-      alert('업로드 예외: ' + e.message);
+      alert((_koNow() ? '업로드 예외: ' : 'Upload error: ') + e.message);
       console.warn('Upload failed', e);
     }
   }
@@ -14184,7 +14203,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
 
         <!-- 러닝 제목 -->
         <div style="display:flex; align-items:center; gap:6px; margin-bottom:${r.message ? '4px' : '12px'};">
-          <div style="font-size:var(--fs-lg); font-weight:900; color:#111;">${escapeHtml(r.title) || runLabel}</div>
+          <div style="font-size:var(--fs-lg); font-weight:900; color:#111;">${escapeHtml(localizeRunTitle(r.title)) || runLabel}</div>
           <span style="font-size:var(--fs-xxs); font-weight:800; padding:3px 7px; border-radius:6px; background:${modeBadge.bg}; color:${modeBadge.color}; flex-shrink:0;">${modeBadge.label}</span>
         </div>
         ${r.message ? `<div style="font-size:var(--fs-base); color:#555; margin-bottom:12px;">${escapeHtml(r.message)}</div>` : ''}
@@ -14748,7 +14767,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
     const countEl = document.getElementById('follow-list-count');
     const L = this._profileLabels();
     if (titleEl) titleEl.textContent = (tab === 'following' ? L.following : L.followers).toUpperCase();
-    if (countEl) countEl.textContent = rows.length + (rows.length === 1 ? ' person' : ' people');
+    if (countEl) countEl.textContent = fmtPersonCount(rows.length);
     this.renderFollowListContent();
     if (view) { view.classList.add('over-profile'); view.classList.add('is-open'); }
     this._ensureAvatars(rows.map(f => tab === 'following' ? f.following_id : f.follower_id), () => this.renderFollowListContent());
