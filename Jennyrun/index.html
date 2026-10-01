@@ -2903,6 +2903,18 @@ const DIAG_SPLIT_INTERVAL_KM = 0.1;
 // [추가] 현재 앱 언어가 한국어인지 / 인원수 문구를 언어에 맞게 (한·영 혼용 방지)
 function _koNow() { try { return storage.getLang() === 'ko'; } catch (e) { return true; } }
 function fmtPersonCount(n) { return _koNow() ? (n + '명') : (n + (n === 1 ? ' person' : ' people')); }
+// [추가] 크루 피드/마이포스트용 폰 휴대 위치 라벨. abbr=true면 약자(C/W/A/H/F).
+// 걷기 기록은 위치 개념이 없어 빈 문자열. 프리런은 피드에선 이미 FREE RUN 배지가 있어 abbr일 때만 'F'.
+function postPosLabel(devicePos, activityMode, abbr) {
+  if (activityMode === 'walk') return '';
+  var ko = _koNow();
+  if (activityMode === 'freerun') return abbr ? 'F' : '';
+  var map = ko
+    ? { chest: ['가슴','C'], waist: ['허리','W'], armband: ['암밴드','A'], hand: ['손','H'] }
+    : { chest: ['Chest','C'], waist: ['Waist','W'], armband: ['Armband','A'], hand: ['Hand','H'] };
+  var e = map[devicePos];
+  return e ? (abbr ? e[1] : e[0]) : '';
+}
 // [추가] 자동 생성된 기본 제목("야간 러닝"/"Night Run" 등)을 현재 앱 언어로 맞춰 표시.
 // 저장된 제목은 기록 당시 언어로 박혀 있어 언어를 바꾸면 한/영이 섞여 보였음 → 표시 시점에 변환.
 // 사용자가 직접 지은 제목은 패턴에 안 맞으므로 그대로 둔다.
@@ -13012,10 +13024,9 @@ class CommunityManager {
     try {
       const uid = await this.ensureUserId();
       if (!uid) { this.myPosts = []; return this.myPosts; }
-      const { data, error } = await _sb.from('records')
-        .select('id, title, distance_km, duration_sec, created_at, photo_url')
-        .eq('user_id', uid)
-        .order('created_at', { ascending: false });
+      const _myQ = (cols) => _sb.from('records').select(cols).eq('user_id', uid).order('created_at', { ascending: false });
+      let { data, error } = await _myQ('id, title, activity_mode, device_pos, distance_km, duration_sec, created_at, photo_url');
+      if (error && /device_pos/i.test(error.message || '')) ({ data, error } = await _myQ('id, title, activity_mode, distance_km, duration_sec, created_at, photo_url'));
       if (error) throw error;
       this.myPosts = data || [];
     } catch(e) {
@@ -13076,7 +13087,7 @@ class CommunityManager {
         return `<div class="garmin-import-item" onclick="community.openMyPost('${r.id}')" style="cursor:pointer;">
         <div class="garmin-import-item-head">
           <div style="min-width:0; flex:1;">
-            <div class="garmin-import-item-title" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${title}</div>
+            <div class="garmin-import-item-title" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${title}${postPosLabel(r.device_pos, r.activity_mode, true) ? ' <span style="color:#7fd3ff; font-weight:700; font-size:var(--fs-xs);">· ' + postPosLabel(r.device_pos, r.activity_mode, true) + '</span>' : ''}</div>
             <div style="font-size:var(--fs-xxs); color:#888; margin-top:2px;">${time}</div>
           </div>
           <div class="garmin-import-item-del" onclick="event.stopPropagation(); community.deleteMyPost('${r.id}')">${t.deleteBtn || 'DELETE'}</div>
@@ -13720,6 +13731,9 @@ const shareLeanAngle = opts.leanAngle !== false; // [신규] 린각도 공유 �
         // [추가] RUN/WALK/TRAIL 구분 태그. 과거 기록엔 activityMode가 없으므로 'run'으로 간주.
         // ⚠️ Supabase 'records' 테이블에 activity_mode(text, nullable) 컬럼이 없다면 먼저 추가해야 함.
         activity_mode: record.activityMode || 'run',
+        // [추가] 폰 휴대 위치(chest/waist/armband/hand). 프리런·걷기는 위치 개념이 없어 null.
+        // ⚠️ Supabase 'records' 테이블에 device_pos(text, nullable) 컬럼이 필요. 없으면 아래에서 자동으로 빼고 재시도.
+        device_pos: (record.activityMode === 'freerun' || record.activityMode === 'walk') ? null : (record.devicePos || null),
         distance_km: parseFloat(record.dist) || 0,
         duration_sec: durationSec,
         pace_sec_per_km: paceSec,
@@ -13757,7 +13771,8 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
         max_hr: shareHr ? (record.maxHr || null) : null,
         hr_zone: shareHr ? (record.hrZone || null) : null
       };
-      const { error } = await _sb.from('records').insert(payload);
+      let { error } = await _sb.from('records').insert(payload);
+      if (error && /device_pos/i.test(error.message || '')) { delete payload.device_pos; ({ error } = await _sb.from('records').insert(payload)); } // 컬럼 미생성 시 위치만 빼고 업로드
       if (error) {
         console.warn('Upload error:', error.message);
         let isKo = true;
@@ -13772,12 +13787,12 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
 
   async loadFeed() {
     try {
-      const { data, error } = await _sb
-        .from('records')
-        // [수정] 전체화면 확장맵에 km 스플릿 페이스 마커를 표시하려면 splits(좌표+구간페이스)가 필요해서 추가.
-        .select('id, nickname, avatar_url, location_name, title, activity_mode, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, splits, photo_url, message, avg_hr, max_hr, hr_zone, steps, walk_spm, stride_m, kcal, power_w, power_wkg, avg_lean_angle_deg, avg_lean_forward_deg, avg_lean_lateral_deg')
-        .order('created_at', { ascending: false })
-        .limit(50);
+      const _feedCols = 'id, nickname, avatar_url, location_name, title, activity_mode, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, splits, photo_url, message, avg_hr, max_hr, hr_zone, steps, walk_spm, stride_m, kcal, power_w, power_wkg, avg_lean_angle_deg, avg_lean_forward_deg, avg_lean_lateral_deg';
+      // [수정] 전체화면 확장맵에 km 스플릿 페이스 마커를 표시하려면 splits(좌표+구간페이스)가 필요해서 추가.
+      // device_pos 컬럼이 아직 없으면(미생성) 그 컬럼만 빼고 다시 조회해 피드가 깨지지 않게 한다.
+      const _feedQ = (withPos) => _sb.from('records').select(_feedCols + (withPos ? ', device_pos' : '')).order('created_at', { ascending: false }).limit(50);
+      let { data, error } = await _feedQ(true);
+      if (error && /device_pos/i.test(error.message || '')) ({ data, error } = await _feedQ(false));
       if (error) throw error;
       return data || [];
     } catch(e) { console.warn('Feed load failed', e); return []; }
@@ -14206,6 +14221,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
         <div style="display:flex; align-items:center; gap:6px; margin-bottom:${r.message ? '4px' : '12px'};">
           <div style="font-size:var(--fs-lg); font-weight:900; color:#111;">${escapeHtml(localizeRunTitle(r.title)) || runLabel}</div>
           <span style="font-size:var(--fs-xxs); font-weight:800; padding:3px 7px; border-radius:6px; background:${modeBadge.bg}; color:${modeBadge.color}; flex-shrink:0;">${modeBadge.label}</span>
+          ${postPosLabel(r.device_pos, activityMode, false) ? `<span style="font-size:var(--fs-xxs); font-weight:800; padding:3px 7px; border-radius:6px; background:#e0f2fe; color:#0369a1; flex-shrink:0;">${postPosLabel(r.device_pos, activityMode, false)}</span>` : ''}
         </div>
         ${r.message ? `<div style="font-size:var(--fs-base); color:#555; margin-bottom:12px;">${escapeHtml(r.message)}</div>` : ''}
 
@@ -14572,13 +14588,14 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
 
   // 피드 카드용 상세 조회 (loadFeed 와 같은 컬럼)
   async _fetchProfilePage(userId, from, count, recordId) {
-    let q = _sb.from('records')
-      .select('id, nickname, avatar_url, location_name, title, activity_mode, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, splits, photo_url, message, avg_hr, max_hr, hr_zone, steps, walk_spm, stride_m, kcal, power_w, power_wkg, avg_lean_angle_deg, avg_lean_forward_deg, avg_lean_lateral_deg')
-      .eq('user_id', userId);
-    if (recordId) q = q.eq('id', recordId);
-    const { data, error } = await q
-      .order('created_at', { ascending: false })
-      .range(from, from + count - 1);
+    const _cols = 'id, nickname, avatar_url, location_name, title, activity_mode, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, splits, photo_url, message, avg_hr, max_hr, hr_zone, steps, walk_spm, stride_m, kcal, power_w, power_wkg, avg_lean_angle_deg, avg_lean_forward_deg, avg_lean_lateral_deg';
+    const _run = (withPos) => {
+      let q = _sb.from('records').select(_cols + (withPos ? ', device_pos' : '')).eq('user_id', userId);
+      if (recordId) q = q.eq('id', recordId);
+      return q.order('created_at', { ascending: false }).range(from, from + count - 1);
+    };
+    let { data, error } = await _run(true);
+    if (error && /device_pos/i.test(error.message || '')) ({ data, error } = await _run(false));
     if (error) throw error;
     return data || [];
   }
