@@ -3711,6 +3711,7 @@ if (suggestion.gpsDistFactor != null) prof.gpsDistCorrectionFactor = suggestion.
 if (suggestion.cadFactor != null) prof.cadCorrectionFactor = suggestion.cadFactor;
 if (suggestion.paceFactor != null) prof.paceCorrectionFactor = suggestion.paceFactor; // [추가]
 }
+pushCalibHistory(prof, pos, override.appliedAt); // [추가 2026-09-24] 위치별 최근 3회 적용 이력 (INFO 탭 / SHOW CURRENT DATA 공용)
 return override;
 }
 // [추가] 개인 맞춤 피드백 생성 함수
@@ -4126,6 +4127,130 @@ if (modal) modal.classList.remove('is-open');
 function getPosLabel(pos, isKo) {
 const m = getPosLabelMap(isKo);
 return m[pos] || (isKo ? pos : pos.toUpperCase());
+}
+// ========== [추가 2026-09-24] 캘리브레이션 적용 이력 (위치별 최근 3회) ==========
+// INFO 탭(renderCalibStatus)과 SETTINGS > SHOW CURRENT DATA(toggleCurrentData)가 같은
+// buildCalibHistoryRows()를 써서 똑같은 방식으로 "오래된 → 최신" 3단계를 표시한다.
+// 이력은 prof.motionCalibHistory[pos] = [{t, gctFallbackRatio, ..., stride, gps, cad, pace}, ...]
+// (적용 직후의 "실효값" 스냅샷). 이력이 없는 기존 데이터는 UNDO 스냅샷(직전 상태) + 현재값으로 즉석 복원한다.
+const CALIB_HISTORY_MAX = 3;
+const CALIB_HISTORY_FIELDS = [
+  { key: 'gctFallbackRatio', ko: 'gctFallbackRatio', en: 'gctFallbackRatio', dec: 3 },
+  { key: 'vertScale', ko: 'vertScale', en: 'vertScale', dec: 3 },
+  { key: 'rotRejectThreshold', ko: 'rotRejectThreshold', en: 'rotRejectThreshold', dec: 0 },
+  { key: 'groundThreshold', ko: 'groundThreshold', en: 'groundThreshold', dec: 2 },
+  { key: 'impactThreshold', ko: 'impactThreshold', en: 'impactThreshold', dec: 2 },
+  { key: 'stride', ko: '보폭계수 stride', en: 'stride', dec: 3, factor: true },
+  { key: 'gps', ko: 'GPS거리계수 gps', en: 'gps', dec: 3, factor: true },
+  { key: 'cad', ko: '케이던스 cad', en: 'cad', dec: 3, factor: true },
+  { key: 'pace', ko: '페이스 pace', en: 'pace', dec: 3, factor: true }
+];
+function calibEffectiveSnapshot(prof, pos, at) {
+  prof = prof || {};
+  const cm = DEVICE_MOTION_PROFILES[pos] || DEVICE_MOTION_PROFILES.chest;
+  const ov = (prof.motionCalibOverrides && prof.motionCalibOverrides[pos]) || {};
+  const snap = { t: at || ov.appliedAt || null };
+  ['gctFallbackRatio', 'vertScale', 'rotRejectThreshold', 'groundThreshold', 'impactThreshold'].forEach(function(k) {
+    snap[k] = (ov[k] != null) ? ov[k] : cm[k];
+  });
+  if (!isMotionOnlyPos(pos)) {
+    const df = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || { stride: 1.0, gps: 1.0, cad: 1.0, pace: 1.0 };
+    const pick = function(mapKey, d) {
+      const m = prof[mapKey];
+      return (m && typeof m[pos] === 'number' && m[pos] > 0) ? m[pos] : d;
+    };
+    snap.stride = pick('strideCorrectionFactorByPos', df.stride);
+    snap.gps = pick('gpsDistCorrectionFactorByPos', df.gps);
+    snap.cad = pick('cadCorrectionFactorByPos', df.cad);
+    snap.pace = pick('paceCorrectionFactorByPos', df.pace);
+  }
+  return snap;
+}
+// UNDO 스냅샷(= 직전 적용 "이전" 상태)을 이력 한 칸 형태로 변환
+function calibSnapshotFromUndo(pos, undo) {
+  const cm = DEVICE_MOTION_PROFILES[pos] || DEVICE_MOTION_PROFILES.chest;
+  const po = undo.prevOverride || {};
+  const snap = { t: po.appliedAt || null };
+  ['gctFallbackRatio', 'vertScale', 'rotRejectThreshold', 'groundThreshold', 'impactThreshold'].forEach(function(k) {
+    snap[k] = (po[k] != null) ? po[k] : cm[k];
+  });
+  if (!isMotionOnlyPos(pos)) {
+    const df = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || { stride: 1.0, gps: 1.0, cad: 1.0, pace: 1.0 };
+    snap.stride = (typeof undo.prevStrideCorrectionFactor === 'number') ? undo.prevStrideCorrectionFactor : df.stride;
+    snap.gps = (typeof undo.prevGpsDistCorrectionFactor === 'number') ? undo.prevGpsDistCorrectionFactor : df.gps;
+    snap.cad = (typeof undo.prevCadCorrectionFactor === 'number') ? undo.prevCadCorrectionFactor : df.cad;
+    snap.pace = (typeof undo.prevPaceCorrectionFactor === 'number') ? undo.prevPaceCorrectionFactor : df.pace;
+  }
+  return snap;
+}
+function calibSnapEqual(a, b) {
+  if (!a || !b) return false;
+  return CALIB_HISTORY_FIELDS.every(function(f) {
+    const x = a[f.key], y = b[f.key];
+    if (typeof x === 'number' && typeof y === 'number') return Math.abs(x - y) < 1e-9;
+    return x === y;
+  });
+}
+// 적용 직후 호출: 이력에 "지금 실효값"을 한 칸 추가(최근 3개만 유지). 첫 이력이면 적용 직전 상태를 먼저 심는다.
+function pushCalibHistory(prof, pos, appliedAt) {
+  if (!prof.motionCalibHistory) prof.motionCalibHistory = {};
+  const h = Array.isArray(prof.motionCalibHistory[pos]) ? prof.motionCalibHistory[pos] : [];
+  if (!h.length) {
+    const undo = prof.motionCalibUndos && prof.motionCalibUndos[pos];
+    if (undo) h.push(calibSnapshotFromUndo(pos, undo));
+  }
+  const cur = calibEffectiveSnapshot(prof, pos, appliedAt);
+  if (!h.length || !calibSnapEqual(h[h.length - 1], cur)) h.push(cur);
+  prof.motionCalibHistory[pos] = h.slice(-CALIB_HISTORY_MAX);
+}
+// 표시용 이력: 저장된 이력 + (리셋/복원 등으로 마지막 이력과 현재값이 다르면) 현재값을 끝에 덧붙여 항상 "지금 값"으로 끝난다.
+function getCalibHistory(prof, pos) {
+  prof = prof || {};
+  const h = Array.isArray(prof.motionCalibHistory && prof.motionCalibHistory[pos]) ? prof.motionCalibHistory[pos].slice() : [];
+  if (!h.length) {
+    const undo = prof.motionCalibUndos && prof.motionCalibUndos[pos];
+    if (undo) h.push(calibSnapshotFromUndo(pos, undo));
+  }
+  const cur = calibEffectiveSnapshot(prof, pos);
+  if (!h.length || !calibSnapEqual(h[h.length - 1], cur)) h.push(cur);
+  return h.slice(-CALIB_HISTORY_MAX);
+}
+function calibShortDate(t, isKo) {
+  if (!t) return isKo ? '기본값' : 'base';
+  const d = new Date(t);
+  if (isNaN(d.getTime())) return isKo ? '기본값' : 'base';
+  return (d.getMonth() + 1) + '.' + d.getDate() + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+// 위치 하나의 "최근 3회 적용값" 표(HTML). 왼쪽=오래된 값 → 오른쪽=최신(노란색 굵게), 마지막 두 값이 다르면 ▲/▼.
+function buildCalibHistoryRows(prof, pos, isKo) {
+  const hist = getCalibHistory(prof, pos);
+  const motionOnly = isMotionOnlyPos(pos);
+  let html = '<div style="font-size:var(--fs-xxs); line-height:1.9;">';
+  CALIB_HISTORY_FIELDS.forEach(function(f) {
+    if (motionOnly && f.factor) return;
+    const vals = hist.map(function(h) { return h[f.key]; });
+    const last = vals.length - 1;
+    const valueHtml = vals.map(function(v, i) {
+      const txt = (typeof v === 'number') ? v.toFixed(f.dec) : '-';
+      const color = (i === last) ? '#ffcc44' : (i === last - 1 ? '#999' : '#666');
+      const span = (i === last) ? '<b style="color:' + color + ';">' + txt + '</b>' : '<span style="color:' + color + ';">' + txt + '</span>';
+      return span;
+    }).join(' → ');
+    let arrow = '';
+    if (vals.length >= 2) {
+      const a = vals[last - 1], b = vals[last];
+      if (typeof a === 'number' && typeof b === 'number' && Math.abs(b - a) > 1e-9) {
+        arrow = ' <span style="color:#ffcc44;">' + (b > a ? '▲' : '▼') + '</span>';
+      }
+    }
+    html += '<div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:2px 8px;">'
+      + '<span style="color:#888;">' + (isKo ? f.ko : f.en) + '</span>'
+      + '<span>' + valueHtml + arrow + '</span></div>';
+  });
+  html += '<div style="color:#666; margin-top:4px;">'
+    + hist.map(function(h, i) { return '#' + (i + 1) + ' ' + calibShortDate(h.t, isKo); }).join(' · ')
+    + '</div></div>';
+  return html;
 }
 // ========== RunningStorage ==========
 class RunningStorage {
@@ -6606,32 +6731,9 @@ const order = ['chest', 'waist', 'armband', 'hand', 'freerun'];
 const overridesMap = prof.motionCalibOverrides || {};
 const factorMapKeys = { stride: 'strideCorrectionFactorByPos', gps: 'gpsDistCorrectionFactorByPos', cad: 'cadCorrectionFactorByPos', pace: 'paceCorrectionFactorByPos' };
 
-// 한 항목(committed → prev → current)을 비교해서 렌더링.
-// [추가] prevVal(직전 캘리 적용 전 undo 스냅샷 값)을 옵션으로 받아 최대 3단계로 표시.
-// 값이 이전 단계와 같으면 생략해서 실제로 바뀐 구간만 화살표로 이어붙인다.
-function row(label, committedVal, prevVal, currentVal, fmt) {
-  const cf = fmt ? fmt(committedVal) : committedVal;
-  const pf = (prevVal != null) ? (fmt ? fmt(prevVal) : prevVal) : null;
-  const nf = fmt ? fmt(currentVal) : currentVal;
-  const steps = [{ v: cf, color: '#666' }];
-  if (pf != null && String(pf) !== String(steps[steps.length - 1].v)) {
-    steps.push({ v: pf, color: '#999' });
-  }
-  if (String(nf) !== String(steps[steps.length - 1].v)) {
-    steps.push({ v: nf, color: '#ffcc44', bold: true });
-  }
-  const valueHtml = steps.map(function(s, i) {
-    const span = s.bold ? ('<b style="color:' + s.color + ';">' + s.v + '</b>') : ('<span style="color:' + s.color + ';">' + s.v + '</span>');
-    return i === 0 ? span : (' → ' + span);
-  }).join('');
-  return '<div style="display:flex; justify-content:space-between; gap:8px;">'
-    + '<span style="color:#888;">' + label + '</span>'
-    + '<span>' + valueHtml + '</span></div>';
-}
-
 let html = '<div class="c69">';
 html += '<div class="c37">' +
-  (isKo ? '회색 = 커밋+다운로드했을 때 값. 중간 회색 = 직전 캘리브레이션 적용 전 값. 노란색 = 지금 실제로 적용 중인 값(다른 경우만 단계별로 표시).' : 'Grey = value as of last commit/download. Mid-grey = value before the last calibration apply. Yellow = currently applied value (shown only where it differs, step by step).') +
+  (isKo ? '위치별 최근 3회 적용값(왼쪽 오래된 값 → 오른쪽 최신). 노란색 = 지금 적용 중인 값, ▲▼ = 직전 대비 변화. CHANGED 표시는 커밋된 기본값과 다른 위치.' : 'Last 3 applied values per position (oldest on the left → newest on the right). Yellow = currently applied, ▲▼ = change vs. previous. CHANGED = differs from the committed default.') +
   '</div>';
 // [추가] 각 항목이 무슨 의미인지는 INFO 탭 이론 가이드에 별도 설명 카드로 정리해둠 — 여긴 링크만.
 html += '<div style="font-size:var(--fs-xxs); color:#666; margin-bottom:10px;">' +
@@ -6660,23 +6762,6 @@ order.forEach(function(pos) {
     cad: (prof.cadCorrectionFactorByPos && typeof prof.cadCorrectionFactorByPos[pos] === 'number') ? prof.cadCorrectionFactorByPos[pos] : committedFactors.cad,
     pace: (prof.paceCorrectionFactorByPos && typeof prof.paceCorrectionFactorByPos[pos] === 'number') ? prof.paceCorrectionFactorByPos[pos] : committedFactors.pace
   };
-  // [추가] 바로 직전 캘리 적용 전 undo 스냅샷 — 있으면 committed와 current 사이 "이전 값" 단계로 표시.
-  const undo = (prof.motionCalibUndos && prof.motionCalibUndos[pos]) || null;
-  const prevOv = undo ? undo.prevOverride : null;
-  const prevMotion = undo ? {
-    gctFallbackRatio: (prevOv && prevOv.gctFallbackRatio != null) ? prevOv.gctFallbackRatio : committedMotion.gctFallbackRatio,
-    vertScale: (prevOv && prevOv.vertScale != null) ? prevOv.vertScale : committedMotion.vertScale,
-    rotRejectThreshold: (prevOv && prevOv.rotRejectThreshold != null) ? prevOv.rotRejectThreshold : committedMotion.rotRejectThreshold,
-    groundThreshold: (prevOv && prevOv.groundThreshold != null) ? prevOv.groundThreshold : committedMotion.groundThreshold,
-    impactThreshold: (prevOv && prevOv.impactThreshold != null) ? prevOv.impactThreshold : committedMotion.impactThreshold
-  } : null;
-  const prevFactors = undo ? {
-    stride: (typeof undo.prevStrideCorrectionFactor === 'number') ? undo.prevStrideCorrectionFactor : committedFactors.stride,
-    gps: (typeof undo.prevGpsDistCorrectionFactor === 'number') ? undo.prevGpsDistCorrectionFactor : committedFactors.gps,
-    cad: (typeof undo.prevCadCorrectionFactor === 'number') ? undo.prevCadCorrectionFactor : committedFactors.cad,
-    pace: (typeof undo.prevPaceCorrectionFactor === 'number') ? undo.prevPaceCorrectionFactor : committedFactors.pace
-  } : null;
-
   const posChanged = ov != null
     || curFactors.stride !== committedFactors.stride
     || curFactors.gps !== committedFactors.gps
@@ -6690,21 +6775,11 @@ order.forEach(function(pos) {
     POS_LABEL[pos] + (isCur ? ('  ← ' + (isKo ? '현재 위치' : 'CURRENT')) : '') +
     (posChanged ? '  <span style="color:#ffcc44; font-size:var(--fs-xxs);">● ' + (isKo ? '변경됨' : 'CHANGED') + '</span>' : '') +
     '</div>';
-  html += '<div style="font-size:var(--fs-xxs); line-height:1.9;">';
-  html += row('gctFallbackRatio', committedMotion.gctFallbackRatio, prevMotion && prevMotion.gctFallbackRatio, curMotion.gctFallbackRatio, function(v){ return v.toFixed(3); });
-  html += row('vertScale', committedMotion.vertScale, prevMotion && prevMotion.vertScale, curMotion.vertScale);
-  html += row('rotRejectThreshold', committedMotion.rotRejectThreshold, prevMotion && prevMotion.rotRejectThreshold, curMotion.rotRejectThreshold);
-  html += row('groundThreshold', committedMotion.groundThreshold, prevMotion && prevMotion.groundThreshold, curMotion.groundThreshold);
-  html += row('impactThreshold', committedMotion.impactThreshold, prevMotion && prevMotion.impactThreshold, curMotion.impactThreshold);
+  html += buildCalibHistoryRows(prof, pos, isKo); // [수정 2026-09-24] INFO 탭과 동일한 최근 3회 이력 표시
   if (isMotionOnlyPos(pos)) {
-    html += '<div style="color:#666;">' + (isKo ? '보정계수 없음 (케이던스·거리·페이스는 네이티브/GPS 그대로)' : 'No correction factors (cadence, distance and pace stay native/GPS)') + '</div>';
-  } else {
-  html += row((isKo ? '보폭계수 stride' : 'stride'), committedFactors.stride, prevFactors && prevFactors.stride, curFactors.stride, function(v){ return v.toFixed(3); });
-  html += row('gps', committedFactors.gps, prevFactors && prevFactors.gps, curFactors.gps, function(v){ return v.toFixed(3); });
-  html += row((isKo ? '케이던스 cad' : 'cad'), committedFactors.cad, prevFactors && prevFactors.cad, curFactors.cad, function(v){ return v.toFixed(3); });
-  html += row('pace', committedFactors.pace, prevFactors && prevFactors.pace, curFactors.pace, function(v){ return v.toFixed(3); });
+    html += '<div style="font-size:var(--fs-xxs); color:#666;">' + (isKo ? '보정계수 없음 (케이던스·거리·페이스는 네이티브/GPS 그대로)' : 'No correction factors (cadence, distance and pace stay native/GPS)') + '</div>';
   }
-  html += '</div></div>';
+  html += '</div>';
 });
 
 if (!anyChanged) {
@@ -17127,14 +17202,6 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       const cadVal2 = curProf && curProf.cadCorrectionFactorByPos ? curProf.cadCorrectionFactorByPos[pos] : null;
       const paceVal2 = curProf && curProf.paceCorrectionFactorByPos ? curProf.paceCorrectionFactorByPos[pos] : null; // [추가]
 
-      const parts = [];
-      if (ov.gctFallbackRatio != null) parts.push('gctFallbackRatio: ' + ov.gctFallbackRatio);
-      if (ov.rotRejectThreshold != null) parts.push('rotRejectThreshold: ' + ov.rotRejectThreshold);
-      if (ov.vertScale != null) parts.push('vertScale: ' + ov.vertScale);
-      if (typeof strideVal === 'number' && strideVal !== 1.0) parts.push((isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ': ' + strideVal.toFixed(3));
-      if (typeof gpsVal === 'number' && gpsVal !== 1.0) parts.push((isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + gpsVal.toFixed(3));
-      if (typeof cadVal2 === 'number' && cadVal2 !== 1.0) parts.push((isKo ? '케이던스 보정계수' : 'cadCorrectionFactor') + ': ' + cadVal2.toFixed(3));
-      if (typeof paceVal2 === 'number' && paceVal2 !== 1.0) parts.push((isKo ? '페이스 전용 보정계수' : 'paceCorrectionFactor') + ': ' + paceVal2.toFixed(3)); // [추가]
       const dateTxt = ov.appliedAt ? fmtDate(new Date(ov.appliedAt).getTime()) : '';
 
       // [추가] 코드(applyDevicePos)에 그대로 붙여넣을 수 있는 스니펫 생성.
@@ -17164,7 +17231,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
 
       return '<div class="garmin-import-item" style="border-color:#3a3a2a; margin-bottom:10px;">'
         + '<div style="font-size:var(--fs-xxs); color:var(--primary); font-weight:900; margin-bottom:6px;">' + posLabel + ' — ' + (isKo ? '적용된 보정값' : 'CUSTOM CALIBRATION APPLIED') + '</div>'
-        + '<div style="font-size:var(--fs-xs); color:#ccc; line-height:1.6;">' + parts.join('<br>') + '</div>'
+        + buildCalibHistoryRows(curProf, pos, isKo)
         + (dateTxt ? '<div style="font-size:var(--fs-xxs); color:#666; margin-top:6px;">' + (isKo ? '적용일: ' : 'Applied: ') + dateTxt + '</div>' : '')
         + '<div style="font-size:var(--fs-xxs); color:#888; font-weight:800; margin-top:12px; margin-bottom:4px;">' + (isKo ? '코드 반영용 스니펫 (applyDevicePos / defaultProfile)' : 'CODE SNIPPET (applyDevicePos / defaultProfile)') + '</div>'
         + '<pre style="background:#000; border:1px solid #2a2a2a; border-radius:8px; padding:10px; font-size:var(--fs-xxs); color:#0f0; white-space:pre-wrap; word-break:break-all; margin:0;">' + snippet.replace(/</g,'&lt;') + '</pre>'
@@ -17422,6 +17489,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       }
       delete undos[pos]; // [수정] 이 위치의 되돌리기 스냅샷만 지운다 (다른 위치는 그대로 유지)
       prof.motionCalibUndos = undos;
+      // [추가 2026-09-24] 되돌린 적용분은 이력에서도 뺀다
+      if (prof.motionCalibHistory && Array.isArray(prof.motionCalibHistory[pos]) && prof.motionCalibHistory[pos].length) prof.motionCalibHistory[pos].pop();
       storage.saveProfile(prof);
 
       if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
