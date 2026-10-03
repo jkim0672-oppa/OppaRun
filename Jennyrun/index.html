@@ -1279,6 +1279,19 @@ flex-wrap: wrap; justify-content: center; white-space: nowrap;
 .bar.hl { background: var(--primary); }
 .bar-label { font-size:var(--fs-xxs); color: var(--text-dim); font-weight: 800; margin-top: 6px; white-space: nowrap; }
 .bar-label.hl { color: var(--primary); }
+/* [추가] 막대그래프 좌우 스크롤: 화면에는 --n 칸이 보이고 나머지(지난 기록)는 왼쪽으로 스와이프 */
+.bar-chart.scroll { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+.bar-chart.scroll::-webkit-scrollbar { display: none; }
+.bar-col.tap { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.bar-col.sel .bar { box-shadow: 0 0 0 2px #fff; }
+.bar-col.sel .bar-label { color: #fff; }
+.bar-detail .history-item { margin: 10px 0 0; }
+.bar-chart.scroll .bar-col { flex: 0 0 calc((100% - (var(--n) - 1) * 4px) / var(--n)); }
+/* [추가] BY POSITION 카드: 제목을 누르면 해당 기록 목록(리스트 카드와 동일)이 펼쳐짐 */
+.pos-stat-toggle.clickable { cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent; padding: 8px 12px 8px 0; margin: -8px 0; }
+.pos-stat-toggle .pos-arrow { display: inline-block; width: 14px; color: var(--primary); }
+.pos-detail-list { margin-top: 2px; }
+.pos-detail-list .history-item { margin: 10px 0 0; }
 .streak-banner { display: flex; align-items: center; justify-content: space-around; background: linear-gradient(135deg, rgba(0,255,136,0.14), rgba(0,255,136,0.02)); border: 1.5px solid var(--primary); border-radius: 14px; padding: 13px 10px; margin-top: 4px; } /* [수정 2026-08-02] 13px로 통일 — 설정페이지 dropdown-select/gender-btn/이메일 인풋과 동일한 세로 패딩 */
 .streak-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .streak-value { font-size:var(--fs-xl); font-weight: 900; color: var(--primary); line-height: 1; }
@@ -7256,7 +7269,10 @@ updateHistoryList() {
 const h = storage.loadHistory(); const lang = storage.getLang(); const t = translations[lang] || translations['en'];
 if (!this.dom.historyList) return;
 if (h.length === 0) { this.dom.historyList.innerHTML = '<div class="c31">' + t.noRec + '</div>'; return; }
-this.dom.historyList.innerHTML = h.map(r => {
+this.dom.historyList.innerHTML = h.map(r => this.buildHistoryItemHtml(r, t, lang)).join('');
+}
+// [리팩토링] 리스트 카드 1개 HTML. LIST 탭과 TOTAL > BY POSITION 펼침 목록이 같이 사용한다.
+buildHistoryItemHtml(r, t, lang) {
 let displayDist = parseFloat(r.dist);
 if(this.currentUnit === 'mile') displayDist = displayDist * 0.621371;
 const distStr = displayDist.toFixed(2);
@@ -7372,7 +7388,6 @@ this.buildHrBoxHtml(r, t) +
 '<button class="btn-h-delete" onclick="ui.openConfirmModal(' + r.id + ')">' + t.deleteBtn + '</button>' +
 '</div>' +
 '</div>';
-}).join('');
 }
 // [추가 2026-09-19] 리스트 카드의 PACING 그룹 (페이스 안정성 / 전·후반 차 / 케이던스 유지 / 심박 드리프트).
 // 계산 가능한 항목만 그리고, 하나도 없으면 그룹 자체를 그리지 않는다(빈 칸 '--' 방지).
@@ -7449,6 +7464,7 @@ getBalanceLevel(gctBal) {
 getBalanceColor(gctBal) { const l = this.getBalanceLevel(gctBal); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':l==='danger'?'var(--danger)':'#aaa'; }
 changeStatFilter(filterType) {
 this.currentStatFilter = filterType;
+this._barSel = null;
 document.querySelectorAll('#stat-period-nav .stat-filter-btn').forEach(btn => btn.classList.remove('active'));
 const activeBtn = document.getElementById('stat-filter-' + filterType);
 if(activeBtn) activeBtn.classList.add('active');
@@ -7457,6 +7473,8 @@ this.updateTotalStats();
 // [신규] 통계 페이지 RUN/WALK 분리 토글 (러닝 통계 로직/필터와 완전히 분리해서 보여주기 위함)
 changeStatActivityType(type) {
 this.currentStatActivityType = type;
+this._posOpen = {};
+this._barSel = null;
 document.querySelectorAll('#stat-activity-type-nav .stat-filter-btn').forEach(btn => btn.classList.remove('active'));
 const activeBtn = document.getElementById('stat-type-' + type);
 if(activeBtn) activeBtn.classList.add('active');
@@ -7603,61 +7621,119 @@ return '<div class="compare-banner">' +
 // [신규] 기간별 추이 막대그래프: WEEKLY=최근 7일 일별, MONTHLY=최근 4주 주별, YEARLY=최근 12개월 월별.
 // 전부 "오늘 기준 롤링" 방식이라 항상 오늘/이번주/이번달이 마지막 칸에 오고 미래의 빈 칸이 생기지 않음.
 buildStatBarChartHtml(h, t) {
+// [수정] 좌우로 스크롤해서 지난 기록도 볼 수 있게 함. 화면에는 기존과 같은 개수(주간 7칸/월간 4칸/연간 12칸)가
+// 보이고, 가장 오래된 기록 날짜까지(최대 일간 365일/주간 104주/월간 60개월) 왼쪽으로 확장된다.
 const filter = this.currentStatFilter;
 const cap = filter.charAt(0).toUpperCase() + filter.slice(1);
 const today = new Date(); today.setHours(0,0,0,0);
-let bars = [];
-if (filter === 'weekly') {
-const distByDay = {};
+const DAY = 86400000;
+let earliest = null;
 h.forEach(r => {
 const d = this.parseRecordDate(r.date);
 if (isNaN(d.getTime())) return;
-distByDay[this.dayKey(d)] = (distByDay[this.dayKey(d)] || 0) + (parseFloat(r.dist) || 0);
+const dd = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+if (!earliest || dd < earliest) earliest = dd;
 });
-for (let i = 6; i >= 0; i--) {
+const daysBack = earliest ? Math.max(0, Math.round((today - earliest) / DAY)) : 0;
+let bars = [];
+let visible = 7;
+if (filter === 'weekly') {
+visible = 7;
+const n = Math.min(365, Math.max(7, daysBack + 1));
+const distByDay = {}, idsByDay = {};
+h.forEach(r => {
+const d = this.parseRecordDate(r.date);
+if (isNaN(d.getTime())) return;
+const k = this.dayKey(d);
+distByDay[k] = (distByDay[k] || 0) + (parseFloat(r.dist) || 0);
+(idsByDay[k] = idsByDay[k] || []).push(r.id);
+});
+for (let i = n - 1; i >= 0; i--) {
 const d = new Date(today); d.setDate(d.getDate() - i);
 const val = distByDay[this.dayKey(d)] || 0;
-bars.push({ label: (d.getMonth()+1) + '/' + d.getDate(), val: val, hl: i === 0 });
+bars.push({ label: (d.getMonth()+1) + '/' + d.getDate(), val: val, hl: i === 0, ids: idsByDay[this.dayKey(d)] || [] });
 }
 } else if (filter === 'monthly') {
-const weekSums = [0,0,0,0];
+visible = 4;
+const W = Math.min(104, Math.max(4, Math.floor(daysBack / 7) + 1));
+const weekSums = new Array(W).fill(0);
+const weekIds = Array.from({ length: W }, () => []);
 h.forEach(r => {
 const d = this.parseRecordDate(r.date);
 if (isNaN(d.getTime())) return;
-const diffDays = Math.floor((today - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
-if (diffDays < 0 || diffDays >= 28) return;
-const bucket = 3 - Math.floor(diffDays / 7);
-if (bucket >= 0 && bucket <= 3) weekSums[bucket] += parseFloat(r.dist) || 0;
+const diffDays = Math.round((today - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / DAY);
+if (diffDays < 0 || diffDays >= W * 7) return;
+weekSums[W - 1 - Math.floor(diffDays / 7)] += parseFloat(r.dist) || 0;
+weekIds[W - 1 - Math.floor(diffDays / 7)].push(r.id);
 });
-bars = weekSums.map((v, idx) => ({ label: (idx+1) + (t.weekUnit || 'W'), val: v, hl: idx === 3 }));
+// 라벨 = 그 주(7일 구간)의 시작 날짜
+bars = weekSums.map((v, idx) => {
+const weeksAgo = W - 1 - idx;
+const sd = new Date(today); sd.setDate(sd.getDate() - (weeksAgo * 7 + 6));
+return { label: (sd.getMonth()+1) + '/' + sd.getDate(), val: v, hl: idx === W - 1, ids: weekIds[idx] };
+});
 } else {
+visible = 12;
 const nowY = today.getFullYear(), nowM = today.getMonth();
-const monthSums = new Array(12).fill(0);
-const monthLabels = new Array(12).fill('');
-for (let i = 0; i < 12; i++) {
-const md = new Date(nowY, nowM - (11 - i), 1);
-monthLabels[i] = (md.getMonth() + 1) + '';
+const monthsBack = earliest ? Math.max(0, (nowY*12+nowM) - (earliest.getFullYear()*12+earliest.getMonth())) : 0;
+const M = Math.min(60, Math.max(12, monthsBack + 1));
+const monthSums = new Array(M).fill(0);
+const monthIds = Array.from({ length: M }, () => []);
+const monthLabels = new Array(M).fill('');
+for (let i = 0; i < M; i++) {
+const md = new Date(nowY, nowM - (M - 1 - i), 1);
+// 1월(그리고 맨 왼쪽 칸)에는 연도를 붙여 '26.1' 처럼 표시해서 해가 바뀌는 지점을 구분
+monthLabels[i] = (md.getMonth() === 0 || i === 0) ? ((md.getFullYear() % 100) + '.' + (md.getMonth() + 1)) : ((md.getMonth() + 1) + '');
 }
 h.forEach(r => {
 const d = this.parseRecordDate(r.date);
 if (isNaN(d.getTime())) return;
 const monthsAgo = (nowY*12+nowM) - (d.getFullYear()*12+d.getMonth());
-if (monthsAgo >= 0 && monthsAgo < 12) monthSums[11-monthsAgo] += parseFloat(r.dist) || 0;
+if (monthsAgo >= 0 && monthsAgo < M) { monthSums[M-1-monthsAgo] += parseFloat(r.dist) || 0; monthIds[M-1-monthsAgo].push(r.id); }
 });
-bars = monthSums.map((v, idx) => ({ label: monthLabels[idx], val: v, hl: idx === 11 }));
+bars = monthSums.map((v, idx) => ({ label: monthLabels[idx], val: v, hl: idx === M - 1, ids: monthIds[idx] }));
 }
 const maxVal = Math.max.apply(null, bars.map(b => b.val).concat([0.1]));
 const toUnit = v => this.currentUnit === 'km' ? v : (v * 0.621371);
-const barsHtml = bars.map(b => {
+// [추가] 막대를 누르면 그 날/주/월의 기록 목록(리스트 카드와 동일)이 그래프 아래에 펼쳐진다.
+this._barIds = bars.map(b => b.ids);
+this._barLabels = bars.map(b => b.label);
+if (this._barSel == null || !this._barIds[this._barSel] || this._barIds[this._barSel].length === 0) this._barSel = null;
+const barsHtml = bars.map((b, bi) => {
 const hPct = Math.max(4, Math.round((b.val / maxVal) * 100));
-return '<div class="bar-col">' +
+return '<div class="bar-col' + (b.ids.length ? ' tap' : '') + (this._barSel === bi ? ' sel' : '') + '"' + (b.ids.length ? ' onclick="ui.toggleBarDetail(' + bi + ')"' : '') + '>' +
 '<div class="bar-val">' + (b.val > 0 ? toUnit(b.val).toFixed(1) : '') + '</div>' +
 '<div class="bar ' + (b.hl ? 'hl' : '') + '" style="height:' + hPct + '%;"></div>' +
 '<div class="bar-label ' + (b.hl ? 'hl' : '') + '">' + b.label + '</div>' +
 '</div>';
 }).join('');
 return '<div class="stats-section-title">' + (t['chartTitle' + cap] || '') + '</div>' +
-'<div class="bar-chart">' + barsHtml + '</div>';
+'<div class="bar-chart scroll" style="--n:' + visible + ';">' + barsHtml + '</div>' +
+'<div class="bar-detail" id="bar-detail">' + this.buildBarDetailInner(this._barSel) + '</div>';
+}
+// [추가] 막대 세부정보 영역 내용 (선택 없으면 빈 문자열)
+buildBarDetailInner(bi) {
+if (bi == null || !this._barIds || !this._barIds[bi] || this._barIds[bi].length === 0) return '';
+const lang = storage.getLang();
+const t = translations[lang] || translations['en'];
+const ids = new Set(this._barIds[bi]);
+const recs = storage.loadHistory().filter(r => ids.has(r.id));
+return '<div class="stats-section-title">' + this._barLabels[bi] + ' · ' + recs.length + '</div>' + recs.map(r => this.buildHistoryItemHtml(r, t, lang)).join('');
+}
+// [추가] 막대 탭: 같은 막대를 다시 누르면 접힘. 그래프만 갱신(전체 다시 그리지 않음).
+toggleBarDetail(bi) {
+this._barSel = (this._barSel === bi) ? null : bi;
+const cols = document.querySelectorAll('#total-stats-container .bar-chart.scroll .bar-col');
+cols.forEach((c, i) => c.classList.toggle('sel', i === this._barSel));
+const box = document.getElementById('bar-detail');
+if (box) box.innerHTML = this.buildBarDetailInner(this._barSel);
+}
+// [추가] 막대그래프를 맨 오른쪽(=가장 최근)으로 스크롤. 렌더 직후 호출.
+scrollBarChartToEnd() {
+const el = this.dom.totalStatsContainer && this.dom.totalStatsContainer.querySelector('.bar-chart.scroll');
+if (!el) return;
+el.scrollLeft = el.scrollWidth;
+requestAnimationFrame(() => { el.scrollLeft = el.scrollWidth; });
 }
 // [신규] 일일추이 막대그래프 바로 밑에 붙는 "오늘 요약" 한줄 바.
 // 날짜/시간, 총거리, 총시간, 총칼로리, 장소를 한 줄(font-size 13px)로 표시.
@@ -7824,12 +7900,35 @@ boxes = box(t.dist || 'DIST', distVal, distUnit, tagSum) + box(t.posCount || 'CO
 box(t.cal || 'KCAL', n > 0 ? kcal : null, 'kcal', tagSum) + box(t.cadence || 'CADENCE', cad, 'SPM', tagAvg) + box(t.powerLabel || 'POWER', pw, 'W', tagAvg) +
 box(t.gct || 'GCT', gct, 'ms', tagAvg) + box(t.flight || 'FLIGHT', fl, '%', tagAvg) + box(t.statVert || 'VERT', vert, '%', tagAvg);
 }
-return '<div class="pos-stat-card"><div class="pos-stat-head"><span class="h-group-title">' + g.name + (n > 0 ? ' · ' + n : '') + '</span>' +
+const isOpen = n > 0 && !!(this._posOpen && this._posOpen[g.key]);
+const detailHtml = isOpen ? rs.map(r => this.buildHistoryItemHtml(r, t, lang)).join('') : '';
+return '<div class="pos-stat-card"><div class="pos-stat-head"><span class="h-group-title pos-stat-toggle' + (n > 0 ? ' clickable' : '') + '"' + (n > 0 ? ' onclick="ui.togglePosDetail(\'' + g.key + '\')"' : '') + '>' + (n > 0 ? '<span class="pos-arrow" id="pos-arrow-' + g.key + '">' + (isOpen ? '\u25BE' : '\u25B8') + '</span>' : '') + g.name + (n > 0 ? ' · ' + n : '') + '</span>' +
 '<button class="btn-h-delete"' + (n > 0 ? '' : ' disabled') + ' onclick="ui.deletePosStats(\'' + g.key + '\')">' + (t.deleteBtn || 'DELETE') + '</button></div>' +
-'<div class="h-group-grid">' + boxes + '</div></div>';
+'<div class="h-group-grid">' + boxes + '</div>' +
+'<div class="pos-detail-list" id="pos-detail-' + g.key + '">' + detailHtml + '</div></div>';
 }).join('');
 const title = (isWalk || isFree) ? (t.posStatsTitleSingle || 'DETAIL') : (t.posStatsTitle || 'BY POSITION');
 return '<div class="stats-section-title">' + title + '</div>' + html;
+}
+// [추가] BY POSITION 카드 제목을 누르면 그 그룹의 기록 목록(리스트 카드와 동일)을 펼치고/접는다.
+// 전체 다시 그리기 없이 해당 영역만 갱신해서 스크롤 위치가 튀지 않는다.
+togglePosDetail(key) {
+const box = document.getElementById('pos-detail-' + key);
+if (!box) return;
+this._posOpen = this._posOpen || {};
+const open = !this._posOpen[key];
+this._posOpen[key] = open;
+const arrow = document.getElementById('pos-arrow-' + key);
+if (arrow) arrow.textContent = open ? '\u25BE' : '\u25B8';
+if (open) {
+const lang = storage.getLang();
+const t = translations[lang] || translations['en'];
+const ids = new Set((this._posStatIds && this._posStatIds[key]) || []);
+const recs = storage.loadHistory().filter(r => ids.has(r.id));
+box.innerHTML = recs.map(r => this.buildHistoryItemHtml(r, t, lang)).join('');
+} else {
+box.innerHTML = '';
+}
 }
 // [추가] 위치별 통계 카드의 삭제 버튼. 화면에 그려진(=현재 탭+선택 기간) 그 그룹의 기록만 삭제한다.
 // 정밀로그·위치별 보정값·크루에 이미 공유된 기록은 건드리지 않는다.
@@ -7962,6 +8061,7 @@ this.buildStatBarChartHtml(h, t) +
 (this.currentStatFilter === 'weekly' ? '' : ('<div class="stats-section-title">' + t.heatmapSectionTitle + '</div>' + this.buildHeatmapHtml(h, isKoStats)));
 if (filteredHistory.length === 0) {
 this.dom.totalStatsContainer.innerHTML = todayHtml + '<div style="text-align:center; padding:30px; color:#999; font-weight:900;">' + t.noRec + '</div>' + extraHtml + (statType === 'all' ? this.buildModeSplitHtml(filteredHistory, t) : this.buildPositionStatsHtml(filteredHistory, statType, t, lang));
+this.scrollBarChartToEnd();
 return;
 }
 let totalDist = 0, totalRuns = filteredHistory.length, totalKcal = 0, totalSeconds = 0;
@@ -8057,6 +8157,7 @@ todayHtml +
 (moreCards ? '<details class="stat-more"><summary>' + (t.statMoreBtn || 'MORE') + '</summary><div class="stat-grid-dashboard rp-compact">' + moreCards + '</div></details>' : '') +
 extraHtml +
 (statType === 'all' ? this.buildModeSplitHtml(filteredHistory, t) : this.buildPositionStatsHtml(filteredHistory, statType, t, lang));
+this.scrollBarChartToEnd();
 }
 // ── 히스토리 상세 / 러닝 진단(DIAGNOSIS) ──
 openDetail(id) {
