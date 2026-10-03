@@ -2932,6 +2932,15 @@ window.__nativeAlert = window.alert;
 window.alert = function(msg) { appAlert(msg); };
 
 // ========== 전역 상수 (문자열 오류 방지) ==========
+// [추가] 시간 표시 통일: 초(숫자) 또는 "mm:ss"/"hh:mm:ss" 문자열 -> "HH:MM:SS" (표시 전용, 저장 데이터는 그대로)
+function fmtHMS(v) {
+  let sec = 0;
+  if (typeof v === 'number') sec = v;
+  else if (typeof v === 'string') { const p = v.split(':').map(x => parseInt(x, 10) || 0); sec = p.length === 2 ? p[0]*60 + p[1] : (p.length === 3 ? p[0]*3600 + p[1]*60 + p[2] : 0); }
+  sec = Math.max(0, Math.round(sec) || 0);
+  const h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;
+  return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+}
 const INVALID_PACE = "--'--\"";
 // [수정] 진단 화면 미니 그래프 전용 구간 해상도. 지도 마커/SPLIT ANALYTICS 목록에 쓰이는
 // 기존 1km splits와는 별개(state.diagSplits)로, 100m(0.1km) 단위로 더 촘촘히 기록해
@@ -7275,7 +7284,7 @@ return '<div class="history-item">' +
 '</div>' +
 '<div class="c51">' +
 '<div class="c14">' + (t.time||'TIME') + '</div>' +
-'<div class="h-val-big">' + (r.time || '--') + '</div>' +
+'<div class="h-val-big">' + (r.time ? fmtHMS(r.time) : '--') + '</div>' +
 '</div>' +
 ((() => {
 const unit = storage.getUnit();
@@ -7688,6 +7697,21 @@ const distDisplay = toUnit(dist).toFixed(2) + ' ' + unitLabel;
 const hh = Math.floor(sec/3600), mm = Math.floor((sec%3600)/60), ss = sec%60;
 const timeDisplay = String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0') + ':' + String(ss).padStart(2,'0');
 const kcalDisplay = kcal + ' kcal';
+// [추가] 오늘 요약 확장: 횟수 / 평균 페이스 / 평균 심박 / 평균 케이던스 (모두 오늘 기록 합산 기준)
+const countDisplay = todayRecords.length + (isKo ? '회' : '×');
+const _secOfRec = r => { if (!r.time || typeof r.time !== 'string') return 0; const p = r.time.split(':').map(x => parseInt(x, 10) || 0); return p.length === 2 ? p[0]*60 + p[1] : (p.length === 3 ? p[0]*3600 + p[1]*60 + p[2] : 0); };
+let _hrW = 0, _hrT = 0, _cdW = 0, _cdT = 0;
+todayRecords.forEach(r => {
+const rs = _secOfRec(r), w = rs > 0 ? rs : 1;
+const hv = parseFloat(r.avgHr); if (hv > 0) { _hrW += hv * w; _hrT += w; }
+const cv = parseFloat(r.cadence); if (cv > 0) { _cdW += cv * w; _cdT += w; }
+});
+const hrDisplay = _hrT > 0 ? Math.round(_hrW / _hrT) + ' bpm' : '--';
+const cadDisplay = _cdT > 0 ? Math.round(_cdW / _cdT) + ' spm' : '--';
+// 평균 페이스 = 총 시간 / 총 거리 (런 여러 개일 때 페이스 평균이 아니라 전체 기준으로 계산)
+const _distU = toUnit(dist);
+let paceDisplay = '--';
+if (_distU > 0.01 && sec > 0) { let _ps = Math.round(sec / _distU); const _pm = Math.floor(_ps / 60), _pss = _ps % 60; paceDisplay = _pm + "'" + String(_pss).padStart(2,'0') + '"'; }
 const locId = 'today-summary-loc-' + latest.id;
 const _hasPath = !!(latest.path && latest.path.length > 0 && latest.path[0] && latest.path[0].length >= 2);
 const placeHolder = _hasPath ? (isKo ? '조회중…' : 'Loading…') : '--';
@@ -7703,11 +7727,19 @@ if (el) el.textContent = isKo ? '알 수 없음' : 'Unknown';
 return '<div class="today-summary-bar">' +
 '<span class="ts-item"><span class="ts-label">' + (isKo ? '오늘' : 'Today') + '</span><span class="ts-val">' + dateTimeDisplay + '</span></span>' +
 '<span class="ts-sep">/</span>' +
+'<span class="ts-item"><span class="ts-label">' + (isKo ? '횟수' : 'Count') + '</span><span class="ts-val">' + countDisplay + '</span></span>' +
+'<span class="ts-sep">/</span>' +
 '<span class="ts-item"><span class="ts-label">' + (isKo ? '거리' : 'Dist') + '</span><span class="ts-val">' + distDisplay + '</span></span>' +
 '<span class="ts-sep">/</span>' +
 '<span class="ts-item"><span class="ts-label">' + (isKo ? '시간' : 'Time') + '</span><span class="ts-val">' + timeDisplay + '</span></span>' +
 '<span class="ts-sep">/</span>' +
 '<span class="ts-item"><span class="ts-label">' + (isKo ? '칼로리' : 'Cal') + '</span><span class="ts-val">' + kcalDisplay + '</span></span>' +
+'<span class="ts-sep">/</span>' +
+'<span class="ts-item"><span class="ts-label">' + (isKo ? '페이스' : 'Pace') + '</span><span class="ts-val">' + paceDisplay + '</span></span>' +
+'<span class="ts-sep">/</span>' +
+'<span class="ts-item"><span class="ts-label">' + (isKo ? '케이던스' : 'Cad') + '</span><span class="ts-val">' + cadDisplay + '</span></span>' +
+'<span class="ts-sep">/</span>' +
+'<span class="ts-item"><span class="ts-label">' + (isKo ? '심박' : 'HR') + '</span><span class="ts-val">' + hrDisplay + '</span></span>' +
 '<span class="ts-sep">/</span>' +
 '<span class="ts-item"><span class="ts-label">' + (isKo ? '장소' : 'Place') + '</span><span class="ts-val" id="' + locId + '">' + placeHolder + '</span></span>' +
 '</div>';
@@ -7911,7 +7943,7 @@ const isKoStats = (lang === 'ko');
 const pr = this.computePersonalRecords(h);
 const bestPaceDisplay = pr.bestPaceSec ? (Math.floor(pr.bestPaceSec/60) + "'" + String(pr.bestPaceSec%60).padStart(2,'0') + '"') : '--';
 const longestDistDisplay = this.currentUnit === 'km' ? pr.longestDist.toFixed(2) + ' km' : (pr.longestDist * 0.621371).toFixed(2) + ' mi';
-const longestDurationDisplay = pr.longestDurationSec > 0 ? (Math.floor(pr.longestDurationSec/60) + ':' + String(pr.longestDurationSec%60).padStart(2,'0')) : '--';
+const longestDurationDisplay = pr.longestDurationSec > 0 ? fmtHMS(pr.longestDurationSec) : '--';
 const bestCadenceDisplay = pr.bestCadence !== null ? (pr.bestCadence + ' SPM') : '--';
 const bestStepsDisplay = pr.bestSteps !== null ? (pr.bestSteps + '') : '--';
 // [수정] 표시 순서: 오늘 요약 → 기간 요약 카드 → 기간 그래프 → 개인기록(전체 기간) → 활동 잔디 → 위치별/활동별
@@ -7994,7 +8026,7 @@ const avgStrideResult = countStride > 0 ? (sumStride / countStride).toFixed(2) :
 const _u = (x) => ' <span class="u-font-size-fs-xs">' + x + '</span>';
 const _card = (label, val, cls) => '<div class="card"><div class="label">' + label + '</div><div class="value' + (cls ? ' ' + cls : '') + '">' + val + '</div></div>';
 const _hh = Math.floor(totalSeconds/3600), _mm = Math.floor((totalSeconds%3600)/60), _ss = totalSeconds%60;
-const totalTimeDisplay = totalSeconds > 0 ? (_hh > 0 ? (_hh + ':' + String(_mm).padStart(2,'0') + ':' + String(_ss).padStart(2,'0')) : (_mm + ':' + String(_ss).padStart(2,'0'))) : '--';
+const totalTimeDisplay = fmtHMS(totalSeconds);
 const cDist = _card(t.totalDist, totalDistDisplay + ' ' + unitLabel, 'c25');
 const cPace = _card(t.avgPaceLabel, avgPaceStr);
 const cCal = _card(t.totalCal, totalKcal + ' kcal');
@@ -8422,7 +8454,7 @@ const _expandHint = '<div class="diag-graph-expand-hint">\u26F6 ' + t.tapToExpan
 const _wrapGraph = (key, svg, extraHtml) => svg ? ('<div class="diag-graph-wrap" onclick="ui.openDiagGraphFullscreen(\'' + key + '\',' + r.id + ')">' + svg + (extraHtml || '') + _expandHint + '</div>') : '';
 contentArea.innerHTML =
 '<div class="diag-card"><div class="diag-label">' + (effIsSimple ? (t.diagEffScoreSimple || t.diagEffScore) : t.diagEffScore) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + effColor + '">' + effScore + ' <span style="font-size:var(--fs-md);color:#aaa">/ 100</span></div>' + (effIsSimple ? '' : '<div class="diag-ref">Ref: ≥80</div>') + '</div><div class="diag-tip">' + effComment + '</div>' + (effScore !== '--' ? '<div style="margin-top:6px;font-size:var(--fs-xxs);color:#888;font-weight:700;">' + (effIsSimple ? (t.diagEffNoteSimple || '') : (t.diagEffNote || '')) + '</div>' : '') + '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.time||'TIME') + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.time||'--') + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.time||'TIME') + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.time ? fmtHMS(r.time) : '--') + '</div></div>' +
 '<div style="margin-top:6px;font-size:var(--fs-sm);color:#aaa;font-weight:700;">' + (t.speed||'SPEED') + ' : ' + (() => { const p=r.avgPace||r.pace; if(p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60); return this.currentUnit==='mile'?(kmh*0.621371).toFixed(1)+' mi/h':kmh.toFixed(1)+' km/h';} return '--'; })() + '</div>' +
 '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + (pacePeakDisplay ? (' / ' + pacePeakDisplay) : '') + ' <span class="c44">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div>' + _wrapGraph('pace', paceSparkSvg, diagAxisLabelsHtml + paceNoteHtml) + '</div>' +
@@ -14878,7 +14910,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
     const el = document.getElementById('user-profile-stats');
     if (el) el.innerHTML = `<div class="profile-stat-grid">
       ${cell(L.dist, km(st.dist), 'km')}
-      ${cell(L.time, st.dur > 0 ? this.formatDuration(st.dur) : '--:--', '')}
+      ${cell(L.time, fmtHMS(st.dur > 0 ? st.dur : 0), '')}
       ${cell(L.runs, st.n, '')}
       ${cell(L.avg, pace(st.avgPace), '/km')}
       ${cell(L.best, pace(st.bestPace), '/km')}
