@@ -897,6 +897,12 @@ filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
 .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #333; height: 68px; padding: 0; transition: border-color 0.3s ease; }
 /* [추가 2026-10-03] 프리미엄 잠금: 해제되지 않은 계정은 GCT/FLIGHT 값을 가리고 자물쇠 표시 */
 .card.premium-locked { position: relative; }
+body.prem-lock-dyn .diag-card.lk-dyn, body.prem-lock-dyn .h-group.lk-dyn { position:relative; min-height:64px; }
+body.prem-lock-dyn .diag-card.lk-dyn > *, body.prem-lock-dyn .h-group.lk-dyn > * { visibility:hidden; }
+body.prem-lock-dyn .diag-card.lk-dyn::after, body.prem-lock-dyn .h-group.lk-dyn::after { content:'\1F512  PREMIUM'; position:absolute; left:0; right:0; top:50%; transform:translateY(-50%); text-align:center; font-weight:800; color:#aaa; font-size:var(--fs-sm); }
+body.prem-lock-dyn .h-det-box.lk-dyn { position:relative; }
+body.prem-lock-dyn .h-det-box.lk-dyn .h-det-val { visibility:hidden; }
+body.prem-lock-dyn .h-det-box.lk-dyn::after { content:'\1F512'; position:absolute; left:0; right:0; bottom:6px; text-align:center; }
 #settings-calib-area.premium-locked-area > *:not(.premium-banner) { opacity: .35; pointer-events: none; }
 .premium-banner { display:none; background:#2a2a2a; border:1.5px solid #555; border-radius:12px; padding:14px 16px; margin:0 0 12px; font-size:var(--fs-sm); font-weight:800; color:#ddd; text-align:center; }
 #settings-calib-area.premium-locked-area > .premium-banner { display:block; }
@@ -2131,9 +2137,9 @@ alt="runner"/>
 </div>
 <div id="admin-panel" class="settings-group" style="display:none;">
   <div class="settings-label" id="admin-title">ADMIN · 해제 계정 관리</div>
-  <div class="settings-label" style="margin-top:4px;">잠금 항목 (누르면 잠금/공개 전환)</div>
+  <div class="settings-label" id="admin-lock-title" style="margin-top:4px;">잠금 항목 (누르면 잠금/공개 전환)</div>
   <div id="admin-lock-list" style="margin-bottom:14px;"></div>
-  <div class="settings-label">해제된 계정</div>
+  <div class="settings-label" id="admin-ent-title">해제된 계정</div>
   <div id="admin-ent-list" style="margin-bottom:10px;"></div>
   <input id="admin-email-input" type="email" placeholder="등록할 이메일" autocomplete="off" autocapitalize="off" style="width:100%; background:#2a2a2a; color:#fff; border:1.5px solid #444; padding:13px 16px; border-radius:12px; font-size:var(--fs-md); font-weight:700; outline:none;">
   <button id="admin-add-btn" onclick="premium.add()" class="c28">등록</button>
@@ -6272,6 +6278,7 @@ if(emailConnectedLabel) emailConnectedLabel.textContent = t.emailConnectedLabel;
 const emailSignoutBtn = document.getElementById('email-signout-btn');
 if(emailSignoutBtn) emailSignoutBtn.textContent = t.emailDisconnectBtn;
 if(typeof community !== 'undefined' && community.refreshEmailSentPrefix) community.refreshEmailSentPrefix();
+try { premium.applyLang(); } catch (e) {}
 const unitLabel = document.getElementById('label-unit');
 if(unitLabel) unitLabel.textContent = t.unitLabel;
 const genderLabel = document.getElementById('label-gender');
@@ -7380,8 +7387,8 @@ this.buildHrBoxHtml(r, t) +
 '<div class="h-det-box"><div class="h-det-label">' + t.cal + '</div><div class="h-det-val">' + (r.kcal || 0) + '<span class="c34">' + (r.weightKgSnapshot ? r.weightKgSnapshot.toFixed(1)+'kg' : '') + '</span></div></div>' +
 // [수정] 손/암밴드/프리런은 GCT·FLIGHT 칸을 '--'로 채우지 않고 아예 그리지 않는다
 (this.isGctVertUnreliable(r) ? '' : (
-'<div class="h-det-box"><div class="h-det-label">' + t.gct + '</div><div class="h-det-val" style="color:' + this.getGctColor(r.gct) + '">' + (r.gct || '--') + ' <span class="u-font-size-fs-xxs">MS</span></div></div>' +
-'<div class="h-det-box"><div class="h-det-label">' + t.flight + '</div><div class="h-det-val" style="color:' + this.getFlightColor(r.flight) + '">' + (r.flight || '--') + ' <span class="u-font-size-fs-xxs">%</span></div></div>'
+'<div class="h-det-box lk-dyn"><div class="h-det-label">' + t.gct + '</div><div class="h-det-val" style="color:' + this.getGctColor(r.gct) + '">' + (r.gct || '--') + ' <span class="u-font-size-fs-xxs">MS</span></div></div>' +
+'<div class="h-det-box lk-dyn"><div class="h-det-label">' + t.flight + '</div><div class="h-det-val" style="color:' + this.getFlightColor(r.flight) + '">' + (r.flight || '--') + ' <span class="u-font-size-fs-xxs">%</span></div></div>'
 )) +
 ((() => {
 let strideVal = '--';
@@ -7404,7 +7411,7 @@ return '<div class="h-det-box"><div class="h-det-label">' + t.stride + '</div><d
 '</div></div>' +
 // [추가] GCT 밸런스 / 자이로 밸런스 표시 (좌:우 실측값, 새 데이터 행) — 케이던스 밸런스는 제거
 (this.isGyroAccelUnreliable(r) ? '' : (
-'<div class="h-group"><div class="h-group-title">' + t.hSecBalance + '</div><div class="h-group-grid">' +
+'<div class="h-group lk-dyn"><div class="h-group-title">' + t.hSecBalance + '</div><div class="h-group-grid">' +
 '<div class="h-det-box"><div class="h-det-label">' + t.gctBal + '</div><div class="h-det-val u-color-dddddd">' + (r.gctBal || '50:50') + ' <span class="u-font-size-fs-xxs">L:R</span></div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.gyroBal + '</div><div class="h-det-val u-color-dddddd">' + (r.gyroBal || '50:50') + ' <span class="u-font-size-fs-xxs">L:R</span></div></div>' +
 // [수정] 린 각도(가슴 착용 기록에만 표시)를 BALANCE 맨 끝으로 이동
@@ -7909,6 +7916,7 @@ return digits > 0 ? m.toFixed(digits) : Math.round(m);
 const unit = (u) => ' <span class="u-font-size-fs-xxs">' + u + '</span>';
 const tagSum = ' <span style="color:#ffffff; opacity:0.85; font-weight:700; font-size:0.85em;">' + (t.posTagSum || 'TOTAL') + '</span>';
 const tagAvg = ' <span style="color:#ffffff; opacity:0.85; font-weight:700; font-size:0.85em;">' + (t.posTagAvg || 'AVG') + '</span>';
+const lkBox = (h) => h.replace('class="h-det-box"', 'class="h-det-box lk-dyn"');
 const box = (label, val, u, tag) => '<div class="h-det-box"><div class="h-det-label">' + label + (tag || '') + '</div><div class="h-det-val">' + ((val === null || val === undefined || val === '--') ? '--' : (val + (u ? unit(u) : ''))) + '</div></div>';
 const html = groups.map(g => {
 const rs = g.recs;
@@ -7938,7 +7946,7 @@ const fl = avgOf(rs.map(r => num(r.flight)), 0, 100, 0);
 const vert = avgOf(rs.map(r => num(r.vertRatio)), 0.1, 50, 1);
 boxes = box(t.dist || 'DIST', distVal, distUnit, tagSum) + box(t.posCount || 'COUNT', n > 0 ? n : null) + box(t.pace || 'PACE', paceStr, null, tagAvg) +
 box(t.cal || 'KCAL', n > 0 ? kcal : null, 'kcal', tagSum) + box(t.cadence || 'CADENCE', cad, 'SPM', tagAvg) + box(t.powerLabel || 'POWER', pw, 'W', tagAvg) +
-box(t.gct || 'GCT', gct, 'ms', tagAvg) + box(t.flight || 'FLIGHT', fl, '%', tagAvg) + box(t.statVert || 'VERT', vert, '%', tagAvg);
+lkBox(box(t.gct || 'GCT', gct, 'ms', tagAvg)) + lkBox(box(t.flight || 'FLIGHT', fl, '%', tagAvg)) + lkBox(box(t.statVert || 'VERT', vert, '%', tagAvg));
 }
 const isOpen = n > 0 && !!(this._posOpen && this._posOpen[g.key]);
 const detailHtml = isOpen ? rs.map(r => this.buildHistoryItemHtml(r, t, lang)).join('') : '';
@@ -8380,10 +8388,10 @@ const dateStr = record.date ? record.date.split(' ')[0] : '';
 shareRunCardImage({
   dist: displayDist.toFixed(2), distUnit: unitText, time: record.time, pace: displayPace,
   cadence: record.cadence,
-  gct: _shareGctUntrusted ? '--' : record.gct,
-  flight: _shareGctUntrusted ? '--' : record.flight,
+  gct: (_shareGctUntrusted || premium.shareLocked()) ? '--' : record.gct,
+  flight: (_shareGctUntrusted || premium.shareLocked()) ? '--' : record.flight,
   vertRatio: vertRatioVal,
-  gctBal: _shareGctUntrusted ? '--' : record.gctBal, effScore, effSimple: _shareEffSimple, dateStr,
+  gctBal: (_shareGctUntrusted || premium.shareLocked()) ? '--' : record.gctBal, effScore, effSimple: _shareEffSimple, dateStr,
   // [추가] 활동모드에 따라 카드 레이아웃(걷기용 STEPS/SPM 등)이 분기되도록 전달
   activityMode: record.activityMode || 'run',
   steps: record.steps, walkSpm: record.walkSpm, stride: record.stride,
@@ -8594,7 +8602,7 @@ if (pacePeakDisplay && this.currentUnit === 'mile') pacePeakDisplay = this.conve
 const _expandHint = '<div class="diag-graph-expand-hint">\u26F6 ' + t.tapToExpand + '</div>';
 const _wrapGraph = (key, svg, extraHtml) => svg ? ('<div class="diag-graph-wrap" onclick="ui.openDiagGraphFullscreen(\'' + key + '\',' + r.id + ')">' + svg + (extraHtml || '') + _expandHint + '</div>') : '';
 contentArea.innerHTML =
-'<div class="diag-card"><div class="diag-label">' + (effIsSimple ? (t.diagEffScoreSimple || t.diagEffScore) : t.diagEffScore) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + effColor + '">' + effScore + ' <span style="font-size:var(--fs-md);color:#aaa">/ 100</span></div>' + (effIsSimple ? '' : '<div class="diag-ref">Ref: ≥80</div>') + '</div><div class="diag-tip">' + effComment + '</div>' + (effScore !== '--' ? '<div style="margin-top:6px;font-size:var(--fs-xxs);color:#888;font-weight:700;">' + (effIsSimple ? (t.diagEffNoteSimple || '') : (t.diagEffNote || '')) + '</div>' : '') + '</div>' +
+'<div class="diag-card lk-dyn"><div class="diag-label">' + (effIsSimple ? (t.diagEffScoreSimple || t.diagEffScore) : t.diagEffScore) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + effColor + '">' + effScore + ' <span style="font-size:var(--fs-md);color:#aaa">/ 100</span></div>' + (effIsSimple ? '' : '<div class="diag-ref">Ref: ≥80</div>') + '</div><div class="diag-tip">' + effComment + '</div>' + (effScore !== '--' ? '<div style="margin-top:6px;font-size:var(--fs-xxs);color:#888;font-weight:700;">' + (effIsSimple ? (t.diagEffNoteSimple || '') : (t.diagEffNote || '')) + '</div>' : '') + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.time||'TIME') + '</div><div class="diag-val-group"><div class="diag-main-val">' + (r.time ? fmtHMS(r.time) : '--') + '</div></div>' +
 '<div style="margin-top:6px;font-size:var(--fs-sm);color:#aaa;font-weight:700;">' + (t.speed||'SPEED') + ' : ' + (() => { const p=r.avgPace||r.pace; if(p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60); return this.currentUnit==='mile'?(kmh*0.621371).toFixed(1)+' mi/h':kmh.toFixed(1)+' km/h';} return '--'; })() + '</div>' +
 '</div>' +
@@ -8602,14 +8610,14 @@ contentArea.innerHTML =
 '<div class="diag-card"><div class="diag-label">' + (t.powerLabel || "POWER") + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + (powerPeakForDiag != null ? (' / ' + powerPeakForDiag) : '') + ' <span class="c44">W</span></div><div class="diag-ref">' + (t.powerZoneLabel || 'POWER ZONE') + ': ' + powerZoneDisplay + '</div></div><div class="diag-tip">' + powerComment + '</div>' + _wrapGraph('power', powerSparkSvg, diagAxisLabelsHtml) + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.cadence ? this.getCadenceColor(r.cadence) : '#aaa') + '">CAD: ' + (r.cadence || 0) + (cadPeakForDiag != null ? (' / ' + cadPeakForDiag) : '') + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div>' + _wrapGraph('cadence', cadSparkSvg, diagAxisLabelsHtml + cadNoteHtml) + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getStrideColor(strideNumForFeedback, diagProfile) + '">' + strideVal + '</div><div class="diag-ref">Ref: 0.5~0.75m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (!_gctUntrusted && r.gct && r.gct !== '--' ? this.getGctColor(r.gct) : '#aaa') + '">GCT: ' + (_gctUntrusted ? '--' : r.gct) + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagBalanceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (_gctFlightHidden ? '#aaa' : this.getBalanceColor(r.gctBal)) + '">GCT ' + (_gctFlightHidden ? '--' : (r.gctBal || '--')) + ' <span style="font-size:var(--fs-xs);color:#aaa">L:R</span></div><div class="diag-ref">GYRO ' + (_gctFlightHidden ? '--' : (r.gyroBal || '--')) + '</div></div><div class="diag-tip">' + diagFeedback.balance + '</div><div style="font-size:var(--fs-xs);color:#888;font-weight:600;line-height:1.5;margin-top:8px;padding-top:8px;border-top:1px solid #222;">' + (t.diagBalanceExplain || '') + '</div></div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagFlightLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (isNaN(flightNum)?'#aaa':this.getFlightColor(flightNum)) + '">' + flightVal + (flightVal!=='--'?' %':'') + '</div><div class="diag-ref">Ref: 30~45%</div></div><div class="diag-tip">' + flightComment + '</div></div>' +
+'<div class="diag-card lk-dyn"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (!_gctUntrusted && r.gct && r.gct !== '--' ? this.getGctColor(r.gct) : '#aaa') + '">GCT: ' + (_gctUntrusted ? '--' : r.gct) + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
+'<div class="diag-card lk-dyn"><div class="diag-label">' + (t.diagBalanceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (_gctFlightHidden ? '#aaa' : this.getBalanceColor(r.gctBal)) + '">GCT ' + (_gctFlightHidden ? '--' : (r.gctBal || '--')) + ' <span style="font-size:var(--fs-xs);color:#aaa">L:R</span></div><div class="diag-ref">GYRO ' + (_gctFlightHidden ? '--' : (r.gyroBal || '--')) + '</div></div><div class="diag-tip">' + diagFeedback.balance + '</div><div style="font-size:var(--fs-xs);color:#888;font-weight:600;line-height:1.5;margin-top:8px;padding-top:8px;border-top:1px solid #222;">' + (t.diagBalanceExplain || '') + '</div></div>' +
+'<div class="diag-card lk-dyn"><div class="diag-label">' + (t.diagFlightLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (isNaN(flightNum)?'#aaa':this.getFlightColor(flightNum)) + '">' + flightVal + (flightVal!=='--'?' %':'') + '</div><div class="diag-ref">Ref: 30~45%</div></div><div class="diag-tip">' + flightComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagHrLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + hrColor + '">' + hrMainVal + '</div><div class="diag-ref">' + t.hrZoneLabel + ': ' + hrZoneDisplay + '</div></div><div class="diag-tip">' + hrComment + '</div>' + _wrapGraph('hr', hrSparkSvg, diagAxisLabelsHtml + hrNoteHtml) + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagAltLabel || "GPS ALTITUDE") + '</div><div class="diag-val-group"><div class="diag-main-val">' + (altSparkSvg ? ('+' + totalAltGainForDiag.toFixed(0) + ' <span class="c44">M</span>') : '--') + '</div></div>' + (altSparkSvg ? _wrapGraph('alt', altSparkSvg, diagAxisLabelsHtml) : '<div class="diag-tip">' + (t.diagAltNoData || '') + '</div>') + '</div>' +
 // [추가] 린각도: 해당 기록에 데이터가 있을 때만 카드+다이어그램 노출 (LeanAngleUI.has()로 게이팅, 계산/판정 로직은 모듈만 사용)
 (LeanAngleUI.has(r) ?
-'<div class="diag-card"><div class="diag-label">' + (t.diagLeanLabel || 'LEAN ANGLE') + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (LeanAngleUI.colorForPrimary(r.avgLeanAngleDeg, r.avgLeanForwardDeg) || '#aaa') + '">' + LeanAngleUI.fmtPrimary(r.avgLeanAngleDeg, r.avgLeanForwardDeg) + '</div><div class="diag-ref">Ref: 4~8°</div></div><div class="diag-tip">' + (LeanAngleUI.primarySubHtml(r.avgLeanAngleDeg, r.avgLeanLateralDeg, r.avgLeanForwardDeg, lang, 'var(--fs-xs)') || '') + '</div>' +
+'<div class="diag-card lk-dyn"><div class="diag-label">' + (t.diagLeanLabel || 'LEAN ANGLE') + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (LeanAngleUI.colorForPrimary(r.avgLeanAngleDeg, r.avgLeanForwardDeg) || '#aaa') + '">' + LeanAngleUI.fmtPrimary(r.avgLeanAngleDeg, r.avgLeanForwardDeg) + '</div><div class="diag-ref">Ref: 4~8°</div></div><div class="diag-tip">' + (LeanAngleUI.primarySubHtml(r.avgLeanAngleDeg, r.avgLeanLateralDeg, r.avgLeanForwardDeg, lang, 'var(--fs-xs)') || '') + '</div>' +
 '<div style="margin-top:14px; padding-top:14px; border-top:1px solid #2a2a2a;">' +
 '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 360" width="100%" height="100%" style="display:block;">' +
 '<defs><marker id="arrow-red" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 1 L 10 5 L 0 9 z" fill="#F56565" /></marker><marker id="arrow-black" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 1 L 10 5 L 0 9 z" fill="#CBD5E0" /></marker></defs>' +
@@ -12441,7 +12449,9 @@ const premium = {
   FEATURES: {
     live_gct:    { ko: 'GCT 카드 (라이브)',   en: 'GCT card (live)',    set(on) { const e = document.getElementById('card-gct');    if (e) e.classList.toggle('premium-locked', on); } },
     live_flight: { ko: 'FLIGHT 카드 (라이브)', en: 'FLIGHT card (live)', set(on) { const e = document.getElementById('card-flight'); if (e) e.classList.toggle('premium-locked', on); } },
-    calib:       { ko: '캘리브레이션 탭',      en: 'Calibration tab',    set(on) {
+    diag_dyn:    { ko: '진단·기록 상세의 GCT/체공/밸런스/린각도/효율', en: 'Diagnosis/detail dynamics', set(on) { document.body.classList.toggle('prem-lock-dyn', on); } },
+    share_dyn:   { ko: '공유 카드의 GCT/체공/밸런스', en: 'Share card dynamics', set(on) { premium._shareLock = on; } },
+    calib:       { ko: '캘리브레이션 탭',      en: 'Calibration tab',    relabel() { const b = document.querySelector('#settings-calib-area > .premium-banner'); if (b) b.textContent = '\uD83D\uDD12 ' + premium._s('프리미엄 기능이에요. 해제된 계정으로 로그인하면 쓸 수 있어요.', 'Premium feature. Log in with an unlocked account to use it.'); }, set(on) {
       const a = document.getElementById('settings-calib-area'); if (!a) return;
       let b = a.querySelector(':scope > .premium-banner');
       if (!b) { b = document.createElement('div'); b.className = 'premium-banner'; a.insertBefore(b, a.firstChild); }
@@ -12449,6 +12459,8 @@ const premium = {
       a.classList.toggle('premium-locked-area', on);
     } }
   },
+  _shareLock: true,
+  shareLocked() { return !!this._shareLock; },
   isLockOn(k) { return this.locks[k] === undefined ? true : !!this.locks[k]; },
   _ko() { try { return storage.getLang() === 'ko'; } catch (e) { return false; } },
   _s(ko, en) { return this._ko() ? ko : en; },
@@ -12465,6 +12477,7 @@ const premium = {
     const free = this.unlocked || this.isAdmin;
     Object.keys(this.FEATURES).forEach(k => this.FEATURES[k].set(!free && this.isLockOn(k)));
     if (this.isAdmin) this.renderToggles();
+    this.applyLangTexts();
     const panel = document.getElementById('admin-panel');
     if (panel) panel.style.display = this.isAdmin ? '' : 'none';
   },
@@ -12515,6 +12528,26 @@ const premium = {
       this._busy = false;
       if (this._again) { this._again = false; this.refresh(); }
     }
+  },
+  applyLangTexts() {
+    const set = (id, ko, en, prop) => { const e = document.getElementById(id); if (e) e[prop || 'textContent'] = this._s(ko, en); };
+    set('admin-title', 'ADMIN · 해제 계정 관리', 'ADMIN · UNLOCKED ACCOUNTS');
+    set('admin-lock-title', '잠금 항목 (누르면 잠금/공개 전환)', 'LOCKED FEATURES (tap to toggle)');
+    set('admin-ent-title', '해제된 계정', 'UNLOCKED ACCOUNTS');
+    set('admin-email-input', '등록할 이메일', 'Email to unlock', 'placeholder');
+    set('admin-add-btn', '등록', 'ADD');
+    set('admin-hint', '상대가 앱에서 먼저 이메일 로그인해야 등록할 수 있어요', 'They must log in with email in the app first');
+  },
+  applyLang() {
+    const set = (id, ko, en, prop) => { const e = document.getElementById(id); if (e) e[prop || 'textContent'] = this._s(ko, en); };
+    set('admin-title', 'ADMIN · 해제 계정 관리', 'ADMIN · UNLOCKED ACCOUNTS');
+    set('admin-lock-title', '잠금 항목 (누르면 잠금/공개 전환)', 'LOCKED FEATURES (tap to toggle)');
+    set('admin-ent-title', '해제된 계정', 'UNLOCKED ACCOUNTS');
+    set('admin-email-input', '등록할 이메일', 'Email to unlock', 'placeholder');
+    set('admin-add-btn', '등록', 'ADD');
+    set('admin-hint', '상대가 앱에서 먼저 이메일 로그인해야 등록할 수 있어요', 'They must log in with email in the app first');
+    Object.keys(this.FEATURES).forEach(k => { if (this.FEATURES[k].relabel) this.FEATURES[k].relabel(); });
+    if (this.isAdmin) { this.renderToggles(); this.loadList(); }
   },
   renderToggles() {
     const box = document.getElementById('admin-lock-list');
