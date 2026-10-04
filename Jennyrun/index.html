@@ -903,9 +903,10 @@ body.prem-lock-dyn .diag-card.lk-dyn::after, body.prem-lock-dyn .h-group.lk-dyn:
 body.prem-lock-dyn .h-det-box.lk-dyn { position:relative; }
 body.prem-lock-dyn .h-det-box.lk-dyn .h-det-val { visibility:hidden; }
 body.prem-lock-dyn .h-det-box.lk-dyn::after { content:'PRO'; position:absolute; left:0; right:0; bottom:10px; text-align:center; font-size:var(--fs-xxs); font-weight:800; letter-spacing:1px; color:#aaa; }
-body.prem-lock-garmin .lk-garmin-sugg > *:not(.c58) { display:none; }
-body.prem-lock-garmin .lk-garmin-sugg::after { content:'PRO'; display:block; letter-spacing:1px; text-align:center; font-weight:800; color:#aaa; font-size:var(--fs-sm); padding:14px 0 6px; }
-body.prem-lock-garmin #btn-save-calib-report { display:none; }
+body.prem-lock-garmin #btn-apply-calib::after { content:'PRO'; margin-left:8px; padding:2px 7px; border-radius:6px; background:#000; color:#ffcc66; font-size:.7em; font-weight:900; letter-spacing:1px; vertical-align:middle; }
+body.prem-lock-garmin #btn-save-pending-calib, body.prem-lock-garmin #btn-save-calib-report { display:none; }
+body.prem-lock-garmin #garmin-calib-status > * { display:none; }
+body.prem-lock-garmin #garmin-calib-status:not(:empty)::before { content: var(--lk-status-title, 'APPLIED VALUES · PRO'); display:block; text-align:center; font-weight:800; color:#aaa; font-size:var(--fs-sm); letter-spacing:1px; padding:14px 0; }
 #garmin-sample-box { display:none; }
 body.prem-lock-garmin #garmin-sample-box { display:block; }
 .gs-row { margin:8px 0; font-size:var(--fs-xs); color:#ccc; font-weight:700; }
@@ -12462,7 +12463,7 @@ const premium = {
     live_flight: { ko: 'FLIGHT 카드 (라이브)', en: 'FLIGHT card (live)', set(on) { const e = document.getElementById('card-flight'); if (e) e.classList.toggle('premium-locked', on); } },
     diag_dyn:    { ko: '진단·기록 상세의 GCT/체공/밸런스/린각도/효율', en: 'Diagnosis/detail dynamics', set(on) { document.body.classList.toggle('prem-lock-dyn', on); } },
     share_dyn:   { ko: '공유 카드의 GCT/체공/밸런스', en: 'Share card dynamics', set(on) { premium._shareLock = on; } },
-    garmin_sugg: { ko: '가민 분석실의 보정 제안·적용', en: 'Garmin lab suggestions', set(on) { document.body.classList.toggle('prem-lock-garmin', on); } },
+    garmin_sugg: { ko: '가민 분석실 PRO (보정 적용·적용 기록)', en: 'Garmin lab PRO (apply & history)', set(on) { premium._garminLock = on; document.body.classList.toggle('prem-lock-garmin', on); } },
     stats_range: { ko: '통계 월간·연간 보기', en: 'Stats monthly/yearly', set(on) {
       premium._statsLock = on; document.body.classList.toggle('prem-lock-stats', on);
       if (on) { try { if (ui.currentStatFilter && ui.currentStatFilter !== 'weekly') ui.changeStatFilter('weekly'); } catch (e) {} }
@@ -12475,7 +12476,9 @@ const premium = {
       a.classList.toggle('premium-locked-area', on);
     } }
   },
-  _shareLock: true, _statsLock: true,
+  _shareLock: true, _statsLock: true, _garminLock: true,
+  isGarminLocked() { return !!this._garminLock; },
+  proAlert(ko, en) { return appAlert(this._s(ko, en)); },
   isStatsLocked() { return !!this._statsLock; },
   shareLocked() { return !!this._shareLock; },
   isLockOn(k) { return this.locks[k] === undefined ? true : !!this.locks[k]; },
@@ -12567,6 +12570,7 @@ const premium = {
   },
   applyLangTexts() {
     this.renderGarminSample();
+    try { document.documentElement.style.setProperty('--lk-status-title', JSON.stringify(this._s('적용된 보정값 · PRO', 'APPLIED VALUES · PRO'))); } catch (e) {}
     const set = (id, ko, en, prop) => { const e = document.getElementById(id); if (e) e[prop || 'textContent'] = this._s(ko, en); };
     set('admin-title', 'ADMIN · 해제 계정 관리', 'ADMIN · UNLOCKED ACCOUNTS');
     set('admin-lock-title', 'PRO 항목 (누르면 PRO/무료 전환)', 'PRO FEATURES (tap to toggle)');
@@ -17376,6 +17380,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
 
   // [수정] 체크된 항목만 대기목록에 추가.
   function addPendingCalib() {
+if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 해제된 계정으로 로그인하면 쓸 수 있어요.', 'This is a PRO feature. Log in with a PRO-unlocked account to use it.'); return; }
     const isKo = isKoLang();
     if (!lastSuggestion) return;
     const sel = getCheckedSuggestion();
@@ -17624,6 +17629,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
   }
 
   function applyCalibration() {
+if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 해제된 계정으로 로그인하면 쓸 수 있어요.', 'This is a PRO feature. Log in with a PRO-unlocked account to use it.'); return; }
     const isKo = isKoLang();
     if (!lastSuggestion) return;
     // [수정] 체크박스로 선택한 항목만 반영 (기존엔 lastSuggestion 전체를 무조건 다 적용했음)
@@ -17945,6 +17951,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
   // 네이티브 다운로드 브릿지(AndroidDownload)가 있으면 그걸 우선 쓰고,
   // 없으면 Blob + <a download>로 폴백.
   async function downloadPatchedHtml() {
+if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 해제된 계정으로 로그인하면 쓸 수 있어요.', 'This is a PRO feature. Log in with a PRO-unlocked account to use it.'); return; }
     const isKo = isKoLang();
     try {
       const resp = await fetch(location.href, { cache: 'no-store' });
@@ -18416,6 +18423,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
   // 만들어 다운로드 폴더에 저장. exportData()/downloadCsvFile()과 동일한
   // AndroidDownload 브릿지를 재사용하고, 브릿지가 없으면 data URI 링크로 대체한다.
   function exportCalibReport() {
+if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 해제된 계정으로 로그인하면 쓸 수 있어요.', 'This is a PRO feature. Log in with a PRO-unlocked account to use it.'); return; }
     const isKo = isKoLang();
     if (!lastCompareData) {
       alert(isKo ? '먼저 비교를 실행해주세요.' : 'Run a comparison first.');
