@@ -1491,6 +1491,20 @@ flex-wrap: wrap; justify-content: center; white-space: nowrap;
 .garmin-import-item:not(.is-collapsed) .garmin-import-chev { transform:rotate(180deg); }
 .garmin-import-item.is-collapsed .garmin-import-grid { display:none; }
 .garmin-import-item.is-collapsed .garmin-import-item-head { margin-bottom:0; }
+.garmin-import-item-info { font-size:var(--fs-xxs); color:#7fd3ff; font-weight:800; cursor:pointer; border:1px solid #2f5a73; border-radius:8px; padding:4px 8px; }
+.garmin-info-page { display:none; position:fixed; inset:0; background:#0d0d0d; z-index:999999; flex-direction:column; box-sizing:border-box; }
+.garmin-info-page.is-open { display:flex; }
+.garmin-info-head { flex:0 0 auto; display:flex; align-items:center; gap:10px; padding:calc(env(safe-area-inset-top, 0px) + 12px) 14px 12px 14px; border-bottom:1px solid #262626; background:#141414; }
+.garmin-info-back { background:#2a2a2a; border:1px solid #444; color:var(--primary); border-radius:10px; font-weight:900; font-size:var(--fs-base); padding:6px 12px; cursor:pointer; }
+.garmin-info-title { flex:1; min-width:0; font-size:var(--fs-sm); font-weight:900; color:#fff; line-height:1.4; }
+.garmin-info-body { flex:1 1 auto; overflow-y:auto; padding:14px 14px calc(env(safe-area-inset-bottom, 0px) + 24px) 14px; }
+.garmin-info-sec { color:var(--primary); font-weight:900; font-size:var(--fs-sm); margin:16px 0 8px 2px; letter-spacing:.5px; }
+.garmin-info-kv { display:flex; justify-content:space-between; gap:10px; padding:8px 4px; border-bottom:1px solid #262626; font-size:var(--fs-xs); font-weight:700; color:#ccc; }
+.garmin-info-kv span:last-child { color:#fff; text-align:right; word-break:break-all; }
+.garmin-info-scroll { overflow-x:auto; }
+.garmin-info-table { width:100%; border-collapse:collapse; font-size:var(--fs-xs); font-weight:800; color:#fff; text-align:center; }
+.garmin-info-table th { color:#999; font-weight:900; font-size:var(--fs-xxs); padding:6px 4px; border-bottom:1px solid #333; }
+.garmin-info-table td { padding:7px 4px; border-bottom:1px solid #222; }
 .garmin-import-listhead { display:flex; justify-content:space-between; align-items:center; margin-top: 14px; padding: 0 2px; }
 .garmin-import-listcount { font-size:var(--fs-xs); color: #999; font-weight: 800; }
 .skeleton-graphic-container {
@@ -2091,6 +2105,8 @@ alt="runner"/>
   </div>
   <div id="calib-preclog-dropdown-options" class="precision-dropdown-options c12 log-dd-panel"></div>
 </div>
+<!-- [추가] 체크한 정밀 로그(자동저장+불러온 로그)를 FIT 카드와 같은 상세 카드로 표시 -->
+<div id="garmin-sel-log-list" class="u-margin-top-10px"></div>
 <!-- [추가] 자동저장 로그 카드와 동일한 스타일로, 불러온 지난 로그도 항목별 DELETE 버튼과 함께
      카드로 보여준다 (가민 FIT 가져오기 목록과 동일한 패턴: 드롭다운은 빠른 선택용, 카드는 개별 관리용). -->
 <button id="btn-run-calib-compare" class="btn-run-calib-compare" style="background:var(--primary); color:#000; border:none; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-sm); margin-top:10px;" onclick="garmin.runCalibrationCompare()">COMPARE SELECTED</button>
@@ -16028,7 +16044,7 @@ const garmin = (function () {
   // [수정] 저장된 가민 기록(최대 3개)을 전부 카드로 보여주도록 isSelected 인자 추가.
   // isSelected면 캘리브레이션 비교 기준으로 쓰이는 카드라는 표시(테두리 강조 + 라벨)를 해준다.
   // [추가] 펼쳐둔 가민 기록 카드 id 저장소(체크박스 선택 등으로 render()가 다시 돌아도 펼침 상태 유지)
-  var expandedGarminIds = {};
+  var collapsedGarminIds = {}; // [수정] 체크된 카드는 기본 펼침. 사용자가 접은 카드 id만 보관
   let autoMatchNote = null; // [추가] 마지막 로그 체크의 FIT 자동매칭 결과 안내 ({type:'ok'|'far'|'noimports'|'norange', ...})
   const MAX_ANALYSIS_AUTOLOGS = 10; // [추가] 분석실은 자동저장 로그를 최신 10개까지만 다룸 (저장소엔 설정 탭 기준 최대 30개)
   // [추가] 체크 드롭다운 패널의 한 줄: 체크박스(비교 선택) + 날짜/보조줄 + (INFO) + 삭제.
@@ -16043,11 +16059,12 @@ const garmin = (function () {
       + '<div class="c07">' + (o.infoHtml || '') + o.delHtml + '</div>'
       + '</div>';
   }
-  function renderBox(item, isKo, isSelected, orderIdx) {
-    if (!item) {
-      return '<div class="garmin-import-empty">' + (isKo ? '가져온 가민 데이터가 없습니다.' : 'No imported Garmin data yet.') + '</div>';
-    }
-    const boxes = [
+  // ── [추가] INFO 버튼 / 상세 카드 / 상세 페이지 ──
+  function infoBtn(kind, id, isKo) {
+    return '<div class="garmin-import-item-info" onclick="garmin.openInfo(\'' + kind + '\',\'' + id + '\')">' + (isKo ? '정보' : 'INFO') + '</div>';
+  }
+  function fitBoxes(item, isKo) {
+    return [
       [isKo ? '거리' : 'DIST', item.distanceKm.toFixed(2) + ' km'],
       [isKo ? '시간' : 'TIME', fmtDuration(item.durationSec)],
       [isKo ? '평균 페이스' : 'AVG PACE', fmtPace(item.avgPaceSecPerKm)],
@@ -16060,19 +16077,201 @@ const garmin = (function () {
       [isKo ? '상승고도' : 'ELEV GAIN', item.elevationGain + ' m'],
       [isKo ? '레코드 수' : 'RECORDS', item.recordCount]
     ];
+  }
+  function gridHtml(boxes) {
+    return '<div class="garmin-import-grid">'
+      + boxes.map(b => '<div class="garmin-import-box"><div class="garmin-import-box-label">' + b[0] + '</div><div class="garmin-import-box-val">' + b[1] + '</div></div>').join('')
+      + '</div>';
+  }
+  function summarizeLog(log) {
+    const rows = Array.isArray(log) ? log : [];
+    if (!rows.length) return null;
+    const avg = (key) => { let sum = 0, n = 0; rows.forEach(r => { const v = r[key]; if (v != null && isFinite(v) && v > 0) { sum += v; n++; } }); return n ? sum / n : null; };
+    const r1 = (v) => v == null ? null : Math.round(v * 10) / 10;
+    let durSec = 0, dist = 0, maxHr = 0, gain = 0, lastAlt = null, rotMax = 0;
+    rows.forEach(r => {
+      if (r.t != null && isFinite(r.t) && r.t > durSec) durSec = r.t;
+      if (r.distKm != null && isFinite(r.distKm) && r.distKm > dist) dist = r.distKm;
+      if (r.hrBpm != null && r.hrBpm > maxHr) maxHr = r.hrBpm;
+      if (r.rotPeakDps != null && isFinite(r.rotPeakDps) && r.rotPeakDps > rotMax) rotMax = r.rotPeakDps;
+      if (r.altM != null && isFinite(r.altM)) { if (lastAlt != null && r.altM - lastAlt > 0.5) gain += r.altM - lastAlt; lastAlt = r.altM; }
+    });
+    durSec = Math.round(durSec);
+    const hr = avg('hrBpm'), cad = avg('cadence'), gct = avg('gctMs'), vo = avg('vertOscMm'), sl = avg('stepLengthM'), fl = avg('flightPct');
+    return {
+      durSec: durSec, distanceKm: dist,
+      avgPace: (dist > 0.01 && durSec > 0) ? durSec / dist : null,
+      avgHr: hr != null ? Math.round(hr) : null,
+      maxHr: maxHr > 0 ? Math.round(maxHr) : null,
+      avgCadence: cad != null ? Math.round(cad) : null,
+      avgGct: gct != null ? Math.round(gct) : null,
+      avgVo: r1(vo),
+      avgStepMm: sl != null ? r1(sl * 1000) : null,
+      avgFlight: r1(fl),
+      rotMax: rotMax > 0 ? Math.round(rotMax) : null,
+      elevGain: Math.round(gain),
+      rows: rows.length
+    };
+  }
+  function logBoxes(sm, isKo) {
+    const f = (v, u) => v != null ? v + ' ' + u : '--';
+    return [
+      [isKo ? '거리' : 'DIST', sm.distanceKm.toFixed(2) + ' km'],
+      [isKo ? '시간' : 'TIME', fmtDuration(sm.durSec)],
+      [isKo ? '평균 페이스' : 'AVG PACE', fmtPace(sm.avgPace)],
+      [isKo ? '평균 심박수' : 'AVG HR', f(sm.avgHr, 'bpm')],
+      [isKo ? '최고 심박수' : 'MAX HR', f(sm.maxHr, 'bpm')],
+      [isKo ? '케이던스' : 'CADENCE', f(sm.avgCadence, 'spm')],
+      [isKo ? '평균 GCT' : 'AVG GCT', f(sm.avgGct, 'ms')],
+      [isKo ? '수직진동' : 'VERT OSC', f(sm.avgVo, 'mm')],
+      [isKo ? '보폭' : 'STEP LENGTH', f(sm.avgStepMm, 'mm')],
+      [isKo ? '상승고도' : 'ELEV GAIN', sm.elevGain + ' m'],
+      [isKo ? '레코드 수' : 'RECORDS', sm.rows]
+    ];
+  }
+  function logOrderInfo(id) {
+    let autoAll = [];
+    try { autoAll = (typeof storage !== 'undefined') ? storage.loadPrecisionLogs() : []; } catch (e) { autoAll = []; }
+    const ai = autoAll.findIndex(l => l.id === id);
+    if (ai >= 0) return { order: ai + 1, src: 'auto' };
+    const ii = loadPrecLogImports().findIndex(l => l.id === id);
+    return { order: ii + 1, src: 'import' };
+  }
+  function logPosLabel(l, isKo) {
+    const posMap = getPosLabelMap(isKo);
+    return l.isFreerun ? (posMap.freerun || 'FREE RUN') : (l.devicePos ? (posMap[l.devicePos] || l.devicePos) : '');
+  }
+  function renderLogBox(l, isKo) {
+    const sm = summarizeLog(l.log);
+    const oi = logOrderInfo(l.id);
+    const isOpen = !collapsedGarminIds[l.id];
+    const pos = logPosLabel(l, isKo);
+    const srcBadge = oi.src === 'import' ? (isKo ? '가져옴' : 'IMPORTED') : (isKo ? '자동저장' : 'AUTO');
+    const delCall = oi.src === 'import' ? "garmin.deletePrecLogImport('" + l.id + "')" : "storage.deletePrecisionLog('" + l.id + "')";
+    return '<div class="garmin-import-item u-border-color-primary' + (isOpen ? '' : ' is-collapsed') + '">'
+      + '<div class="garmin-import-item-head">'
+      + '<div class="garmin-import-item-title garmin-import-toggle u-line-height-1-5" onclick="garmin.toggleGarminDetail(\'' + l.id + '\', this)">'
+      + '<div>LOG <span class="c09">#' + oi.order + '</span> ' + fmtDate(new Date(l.savedAt).getTime()) + '<span class="garmin-import-chev">&#9662;</span></div>'
+      + '<div class="c26">' + srcBadge + (pos ? ' <span class="c27">· ' + pos + '</span>' : '') + '</div>'
+      + '</div>'
+      + '<div class="c07">' + infoBtn('log', l.id, isKo)
+      + '<div class="garmin-import-item-del" onclick="' + delCall + '">' + (isKo ? '삭제' : 'DELETE') + '</div></div></div>'
+      + (sm ? gridHtml(logBoxes(sm, isKo)) : '<div class="garmin-import-empty">' + (isKo ? '로그 데이터가 없습니다.' : 'No log data.') + '</div>')
+      + '</div>';
+  }
+  function renderSelectedLogCards(isKo) {
+    const wrap = document.getElementById('garmin-sel-log-list');
+    if (!wrap) return;
+    const all = getCombinedPrecLogs();
+    wrap.innerHTML = selectedPrecLogIds.map(id => {
+      const l = all.find(x => x.id === id);
+      return l ? renderLogBox(l, isKo) : '';
+    }).join('');
+  }
+  // 구간(스플릿) 표: pts = [{d(km), t(sec), cad, gct, vo, hr}]
+  function buildSplitsHtml(pts, isKo) {
+    const v = pts.filter(p => p.d != null && p.t != null && isFinite(p.d) && isFinite(p.t));
+    if (v.length < 2) return '';
+    let total = 0; v.forEach(p => { if (p.d > total) total = p.d; });
+    if (total < 0.05) return '';
+    const size = total < 3 ? 0.5 : 1;
+    const buckets = {};
+    v.forEach(p => { const b = Math.floor(p.d / size + 1e-9); (buckets[b] = buckets[b] || []).push(p); });
+    const avgOf = (arr, k) => { let sum = 0, n = 0; arr.forEach(p => { if (p[k] != null && isFinite(p[k]) && p[k] > 0) { sum += p[k]; n++; } }); return n ? sum / n : null; };
+    let prev = { d: 0, t: v[0].t }, hasHr = false, rowsHtml = '';
+    Object.keys(buckets).map(Number).sort((a, b) => a - b).forEach(b => {
+      const arr = buckets[b], last = arr[arr.length - 1];
+      const dd = last.d - prev.d, dt = last.t - prev.t;
+      const pace = dd > 0.02 ? dt / dd : null;
+      const cad = avgOf(arr, 'cad'), gct = avgOf(arr, 'gct'), vo = avgOf(arr, 'vo'), hr = avgOf(arr, 'hr');
+      if (hr != null) hasHr = true;
+      rowsHtml += '<tr><td>' + last.d.toFixed(2) + '</td><td>' + (pace ? fmtPace(pace).replace(' /km', '') : '--') + '</td><td>' + (cad != null ? Math.round(cad) : '--') + '</td><td>' + (gct != null ? Math.round(gct) : '--') + '</td><td>' + (vo != null ? (Math.round(vo * 10) / 10) : '--') + '</td>' + '<td data-hr="1">' + (hr != null ? Math.round(hr) : '--') + '</td></tr>';
+      prev = last;
+    });
+    const head = '<tr><th>KM</th><th>' + (isKo ? '페이스' : 'PACE') + '</th><th>' + (isKo ? '케이던스' : 'CAD') + '</th><th>GCT</th><th>' + (isKo ? '수직진동' : 'V.OSC') + '</th><th data-hr="1">HR</th></tr>';
+    let html = '<div class="garmin-info-sec">' + (isKo ? '구간별 (' + size + 'km)' : 'SPLITS (' + size + ' km)') + '</div><div class="garmin-info-scroll"><table class="garmin-info-table">' + head + rowsHtml + '</table></div>';
+    if (!hasHr) html = html.replace(/<th data-hr="1">HR<\/th>/, '').replace(/<td data-hr="1">[^<]*<\/td>/g, '');
+    return html;
+  }
+  function kvRow(k, val) { return '<div class="garmin-info-kv"><span>' + k + '</span><span>' + val + '</span></div>'; }
+  function fmtClock(ms) {
+    const d = new Date(ms);
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0');
+  }
+  function openInfo(kind, id) {
+    const isKo = isKoLang();
+    const page = document.getElementById('garmin-info-page');
+    const body = document.getElementById('garmin-info-body');
+    const titleEl = document.getElementById('garmin-info-title');
+    if (!page || !body || !titleEl) return;
+    let title = '', html = '';
+    if (kind === 'fit') {
+      const list = loadImports();
+      const idx = list.findIndex(i => i.id === id);
+      if (idx < 0) return;
+      const item = list[idx];
+      title = 'GARMIN FIT #' + (idx + 1) + '<br><span class="c62">' + fmtDate(item.startMs) + '</span>';
+      html = '<div class="garmin-info-sec" style="margin-top:0;">' + (isKo ? '요약' : 'SUMMARY') + '</div>' + gridHtml(fitBoxes(item, isKo));
+      html += '<div class="garmin-info-sec">' + (isKo ? '기록 정보' : 'DETAILS') + '</div>'
+        + kvRow(isKo ? '시작' : 'START', fmtDate(item.startMs))
+        + kvRow(isKo ? '종료' : 'END', fmtDate(item.endMs || (item.startMs + item.durationSec * 1000)));
+      const recs = Array.isArray(item.records) ? item.records : [];
+      if (recs.length) {
+        const t0 = recs[0].unixMs;
+        html += buildSplitsHtml(recs.map(r => ({ d: r.distance != null ? r.distance / 1000 : null, t: (r.unixMs - t0) / 1000, cad: r.cadence, gct: r.stanceTimeMs, vo: r.verticalOscillationMm, hr: null })), isKo);
+      }
+    } else {
+      const l = getCombinedPrecLogs().find(x => x.id === id);
+      if (!l) return;
+      const oi = logOrderInfo(id);
+      const sm = summarizeLog(l.log);
+      const pos = logPosLabel(l, isKo);
+      title = 'LOG #' + oi.order + '<br><span class="c62">' + fmtDate(new Date(l.savedAt).getTime()) + '</span>';
+      if (!sm) { html = '<div class="garmin-import-empty">' + (isKo ? '로그 데이터가 없습니다.' : 'No log data.') + '</div>'; }
+      else {
+        html = '<div class="garmin-info-sec" style="margin-top:0;">' + (isKo ? '요약' : 'SUMMARY') + '</div>' + gridHtml(logBoxes(sm, isKo));
+        const firstTs = l.log[0] && l.log[0].timestamp ? Date.parse(l.log[0].timestamp) : NaN;
+        html += '<div class="garmin-info-sec">' + (isKo ? '기록 정보' : 'DETAILS') + '</div>'
+          + kvRow(isKo ? '구분' : 'SOURCE', oi.src === 'import' ? (isKo ? '가져온 로그' : 'Imported log') : (isKo ? '자동저장 로그' : 'Auto-saved log'))
+          + (pos ? kvRow(isKo ? '착용 위치' : 'POSITION', pos) : '')
+          + (l.fileName ? kvRow(isKo ? '파일명' : 'FILE', escapeHtml(l.fileName)) : '')
+          + (isFinite(firstTs) ? kvRow(isKo ? '시작 시각' : 'START', fmtDate(firstTs) ) : '')
+          + (sm.avgFlight != null ? kvRow(isKo ? '평균 체공 비율' : 'AVG FLIGHT', sm.avgFlight + ' %') : '')
+          + (sm.rotMax != null ? kvRow(isKo ? '최대 회전 피크' : 'MAX ROT PEAK', sm.rotMax + ' dps') : '')
+          + kvRow(isKo ? '레코드 수' : 'RECORDS', sm.rows);
+        html += buildSplitsHtml(l.log.map(r => ({ d: r.distKm, t: r.t, cad: r.cadence, gct: r.gctMs, vo: r.vertOscMm, hr: r.hrBpm })), isKo);
+      }
+    }
+    titleEl.innerHTML = title;
+    body.innerHTML = html;
+    body.scrollTop = 0;
+    page.classList.add('is-open');
+    try { history.pushState({ jrPage: 'garminInfo' }, ''); } catch (e) {}
+  }
+  function closeInfo() {
+    const page = document.getElementById('garmin-info-page');
+    if (page) page.classList.remove('is-open');
+  }
+
+  function renderBox(item, isKo, isSelected, orderIdx) {
+    if (!item) {
+      return '<div class="garmin-import-empty">' + (isKo ? '가져온 가민 데이터가 없습니다.' : 'No imported Garmin data yet.') + '</div>';
+    }
+    const boxes = fitBoxes(item, isKo);
     const escapedLabel = fmtDate(item.startMs).replace(/'/g, "&#39;");
     const orderBadge = (orderIdx != null) ? '<span class="c09">#' + orderIdx + '</span> ' : '';
     // [수정] 단일선택 버튼("비교 기준으로") 대신 체크박스로 다중선택 — 체크한 기록들의 평균으로 비교.
     const selectBtn = '<label class="c24">'
       + '<input type="checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="garmin.toggleGarminSelect(\'' + item.id + '\')" class="c11">'
       + (isKo ? '비교 선택' : 'COMPARE') + '</label>';
-    const isOpen = !!expandedGarminIds[item.id];
+    const isOpen = !collapsedGarminIds[item.id];
     return '<div class="garmin-import-item u-border-color-primary' + (isOpen ? '' : ' is-collapsed') + '">'
       + '<div class="garmin-import-item-head">'
       + '<div class="garmin-import-item-title garmin-import-toggle" onclick="garmin.toggleGarminDetail(\'' + item.id + '\', this)">'
       + orderBadge + fmtDate(item.startMs) + '<span class="garmin-import-chev">&#9662;</span></div>'
       + '<div class="c07">'
       + selectBtn
+      + infoBtn('fit', item.id, isKo)
       + '<div class="garmin-import-item-del" onclick="garmin.deleteImport(\'' + item.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</div>'
       + '</div></div>'
       + '<div class="garmin-import-grid">'
@@ -16085,7 +16284,7 @@ const garmin = (function () {
     const card = el && el.closest ? el.closest('.garmin-import-item') : null;
     if (!card) return;
     const collapsed = card.classList.toggle('is-collapsed');
-    if (collapsed) delete expandedGarminIds[id]; else expandedGarminIds[id] = true;
+    if (collapsed) collapsedGarminIds[id] = true; else delete collapsedGarminIds[id];
   }
 
   function applyStaticLabels(isKo) {
@@ -16144,6 +16343,7 @@ const garmin = (function () {
     // 자동으로 쌓인 정밀 로그가 있어도 드롭다운에는 절대 반영되지 않는 버그가 있었음.
     renderPrecLogDropdown(isKo);
     renderAutoLogList(isKo); // [추가] 자동저장 로그 개별 리스트도 항상 갱신
+    renderSelectedLogCards(isKo); // [추가] 체크한 로그를 상세 카드로 표시
 
     // [수정] 목록에서 사라진 기록(삭제/전체삭제 등)은 선택 목록에서도 제거
     selectedIds = selectedIds.filter(id => list.find(i => i.id === id));
@@ -16177,6 +16377,7 @@ const garmin = (function () {
       order: idx + 1,
       line1: fmtDate(item.startMs),
       line2: item.distanceKm.toFixed(2) + ' km · ' + fmtDuration(item.durationSec),
+      infoHtml: infoBtn('fit', item.id, isKo),
       delHtml: '<div class="garmin-import-item-del" onclick="garmin.deleteImport(\'' + item.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</div>'
     })).join('');
 
@@ -16299,6 +16500,7 @@ const garmin = (function () {
         order: idx + 1,
         line1: fmtDate(new Date(l.savedAt).getTime()),
         line2: line2,
+        infoHtml: infoBtn('log', l.id, isKo),
         delHtml: '<div class="garmin-import-item-del" onclick="garmin.deletePrecLogImport(\'' + l.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</div>'
       });
     }).join('');
@@ -16349,6 +16551,7 @@ const garmin = (function () {
         order: idx + 1,
         line1: fmtDate(new Date(l.savedAt).getTime()),
         line2: l.log.length + (isKo ? '개' : ' rows') + posBadge,
+        infoHtml: infoBtn('log', l.id, isKo),
         delHtml: '<div class="garmin-import-item-del" onclick="storage.deletePrecisionLog(\'' + l.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</div>'
       });
     }).join('') + (allLogs.length > MAX_ANALYSIS_AUTOLOGS
@@ -18583,7 +18786,7 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
     saveTextFileNative(reportStr, fileName, 'text/plain;charset=utf-8', isKo);
   }
 
-  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, toggleGarminDetail, togglePrecLogSelect, togglePrecLogSelectAutoMatch, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
+  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, toggleGarminDetail, openInfo, closeInfo, togglePrecLogSelect, togglePrecLogSelectAutoMatch, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
@@ -19375,6 +19578,12 @@ UIManager.prototype.stopRoutePlayback = function() {
       es.classList.remove('is-open');
       return;
     }
+    // [추가] 가민 분석실 INFO 상세 페이지가 열려있으면 → 닫기만 함(목록으로 복귀)
+    const garminInfoPage = document.getElementById('garmin-info-page');
+    if (garminInfoPage && garminInfoPage.classList.contains('is-open')) {
+      if (typeof garmin !== 'undefined') garmin.closeInfo();
+      return;
+    }
     // 전체화면 맵이 열려있으면 닫기만 함
     const mainFull = document.getElementById('map-fullscreen-overlay');
     const detailFull = document.getElementById('detail-map-fullscreen-overlay');
@@ -19539,6 +19748,14 @@ UIManager.prototype.stopRoutePlayback = function() {
 })();
 </script>
 <!-- 신고/차단 액션시트 -->
+<!-- 가민 분석실 INFO 상세 페이지 -->
+<div id="garmin-info-page" class="garmin-info-page">
+  <div class="garmin-info-head">
+    <button class="garmin-info-back" onclick="garmin.closeInfo()">&#8592;</button>
+    <div id="garmin-info-title" class="garmin-info-title"></div>
+  </div>
+  <div id="garmin-info-body" class="garmin-info-body"></div>
+</div>
 <!-- 원본 사진 보기 -->
 <div id="photo-viewer-modal" onclick="community.closePhotoViewer()" class="photo-viewer-modal">
   <img id="photo-viewer-img" src="" style="max-width:100%; max-height:100%; object-fit:contain; border-radius:8px;">
