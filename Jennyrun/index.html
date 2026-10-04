@@ -15962,9 +15962,15 @@ const garmin = (function () {
   // 기록이 없으면(10분 넘게 떨어져 있으면) 아예 매칭하지 않음.
   const AUTO_MATCH_MAX_GAP_MS = 10 * 60 * 1000; // 겹치는 게 없을 때, 이 이상 떨어져 있으면 매칭 포기
   function findBestGarminMatchByTime(precLog) {
+    return findBestGarminMatchDetailed(precLog).match;
+  }
+  // [추가] 매칭 결과와 함께 실패 이유(norange/noimports/far)와 간격(분)을 돌려줘서,
+  // 체크했는데 FIT이 안 잡힐 때 화면에 이유를 보여줄 수 있게 한다.
+  function findBestGarminMatchDetailed(precLog) {
     const pr = precLogTimeRangeMs(precLog);
-    if (!pr) return null;
+    if (!pr) return { match: null, reason: 'norange' };
     const gList = loadImports();
+    if (!gList.length) return { match: null, reason: 'noimports' };
     let best = null, bestScore = Infinity;
     gList.forEach(g => {
       const gr = garminTimeRangeMs(g);
@@ -15975,9 +15981,9 @@ const garmin = (function () {
       const score = (overlapEnd > overlapStart) ? -(overlapEnd - overlapStart) : Math.max(gr.startMs - pr.endMs, pr.startMs - gr.endMs);
       if (score < bestScore) { bestScore = score; best = g; }
     });
-    if (!best) return null;
-    if (bestScore > AUTO_MATCH_MAX_GAP_MS) return null; // 겹침도 없고 너무 멀리 떨어져 있으면 매칭 포기
-    return best;
+    if (!best) return { match: null, reason: 'noimports' };
+    if (bestScore > AUTO_MATCH_MAX_GAP_MS) return { match: null, reason: 'far', gapMin: Math.round(bestScore / 60000) }; // 겹침도 없고 너무 멀리 떨어져 있으면 매칭 포기
+    return { match: best, reason: 'ok' };
   }
   // [수정 2026-09-23] 체크 시엔 시간대 매칭되는 가민 기록을 같이 체크하고 어떤 로그↔가민
   // 조합인지 autoMatchedGarminByPrecLogId에 기록해둔다. 해제 시엔 그 기록을 보고 같이
@@ -15992,12 +15998,17 @@ const garmin = (function () {
       let autoLogs = [];
       try { autoLogs = (typeof storage !== 'undefined') ? storage.loadPrecisionLogs() : []; } catch (e) {}
       const precItem = autoLogs.find(l => l.id === id) || getCombinedPrecLogs().find(l => l.id === id);
-      const match = precItem ? findBestGarminMatchByTime(precItem.log) : null;
+      const res = precItem ? findBestGarminMatchDetailed(precItem.log) : { match: null, reason: 'norange' };
+      const match = res.match;
       if (match) {
         autoMatchedGarminByPrecLogId[id] = match.id;
         if (selectedIds.indexOf(match.id) < 0) selectedIds.push(match.id);
+        autoMatchNote = { type: 'ok', garminId: match.id };
+      } else {
+        autoMatchNote = { type: res.reason, gapMin: res.gapMin };
       }
     } else {
+      autoMatchNote = null;
       const matchedGid = autoMatchedGarminByPrecLogId[id];
       delete autoMatchedGarminByPrecLogId[id];
       if (matchedGid) {
@@ -16018,7 +16029,7 @@ const garmin = (function () {
   // isSelected면 캘리브레이션 비교 기준으로 쓰이는 카드라는 표시(테두리 강조 + 라벨)를 해준다.
   // [추가] 펼쳐둔 가민 기록 카드 id 저장소(체크박스 선택 등으로 render()가 다시 돌아도 펼침 상태 유지)
   var expandedGarminIds = {};
-  let focusedGarminId = null; // [추가] 드롭다운 아래에 상세 카드로 보여줄 가민 기록 id
+  let autoMatchNote = null; // [추가] 마지막 로그 체크의 FIT 자동매칭 결과 안내 ({type:'ok'|'far'|'noimports'|'norange', ...})
   const MAX_ANALYSIS_AUTOLOGS = 10; // [추가] 분석실은 자동저장 로그를 최신 10개까지만 다룸 (저장소엔 설정 탭 기준 최대 30개)
   // [추가] 체크 드롭다운 패널의 한 줄: 체크박스(비교 선택) + 날짜/보조줄 + (INFO) + 삭제.
   // 패널은 열린 채로 유지되고(render()가 is-open 클래스를 건드리지 않음) 체크만 토글된다.
@@ -16031,13 +16042,6 @@ const garmin = (function () {
       + '</label>'
       + '<div class="c07">' + (o.infoHtml || '') + o.delHtml + '</div>'
       + '</div>';
-  }
-  function focusGarmin(id) { // [추가] INFO 버튼: 해당 가민 기록 상세 카드를 드롭다운 아래에 펼쳐 보여줌
-    focusedGarminId = id;
-    expandedGarminIds[id] = true;
-    const dd = document.getElementById('garmin-record-dropdown-options');
-    if (dd) dd.classList.remove('is-open');
-    render();
   }
   function renderBox(item, isKo, isSelected, orderIdx) {
     if (!item) {
@@ -16092,11 +16096,11 @@ const garmin = (function () {
       ? '1. 가민 커넥트(Garmin Connect) 앱에서 확인하려는 러닝 기록을 엽니다.<br>'
         + '2. 오른쪽 위 ⋯ 메뉴 → 내보내기(Export) → 원본 파일(.FIT)을 선택해 폰에 저장합니다.<br>'
         + '3. 아래 "가민 데이터 가져오기 (.FIT)" 버튼을 눌러 그 파일을 선택합니다.<br>'
-        + '4. 드롭다운에서 체크하면 비교 대상으로 선택되고, 상세 버튼을 누르면 해당 기록의 세부 데이터를 볼 수 있습니다.'
+        + '4. 드롭다운에서 체크하면 비교 대상으로 선택되어 아래에 카드로 표시되고, 카드 제목을 누르면 세부 데이터가 펼쳐집니다.'
       : '1. Open the run in the Garmin Connect app.<br>'
         + '2. Tap the ⋯ menu → Export → Original file (.FIT), then save it to your phone.<br>'
         + '3. Tap "IMPORT GARMIN DATA (.FIT)" below and pick that file.<br>'
-        + '4. Tick records in the dropdown to compare them; tap INFO to view a record\'s details.');
+        + '4. Tick records in the dropdown to compare them; they show as cards below — tap a card title to see details.');
     setText('garmin-import-header-title', isKo ? '가민 데이터 가져오기' : 'GARMIN IMPORT');
     setText('btn-import-garmin-fit', isKo ? '가민 데이터 가져오기 (.FIT)' : 'IMPORT GARMIN DATA (.FIT)');
     setText('label-garmin-import', isKo ? '가져온 기록' : 'IMPORTED RECORDS');
@@ -16152,27 +16156,37 @@ const garmin = (function () {
       return;
     }
 
-    // [수정] FIT 목록도 카드 나열 대신 체크 드롭다운: 체크=비교 선택, INFO=상세 카드, 삭제=개별 삭제.
+    // [추가] 로그 체크 시 FIT 자동매칭 결과 안내 (성공/실패 이유)
+    let noteHtml = '';
+    if (autoMatchNote) {
+      const n = autoMatchNote;
+      let txt = '', warn = true;
+      if (n.type === 'ok') {
+        const gi = list.findIndex(i => i.id === n.garminId);
+        txt = gi >= 0 ? (isKo ? '✓ 같은 시간대 FIT #' + (gi + 1) + ' 자동 선택됨' : '✓ Matching FIT #' + (gi + 1) + ' ticked') : '';
+        warn = false;
+      } else if (n.type === 'far') txt = isKo ? '시간대가 맞는 FIT 없음 (가장 가까운 FIT와 ' + n.gapMin + '분 차이)' : 'No FIT from the same time (closest is ' + n.gapMin + ' min away)';
+      else if (n.type === 'noimports') txt = isKo ? '가져온 FIT 기록이 없어요' : 'No FIT records imported';
+      else if (n.type === 'norange') txt = isKo ? '이 로그에 시간 정보가 없어 자동 매칭할 수 없어요' : 'This log has no timestamps, so it cannot be auto-matched';
+      if (txt) noteHtml = '<div class="garmin-import-empty" style="padding:6px 2px; color:' + (warn ? '#e0a030' : 'var(--primary)') + ';">' + txt + '</div>';
+    }
+    // [수정] FIT 목록도 카드 나열 대신 체크 드롭다운: 체크=비교 선택, 삭제=개별 삭제.
     dropdownOptions.innerHTML = list.map((item, idx) => ddCheckRow({
       checked: selectedIds.indexOf(item.id) >= 0,
       onToggle: "garmin.toggleGarminSelect('" + item.id + "')",
       order: idx + 1,
       line1: fmtDate(item.startMs),
       line2: item.distanceKm.toFixed(2) + ' km · ' + fmtDuration(item.durationSec),
-      infoHtml: '<div class="garmin-import-item-del c60" onclick="garmin.focusGarmin(\'' + item.id + '\')">' + (isKo ? '상세' : 'INFO') + '</div>',
       delHtml: '<div class="garmin-import-item-del" onclick="garmin.deleteImport(\'' + item.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</div>'
     })).join('');
 
     currentText.textContent = selectedIds.length
       ? selectedIds.length + (isKo ? '개 선택됨' : ' selected')
       : (isKo ? '선택 안 함' : 'NONE SELECTED');
-    // 상세 카드는 포커스된 기록 1개만 (기본: 목록 맨 위 #1). 포커스가 사라지면(삭제 등) #1로 복귀.
-    if (!list.some(i => i.id === focusedGarminId)) {
-      focusedGarminId = list[0].id;
-      expandedGarminIds[focusedGarminId] = true;
-    }
-    const fIdx = list.findIndex(i => i.id === focusedGarminId);
-    wrap.innerHTML = renderBox(list[fIdx], isKo, selectedIds.indexOf(list[fIdx].id) >= 0, fIdx + 1);
+    // [수정] 드롭다운 밖에는 "체크된(=비교 선택/자동매칭된) FIT"만 접힌 카드로 표시한다.
+    // 카드 제목을 누르면 상세 수치가 펼쳐지고, 체크 해제하면 카드가 사라진다. 펼침 상태 기본값은 접힘.
+    const selCards = list.map((item, idx) => selectedIds.indexOf(item.id) >= 0 ? renderBox(item, isKo, true, idx + 1) : '').join('');
+    wrap.innerHTML = noteHtml + (selCards || '<div class="garmin-import-empty">' + (isKo ? '비교할 FIT를 체크하면 여기에 표시돼요. 아래 로그를 체크하면 같은 시간대 FIT가 자동으로 체크됩니다.' : 'Ticked FIT records appear here. Ticking a log below auto-ticks the FIT from the same time.') + '</div>');
     if (clearAllBtn) clearAllBtn.classList.add('is-open');
   }
 
@@ -16281,7 +16295,7 @@ const garmin = (function () {
         + (posLabelDl ? ' <span class="c27">· ' + posLabelDl + '</span>' : '');
       return ddCheckRow({
         checked: selectedPrecLogIds.indexOf(l.id) >= 0,
-        onToggle: "garmin.togglePrecLogSelect('" + l.id + "')",
+        onToggle: "garmin.togglePrecLogSelectAutoMatch('" + l.id + "')", // [수정] 불러온 지난 로그도 체크 시 같은 시간대 FIT 자동 체크
         order: idx + 1,
         line1: fmtDate(new Date(l.savedAt).getTime()),
         line2: line2,
@@ -16553,6 +16567,7 @@ const garmin = (function () {
   }
 
   function deleteImport(id) {
+    autoMatchNote = null;
     const list = loadImports().filter(item => item.id !== id);
     saveImports(list);
     selectedIds = selectedIds.filter(x => x !== id); // [수정] 삭제된 기록은 선택 배열에서도 제거
@@ -18568,7 +18583,7 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
     saveTextFileNative(reportStr, fileName, 'text/plain;charset=utf-8', isKo);
   }
 
-  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, focusGarmin, selectPrecLog, toggleGarminSelect, toggleGarminDetail, togglePrecLogSelect, togglePrecLogSelectAutoMatch, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
+  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, toggleGarminDetail, togglePrecLogSelect, togglePrecLogSelectAutoMatch, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
