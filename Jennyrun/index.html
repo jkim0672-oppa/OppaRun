@@ -16083,8 +16083,17 @@ const garmin = (function () {
       + boxes.map(b => '<div class="garmin-import-box"><div class="garmin-import-box-label">' + b[0] + '</div><div class="garmin-import-box-val">' + b[1] + '</div></div>').join('')
       + '</div>';
   }
+  // 로그 값이 문자열("0.77")로 저장돼 있어도 숫자로 취급 (toFixed/평균 계산 오류 방지)
+  function toN(v) { if (v == null || v === '') return null; const n = Number(v); return isFinite(n) ? n : null; }
+  function normLogRows(log) {
+    return (Array.isArray(log) ? log : []).map(r => ({
+      t: toN(r.t), distKm: toN(r.distKm), cadence: toN(r.cadence), gctMs: toN(r.gctMs), hrBpm: toN(r.hrBpm),
+      vertOscMm: toN(r.vertOscMm), stepLengthM: toN(r.stepLengthM), flightPct: toN(r.flightPct),
+      rotPeakDps: toN(r.rotPeakDps), altM: toN(r.altM), timestamp: r.timestamp
+    }));
+  }
   function summarizeLog(log) {
-    const rows = Array.isArray(log) ? log : [];
+    const rows = normLogRows(log);
     if (!rows.length) return null;
     const avg = (key) => { let sum = 0, n = 0; rows.forEach(r => { const v = r[key]; if (v != null && isFinite(v) && v > 0) { sum += v; n++; } }); return n ? sum / n : null; };
     const r1 = (v) => v == null ? null : Math.round(v * 10) / 10;
@@ -16116,7 +16125,7 @@ const garmin = (function () {
   function logBoxes(sm, isKo) {
     const f = (v, u) => v != null ? v + ' ' + u : '--';
     return [
-      [isKo ? '거리' : 'DIST', sm.distanceKm.toFixed(2) + ' km'],
+      [isKo ? '거리' : 'DIST', (Number(sm.distanceKm) || 0).toFixed(2) + ' km'],
       [isKo ? '시간' : 'TIME', fmtDuration(sm.durSec)],
       [isKo ? '평균 페이스' : 'AVG PACE', fmtPace(sm.avgPace)],
       [isKo ? '평균 심박수' : 'AVG HR', f(sm.avgHr, 'bpm')],
@@ -16250,7 +16259,7 @@ const garmin = (function () {
           + (sm.avgFlight != null ? kvRow(isKo ? '평균 체공 비율' : 'AVG FLIGHT', sm.avgFlight + ' %') : '')
           + (sm.rotMax != null ? kvRow(isKo ? '최대 회전 피크' : 'MAX ROT PEAK', sm.rotMax + ' dps') : '')
           + kvRow(isKo ? '레코드 수' : 'RECORDS', sm.rows);
-        html += buildSplitsHtml(l.log.map(r => ({ d: r.distKm, t: r.t, cad: r.cadence, gct: r.gctMs, vo: r.vertOscMm, hr: r.hrBpm })), isKo);
+        html += buildSplitsHtml(normLogRows(l.log).map(r => ({ d: r.distKm, t: r.t, cad: r.cadence, gct: r.gctMs, vo: r.vertOscMm, hr: r.hrBpm })), isKo);
       }
     }
     titleEl.innerHTML = title;
