@@ -1492,12 +1492,12 @@ flex-wrap: wrap; justify-content: center; white-space: nowrap;
 .garmin-import-item.is-collapsed .garmin-import-grid { display:none; }
 .garmin-import-item.is-collapsed .garmin-import-item-head { margin-bottom:0; }
 .garmin-import-item-info { font-size:var(--fs-xxs); color:#7fd3ff; font-weight:800; cursor:pointer; border:1px solid #2f5a73; border-radius:8px; padding:4px 8px; }
-.garmin-info-page { display:none; position:fixed; inset:0; background:#0d0d0d; z-index:999999; flex-direction:column; box-sizing:border-box; }
+.garmin-info-page { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:#0d0d0d; z-index:999999; flex-direction:column; box-sizing:border-box; }
 .garmin-info-page.is-open { display:flex; }
-.garmin-info-head { flex:0 0 auto; display:flex; align-items:center; gap:10px; padding:calc(env(safe-area-inset-top, 0px) + 12px) 14px 12px 14px; border-bottom:1px solid #262626; background:#141414; }
+.garmin-info-head { flex:0 0 auto; position:relative; display:flex; align-items:center; gap:10px; padding:calc(var(--top-inset) + 10px) 120px 12px 16px; min-height:calc(var(--top-inset) + 62px); box-sizing:border-box; border-bottom:1px solid #262626; background:#141414; }
 .garmin-info-back { background:#2a2a2a; border:1px solid #444; color:var(--primary); border-radius:10px; font-weight:900; font-size:var(--fs-base); padding:6px 12px; cursor:pointer; }
 .garmin-info-title { flex:1; min-width:0; font-size:var(--fs-sm); font-weight:900; color:#fff; line-height:1.4; }
-.garmin-info-body { flex:1 1 auto; overflow-y:auto; padding:14px 14px calc(env(safe-area-inset-bottom, 0px) + 24px) 14px; }
+.garmin-info-body { flex:1 1 auto; overflow-y:auto; padding:14px 14px calc(var(--bottom-inset, 0px) + 24px) 14px; }
 .garmin-info-sec { color:var(--primary); font-weight:900; font-size:var(--fs-sm); margin:16px 0 8px 2px; letter-spacing:.5px; }
 .garmin-info-kv { display:flex; justify-content:space-between; gap:10px; padding:8px 4px; border-bottom:1px solid #262626; font-size:var(--fs-xs); font-weight:700; color:#ccc; }
 .garmin-info-kv span:last-child { color:#fff; text-align:right; word-break:break-all; }
@@ -16164,8 +16164,10 @@ const garmin = (function () {
     if (!wrap) return;
     const all = getCombinedPrecLogs();
     wrap.innerHTML = selectedPrecLogIds.map(id => {
-      const l = all.find(x => x.id === id);
-      return l ? renderLogBox(l, isKo) : '';
+      const l = all.find(x => String(x.id) === String(id));
+      if (!l) return '';
+      try { return renderLogBox(l, isKo); }
+      catch (e) { return '<div class="garmin-import-empty" style="color:#e0a030;">LOG ' + (isKo ? '상세 표시 오류: ' : 'detail error: ') + String(e && e.message || e) + '</div>'; }
     }).join('');
   }
   // 구간(스플릿) 표: pts = [{d(km), t(sec), cad, gct, vo, hr}]
@@ -16199,7 +16201,16 @@ const garmin = (function () {
     return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0');
   }
   function openInfo(kind, id) {
+    try { openInfoInner(kind, id); }
+    catch (e) {
+      const page = document.getElementById('garmin-info-page'), body = document.getElementById('garmin-info-body'), t = document.getElementById('garmin-info-title');
+      if (page && body) { if (t) t.textContent = 'INFO'; body.innerHTML = '<div class="garmin-import-empty" style="color:#e0a030;">ERROR: ' + String(e && e.message || e) + '</div>'; page.classList.add('is-open'); }
+    }
+  }
+  function openInfoInner(kind, id) {
     const isKo = isKoLang();
+    const backBtn = document.getElementById('garmin-info-back-btn');
+    if (backBtn) backBtn.textContent = isKo ? '뒤로' : 'BACK';
     const page = document.getElementById('garmin-info-page');
     const body = document.getElementById('garmin-info-body');
     const titleEl = document.getElementById('garmin-info-title');
@@ -16207,7 +16218,7 @@ const garmin = (function () {
     let title = '', html = '';
     if (kind === 'fit') {
       const list = loadImports();
-      const idx = list.findIndex(i => i.id === id);
+      const idx = list.findIndex(i => String(i.id) === String(id));
       if (idx < 0) return;
       const item = list[idx];
       title = 'GARMIN FIT #' + (idx + 1) + '<br><span class="c62">' + fmtDate(item.startMs) + '</span>';
@@ -16221,7 +16232,7 @@ const garmin = (function () {
         html += buildSplitsHtml(recs.map(r => ({ d: r.distance != null ? r.distance / 1000 : null, t: (r.unixMs - t0) / 1000, cad: r.cadence, gct: r.stanceTimeMs, vo: r.verticalOscillationMm, hr: null })), isKo);
       }
     } else {
-      const l = getCombinedPrecLogs().find(x => x.id === id);
+      const l = getCombinedPrecLogs().find(x => String(x.id) === String(id));
       if (!l) return;
       const oi = logOrderInfo(id);
       const sm = summarizeLog(l.log);
@@ -16343,7 +16354,7 @@ const garmin = (function () {
     // 자동으로 쌓인 정밀 로그가 있어도 드롭다운에는 절대 반영되지 않는 버그가 있었음.
     renderPrecLogDropdown(isKo);
     renderAutoLogList(isKo); // [추가] 자동저장 로그 개별 리스트도 항상 갱신
-    renderSelectedLogCards(isKo); // [추가] 체크한 로그를 상세 카드로 표시
+    try { renderSelectedLogCards(isKo); } catch (e) { console.error('selected log cards', e); } // [추가] 체크한 로그를 상세 카드로 표시 (오류가 나도 FIT 카드 렌더는 계속)
 
     // [수정] 목록에서 사라진 기록(삭제/전체삭제 등)은 선택 목록에서도 제거
     selectedIds = selectedIds.filter(id => list.find(i => i.id === id));
@@ -19751,8 +19762,8 @@ UIManager.prototype.stopRoutePlayback = function() {
 <!-- 가민 분석실 INFO 상세 페이지 -->
 <div id="garmin-info-page" class="garmin-info-page">
   <div class="garmin-info-head">
-    <button class="garmin-info-back" onclick="garmin.closeInfo()">&#8592;</button>
     <div id="garmin-info-title" class="garmin-info-title"></div>
+    <button id="garmin-info-back-btn" class="close-detail" onclick="garmin.closeInfo()">BACK</button>
   </div>
   <div id="garmin-info-body" class="garmin-info-body"></div>
 </div>
