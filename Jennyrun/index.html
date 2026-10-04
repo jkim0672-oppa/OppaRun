@@ -895,6 +895,13 @@ filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
 .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
 .dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 6px; margin-top: var(--dashboard-top-gap); flex-shrink: 0; }
 .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #333; height: 68px; padding: 0; transition: border-color 0.3s ease; }
+/* [추가 2026-10-03] 프리미엄 잠금: 해제되지 않은 계정은 GCT/FLIGHT 값을 가리고 자물쇠 표시 */
+.card.premium-locked { position: relative; }
+#settings-calib-area.premium-locked-area > *:not(.premium-banner) { opacity: .35; pointer-events: none; }
+.premium-banner { display:none; background:#2a2a2a; border:1.5px solid #555; border-radius:12px; padding:14px 16px; margin:0 0 12px; font-size:var(--fs-sm); font-weight:800; color:#ddd; text-align:center; }
+#settings-calib-area.premium-locked-area > .premium-banner { display:block; }
+.card.premium-locked .value { visibility: hidden; }
+.card.premium-locked::after { content: '\1F512'; position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; font-size: var(--fs-md); }
 .card-main { grid-column: span 3; border: 2.5px solid var(--primary); height: 82px; position: relative; margin-bottom: 4px; }
 .card-hr-row { grid-column: span 3; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
 .label { font-size:var(--fs-xxs); color: var(--text-dim); font-weight: 900; margin-bottom: 3px; text-transform: uppercase; }
@@ -2121,6 +2128,16 @@ alt="runner"/>
     </div>
   </div>
   <div id="email-hint" style="font-size:var(--fs-xxs); color:#666; margin-top:8px; font-weight:700;">이메일로 로그인하면 크루에 기록 공유·팔로우·댓글을 할 수 있어요. 계정은 이메일 하나뿐이라 앱을 지우거나 기기를 바꿔도 그대로 유지됩니다</div>
+</div>
+<div id="admin-panel" class="settings-group" style="display:none;">
+  <div class="settings-label" id="admin-title">ADMIN · 해제 계정 관리</div>
+  <div class="settings-label" style="margin-top:4px;">잠금 항목 (누르면 잠금/공개 전환)</div>
+  <div id="admin-lock-list" style="margin-bottom:14px;"></div>
+  <div class="settings-label">해제된 계정</div>
+  <div id="admin-ent-list" style="margin-bottom:10px;"></div>
+  <input id="admin-email-input" type="email" placeholder="등록할 이메일" autocomplete="off" autocapitalize="off" style="width:100%; background:#2a2a2a; color:#fff; border:1.5px solid #444; padding:13px 16px; border-radius:12px; font-size:var(--fs-md); font-weight:700; outline:none;">
+  <button id="admin-add-btn" onclick="premium.add()" class="c28">등록</button>
+  <div id="admin-hint" style="font-size:var(--fs-xxs); color:#666; margin-top:8px; font-weight:700;">상대가 앱에서 먼저 이메일 로그인해야 등록할 수 있어요</div>
 </div>
 <div class="section-title" id="section-title-profile">MY INFO</div>
 <div class="settings-group"><div id="label-gender" class="settings-label">GENDER</div><div class="gender-toggle-row"><div id="gender-male" class="gender-btn active" onclick="ui.setGender('male')"> MALE</div><div id="gender-female" class="gender-btn" onclick="ui.setGender('female')"> FEMALE</div></div></div>
@@ -12412,6 +12429,166 @@ const SUPABASE_URL = 'https://ujodpspxsisoycniswwl.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVqb2Rwc3B4c2lzb3ljbmlzd3dsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0NDg4OTUsImV4cCI6MjA5NzAyNDg5NX0.KWyli79Llmr5VA027BfF9d76-05IFkjylII3Wj_F7Vc';
 const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// [추가 2026-10-03] 프리미엄 잠금(GCT/FLIGHT 라이브 카드) + 관리자 패널
+// - 해제 여부는 로그인한 계정으로 결정(서버 entitlements 테이블). 관리자는 항상 해제.
+// - 마지막 확인 결과를 localStorage에 캐시해서 야외/오프라인에서도 상태 유지.
+// - 이 잠금은 화면 표시용이고, 등록/해제 권한은 서버 함수(is_admin 확인)가 지킴.
+const premium = {
+  CACHE_KEY: 'jrPremiumCache',
+  unlocked: false, isAdmin: false, _busy: false, _again: false,
+  LOCKS_KEY: 'jrPremiumLocks', locks: {},
+  // 잠금 항목 목록: 서버 feature_locks 테이블의 key와 같아야 함. 서버값이 없으면 기본 잠금(true).
+  FEATURES: {
+    live_gct:    { ko: 'GCT 카드 (라이브)',   en: 'GCT card (live)',    set(on) { const e = document.getElementById('card-gct');    if (e) e.classList.toggle('premium-locked', on); } },
+    live_flight: { ko: 'FLIGHT 카드 (라이브)', en: 'FLIGHT card (live)', set(on) { const e = document.getElementById('card-flight'); if (e) e.classList.toggle('premium-locked', on); } },
+    calib:       { ko: '캘리브레이션 탭',      en: 'Calibration tab',    set(on) {
+      const a = document.getElementById('settings-calib-area'); if (!a) return;
+      let b = a.querySelector(':scope > .premium-banner');
+      if (!b) { b = document.createElement('div'); b.className = 'premium-banner'; a.insertBefore(b, a.firstChild); }
+      b.textContent = '\uD83D\uDD12 ' + premium._s('프리미엄 기능이에요. 해제된 계정으로 로그인하면 쓸 수 있어요.', 'Premium feature. Log in with an unlocked account to use it.');
+      a.classList.toggle('premium-locked-area', on);
+    } }
+  },
+  isLockOn(k) { return this.locks[k] === undefined ? true : !!this.locks[k]; },
+  _ko() { try { return storage.getLang() === 'ko'; } catch (e) { return false; } },
+  _s(ko, en) { return this._ko() ? ko : en; },
+  loadCache() {
+    try { this.locks = JSON.parse(localStorage.getItem(this.LOCKS_KEY) || '{}') || {}; } catch (e) { this.locks = {}; }
+    try {
+      const c = JSON.parse(localStorage.getItem(this.CACHE_KEY) || 'null');
+      if (c && c.uid && c.uid === localStorage.getItem(community.USER_ID_KEY)) {
+        this.unlocked = !!c.unlocked; this.isAdmin = !!c.isAdmin;
+      }
+    } catch (e) {}
+  },
+  apply() {
+    const free = this.unlocked || this.isAdmin;
+    Object.keys(this.FEATURES).forEach(k => this.FEATURES[k].set(!free && this.isLockOn(k)));
+    if (this.isAdmin) this.renderToggles();
+    const panel = document.getElementById('admin-panel');
+    if (panel) panel.style.display = this.isAdmin ? '' : 'none';
+  },
+  initLockTap() {
+    ['card-gct', 'card-flight'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('click', () => {
+        if (el.classList.contains('premium-locked')) {
+          appAlert(this._s('잠겨 있는 지표예요. 해제된 계정으로 로그인하면 볼 수 있어요.', 'This metric is locked. Log in with an unlocked account to see it.'));
+        }
+      });
+    });
+  },
+  async refresh() {
+    if (this._busy) { this._again = true; return; }
+    this._busy = true;
+    try {
+      try {
+        const lr = await _sb.from('feature_locks').select('key,locked');
+        if (!lr.error && lr.data) {
+          const m = {}; lr.data.forEach(r => { m[r.key] = r.locked; });
+          this.locks = m;
+          try { localStorage.setItem(this.LOCKS_KEY, JSON.stringify(m)); } catch (e) {}
+        }
+      } catch (e) {}
+      const { data } = await _sb.auth.getSession();
+      const user = data && data.session && data.session.user;
+      if (!user || !user.email || user.is_anonymous) {
+        this.unlocked = false; this.isAdmin = false;
+        try { localStorage.removeItem(this.CACHE_KEY); } catch (e) {}
+        this.apply();
+        return;
+      }
+      const [ent, adm] = await Promise.all([
+        _sb.from('entitlements').select('user_id').eq('user_id', user.id).maybeSingle(),
+        _sb.rpc('is_admin')
+      ]);
+      if (ent.error || adm.error) return; // 네트워크 실패 시 캐시된 상태 유지
+      this.unlocked = !!ent.data;
+      this.isAdmin = adm.data === true;
+      try { localStorage.setItem(this.CACHE_KEY, JSON.stringify({ uid: user.id, unlocked: this.unlocked, isAdmin: this.isAdmin })); } catch (e) {}
+      this.apply();
+      if (this.isAdmin) this.loadList();
+    } catch (e) {
+      /* 오프라인 등: 캐시 유지 */
+    } finally {
+      this._busy = false;
+      if (this._again) { this._again = false; this.refresh(); }
+    }
+  },
+  renderToggles() {
+    const box = document.getElementById('admin-lock-list');
+    if (!box) return;
+    box.textContent = '';
+    Object.keys(this.FEATURES).forEach(k => {
+      const on = this.isLockOn(k);
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px; background:#2a2a2a; border:1px solid #444; border-radius:10px; padding:8px 10px; margin-bottom:6px;';
+      const name = document.createElement('span');
+      name.style.cssText = 'font-size:var(--fs-sm); color:#fff; font-weight:700;';
+      name.textContent = this.FEATURES[k][this._ko() ? 'ko' : 'en'];
+      const btn = document.createElement('button');
+      btn.textContent = on ? ('\uD83D\uDD12 ' + this._s('잠금', 'LOCKED')) : this._s('공개', 'OPEN');
+      btn.style.cssText = 'flex:none; background:none; border:1.5px solid ' + (on ? '#e57373' : '#00c853') + '; color:' + (on ? '#e57373' : '#00c853') + '; padding:8px 12px; border-radius:8px; font-size:var(--fs-xs); font-weight:800; cursor:pointer;';
+      btn.addEventListener('click', () => this.setLock(k, !on));
+      row.appendChild(name); row.appendChild(btn); box.appendChild(row);
+    });
+  },
+  async setLock(k, locked) {
+    const { error } = await _sb.rpc('admin_set_lock', { p_key: k, p_locked: locked });
+    if (error) { await appAlert(this._s('변경 실패: ', 'Failed: ') + error.message); return; }
+    this.locks[k] = locked;
+    try { localStorage.setItem(this.LOCKS_KEY, JSON.stringify(this.locks)); } catch (e) {}
+    this.apply();
+  },
+  async loadList() {
+    const box = document.getElementById('admin-ent-list');
+    if (!box) return;
+    const { data, error } = await _sb.rpc('admin_list_entitlements');
+    box.textContent = '';
+    const note = (txt) => {
+      const d = document.createElement('div');
+      d.style.cssText = 'font-size:var(--fs-xxs); color:#888; font-weight:700; padding:6px 0;';
+      d.textContent = txt; box.appendChild(d);
+    };
+    if (error) { note(this._s('목록을 불러오지 못했어요', 'Could not load the list')); return; }
+    if (!data || !data.length) { note(this._s('등록된 계정이 없어요', 'No accounts registered')); return; }
+    data.forEach(row => {
+      const line = document.createElement('div');
+      line.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px; background:#2a2a2a; border:1px solid #444; border-radius:10px; padding:8px 10px; margin-bottom:6px;';
+      const em = document.createElement('span');
+      em.style.cssText = 'font-size:var(--fs-sm); color:#fff; font-weight:700; word-break:break-all;';
+      em.textContent = row.email || '(no email)';
+      const btn = document.createElement('button');
+      btn.textContent = this._s('해제', 'REMOVE');
+      btn.style.cssText = 'flex:none; background:none; border:1.5px solid #663333; color:#e57373; padding:8px 12px; border-radius:8px; font-size:var(--fs-xs); font-weight:800; cursor:pointer;';
+      btn.addEventListener('click', () => this.remove(row.user_id, row.email));
+      line.appendChild(em); line.appendChild(btn); box.appendChild(line);
+    });
+  },
+  async add() {
+    const inp = document.getElementById('admin-email-input');
+    const email = inp ? inp.value.trim() : '';
+    if (!email) return;
+    const { data, error } = await _sb.rpc('admin_add_entitlement', { p_email: email, p_note: 'friend' });
+    if (error) { await appAlert(this._s('등록 실패: ', 'Failed: ') + error.message); return; }
+    if (data === 'not_found') {
+      await appAlert(this._s('이 이메일로 가입한 계정이 없어요. 상대가 앱에서 먼저 이메일 로그인해야 해요.', 'No account with this email. They need to log in with email in the app first.'));
+      return;
+    }
+    if (inp) inp.value = '';
+    await this.loadList();
+  },
+  async remove(uid, email) {
+    const ok = await appConfirm(this._s(email + ' 계정의 해제를 취소할까요?', 'Remove access for ' + email + '?'));
+    if (!ok) return;
+    const { error } = await _sb.rpc('admin_remove_entitlement', { p_user_id: uid });
+    if (error) { await appAlert(this._s('해제 실패: ', 'Failed: ') + error.message); return; }
+    await this.loadList();
+  }
+};
+
+
 // 경로맵(리스트/상세/크루피드)은 다크모드 설정과 무관하게 항상 밝게 표시.
 // 라이브 러닝 화면(#map)만 다크모드 토글(applyMapTheme)을 따르고, 기록된 경로를 보여주는
 // 맵 컨테이너는 전부 이 함수로 통일해서 dark-map-layer 클래스를 제거함.
@@ -13835,6 +14012,7 @@ class CommunityManager {
   }
 
   refreshEmailUI() {
+    try { if (typeof premium !== 'undefined') premium.refresh(); } catch (e) {}
     const email = this.getLinkedEmail();
     const box = document.getElementById('email-login-box');
     const linkedBox = document.getElementById('email-linked-box');
@@ -18391,8 +18569,9 @@ try {
 const nicknameInput = document.getElementById('nickname-input');
 if (nicknameInput) nicknameInput.value = community.getNickname();
 // 이메일 로그인 세션 확인 후 UI 반영 (세션이 없으면 로그아웃 상태로 정리됨)
+premium.loadCache(); premium.initLockTap(); premium.apply();
 community.ensureUserId().then(() => { community.refreshEmailUI(); community.syncProfileAfterLogin(); });
-try { _sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') community.ensureUserId().then(() => community.refreshEmailUI()); }); } catch(e) {}
+try { _sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') community.ensureUserId().then(() => community.refreshEmailUI()); if (ev === 'SIGNED_IN' || ev === 'SIGNED_OUT' || ev === 'USER_UPDATED') setTimeout(() => premium.refresh(), 0); }); } catch(e) {}
 // NoSleep은 사용자 제스처(버튼 터치) 후 onStart에서 활성화됨
 // 서비스 워커
 if ('serviceWorker' in navigator) {
