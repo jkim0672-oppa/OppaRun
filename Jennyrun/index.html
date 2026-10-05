@@ -2081,6 +2081,8 @@ alt="runner"/>
   </div>
   <div id="calib-autolog-dropdown-options" class="precision-dropdown-options c12 log-dd-panel"></div>
 </div>
+<button id="btn-restore-hidden-logs" class="hidden" style="width:100%; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; font-weight:800; font-size:var(--fs-xs); cursor:pointer; margin:-4px 0 12px;" onclick="garmin.toggleRestorePanel()">RESTORE HIDDEN LOGS</button>
+<div id="calib-restore-panel" class="hidden" style="border:1.5px solid #444; border-radius:12px; overflow:hidden; margin:-4px 0 12px; background:#1a1a1a;"></div>
 <!-- [추가] 체크한 정밀 로그(자동저장+불러온 로그)를 FIT 카드와 같은 상세 카드로 표시 -->
 <!-- [추가] 캘리브레이션 비교 전용 "지난 로그 불러오기". 가민 가져오기와 동일하게
      별도의 localStorage 키(oppaRunPrecLogImports, 최대 3개)를 사용하므로
@@ -15989,7 +15991,7 @@ const garmin = (function () {
     if (pIdx >= 0) selectedPrecLogIds.splice(pIdx, 1); else selectedPrecLogIds.push(id);
     if (!wasSelected) {
       let autoLogs = [];
-      try { autoLogs = (typeof storage !== 'undefined') ? storage.loadPrecisionLogs() : []; } catch (e) {}
+      try { autoLogs = loadLabAutoLogs(); } catch (e) {}
       const precItem = autoLogs.find(l => l.id === id) || getCombinedPrecLogs().find(l => l.id === id);
       const res = precItem ? findBestGarminMatchDetailed(precItem.log) : { match: null, reason: 'norange' };
       const match = res.match;
@@ -16117,7 +16119,7 @@ const garmin = (function () {
   }
   function logOrderInfo(id) {
     let autoAll = [];
-    try { autoAll = (typeof storage !== 'undefined') ? storage.loadPrecisionLogs() : []; } catch (e) { autoAll = []; }
+    try { autoAll = loadLabAutoLogs(); } catch (e) { autoAll = []; }
     const ai = autoAll.findIndex(l => l.id === id);
     if (ai >= 0) return { order: ai + 1, src: 'auto' };
     const ii = loadPrecLogImports().findIndex(l => l.id === id);
@@ -16133,7 +16135,7 @@ const garmin = (function () {
     const isOpen = !collapsedGarminIds[l.id];
     const pos = logPosLabel(l, isKo);
     const srcBadge = oi.src === 'import' ? (isKo ? '가져옴' : 'IMPORTED') : (isKo ? '자동저장' : 'AUTO');
-    const delCall = oi.src === 'import' ? "garmin.deletePrecLogImport('" + l.id + "')" : "storage.deletePrecisionLog('" + l.id + "')";
+    const delCall = oi.src === 'import' ? "garmin.deletePrecLogImport('" + l.id + "')" : "garmin.hideAutoLog('" + l.id + "')";
     return '<div class="garmin-import-item u-border-color-primary' + (isOpen ? '' : ' is-collapsed') + '">'
       + '<div class="garmin-import-item-head">'
       + '<div class="garmin-import-item-title garmin-import-toggle u-line-height-1-5" onclick="garmin.toggleGarminDetail(\'' + l.id + '\', this)">'
@@ -16390,6 +16392,138 @@ const garmin = (function () {
 
   // [추가] 캘리브레이션 비교용으로 따로 불러온 지난 로그 목록 (자동 저장분과 분리된 저장소)
   // ── 정밀로그(비교용) 임포트 관리 ──
+  // [추가] 가민 분석실에서 "삭제"한 자동저장 로그는 실제 데이터(설정 > PRECISION LOGS)는 그대로 두고
+  // 분석실 화면에서만 숨긴다. 설정 화면에서 삭제하면 원본이 지워지므로 분석실에서도 사라진다.
+  const HIDDEN_AUTOLOG_KEY = 'garmin_hidden_autolog_ids';
+  function loadHiddenAutoLogIds() {
+    try { const a = JSON.parse(localStorage.getItem(HIDDEN_AUTOLOG_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+  }
+  function saveHiddenAutoLogIds(ids) {
+    try { localStorage.setItem(HIDDEN_AUTOLOG_KEY, JSON.stringify(ids)); } catch (e) {}
+  }
+  // [추가] "분석실에서 영구 제거": 설정 로그는 그대로 두고, 분석실 목록과 복원 목록 양쪽에서 모두 뺀다.
+  const DISMISSED_AUTOLOG_KEY = 'garmin_dismissed_autolog_ids';
+  function loadDismissedAutoLogIds() {
+    try { const a = JSON.parse(localStorage.getItem(DISMISSED_AUTOLOG_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+  }
+  function saveDismissedAutoLogIds(ids) {
+    try { localStorage.setItem(DISMISSED_AUTOLOG_KEY, JSON.stringify(ids)); } catch (e) {}
+  }
+  function loadLabAutoLogs() {
+    let all = [];
+    try { all = (typeof storage !== 'undefined') ? storage.loadPrecisionLogs() : []; } catch (e) { all = []; }
+    const alive = new Set(all.map(l => l.id));
+    // 설정에서 이미 지워진 id는 숨김/제거 목록에서도 정리
+    const hidden = loadHiddenAutoLogIds();
+    const prunedHidden = hidden.filter(id => alive.has(id));
+    if (prunedHidden.length !== hidden.length) saveHiddenAutoLogIds(prunedHidden);
+    const dismissed = loadDismissedAutoLogIds();
+    const prunedDismissed = dismissed.filter(id => alive.has(id));
+    if (prunedDismissed.length !== dismissed.length) saveDismissedAutoLogIds(prunedDismissed);
+    if (!prunedHidden.length && !prunedDismissed.length) return all;
+    return all.filter(l => prunedHidden.indexOf(l.id) < 0 && prunedDismissed.indexOf(l.id) < 0);
+  }
+  // [추가] 복원한 로그는 최신 10개 목록에서 아무것도 밀어내지 않고 "추가로" 함께 보여준다.
+  const PINNED_AUTOLOG_KEY = 'garmin_pinned_autolog_ids';
+  function loadPinnedAutoLogIds() {
+    try { const a = JSON.parse(localStorage.getItem(PINNED_AUTOLOG_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+  }
+  function savePinnedAutoLogIds(ids) {
+    try { localStorage.setItem(PINNED_AUTOLOG_KEY, JSON.stringify(ids)); } catch (e) {}
+  }
+  function hideAutoLog(id) {
+    savePinnedAutoLogIds(loadPinnedAutoLogIds().filter(x => x !== id));
+    const hidden = loadHiddenAutoLogIds();
+    if (hidden.indexOf(id) < 0) hidden.push(id);
+    saveHiddenAutoLogIds(hidden);
+    selectedPrecLogIds = selectedPrecLogIds.filter(x => x !== id);
+    render();
+  }
+  // [수정] 숨긴 로그를 전부가 아니라 체크한 것만 복원. 버튼을 누르면 숨긴 로그 목록이 펼쳐진다.
+  let restorePanelOpen = false;
+  let restoreSelIds = [];
+  function getHiddenAutoLogs() {
+    let all = [];
+    try { all = (typeof storage !== 'undefined') ? storage.loadPrecisionLogs() : []; } catch (e) {}
+    const hidden = loadHiddenAutoLogIds();
+    const dismissed = loadDismissedAutoLogIds();
+    return all.filter(l => hidden.indexOf(l.id) >= 0 && dismissed.indexOf(l.id) < 0);
+  }
+  function toggleRestorePanel() {
+    restorePanelOpen = !restorePanelOpen;
+    if (!restorePanelOpen) restoreSelIds = [];
+    renderAutoLogList(isKoLang());
+  }
+  function toggleRestoreSel(id) {
+    const i = restoreSelIds.indexOf(id);
+    if (i >= 0) restoreSelIds.splice(i, 1); else restoreSelIds.push(id);
+    renderAutoLogList(isKoLang());
+  }
+  function restoreSelectedAutoLogs() {
+    if (!restoreSelIds.length) return;
+    const left = loadHiddenAutoLogIds().filter(id => restoreSelIds.indexOf(id) < 0);
+    saveHiddenAutoLogIds(left);
+    const pinned = loadPinnedAutoLogIds();
+    restoreSelIds.forEach(id => { if (pinned.indexOf(id) < 0) pinned.push(id); });
+    savePinnedAutoLogIds(pinned);
+    restoreSelIds = [];
+    restorePanelOpen = left.length > 0 && restorePanelOpen;
+    render();
+  }
+  async function clearHiddenList() {
+    const isKo = isKoLang();
+    const hiddenLogs = getHiddenAutoLogs();
+    if (!hiddenLogs.length) return;
+    const msg = isKo
+      ? '숨긴 로그 ' + hiddenLogs.length + '개를 복원 목록에서 비울까요?\n\n설정의 정밀 로그에는 그대로 남지만, 분석실에서는 다시 복원할 수 없어요.'
+      : 'Clear ' + hiddenLogs.length + ' hidden log(s) from the restore list?\n\nThey stay in Settings → Precision Logs, but can no longer be restored in the lab.';
+    if (!(await appConfirm(msg))) return;
+    const dismissed = loadDismissedAutoLogIds();
+    hiddenLogs.forEach(l => { if (dismissed.indexOf(l.id) < 0) dismissed.push(l.id); });
+    saveDismissedAutoLogIds(dismissed);
+    saveHiddenAutoLogIds(loadHiddenAutoLogIds().filter(id => dismissed.indexOf(id) < 0));
+    restoreSelIds = [];
+    restorePanelOpen = false;
+    render();
+  }
+  function renderRestorePanel(isKo) {
+    const btn = document.getElementById('btn-restore-hidden-logs');
+    const panel = document.getElementById('calib-restore-panel');
+    if (!btn || !panel) return;
+    const hiddenLogs = getHiddenAutoLogs();
+    btn.classList.toggle('hidden', hiddenLogs.length === 0);
+    btn.textContent = (isKo ? '숨긴 로그 복원' : 'RESTORE HIDDEN LOGS') + ' (' + hiddenLogs.length + ') ' + (restorePanelOpen ? '▴' : '▾');
+    if (!hiddenLogs.length) restorePanelOpen = false;
+    panel.classList.toggle('hidden', !restorePanelOpen);
+    if (!restorePanelOpen) { panel.innerHTML = ''; return; }
+    const posShortMap = { chest:'C', waist:'W', armband:'A', hand:'H' };
+    restoreSelIds = restoreSelIds.filter(id => hiddenLogs.some(l => l.id === id));
+    panel.innerHTML = hiddenLogs.map((l, idx) => {
+      const posBadge = l.isFreerun ? ' <span class="c27">· F</span>' : (l.devicePos ? ' <span class="c27">· ' + (posShortMap[l.devicePos] || l.devicePos) + '</span>' : '');
+      return ddCheckRow({
+        checked: restoreSelIds.indexOf(l.id) >= 0,
+        onToggle: "garmin.toggleRestoreSel('" + l.id + "')",
+        order: idx + 1,
+        line1: fmtDate(new Date(l.savedAt).getTime()),
+        line2: l.log.length + (isKo ? '개' : ' rows') + posBadge,
+        infoHtml: '',
+        delHtml: ''
+      });
+    }).join('')
+    + '<button style="width:100%; background:var(--primary); color:#000; border:none; padding:10px; font-weight:900; font-size:var(--fs-xs); cursor:pointer;' + (restoreSelIds.length ? '' : ' opacity:0.4;') + '" onclick="garmin.restoreSelectedAutoLogs()">'
+    + (isKo ? '선택한 로그 복원' : 'RESTORE SELECTED') + (restoreSelIds.length ? ' (' + restoreSelIds.length + ')' : '') + '</button>'
+    + '<button style="width:100%; background:#2a2a2a; color:#ff8a80; border:none; border-top:1px solid #444; padding:10px; font-weight:900; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.clearHiddenList()">'
+    + (isKo ? '복원 목록 비우기' : 'CLEAR HIDDEN LIST') + '</button>';
+  }
+  function hideAllAutoLogs() {
+    savePinnedAutoLogIds([]);
+    let all = [];
+    try { all = (typeof storage !== 'undefined') ? storage.loadPrecisionLogs() : []; } catch (e) {}
+    const hidden = loadHiddenAutoLogIds();
+    all.forEach(l => { if (hidden.indexOf(l.id) < 0) hidden.push(l.id); });
+    saveHiddenAutoLogIds(hidden);
+    selectedPrecLogIds = selectedPrecLogIds.filter(id => String(id).indexOf('plog_') !== 0);
+  }
   function loadPrecLogImports() {
     try {
       const data = localStorage.getItem(PRECLOG_IMPORT_KEY);
@@ -16403,7 +16537,7 @@ const garmin = (function () {
   // 드롭다운 표시와 runCalibrationCompare()의 선택 검색 양쪽에서 재사용한다.
   function getCombinedPrecLogs() {
     let autoLogs = [];
-    try { autoLogs = (typeof storage !== 'undefined') ? storage.loadPrecisionLogs() : []; } catch (e) { autoLogs = []; }
+    try { autoLogs = loadLabAutoLogs(); } catch (e) { autoLogs = []; }
     return autoLogs.concat(loadPrecLogImports());
   }
   // [추가] 캘리브레이션 비교 카드의 "IMPORT PAST LOG (.CSV)" 버튼 핸들러.
@@ -16522,15 +16656,25 @@ const garmin = (function () {
     const labelEl = document.getElementById('label-preclog-auto');
     if (!panel) return;
     let allLogs = [];
-    try { allLogs = (typeof storage !== 'undefined') ? storage.loadPrecisionLogs() : []; } catch (e) { allLogs = []; }
-    const autoLogs = allLogs.slice(0, MAX_ANALYSIS_AUTOLOGS);
+    try { allLogs = loadLabAutoLogs(); } catch (e) { allLogs = []; }
+    // 복원한 로그(pinned)는 최신 10개에 더해서 함께 보여준다 (존재하지 않는 id는 정리)
+    let pinned = loadPinnedAutoLogIds();
+    const aliveIds = allLogs.map(l => l.id);
+    const prunedPinned = pinned.filter(id => aliveIds.indexOf(id) >= 0);
+    if (prunedPinned.length !== pinned.length) savePinnedAutoLogIds(prunedPinned);
+    pinned = prunedPinned;
+    const latest = allLogs.slice(0, MAX_ANALYSIS_AUTOLOGS);
+    const latestIds = latest.map(l => l.id);
+    const extra = allLogs.filter(l => latestIds.indexOf(l.id) < 0 && pinned.indexOf(l.id) >= 0);
+    const autoLogs = allLogs.filter(l => latestIds.indexOf(l.id) >= 0 || pinned.indexOf(l.id) >= 0);
     // 10개 밖으로 밀려난 로그가 선택 상태로 남아 비교에 몰래 들어가지 않도록 선택에서 제거
-    const hiddenIds = allLogs.slice(MAX_ANALYSIS_AUTOLOGS).map(l => l.id);
+    const hiddenIds = allLogs.filter(l => autoLogs.indexOf(l) < 0).map(l => l.id);
     if (hiddenIds.length) {
       selectedPrecLogIds = selectedPrecLogIds.filter(id => hiddenIds.indexOf(id) < 0);
       hiddenIds.forEach(id => { delete autoMatchedGarminByPrecLogId[id]; });
     }
-    if (labelEl) labelEl.textContent = (isKo ? '자동저장 로그' : 'AUTO-SAVED LOGS') + ' (' + autoLogs.length + '/' + MAX_ANALYSIS_AUTOLOGS + ')';
+    if (labelEl) labelEl.textContent = (isKo ? '자동저장 로그' : 'AUTO-SAVED LOGS') + ' (' + latest.length + '/' + MAX_ANALYSIS_AUTOLOGS + (extra.length ? ' + ' + extra.length + (isKo ? ' 복원' : ' restored') : '') + ')';
+    renderRestorePanel(isKo); // 분석실에서 숨긴 로그가 있으면 복원 버튼/목록 표시
     if (!autoLogs.length) {
       if (currentText) currentText.textContent = isKo ? '자동저장 로그 없음' : 'NO AUTO-SAVED LOGS';
       panel.innerHTML = '<div class="dropdown-option precision-option c61">' + (isKo ? '자동저장된 정밀 로그가 없습니다.' : 'No auto-saved precision logs yet.') + '</div>';
@@ -16547,9 +16691,9 @@ const garmin = (function () {
         line1: fmtDate(new Date(l.savedAt).getTime()),
         line2: l.log.length + (isKo ? '개' : ' rows') + posBadge,
         infoHtml: infoBtn('log', l.id, isKo),
-        delHtml: '<div class="garmin-import-item-del" onclick="storage.deletePrecisionLog(\'' + l.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</div>'
+        delHtml: '<div class="garmin-import-item-del" onclick="garmin.hideAutoLog(\'' + l.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</div>'
       });
-    }).join('') + (allLogs.length > MAX_ANALYSIS_AUTOLOGS
+    }).join('') + (allLogs.length > autoLogs.length
       ? '<div class="garmin-dd-hint">' + (isKo ? '최신 ' + MAX_ANALYSIS_AUTOLOGS + '개만 표시 · 전체 ' + allLogs.length + '개는 설정 → 정밀 로그' : 'Showing latest ' + MAX_ANALYSIS_AUTOLOGS + ' · all ' + allLogs.length + ' in Settings → Precision Logs') + '</div>'
       : '');
     const selCount = autoLogs.filter(l => selectedPrecLogIds.indexOf(l.id) >= 0).length;
@@ -18642,7 +18786,7 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
   async function resetEverything() {
     const isKo = isKoLang();
     const msg = isKo
-      ? '가민 분석실의 FIT 가져오기 기록, 폰 정밀 로그, 되돌리기/대기목록 등 화면에 보이는 기록들을 모두 삭제할까요?\n\n(주의) 지금 폰에 적용되어 있는 보정수치 자체는 그대로 유지됩니다. 이 작업은 되돌릴 수 없습니다.'
+      ? '가민 분석실의 FIT 가져오기 기록, 자동저장 로그 목록, 되돌리기/대기목록 등 화면에 보이는 기록들을 모두 삭제할까요?\n\n(주의) 설정의 정밀 로그와 지금 폰에 적용되어 있는 보정수치는 그대로 유지됩니다. 이 작업은 되돌릴 수 없습니다.'
       : 'Delete all Garmin FIT imports, phone precision logs, and calibration history shown on screen (undo snapshots, pending list)?\n\nNote: the correction values currently applied on your phone will NOT be changed. This cannot be undone.';
     if (!(await appConfirm(msg))) return;
     try {
@@ -18651,8 +18795,7 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
       savePrecLogImportsList([]);
       selectedIds = [];
       selectedPrecLogIds = [];
-      try { storage.savePrecisionLogsList([]); } catch (e) {}
-      if (typeof ui !== 'undefined' && ui.renderPrecisionLogList) ui.renderPrecisionLogList();
+      hideAllAutoLogs(); // 설정의 PRECISION LOGS 원본은 유지, 분석실에서만 숨김
 
       // 2) 화면에 남는 "기록"만 삭제: 되돌리기 스냅샷 + 평균 적용 대기목록.
       // [중요] motionCalibOverrides / strideCorrectionFactorByPos / gpsDistCorrectionFactorByPos는
@@ -18687,15 +18830,14 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
   async function clearLogsOnly() {
     const isKo = isKoLang();
     const msg = isKo
-      ? '폰 정밀 로그, 지난 로그 불러오기, 되돌리기/대기목록 등 로그 기록만 삭제할까요?\n\n(주의) 가져온 가민 FIT 데이터와 지금 폰에 적용되어 있는 보정수치는 그대로 유지됩니다. 이 작업은 되돌릴 수 없습니다.'
+      ? '분석실의 자동저장 로그 목록, 지난 로그 불러오기, 되돌리기/대기목록 등 로그 기록만 삭제할까요?\n\n(주의) 설정의 정밀 로그, 가져온 가민 FIT 데이터, 지금 폰에 적용되어 있는 보정수치는 그대로 유지됩니다. 이 작업은 되돌릴 수 없습니다.'
       : 'Delete phone precision logs, imported past logs, and calibration history (undo snapshots, pending list) — logs only?\n\nNote: imported Garmin FIT data and the correction values currently applied on your phone will NOT be changed. This cannot be undone.';
     if (!(await appConfirm(msg))) return;
     try {
       // 1) 캘리브레이션용 지난 로그 불러오기 + 폰 자동저장 정밀 로그 (가민 FIT 목록은 유지)
       savePrecLogImportsList([]);
       selectedPrecLogIds = [];
-      try { storage.savePrecisionLogsList([]); } catch (e) {}
-      if (typeof ui !== 'undefined' && ui.renderPrecisionLogList) ui.renderPrecisionLogList();
+      hideAllAutoLogs(); // 설정의 PRECISION LOGS 원본은 유지, 분석실에서만 숨김
 
       // 2) 화면에 남는 "기록"만 삭제: 되돌리기 스냅샷 + 평균 적용 대기목록.
       savePendingCalibList([]);
@@ -18788,7 +18930,7 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
     saveTextFileNative(reportStr, fileName, 'text/plain;charset=utf-8', isKo);
   }
 
-  return { importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, toggleGarminDetail, openInfo, closeInfo, togglePrecLogSelect, togglePrecLogSelectAutoMatch, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
+  return { hideAutoLog, clearHiddenList, toggleRestorePanel, toggleRestoreSel, restoreSelectedAutoLogs, importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, toggleGarminDetail, openInfo, closeInfo, togglePrecLogSelect, togglePrecLogSelectAutoMatch, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
