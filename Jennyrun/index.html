@@ -2065,7 +2065,7 @@ alt="runner"/>
      기존 계산 로직은 전혀 건드리지 않는 읽기 전용 진단 도구. -->
 <div class="diag-card u-margin-0-0-10px-0">
 <div id="garmin-calib-title" style="color:var(--primary); font-weight:900; font-size:var(--fs-md); margin-bottom:8px;">CALIBRATION CHECK</div>
-<div id="garmin-calib-desc" style="font-size:var(--fs-xxs); color:#888; margin-bottom:10px; line-height:1.6;">Check 1-10 Garmin records and 1-10 precision logs. With one of each, they're compared directly; with multiple, the selected records are averaged before comparing cadence/GCT and other metrics.</div>
+<div id="garmin-calib-desc" style="font-size:var(--fs-xxs); color:#888; margin-bottom:10px; line-height:1.6;">Check 1-20 Garmin records and 1-20 precision logs. With one of each, they're compared directly; with multiple, the selected records are averaged before comparing cadence/GCT and other metrics.</div>
 <!-- [추가] 자동저장된 최근 로그(최대 3개)를 임포트 로그와 분리해서 보여주고,
      각 항목마다 COMPARE 버튼으로 바로 1개씩 비교할 수 있게 한다.
      (기존엔 자동저장 로그와 임포트 로그가 드롭다운 하나에 섞여 있어서 구분이 어려웠음) -->
@@ -2073,8 +2073,8 @@ alt="runner"/>
      이미 자동저장 로그를 포함해 더 넓은 범위(로그성 기록 전체)를 한 번에 지우므로,
      여기 별도 CLEAR ALL을 추가하면 기능이 중복됨. 개별 삭제는 각 카드의 DELETE 버튼으로. -->
 <div class="grp-log">
-<div id="label-preclog-auto" class="c17">AUTO-SAVED LOGS (0/10)</div>
-<!-- [수정] 자동저장 로그도 카드 나열 대신 체크 드롭다운으로 (분석실에서는 최신 10개만 다룸) -->
+<div id="label-preclog-auto" class="c17">AUTO-SAVED LOGS (0/20)</div>
+<!-- [수정] 자동저장 로그도 카드 나열 대신 체크 드롭다운으로 (분석실에서는 최신 20개만 다룸) -->
 <div class="u-position-relative u-margin-bottom-14px">
   <div id="calib-autolog-select-btn" onclick="ui.toggleDropdown('calib-autolog-dropdown-options')" class="dropdown-select c13">
     <span id="current-calib-autolog-text">-</span><span class="c08">▼</span>
@@ -2088,7 +2088,7 @@ alt="runner"/>
      별도의 localStorage 키(oppaRunPrecLogImports, 최대 3개)를 사용하므로
      러닝할 때마다 자동 저장되는 정밀 로그(oppaRunPrecisionLogs)의 슬롯을 밀어내지 않는다. -->
 <div class="c20">
-  <div id="label-preclog-import" style="font-size:var(--fs-xs); color:#888; font-weight:800;">IMPORTED PAST LOGS (0/10)</div>
+  <div id="label-preclog-import" style="font-size:var(--fs-xs); color:#888; font-weight:800;">IMPORTED PAST LOGS (0/20)</div>
   <div id="preclog-import-clear-all-btn" class="garmin-import-item-del hidden" onclick="garmin.clearPrecLogImports()">CLEAR ALL</div>
 </div>
 <button id="btn-import-preclog-csv" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-sm); margin-bottom:10px;" onclick="document.getElementById('calib-preclog-csv-input').click()">IMPORT PAST LOG (.CSV/.JSON)</button>
@@ -15725,13 +15725,13 @@ const garmin = (function () {
   const FIT_EPOCH_OFFSET = 631065600; // 1989-12-31 00:00:00 UTC -> Unix epoch 초 차이
   // [추가] 정밀 로그(savePrecisionLog)와 동일하게 최근 3개까지만 보관.
   // 그 이상은 오래돼서 비교 의미가 떨어지고 localStorage 용량도 아낄 수 있음.
-  const MAX_GARMIN_IMPORTS = 10; // [수정] 가민 FIT 최대 5→10개로 확장
+  const MAX_GARMIN_IMPORTS = 20; // [수정] 가민 FIT 최대 10→20개로 확장 (여러 개 합산 보정용)
   // [추가] 캘리브레이션 비교 전용 "지난 로그 불러오기" 저장소.
   // storage.oppaRunPrecisionLogs(자동 저장분)와는 별도의 키를 사용해서
   // 지난 로그를 불러와도 최근 자동 기록 3개가 밀려나지 않도록 분리한다.
   // (가민 가져오기가 oppaRunGarminImports를 쓰는 것과 동일한 방식)
   const PRECLOG_IMPORT_KEY = 'oppaRunPrecLogImports';
-  const MAX_PRECLOG_IMPORTS = 10; // [수정] 폰 정밀 로그 최대 5→10개로 확장
+  const MAX_PRECLOG_IMPORTS = 20; // [수정] 폰 정밀 로그 최대 10→20개로 확장
 
   const BASE_TYPES = {
     0x00: { size: 1, invalid: 0xFF, read: (v,o,le) => v.getUint8(o) },
@@ -15908,7 +15908,7 @@ const garmin = (function () {
     const data = localStorage.getItem(STORAGE_KEY);
     return data ? JSON.parse(data) : [];
   }
-  function saveImports(list) { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); }
+  function saveImports(list) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch (e) { console.error('가민 기록 저장 실패(저장 공간 부족):', e); } }
 
   // ── 포맷 유틸(시간/페이스/날짜/언어) ──
   function fmtDuration(sec) {
@@ -16025,7 +16025,7 @@ const garmin = (function () {
   // [추가] 펼쳐둔 가민 기록 카드 id 저장소(체크박스 선택 등으로 render()가 다시 돌아도 펼침 상태 유지)
   var collapsedGarminIds = {}; // [수정] 체크된 카드는 기본 펼침. 사용자가 접은 카드 id만 보관
   let autoMatchNote = null; // [추가] 마지막 로그 체크의 FIT 자동매칭 결과 안내 ({type:'ok'|'far'|'noimports'|'norange', ...})
-  const MAX_ANALYSIS_AUTOLOGS = 10; // [추가] 분석실은 자동저장 로그를 최신 10개까지만 다룸 (저장소엔 설정 탭 기준 최대 30개)
+  const MAX_ANALYSIS_AUTOLOGS = 20; // [수정] 분석실은 자동저장 로그를 최신 20개까지 다룸 (저장소엔 설정 탭 기준 최대 30개)
   // [추가] 체크 드롭다운 패널의 한 줄: 체크박스(비교 선택) + 날짜/보조줄 + (INFO) + 삭제.
   // 패널은 열린 채로 유지되고(render()가 is-open 클래스를 건드리지 않음) 체크만 토글된다.
   function ddCheckRow(o) {
@@ -16306,8 +16306,8 @@ const garmin = (function () {
     // [추가] 캘리브레이션 비교 카드 다국어 처리
     setText('garmin-calib-title', isKo ? '캘리브레이션 비교' : 'CALIBRATION CHECK');
     setText('garmin-calib-desc', isKo
-      ? '가민 기록과 정밀 로그를 체크박스로 각각 1~10개 선택하세요. 1개씩 선택하면 그 둘을 그대로 비교하고, 여러 개 선택하면 선택한 기록들의 평균으로 비교해서 케이던스/GCT 등 오차와 조정 제안값을 보여줍니다.'
-      : 'Check 1-10 Garmin records and 1-10 precision logs. With one of each, they\'re compared directly; with multiple, the selected records are averaged before comparing cadence/GCT and other metrics.');
+      ? '가민 기록과 정밀 로그를 체크박스로 각각 1~20개 선택하세요. 1개씩 선택하면 그 둘을 그대로 비교하고, 여러 개 선택하면 선택한 기록들의 평균으로 비교해서 케이던스/GCT 등 오차와 조정 제안값을 보여줍니다.'
+      : 'Check 1-20 Garmin records and 1-20 precision logs. With one of each, they\'re compared directly; with multiple, the selected records are averaged before comparing cadence/GCT and other metrics.');
     setText('btn-run-calib-compare', isKo ? '선택한 기록 비교' : 'COMPARE SELECTED');
     // [추가] 지난 로그 불러오기 버튼/전체삭제 버튼 다국어 처리 (개수는 renderPrecLogDropdown에서 갱신)
     setText('btn-import-preclog-csv', isKo ? '지난 로그 불러오기 (.CSV/.JSON)' : 'IMPORT PAST LOG (.CSV/.JSON)');
@@ -16423,7 +16423,7 @@ const garmin = (function () {
     if (!prunedHidden.length && !prunedDismissed.length) return all;
     return all.filter(l => prunedHidden.indexOf(l.id) < 0 && prunedDismissed.indexOf(l.id) < 0);
   }
-  // [추가] 복원한 로그는 최신 10개 목록에서 아무것도 밀어내지 않고 "추가로" 함께 보여준다.
+  // [추가] 복원한 로그는 최신 20개 목록에서 아무것도 밀어내지 않고 "추가로" 함께 보여준다.
   const PINNED_AUTOLOG_KEY = 'garmin_pinned_autolog_ids';
   function loadPinnedAutoLogIds() {
     try { const a = JSON.parse(localStorage.getItem(PINNED_AUTOLOG_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
@@ -16647,7 +16647,7 @@ const garmin = (function () {
     render();
   }
 
-  // [수정] 자동저장 로그를 카드 나열 대신 체크 드롭다운으로 렌더링. 분석실에서는 최신 10개까지만 다룬다
+  // [수정] 자동저장 로그를 카드 나열 대신 체크 드롭다운으로 렌더링. 분석실에서는 최신 20개까지만 다룬다
   // (저장소에는 설정 탭 기준 최대 30개까지 있을 수 있음). 체크하면 selectedPrecLogIds에 추가/제거만 하고,
   // 실제 비교는 하단 COMPARE SELECTED 버튼으로 한다.
   function renderAutoLogList(isKo) {
@@ -16657,7 +16657,7 @@ const garmin = (function () {
     if (!panel) return;
     let allLogs = [];
     try { allLogs = loadLabAutoLogs(); } catch (e) { allLogs = []; }
-    // 복원한 로그(pinned)는 최신 10개에 더해서 함께 보여준다 (존재하지 않는 id는 정리)
+    // 복원한 로그(pinned)는 최신 20개에 더해서 함께 보여준다 (존재하지 않는 id는 정리)
     let pinned = loadPinnedAutoLogIds();
     const aliveIds = allLogs.map(l => l.id);
     const prunedPinned = pinned.filter(id => aliveIds.indexOf(id) >= 0);
@@ -16667,7 +16667,7 @@ const garmin = (function () {
     const latestIds = latest.map(l => l.id);
     const extra = allLogs.filter(l => latestIds.indexOf(l.id) < 0 && pinned.indexOf(l.id) >= 0);
     const autoLogs = allLogs.filter(l => latestIds.indexOf(l.id) >= 0 || pinned.indexOf(l.id) >= 0);
-    // 10개 밖으로 밀려난 로그가 선택 상태로 남아 비교에 몰래 들어가지 않도록 선택에서 제거
+    // 20개 밖으로 밀려난 로그가 선택 상태로 남아 비교에 몰래 들어가지 않도록 선택에서 제거
     const hiddenIds = allLogs.filter(l => autoLogs.indexOf(l) < 0).map(l => l.id);
     if (hiddenIds.length) {
       selectedPrecLogIds = selectedPrecLogIds.filter(id => hiddenIds.indexOf(id) < 0);
@@ -17755,7 +17755,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
   // 대기목록. motionCalibOverride는 덮어쓰기 방식이라 순차 적용하면 마지막 결과만
   // 남고 앞의 결과들은 그냥 버려지는 문제가 있었음 → 그래서 평균 후 1회 적용으로 변경.
   const PENDING_CALIB_KEY = 'oppaRunPendingCalibRuns';
-  const MAX_PENDING_CALIB = 10; // [수정] 설정 페이지 대기목록(평균 적용용) 최대 3→10개로 확장
+  const MAX_PENDING_CALIB = 20; // [수정] 설정 페이지 대기목록(평균 적용용) 최대 10→20개로 확장
 
   // ── 보정값 후보(Pending Calibration) 관리 ──
   function loadPendingCalib() {
