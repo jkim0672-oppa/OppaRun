@@ -2065,7 +2065,7 @@ alt="runner"/>
      기존 계산 로직은 전혀 건드리지 않는 읽기 전용 진단 도구. -->
 <div class="diag-card u-margin-0-0-10px-0">
 <div id="garmin-calib-title" style="color:var(--primary); font-weight:900; font-size:var(--fs-md); margin-bottom:8px;">CALIBRATION CHECK</div>
-<div id="garmin-calib-desc" style="font-size:var(--fs-xxs); color:#888; margin-bottom:10px; line-height:1.6;">Check 1-20 Garmin records and 1-20 precision logs. With one of each, they're compared directly; with multiple, the selected records are averaged before comparing cadence/GCT and other metrics.</div>
+<div id="garmin-calib-desc" style="font-size:var(--fs-xxs); color:#888; margin-bottom:10px; line-height:1.6;">Check 1-15 Garmin records and 1-15 precision logs. With one of each, they're compared directly; with multiple, the selected records are averaged before comparing cadence/GCT and other metrics.</div>
 <!-- [추가] 자동저장된 최근 로그(최대 3개)를 임포트 로그와 분리해서 보여주고,
      각 항목마다 COMPARE 버튼으로 바로 1개씩 비교할 수 있게 한다.
      (기존엔 자동저장 로그와 임포트 로그가 드롭다운 하나에 섞여 있어서 구분이 어려웠음) -->
@@ -2073,8 +2073,8 @@ alt="runner"/>
      이미 자동저장 로그를 포함해 더 넓은 범위(로그성 기록 전체)를 한 번에 지우므로,
      여기 별도 CLEAR ALL을 추가하면 기능이 중복됨. 개별 삭제는 각 카드의 DELETE 버튼으로. -->
 <div class="grp-log">
-<div id="label-preclog-auto" class="c17">AUTO-SAVED LOGS (0/20)</div>
-<!-- [수정] 자동저장 로그도 카드 나열 대신 체크 드롭다운으로 (분석실에서는 최신 20개만 다룸) -->
+<div id="label-preclog-auto" class="c17">AUTO-SAVED LOGS (0/15)</div>
+<!-- [수정] 자동저장 로그도 카드 나열 대신 체크 드롭다운으로 (분석실에서는 최신 15개만 다룸) -->
 <div class="u-position-relative u-margin-bottom-14px">
   <div id="calib-autolog-select-btn" onclick="ui.toggleDropdown('calib-autolog-dropdown-options')" class="dropdown-select c13">
     <span id="current-calib-autolog-text">-</span><span class="c08">▼</span>
@@ -2088,7 +2088,7 @@ alt="runner"/>
      별도의 localStorage 키(oppaRunPrecLogImports, 최대 3개)를 사용하므로
      러닝할 때마다 자동 저장되는 정밀 로그(oppaRunPrecisionLogs)의 슬롯을 밀어내지 않는다. -->
 <div class="c20">
-  <div id="label-preclog-import" style="font-size:var(--fs-xs); color:#888; font-weight:800;">IMPORTED PAST LOGS (0/20)</div>
+  <div id="label-preclog-import" style="font-size:var(--fs-xs); color:#888; font-weight:800;">IMPORTED PAST LOGS (0/15)</div>
   <div id="preclog-import-clear-all-btn" class="garmin-import-item-del hidden" onclick="garmin.clearPrecLogImports()">CLEAR ALL</div>
 </div>
 <button id="btn-import-preclog-csv" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:14px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-sm); margin-bottom:10px;" onclick="document.getElementById('calib-preclog-csv-input').click()">IMPORT PAST LOG (.CSV/.JSON)</button>
@@ -2227,7 +2227,7 @@ alt="runner"/>
     </div>
   </div>
   <input type="file" id="precision-log-csv-input" accept="*/*" class="hidden" onchange="storage.importPrecisionLogCsv(event)">
-  <!-- [수정] 로그가 30개까지 늘어나므로 펼친 리스트 대신 드롭다운으로 선택 → 선택한 1개만 카드로 표시 -->
+  <!-- [수정] 로그가 15개까지 늘어나므로 펼친 리스트 대신 드롭다운으로 선택 → 선택한 1개만 카드로 표시 -->
   <div class="u-position-relative">
     <div id="precision-log-select-btn" onclick="ui.toggleDropdown('precision-log-dropdown-options')" class="dropdown-select c13">
       <span id="current-precision-log-text">-</span><span class="c08">▼</span>
@@ -4409,6 +4409,88 @@ function buildCalibHistoryRows(prof, pos, isKo) {
   return html;
 }
 // ========== RunningStorage ==========
+// [추가 2026-10-05] 큰 로그 전용 저장소 (용량 부족 방지).
+// 정밀 로그(oppaRunPrecisionLogs) / 가민 FIT(oppaRunGarminImports) / 불러온 지난 로그(oppaRunPrecLogImports)는
+// localStorage(약 5~10MB 한도) 대신 IndexedDB(수백 MB)에 저장한다.
+// - 읽기는 메모리 캐시에서 즉시(동기) 돌려주므로 기존 호출부(loadPrecisionLogs 등)는 수정할 필요가 없다.
+// - 쓰기는 캐시를 먼저 갱신하고 IndexedDB에는 바로 이어서 저장한다.
+// - 첫 실행 때 기존 localStorage 데이터를 IndexedDB로 복사하고, 복사가 확인된 뒤에만 localStorage에서 지운다.
+// - IndexedDB를 못 쓰는 환경이면 예전 방식(localStorage)으로 그대로 동작한다.
+const bigStore = (function () {
+  const KEYS = ['oppaRunPrecisionLogs', 'oppaRunGarminImports', 'oppaRunPrecLogImports'];
+  const DB_NAME = 'oppaRunBigStore', STORE = 'kv';
+  let db = null, ready = false;
+  const cache = {};
+  function openDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => { req.result.createObjectStore(STORE); };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+      req.onblocked = () => reject(new Error('IndexedDB blocked'));
+    });
+  }
+  function idbGet(key) {
+    return new Promise((resolve, reject) => {
+      const r = db.transaction(STORE, 'readonly').objectStore(STORE).get(key);
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+  }
+  function idbPut(key, value) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).put(value, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('IndexedDB abort'));
+    });
+  }
+  async function init() {
+    if (ready) return true;
+    try {
+      if (typeof indexedDB === 'undefined') return false;
+      db = await openDb();
+      for (const key of KEYS) {
+        const stored = await idbGet(key);
+        if (stored !== undefined) { cache[key] = stored; continue; }
+        // IndexedDB에 아직 없음 → 기존 localStorage 데이터가 있으면 복사(이전)
+        let raw = null, parsed = [];
+        try { raw = localStorage.getItem(key); parsed = raw ? JSON.parse(raw) : []; } catch (e) { raw = null; parsed = []; }
+        if (!Array.isArray(parsed)) parsed = [];
+        if (raw && parsed.length) {
+          await idbPut(key, parsed);
+          const back = await idbGet(key);
+          if (back && JSON.stringify(back).length === JSON.stringify(parsed).length) {
+            cache[key] = back;
+            try { localStorage.removeItem(key); } catch (e) {} // 복사 확인 후에만 삭제
+          } else {
+            throw new Error('IndexedDB 이전 확인 실패: ' + key); // 원본(localStorage)은 그대로 둠
+          }
+        } else {
+          cache[key] = [];
+        }
+      }
+      ready = true;
+    } catch (e) {
+      console.error('bigStore 초기화 실패 → localStorage 방식으로 동작:', e);
+      ready = false;
+    }
+    return ready;
+  }
+  function get(key, fallback) {
+    if (ready) return (cache[key] !== undefined) ? cache[key] : fallback;
+    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; }
+  }
+  function set(key, value) {
+    if (!ready) { localStorage.setItem(key, JSON.stringify(value)); return true; } // 예전 방식 (용량 초과 시 기존처럼 예외 발생)
+    cache[key] = value;
+    idbPut(key, value).catch(e => console.error('IndexedDB 저장 실패(' + key + '):', e));
+    return true;
+  }
+  return { init, get, set };
+})();
+
 class RunningStorage {
 constructor() {
 this.HISTORY_KEY = 'oppaRunHistory';
@@ -4452,7 +4534,28 @@ ui.updateTotalStats();
 alert(translations[lang].alertCleared);
 }
 }
-saveTempSession(data) { localStorage.setItem(this.TEMP_SESSION_KEY, JSON.stringify(data)); }
+// [수정 2026-10-05] 원본: saveTempSession(data) { localStorage.setItem(this.TEMP_SESSION_KEY, JSON.stringify(data)); }
+// 긴 러닝에서 정밀 로그(precisionLog)가 커져 localStorage 용량을 넘기지 않도록,
+// '복구용 임시 복사본'에서만 1시간(3600줄)보다 오래된 구간을 10줄에 1줄로 줄여 저장한다.
+// (실제 러닝 중 로그(state.precisionLog)와 종료 후 저장되는 로그는 그대로 풀 로그)
+// 그래도 저장이 실패하면 정밀 로그를 뺀 나머지만 저장하고, 어떤 경우에도 예외를 밖으로 던지지 않는다.
+saveTempSession(data) {
+  try {
+    let toSave = data;
+    const pl = data && data.precisionLog;
+    if (Array.isArray(pl) && pl.length > 3600) {
+      const cut = pl.length - 3600;
+      toSave = Object.assign({}, data, { precisionLog: pl.slice(0, cut).filter((_, i) => i % 10 === 0).concat(pl.slice(cut)) });
+    }
+    localStorage.setItem(this.TEMP_SESSION_KEY, JSON.stringify(toSave));
+  } catch (e) {
+    try {
+      const slim = Object.assign({}, data);
+      delete slim.precisionLog;
+      localStorage.setItem(this.TEMP_SESSION_KEY, JSON.stringify(slim));
+    } catch (e2) { console.warn('임시 세션 저장 실패(러닝은 계속):', e2); }
+  }
+}
 loadTempSession() {
 const data = localStorage.getItem(this.TEMP_SESSION_KEY);
 return data ? JSON.parse(data) : null;
@@ -4495,8 +4598,8 @@ calibSoundVolume: this.getCalibSoundVolume(),
 devMode: this.getDevMode(),
 history: this.loadHistory(),
 precisionLogs: this.loadPrecisionLogs(),
-garminImports: this._readRaw('oppaRunGarminImports', []),
-precLogImports: this._readRaw('oppaRunPrecLogImports', []),
+garminImports: bigStore.get('oppaRunGarminImports', []), // [수정 2026-10-05] 원본: this._readRaw('oppaRunGarminImports', [])
+precLogImports: bigStore.get('oppaRunPrecLogImports', []), // [수정 2026-10-05] 원본: this._readRaw('oppaRunPrecLogImports', [])
 pendingCalibRuns: this._readRaw('oppaRunPendingCalibRuns', []),
 community: {
 nickname: localStorage.getItem('jennyRunNickname') || '',
@@ -4521,8 +4624,8 @@ saveTextFileNative(jsonStr, fileName, 'application/json;charset=utf-8', storage.
 // 러닝 기록 리스트처럼 여러 개를 쌓아두고, 각각 내보내기/삭제, 전체삭제가
 // 가능하도록 리스트 구조로 변경.
 getPrecisionLogsKey() { return 'oppaRunPrecisionLogs'; }
-// [수정] 정밀 로그 최대 보관 개수 10 → 30. 한 곳에서만 바꾸면 되도록 상수화.
-getMaxPrecisionLogs() { return 30; }
+// [수정] 정밀 로그 최대 보관 개수 15개로 통일 (이전 30). 한 곳에서만 바꾸면 되도록 상수화.
+getMaxPrecisionLogs() { return 15; }
 // [추가] 개수 상한(30)으로 자르되, localStorage 용량이 모자라면 가장 오래된 로그부터
 // 하나씩 줄여서라도 저장이 성공하게 한다 (긴 러닝 로그가 많으면 30개가 다 안 들어갈 수 있음).
 // 최신 로그 1개조차 못 넣을 때만 savePrecisionLogsList()의 기존 실패 알림이 뜬다.
@@ -4530,7 +4633,7 @@ savePrecisionLogsCapped(list) {
 let arr = list.slice(0, this.getMaxPrecisionLogs());
 while (arr.length > 1) {
 try {
-localStorage.setItem(this.getPrecisionLogsKey(), JSON.stringify(arr));
+bigStore.set(this.getPrecisionLogsKey(), arr); // [수정 2026-10-05] 원본: localStorage.setItem(this.getPrecisionLogsKey(), JSON.stringify(arr));
 return true;
 } catch (e) {
 arr = arr.slice(0, arr.length - 1);
@@ -4540,13 +4643,14 @@ return this.savePrecisionLogsList(arr);
 }
 loadPrecisionLogs() {
 try {
-const data = localStorage.getItem(this.getPrecisionLogsKey());
-return data ? JSON.parse(data) : [];
+const arr = bigStore.get(this.getPrecisionLogsKey(), []); // [수정 2026-10-05] 원본: localStorage.getItem(...) 후 JSON.parse
+// [추가] 예전에 30개까지 쌓인 로그가 있어도 상한(15개)만 보이도록 자름
+return Array.isArray(arr) ? arr.slice(0, this.getMaxPrecisionLogs()) : [];
 } catch (e) { return []; }
 }
 savePrecisionLogsList(list) {
 try {
-localStorage.setItem(this.getPrecisionLogsKey(), JSON.stringify(list));
+bigStore.set(this.getPrecisionLogsKey(), list); // [수정 2026-10-05] 원본: localStorage.setItem(this.getPrecisionLogsKey(), JSON.stringify(list));
 return true;
 } catch (e) {
 console.error('정밀 로그 저장 실패:', e);
@@ -7150,8 +7254,8 @@ if (typeof data.devMode === 'boolean') storage.setDevMode(data.devMode);
 // [추가] 러닝 기록 / 정밀 로그 / 가민 분석실 데이터 복원
 if (Array.isArray(data.history)) localStorage.setItem(storage.HISTORY_KEY, JSON.stringify(data.history));
 if (Array.isArray(data.precisionLogs)) storage.savePrecisionLogsList(data.precisionLogs);
-if (Array.isArray(data.garminImports)) localStorage.setItem('oppaRunGarminImports', JSON.stringify(data.garminImports));
-if (Array.isArray(data.precLogImports)) localStorage.setItem('oppaRunPrecLogImports', JSON.stringify(data.precLogImports));
+if (Array.isArray(data.garminImports)) bigStore.set('oppaRunGarminImports', data.garminImports); // [수정 2026-10-05] 원본: localStorage.setItem('oppaRunGarminImports', JSON.stringify(...))
+if (Array.isArray(data.precLogImports)) bigStore.set('oppaRunPrecLogImports', data.precLogImports); // [수정 2026-10-05] 원본: localStorage.setItem('oppaRunPrecLogImports', JSON.stringify(...))
 if (Array.isArray(data.pendingCalibRuns)) localStorage.setItem('oppaRunPendingCalibRuns', JSON.stringify(data.pendingCalibRuns));
 // [추가] 크루 기능 로컬 식별 정보 복원 (게시글/좋아요 등 실제 콘텐츠는 서버(Supabase)에 있으므로
 // 여기선 닉네임/유저ID/아바타/이메일 같은 "이 기기가 어떤 크루 계정인지" 식별 정보만 복원)
@@ -15725,13 +15829,13 @@ const garmin = (function () {
   const FIT_EPOCH_OFFSET = 631065600; // 1989-12-31 00:00:00 UTC -> Unix epoch 초 차이
   // [추가] 정밀 로그(savePrecisionLog)와 동일하게 최근 3개까지만 보관.
   // 그 이상은 오래돼서 비교 의미가 떨어지고 localStorage 용량도 아낄 수 있음.
-  const MAX_GARMIN_IMPORTS = 20; // [수정] 가민 FIT 최대 10→20개로 확장 (여러 개 합산 보정용)
+  const MAX_GARMIN_IMPORTS = 15; // [수정] 가민 FIT 최대 15개로 통일 (이전 20)
   // [추가] 캘리브레이션 비교 전용 "지난 로그 불러오기" 저장소.
   // storage.oppaRunPrecisionLogs(자동 저장분)와는 별도의 키를 사용해서
   // 지난 로그를 불러와도 최근 자동 기록 3개가 밀려나지 않도록 분리한다.
   // (가민 가져오기가 oppaRunGarminImports를 쓰는 것과 동일한 방식)
   const PRECLOG_IMPORT_KEY = 'oppaRunPrecLogImports';
-  const MAX_PRECLOG_IMPORTS = 20; // [수정] 폰 정밀 로그 최대 10→20개로 확장
+  const MAX_PRECLOG_IMPORTS = 15; // [수정] 불러온 폰 정밀 로그 최대 15개로 통일 (이전 20)
 
   const BASE_TYPES = {
     0x00: { size: 1, invalid: 0xFF, read: (v,o,le) => v.getUint8(o) },
@@ -15905,10 +16009,10 @@ const garmin = (function () {
 
   // ── 가민 가져오기 목록 저장/불러오기 ──
   function loadImports() {
-    const data = localStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : [];
+    const arr = bigStore.get(STORAGE_KEY, []); // [수정 2026-10-05] 원본: localStorage.getItem(STORAGE_KEY) 후 JSON.parse
+    return Array.isArray(arr) ? arr.slice(0, MAX_GARMIN_IMPORTS) : []; // [추가] 예전 20개 데이터도 상한(15)만 보이도록 자름
   }
-  function saveImports(list) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch (e) { console.error('가민 기록 저장 실패(저장 공간 부족):', e); } }
+  function saveImports(list) { try { bigStore.set(STORAGE_KEY, list); /* [수정 2026-10-05] 원본: localStorage.setItem(STORAGE_KEY, JSON.stringify(list)) */ } catch (e) { console.error('가민 기록 저장 실패(저장 공간 부족):', e); } }
 
   // ── 포맷 유틸(시간/페이스/날짜/언어) ──
   function fmtDuration(sec) {
@@ -16025,7 +16129,7 @@ const garmin = (function () {
   // [추가] 펼쳐둔 가민 기록 카드 id 저장소(체크박스 선택 등으로 render()가 다시 돌아도 펼침 상태 유지)
   var collapsedGarminIds = {}; // [수정] 체크된 카드는 기본 펼침. 사용자가 접은 카드 id만 보관
   let autoMatchNote = null; // [추가] 마지막 로그 체크의 FIT 자동매칭 결과 안내 ({type:'ok'|'far'|'noimports'|'norange', ...})
-  const MAX_ANALYSIS_AUTOLOGS = 20; // [수정] 분석실은 자동저장 로그를 최신 20개까지 다룸 (저장소엔 설정 탭 기준 최대 30개)
+  const MAX_ANALYSIS_AUTOLOGS = 15; // [수정] 분석실도 자동저장 로그를 최신 15개까지 다룸 (설정 탭 상한과 동일)
   // [추가] 체크 드롭다운 패널의 한 줄: 체크박스(비교 선택) + 날짜/보조줄 + (INFO) + 삭제.
   // 패널은 열린 채로 유지되고(render()가 is-open 클래스를 건드리지 않음) 체크만 토글된다.
   function ddCheckRow(o) {
@@ -16306,8 +16410,8 @@ const garmin = (function () {
     // [추가] 캘리브레이션 비교 카드 다국어 처리
     setText('garmin-calib-title', isKo ? '캘리브레이션 비교' : 'CALIBRATION CHECK');
     setText('garmin-calib-desc', isKo
-      ? '가민 기록과 정밀 로그를 체크박스로 각각 1~20개 선택하세요. 1개씩 선택하면 그 둘을 그대로 비교하고, 여러 개 선택하면 선택한 기록들의 평균으로 비교해서 케이던스/GCT 등 오차와 조정 제안값을 보여줍니다.'
-      : 'Check 1-20 Garmin records and 1-20 precision logs. With one of each, they\'re compared directly; with multiple, the selected records are averaged before comparing cadence/GCT and other metrics.');
+      ? '가민 기록과 정밀 로그를 체크박스로 각각 1~15개 선택하세요. 1개씩 선택하면 그 둘을 그대로 비교하고, 여러 개 선택하면 선택한 기록들의 평균으로 비교해서 케이던스/GCT 등 오차와 조정 제안값을 보여줍니다.'
+      : 'Check 1-15 Garmin records and 1-15 precision logs. With one of each, they\'re compared directly; with multiple, the selected records are averaged before comparing cadence/GCT and other metrics.');
     setText('btn-run-calib-compare', isKo ? '선택한 기록 비교' : 'COMPARE SELECTED');
     // [추가] 지난 로그 불러오기 버튼/전체삭제 버튼 다국어 처리 (개수는 renderPrecLogDropdown에서 갱신)
     setText('btn-import-preclog-csv', isKo ? '지난 로그 불러오기 (.CSV/.JSON)' : 'IMPORT PAST LOG (.CSV/.JSON)');
@@ -16526,12 +16630,12 @@ const garmin = (function () {
   }
   function loadPrecLogImports() {
     try {
-      const data = localStorage.getItem(PRECLOG_IMPORT_KEY);
-      return data ? JSON.parse(data) : [];
+      const arr = bigStore.get(PRECLOG_IMPORT_KEY, []); // [수정 2026-10-05] 원본: localStorage.getItem(PRECLOG_IMPORT_KEY) 후 JSON.parse
+      return Array.isArray(arr) ? arr.slice(0, MAX_PRECLOG_IMPORTS) : []; // [추가] 예전 20개 데이터도 상한(15)만 보이도록 자름
     } catch (e) { return []; }
   }
   function savePrecLogImportsList(list) {
-    try { localStorage.setItem(PRECLOG_IMPORT_KEY, JSON.stringify(list)); } catch (e) { console.error('지난 로그(비교용) 저장 실패:', e); }
+    try { bigStore.set(PRECLOG_IMPORT_KEY, list); /* [수정 2026-10-05] 원본: localStorage.setItem(PRECLOG_IMPORT_KEY, JSON.stringify(list)) */ } catch (e) { console.error('지난 로그(비교용) 저장 실패:', e); }
   }
   // 자동 저장된 정밀 로그(storage.oppaRunPrecisionLogs) + 비교용으로 따로 불러온 지난 로그를 합쳐서 반환.
   // 드롭다운 표시와 runCalibrationCompare()의 선택 검색 양쪽에서 재사용한다.
@@ -17755,13 +17859,14 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
   // 대기목록. motionCalibOverride는 덮어쓰기 방식이라 순차 적용하면 마지막 결과만
   // 남고 앞의 결과들은 그냥 버려지는 문제가 있었음 → 그래서 평균 후 1회 적용으로 변경.
   const PENDING_CALIB_KEY = 'oppaRunPendingCalibRuns';
-  const MAX_PENDING_CALIB = 20; // [수정] 설정 페이지 대기목록(평균 적용용) 최대 10→20개로 확장
+  const MAX_PENDING_CALIB = 15; // [수정] 설정 페이지 대기목록(평균 적용용) 최대 15개로 통일 (이전 20)
 
   // ── 보정값 후보(Pending Calibration) 관리 ──
   function loadPendingCalib() {
     try {
       const raw = localStorage.getItem(PENDING_CALIB_KEY);
-      return raw ? JSON.parse(raw) : [];
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr.slice(0, MAX_PENDING_CALIB) : []; // [추가] 예전 20개 데이터도 상한(15)만 보이도록 자름
     } catch (e) { return []; }
   }
 
@@ -19065,7 +19170,8 @@ const community = new CommunityManager();
   }
 })();
 
-window.onload = () => {
+window.onload = async () => {
+try { await bigStore.init(); } catch (e) { console.error(e); } // [추가 2026-10-05] 큰 로그 저장소(IndexedDB) 준비 후 앱 시작
 app.init();
 initHoldToStop(); // [추가] STOP 버튼 꾹 누르기 인터랙션 바인딩
 ui.applyDevModeVisibility(); // [추가] 개발자 모드가 아니면 GARMIN 탭 숨김
