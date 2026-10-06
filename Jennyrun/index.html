@@ -2025,6 +2025,11 @@ alt="runner"/>
 <div style="position:absolute; top:10px; left:14px; color:var(--primary); font-size:var(--fs-md); font-weight:900; letter-spacing:0.5px; text-shadow:0 1px 4px rgba(0,0,0,0.8);">FormAnalyzer</div>
 </div>
 </div>
+<!-- [추가 2026-10-05] 폼분석기 실제 화면 스크린샷(form_v4.jpg). 위의 기존 form_v3.jpg 그림은 그대로 두고 아래에 함께 표시.
+     되돌리려면 이 블록(주석 포함)만 지우면 됨. -->
+<div style="margin-top:12px; text-align:center;">
+<img src="form_v4.jpg" style="width:70%; max-width:360px; height:auto; display:inline-block; border-radius:12px; border:1px solid #333;" alt="FormAnalyzer screen" loading="lazy"/>
+</div>
 <div style="text-align:right; margin-top:6px;">
 <a href="javascript:void(0)" onclick="(function(){ var isKo=true; try{ isKo = storage.getLang()==='ko'; }catch(e){} appAlert(isKo ? 'Google Play 출시 준비 중입니다.' : 'Coming soon to Google Play.'); })()" style="display:inline-block; color:var(--primary); font-size:var(--fs-xs); font-weight:700; text-decoration:none; border:1px solid var(--primary); border-radius:8px; padding:4px 10px;">▶ Google Play</a>
 </div>
@@ -10498,6 +10503,41 @@ function avgFromPrecLogStepWeighted(log, field) {
   if (!hasStepData) return avgFromPrecLog(log, field); // 구버전 로그(스텝 카운터 컬럼 없음) 폴백
   return weightSum ? (sum / weightSum) : avgFromPrecLog(log, field);
 }
+// [추가 2026-10-06] 분석실 비교·보정 제안용: "달리는 줄"만 평균.
+// 걷기/신호 대기 구간(케이던스 낮음)의 접지시간·수직진동은 의미가 없고, 가민도 그런 구간의 값은 대부분 비워 둔다.
+// 그런 줄이 평균에 섞이면 폰 값이 낮게 나와 잘못된 보정 제안이 나올 수 있어 케이던스 기준으로 제외한다.
+// 기존 avgFromPrecLog / avgFromPrecLogStepWeighted는 그대로 두고, 아래 함수만 분석실에서 사용한다.
+// 달리는 줄이 전체의 20% 미만이거나 케이던스가 없는 로그(손/암밴드 등)는 예전 방식으로 계산한다.
+const PREC_RUNNING_MIN_CAD = 130;
+function precHasEnoughRunningRows(log) {
+  if (!log || !log.length) return false;
+  let n = 0;
+  log.forEach(r => { const c = parseFloat(r.cadence); if (!isNaN(c) && c >= PREC_RUNNING_MIN_CAD) n++; });
+  return n >= log.length * 0.2;
+}
+function avgFromPrecLogRunning(log, field) {
+  if (!precHasEnoughRunningRows(log)) return avgFromPrecLog(log, field);
+  return avgFromPrecLog(log.filter(r => { const c = parseFloat(r.cadence); return !isNaN(c) && c >= PREC_RUNNING_MIN_CAD; }), field);
+}
+function avgFromPrecLogStepWeightedRunning(log, field) {
+  if (!precHasEnoughRunningRows(log)) return avgFromPrecLogStepWeighted(log, field);
+  let sum = 0, weightSum = 0, prevSteps = null, hasStepData = false;
+  log.forEach(r => {
+    const stepsNow = parseFloat(r.stepDetectorCnt);
+    const v = parseFloat(r[field]);
+    const c = parseFloat(r.cadence);
+    if (!isNaN(stepsNow)) {
+      hasStepData = true;
+      if (prevSteps != null) {
+        const w = Math.max(0, stepsNow - prevSteps); // 걸음 수 누적은 전체 줄로 계산(걷는 구간 걸음이 섞이지 않게)
+        if (!isNaN(v) && v > 0 && w > 0 && !isNaN(c) && c >= PREC_RUNNING_MIN_CAD) { sum += v * w; weightSum += w; }
+      }
+      prevSteps = stepsNow;
+    }
+  });
+  if (!hasStepData) return avgFromPrecLogRunning(log, field);
+  return weightSum ? (sum / weightSum) : avgFromPrecLogRunning(log, field);
+}
 // [추가] 정밀로그 한 개의 마지막 행 stepDetectorCnt/stepCounterSteps로 OS 걸음센서
 // 케이던스를 역산(총 실측 걸음수 ÷ 총 시간) — 리스트 카드의 avgCadence(steps/seconds*60)와
 // 동일한 "실측값 우선" 원칙. 여러 로그면 로그별로 계산한 뒤 평균한다(원본 행을
@@ -17327,7 +17367,8 @@ const garmin = (function () {
     // 되돌림. 로그가 매 스텝이 아니라 일정 간격으로만 찍히기 때문에, 리스트 카드(record.gct)와
     // 동일한 계산식(공용 유틸)을 쓰려면 이쪽도 실측 걸음수 가중이 필요함 — 아래 finishRun()의
     // avgGct도 같은 함수를 쓰도록 맞춰뒀다(두 값이 항상 일치하는 게 목표).
-    const phoneAvgGct = avgArr(precItems.map(p => avgFromPrecLogStepWeighted(p.log, 'gctMs')));
+    // [수정 2026-10-06] 원본: const phoneAvgGct = avgArr(precItems.map(p => avgFromPrecLogStepWeighted(p.log, 'gctMs')));
+const phoneAvgGct = avgArr(precItems.map(p => avgFromPrecLogStepWeightedRunning(p.log, 'gctMs')));
     // [추가 2026-08-15] groundThreshold/impactThreshold 제안값 게이팅용.
     const gctMeasuredFrac = avgArr(precItems.map(p => computeGctMeasuredFrac(p.log)));
     // [추가 2026-09-13] ground/impact 제안 게이팅용: 클램프 발동 비율.
@@ -17379,14 +17420,16 @@ const garmin = (function () {
 
     // [수정 2026-09-21] const → let: 아래 curVertScale 확정 후, vertOscMm이 비는 위치(손/암밴드/프리런)에서
     // 원시 진폭 × 현재 vertScale로 폰 수직진동을 다시 계산해 채울 수 있게 함(원래 선언: const).
-    let phoneAvgVertMm = avgArr(precItems.map(p => avgFromPrecLog(p.log, 'vertOscMm')));
+    // [수정 2026-10-06] 원본: let phoneAvgVertMm = avgArr(precItems.map(p => avgFromPrecLog(p.log, 'vertOscMm')));
+let phoneAvgVertMm = avgArr(precItems.map(p => avgFromPrecLogRunning(p.log, 'vertOscMm')));
     let vertDiffPct = (phoneAvgVertMm && garminAvgVertMm) ? ((phoneAvgVertMm - garminAvgVertMm) / garminAvgVertMm * 100) : null;
     // [추가 2026-09-20] 손(HAND)은 vertEnabled:false라서 vertOscMm이 항상 비어 있어 위
     // phoneAvgVertMm으로는 절대 비교가 안 된다. 반면 vertScale 미적용 원시 진폭(vertOscRaw)은
     // vertEnabled와 무관하게 스텝마다 항상 정밀 로그에 기록되고 있으므로(8528줄), 이걸로
     // 가민과 직접 비교해 최초 vertScale을 계산해낸다. 어디까지나 캘리브레이션 랩(데이터 분석)
     // 전용이며, hand의 vertEnabled는 그대로 false로 둬서 실제 화면/기록에는 절대 노출되지 않는다.
-    const phoneAvgVertAmplitudeRaw = avgArr(precItems.map(p => avgFromPrecLog(p.log, 'vertOscRaw')));
+    // [수정 2026-10-06] 원본: const phoneAvgVertAmplitudeRaw = avgArr(precItems.map(p => avgFromPrecLog(p.log, 'vertOscRaw')));
+const phoneAvgVertAmplitudeRaw = avgArr(precItems.map(p => avgFromPrecLogRunning(p.log, 'vertOscRaw')));
 
     // [추가] 페이스 비교. 정밀 로그엔 순간속도(speedKmh)만 있으므로 평균속도로 변환한 뒤
     // 가민의 avgPaceSecPerKm(전체 평균 페이스, sec/km)과 같은 단위로 맞춰 비교한다.
