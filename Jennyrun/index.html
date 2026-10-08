@@ -3717,8 +3717,11 @@ const FACTORY_DEFAULT_FACTORS = { stride: 1.0, gps: 1.0, cad: 1.0, pace: 1.0 };
 //      가민분석실의 4개 계수는 "참고용(적용 안 됨)"으로만 보인다. 위치별 저장값(...ByPos)은 지우지 않는다.
 // ON : 지금까지와 동일 — 위치별 저장값(없으면 DEFAULT_PROFILE_FACTORS_BY_POS)이 적용된다.
 // gctFallbackRatio / groundThreshold / impactThreshold / vertScale 등 모션 보정은 스위치와 무관하게 항상 적용.
+// [추가 2026-10-08] 스위치 상태를 읽는 유일한 기준. profile 객체를 이미 들고 있으면 이걸로,
+// 없으면 isCalibFactorsOn()으로 읽는다(직접 `calibFactorsEnabled === true` 비교 금지).
+function calibFactorsFlag(prof) { return !!(prof && prof.calibFactorsEnabled === true); }
 function isCalibFactorsOn() {
-  try { return storage.loadProfile().calibFactorsEnabled === true; } catch (e) { return false; }
+  try { return calibFactorsFlag(storage.loadProfile()); } catch (e) { return false; }
 }
 // 스위치 상태(on)와 무관하게 "이 위치에서 실제로 쓰일 4개 계수"를 계산. on=false면 전부 1.0.
 function factorsForPos(prof, pos, on) {
@@ -3885,7 +3888,7 @@ prevPaceCorrectionFactor: curPace, // [추가]
 savedAt: new Date().toISOString()
 };
 prof.motionCalibOverrides[pos] = override;
-const _factorSwitchOn = prof.calibFactorsEnabled === true; // [추가 2026-10-08] OFF면 4개 계수는 저장/적용하지 않음(모션 보정은 그대로)
+const _factorSwitchOn = calibFactorsFlag(prof); // [추가 2026-10-08] OFF면 4개 계수는 저장/적용하지 않음(모션 보정은 그대로)
 if (!isMotionOnlyPos(pos) && _factorSwitchOn) { // [추가] 프리런 같은 모션 전용 슬롯은 보정계수 맵에 아무것도 쓰지 않는다
 if (suggestion.strideFactor != null) prof.strideCorrectionFactorByPos[pos] = suggestion.strideFactor;
 if (suggestion.gpsDistFactor != null) prof.gpsDistCorrectionFactorByPos[pos] = suggestion.gpsDistFactor;
@@ -5020,7 +5023,9 @@ reader.readAsText(file);
 saveProfile(profile) {
 // [추가 2026-10-08] 보정계수 스위치: OFF면 플랫 필드(calcStride/GPS거리 등이 읽는 값)를 항상 1.0으로 저장.
 // 위치별 저장값(...ByPos)은 그대로 보존되므로 ON으로 바꾸면 원래 값이 되살아난다.
-// ByPos 맵이 아직 없는(=구버전 단일슬롯 마이그레이션 전) 프로필은 건드리지 않는다.
+// ByPos 맵이 아직 없는(=구버전 단일슬롯 마이그레이션 전) 프로필은 일부러 건드리지 않는다:
+// MotionManager 초기화의 마이그레이션이 플랫 필드 값을 읽어 ByPos로 옮겨 담기 때문에,
+// 그 전에 1.0으로 덮어쓰면 기존 사용자 보정값/출고 기본값이 유실된다. (마이그레이션 직후엔 OFF면 1.0으로 동기화·저장됨)
 try {
   let _on = profile.calibFactorsEnabled;
   if (typeof _on !== 'boolean') {
@@ -5028,7 +5033,7 @@ try {
     _on = _raw ? (JSON.parse(_raw).calibFactorsEnabled === true) : false;
   }
   profile.calibFactorsEnabled = (_on === true);
-  if (!profile.calibFactorsEnabled && profile.strideCorrectionFactorByPos) {
+  if (!calibFactorsFlag(profile) && profile.strideCorrectionFactorByPos) {
     profile.strideCorrectionFactor = 1.0; profile.gpsDistCorrectionFactor = 1.0;
     profile.cadCorrectionFactor = 1.0; profile.paceCorrectionFactor = 1.0;
   }
@@ -5044,7 +5049,7 @@ const data = localStorage.getItem(this.PROFILE_KEY);
 // [수정] 기존 저장 데이터에 새 필드(age, devicePos)가 없을 경우 기본값으로 보완
 const _loaded = data ? Object.assign({}, defaultProfile, JSON.parse(data)) : defaultProfile;
 // [추가 2026-10-08] 보정계수 스위치 OFF면 읽는 쪽에서도 4개 계수를 1.0으로 돌려준다(저장값 ByPos는 그대로).
-if (_loaded.calibFactorsEnabled !== true && _loaded.strideCorrectionFactorByPos) {
+if (!calibFactorsFlag(_loaded) && _loaded.strideCorrectionFactorByPos) { // ByPos 없는 프로필은 마이그레이션이 끝날 때까지 원본 유지
   _loaded.strideCorrectionFactor = 1.0; _loaded.gpsDistCorrectionFactor = 1.0;
   _loaded.cadCorrectionFactor = 1.0; _loaded.paceCorrectionFactor = 1.0;
 }
@@ -7014,7 +7019,7 @@ if (desc) desc.textContent = isKo
 }
 toggleCalibFactors() {
 const prof = storage.loadProfile();
-const next = !(prof.calibFactorsEnabled === true);
+const next = !calibFactorsFlag(prof);
 prof.calibFactorsEnabled = next;
 const pos = prof.devicePos || 'chest';
 const f = factorsForPos(prof, pos, next);
@@ -9176,7 +9181,7 @@ try {
   // 이래야 캘리브레이션을 커밋했을 때 4개 위치 모두 "새로 설치한 유저가 처음부터 그
   // 보정값으로 시작"하게 된다. 진짜 1.0(출고값)으로 시작하고 싶으면 RESET 버튼(그건
   // FACTORY_DEFAULT_FACTORS를 참조)을 누르면 된다.
-  const _factorsOn = _prof.calibFactorsEnabled === true; // [추가 2026-10-08] OFF면 아래 4개는 전부 1.0
+  const _factorsOn = calibFactorsFlag(_prof); // [추가 2026-10-08] OFF면 아래 4개는 전부 1.0
   const _posDefFactors = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || FACTORY_DEFAULT_FACTORS;
   const _syncedStride = !_factorsOn ? 1.0 : (typeof _prof.strideCorrectionFactorByPos[pos] === 'number' && _prof.strideCorrectionFactorByPos[pos] > 0) ? _prof.strideCorrectionFactorByPos[pos] : _posDefFactors.stride;
   const _syncedGps = !_factorsOn ? 1.0 : (typeof _prof.gpsDistCorrectionFactorByPos[pos] === 'number' && _prof.gpsDistCorrectionFactorByPos[pos] > 0) ? _prof.gpsDistCorrectionFactorByPos[pos] : _posDefFactors.gps;
