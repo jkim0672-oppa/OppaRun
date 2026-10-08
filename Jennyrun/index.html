@@ -2384,6 +2384,11 @@ alt="runner"/>
      한눈에 볼 수 있게 하는 버튼. 순수 표시 기능이며 값을 읽기만 하고 아무것도 저장하지 않는다. -->
 <button id="btn-show-current-data" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:8px;" onclick="ui.toggleCurrentData()"><span id="btn-show-current-data-label">SHOW CURRENT DATA</span></button>
 <div id="current-data-result" class="current-data-result"></div>
+<!-- [추가 2026-10-08] "보정계수 사용" 스위치 (기본 OFF). OFF면 보폭/GPS거리/케이던스/페이스 계수는 모든 위치에서 1.0. -->
+<div id="calib-factor-switch-box" style="margin-top:14px; border:1.5px solid #444; border-radius:12px; padding:12px; background:#1a1a1a;">
+<button id="btn-calib-factor-switch" style="background:#2a2a2a; color:#aaa; border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base);" onclick="ui.toggleCalibFactors()"><span id="btn-calib-factor-switch-label">USE CALIBRATION FACTORS: OFF</span></button>
+<div id="calib-factor-switch-desc" class="c35" style="margin-top:8px;"></div>
+</div>
 <button id="btn-restore-committed-calib-all" style="background:#14261a; color:#5fd18a; border:1.5px solid #2d5a3f; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:14px;" onclick="garmin.applyCommittedDefaultAllPos()"><span id="btn-restore-committed-calib-all-label">RESTORE CURRENT CALIBRATION (ALL POSITIONS)</span></button>
 <button id="btn-factory-reset-calib-all" style="background:#2a1414; color:var(--danger); border:1.5px solid #663333; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:8px;" onclick="garmin.resetCalibrationAllPos()"><span id="btn-factory-reset-calib-all-label">FACTORY RESET CALIBRATION (ALL POSITIONS)</span></button>
 </div>
@@ -3707,6 +3712,29 @@ const DEFAULT_PROFILE_FACTORS_BY_POS = {
 // 4개 위치 모두 바뀌지만, 이 상수는 절대 코드로 자동 갱신되지 않는 고정 1.0이다.
 // RESET 버튼이 "커밋된 기본값이 마음에 안 들면 진짜 최초 상태(1.0)로" 되돌리는 용도로 이 상수를 참조한다.
 const FACTORY_DEFAULT_FACTORS = { stride: 1.0, gps: 1.0, cad: 1.0, pace: 1.0 };
+// [추가 2026-10-08] "보정계수 사용" 스위치 (profile.calibFactorsEnabled, 기본 OFF).
+// OFF: 보폭/GPS거리/케이던스/페이스 4개 계수는 모든 위치에서 1.0(네이티브 원본값)으로 쓰이고,
+//      가민분석실의 4개 계수는 "참고용(적용 안 됨)"으로만 보인다. 위치별 저장값(...ByPos)은 지우지 않는다.
+// ON : 지금까지와 동일 — 위치별 저장값(없으면 DEFAULT_PROFILE_FACTORS_BY_POS)이 적용된다.
+// gctFallbackRatio / groundThreshold / impactThreshold / vertScale 등 모션 보정은 스위치와 무관하게 항상 적용.
+function isCalibFactorsOn() {
+  try { return storage.loadProfile().calibFactorsEnabled === true; } catch (e) { return false; }
+}
+// 스위치 상태(on)와 무관하게 "이 위치에서 실제로 쓰일 4개 계수"를 계산. on=false면 전부 1.0.
+function factorsForPos(prof, pos, on) {
+  if (!on) return { stride: 1.0, gps: 1.0, cad: 1.0, pace: 1.0 };
+  const d = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || FACTORY_DEFAULT_FACTORS;
+  const pick = (mapName, def) => {
+    const m = prof && prof[mapName];
+    return (m && typeof m[pos] === 'number' && m[pos] > 0) ? m[pos] : def;
+  };
+  return {
+    stride: pick('strideCorrectionFactorByPos', d.stride),
+    gps: pick('gpsDistCorrectionFactorByPos', d.gps),
+    cad: pick('cadCorrectionFactorByPos', d.cad),
+    pace: pick('paceCorrectionFactorByPos', d.pace)
+  };
+}
 // [추가 2026-09-20] "모션 전용" 위치 목록. 프리런은 GCT/수직진동(=motionCalibOverrides)만 보정 슬롯을 갖고,
 // 보폭/GPS거리/케이던스/페이스 보정계수 슬롯은 없다 — 프리런의 코어 지표(케이던스·거리·페이스)는
 // 네이티브 걸음센서/GPS 그대로 유지하기 위함. 위치별 보정계수 맵(...ByPos)에는 이 위치를 절대 쓰지 않는다.
@@ -3857,7 +3885,8 @@ prevPaceCorrectionFactor: curPace, // [추가]
 savedAt: new Date().toISOString()
 };
 prof.motionCalibOverrides[pos] = override;
-if (!isMotionOnlyPos(pos)) { // [추가] 프리런 같은 모션 전용 슬롯은 보정계수 맵에 아무것도 쓰지 않는다
+const _factorSwitchOn = prof.calibFactorsEnabled === true; // [추가 2026-10-08] OFF면 4개 계수는 저장/적용하지 않음(모션 보정은 그대로)
+if (!isMotionOnlyPos(pos) && _factorSwitchOn) { // [추가] 프리런 같은 모션 전용 슬롯은 보정계수 맵에 아무것도 쓰지 않는다
 if (suggestion.strideFactor != null) prof.strideCorrectionFactorByPos[pos] = suggestion.strideFactor;
 if (suggestion.gpsDistFactor != null) prof.gpsDistCorrectionFactorByPos[pos] = suggestion.gpsDistFactor;
 if (suggestion.cadFactor != null) prof.cadCorrectionFactorByPos[pos] = suggestion.cadFactor;
@@ -3866,7 +3895,7 @@ if (suggestion.paceFactor != null) prof.paceCorrectionFactorByPos[pos] = suggest
 // calcStride() 등이 읽는 플랫 필드는 "지금 실제로 착용 중인 위치"일 때만 갱신 —
 // 예를 들어 지금 가슴을 차고 있는데 손 위치 보정값을 적용했다고 해서 지금 러닝에
 // 손 보정계수가 끼어들면 안 되기 때문.
-if (prof.devicePos === pos) {
+if (prof.devicePos === pos && _factorSwitchOn) {
 if (suggestion.strideFactor != null) prof.strideCorrectionFactor = suggestion.strideFactor;
 if (suggestion.gpsDistFactor != null) prof.gpsDistCorrectionFactor = suggestion.gpsDistFactor;
 if (suggestion.cadFactor != null) prof.cadCorrectionFactor = suggestion.cadFactor;
@@ -4988,15 +5017,38 @@ event.target.value = '';
 };
 reader.readAsText(file);
 }
-saveProfile(profile) { localStorage.setItem(this.PROFILE_KEY, JSON.stringify(profile)); }
+saveProfile(profile) {
+// [추가 2026-10-08] 보정계수 스위치: OFF면 플랫 필드(calcStride/GPS거리 등이 읽는 값)를 항상 1.0으로 저장.
+// 위치별 저장값(...ByPos)은 그대로 보존되므로 ON으로 바꾸면 원래 값이 되살아난다.
+// ByPos 맵이 아직 없는(=구버전 단일슬롯 마이그레이션 전) 프로필은 건드리지 않는다.
+try {
+  let _on = profile.calibFactorsEnabled;
+  if (typeof _on !== 'boolean') {
+    const _raw = localStorage.getItem(this.PROFILE_KEY);
+    _on = _raw ? (JSON.parse(_raw).calibFactorsEnabled === true) : false;
+  }
+  profile.calibFactorsEnabled = (_on === true);
+  if (!profile.calibFactorsEnabled && profile.strideCorrectionFactorByPos) {
+    profile.strideCorrectionFactor = 1.0; profile.gpsDistCorrectionFactor = 1.0;
+    profile.cadCorrectionFactor = 1.0; profile.paceCorrectionFactor = 1.0;
+  }
+} catch (e) {}
+localStorage.setItem(this.PROFILE_KEY, JSON.stringify(profile));
+}
 loadProfile() {
 // [기본값 안내] defaultProfile의 strideCorrectionFactor 등도 위와 동일 — 가슴(chest) 전용
 // "현재 기본값"이며, 가민분석실에서 가슴을 보정 후 다운로드→커밋하면 그 시점 값으로 자동 갱신됨.
 // [CALIB_ANCHOR:DEFAULT_PROFILE] 캘리브레이션 스니펫(코드 반영용)을 여기 strideCorrectionFactor/gpsDistCorrectionFactor/cadCorrectionFactor/paceCorrectionFactor에 반영하세요.
-const defaultProfile = { h: 175, hu: "cm", w: 70, wu: "kg", age: 30, devicePos: "chest", strideCorrectionFactor: 1.059, gpsDistCorrectionFactor: 0.979, cadCorrectionFactor: 1.011, paceCorrectionFactor: 0.983 }; // [수정 2026-08-29] SETTINGS > SHOW CURRENT DATA 가슴 캘리브레이션 최종 적용값(노란색)으로 갱신: stride 1.078→1.006, gps 0.976→0.997, cad 1.085→1.000(중립값 유지, 이번 캘리브레이션에서 추가 조정 없었음), pace 0.992→0.995. 이전 실측값(1.078/0.976/1.085/0.992, 2026-08-16 리셋 시점 값)은 이 시점 기준으로 대체.
+const defaultProfile = { h: 175, hu: "cm", w: 70, wu: "kg", age: 30, devicePos: "chest", calibFactorsEnabled: false, strideCorrectionFactor: 1.059, gpsDistCorrectionFactor: 0.979, cadCorrectionFactor: 1.011, paceCorrectionFactor: 0.983 }; // [수정 2026-08-29] SETTINGS > SHOW CURRENT DATA 가슴 캘리브레이션 최종 적용값(노란색)으로 갱신: stride 1.078→1.006, gps 0.976→0.997, cad 1.085→1.000(중립값 유지, 이번 캘리브레이션에서 추가 조정 없었음), pace 0.992→0.995. 이전 실측값(1.078/0.976/1.085/0.992, 2026-08-16 리셋 시점 값)은 이 시점 기준으로 대체.
 const data = localStorage.getItem(this.PROFILE_KEY);
 // [수정] 기존 저장 데이터에 새 필드(age, devicePos)가 없을 경우 기본값으로 보완
-return data ? Object.assign({}, defaultProfile, JSON.parse(data)) : defaultProfile;
+const _loaded = data ? Object.assign({}, defaultProfile, JSON.parse(data)) : defaultProfile;
+// [추가 2026-10-08] 보정계수 스위치 OFF면 읽는 쪽에서도 4개 계수를 1.0으로 돌려준다(저장값 ByPos는 그대로).
+if (_loaded.calibFactorsEnabled !== true && _loaded.strideCorrectionFactorByPos) {
+  _loaded.strideCorrectionFactor = 1.0; _loaded.gpsDistCorrectionFactor = 1.0;
+  _loaded.cadCorrectionFactor = 1.0; _loaded.paceCorrectionFactor = 1.0;
+}
+return _loaded;
 }
 getLang() { return localStorage.getItem(this.LANG_KEY) || 'en'; }
 setLang(lang) { localStorage.setItem(this.LANG_KEY, lang); }
@@ -6941,6 +6993,45 @@ const el400 = document.getElementById('calib-dist-400');
 const el1000 = document.getElementById('calib-dist-1000');
 if(el400) el400.classList.toggle('active', d === 400);
 if(el1000) el1000.classList.toggle('active', d === 1000);
+}
+// [추가 2026-10-08] "보정계수 사용" 스위치. OFF(기본)면 보폭/GPS거리/케이던스/페이스 계수는 1.0으로 동작하고
+// 위치별 저장값은 그대로 보존된다. ON이면 위치별 저장값이 다시 적용된다. 모션 보정(접지시간/수직진동 등)은 무관.
+refreshCalibFactorSwitch() {
+const on = isCalibFactorsOn();
+const isKo = storage.getLang() === 'ko';
+const btn = document.getElementById('btn-calib-factor-switch');
+const lab = document.getElementById('btn-calib-factor-switch-label');
+const desc = document.getElementById('calib-factor-switch-desc');
+if (lab) lab.textContent = (isKo ? '보정계수 사용: ' : 'USE CALIBRATION FACTORS: ') + (on ? 'ON' : 'OFF');
+if (btn) {
+  btn.style.background = on ? '#14261a' : '#2a2a2a';
+  btn.style.color = on ? '#5fd18a' : '#aaa';
+  btn.style.borderColor = on ? '#2d5a3f' : '#444';
+}
+if (desc) desc.textContent = isKo
+  ? (on ? '저장된 위치별 보정계수(걸음 길이·GPS·케이던스·페이스)가 적용돼요.' : '걸음 길이·GPS·케이던스·페이스 계수는 모든 위치에서 1.0(원본값)이에요. 분석실의 4개 계수는 참고용으로만 보여요. 접지시간/수직진동 보정은 항상 적용돼요.')
+  : (on ? 'Saved per-position factors (stride/GPS/cadence/pace) are applied.' : 'Stride/GPS/cadence/pace factors are 1.0 (raw) at every position. The Garmin lab shows the 4 factors as reference only. GCT/vertical-oscillation calibration always applies.');
+}
+toggleCalibFactors() {
+const prof = storage.loadProfile();
+const next = !(prof.calibFactorsEnabled === true);
+prof.calibFactorsEnabled = next;
+const pos = prof.devicePos || 'chest';
+const f = factorsForPos(prof, pos, next);
+prof.strideCorrectionFactor = f.stride;
+prof.gpsDistCorrectionFactor = f.gps;
+prof.cadCorrectionFactor = f.cad;
+prof.paceCorrectionFactor = f.pace;
+storage.saveProfile(prof);
+// 러닝 중이어도 바로 반영되도록 MotionManager 캐시값도 갱신 (stride/GPS는 매번 profile에서 읽음)
+try {
+  if (typeof app !== 'undefined' && app && app.motion) {
+    app.motion.cadCorrectionFactor = f.cad;
+    app.motion.paceCorrectionFactor = f.pace;
+  }
+} catch (e) {}
+console.log('[calib-factor-switch]', next ? 'ON' : 'OFF', 'pos=' + pos, JSON.stringify(f));
+this.refreshCalibFactorSwitch();
 }
 updateCalibFactorDisplay() {
 const lang = storage.getLang();
@@ -9085,11 +9176,12 @@ try {
   // 이래야 캘리브레이션을 커밋했을 때 4개 위치 모두 "새로 설치한 유저가 처음부터 그
   // 보정값으로 시작"하게 된다. 진짜 1.0(출고값)으로 시작하고 싶으면 RESET 버튼(그건
   // FACTORY_DEFAULT_FACTORS를 참조)을 누르면 된다.
+  const _factorsOn = _prof.calibFactorsEnabled === true; // [추가 2026-10-08] OFF면 아래 4개는 전부 1.0
   const _posDefFactors = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || FACTORY_DEFAULT_FACTORS;
-  const _syncedStride = (typeof _prof.strideCorrectionFactorByPos[pos] === 'number' && _prof.strideCorrectionFactorByPos[pos] > 0) ? _prof.strideCorrectionFactorByPos[pos] : _posDefFactors.stride;
-  const _syncedGps = (typeof _prof.gpsDistCorrectionFactorByPos[pos] === 'number' && _prof.gpsDistCorrectionFactorByPos[pos] > 0) ? _prof.gpsDistCorrectionFactorByPos[pos] : _posDefFactors.gps;
-  const _syncedCad = (typeof _prof.cadCorrectionFactorByPos[pos] === 'number' && _prof.cadCorrectionFactorByPos[pos] > 0) ? _prof.cadCorrectionFactorByPos[pos] : _posDefFactors.cad;
-  const _syncedPace = (typeof _prof.paceCorrectionFactorByPos[pos] === 'number' && _prof.paceCorrectionFactorByPos[pos] > 0) ? _prof.paceCorrectionFactorByPos[pos] : _posDefFactors.pace; // [추가]
+  const _syncedStride = !_factorsOn ? 1.0 : (typeof _prof.strideCorrectionFactorByPos[pos] === 'number' && _prof.strideCorrectionFactorByPos[pos] > 0) ? _prof.strideCorrectionFactorByPos[pos] : _posDefFactors.stride;
+  const _syncedGps = !_factorsOn ? 1.0 : (typeof _prof.gpsDistCorrectionFactorByPos[pos] === 'number' && _prof.gpsDistCorrectionFactorByPos[pos] > 0) ? _prof.gpsDistCorrectionFactorByPos[pos] : _posDefFactors.gps;
+  const _syncedCad = !_factorsOn ? 1.0 : (typeof _prof.cadCorrectionFactorByPos[pos] === 'number' && _prof.cadCorrectionFactorByPos[pos] > 0) ? _prof.cadCorrectionFactorByPos[pos] : _posDefFactors.cad;
+  const _syncedPace = !_factorsOn ? 1.0 : (typeof _prof.paceCorrectionFactorByPos[pos] === 'number' && _prof.paceCorrectionFactorByPos[pos] > 0) ? _prof.paceCorrectionFactorByPos[pos] : _posDefFactors.pace; // [추가]
   if (_migrated || _prof.strideCorrectionFactor !== _syncedStride || _prof.gpsDistCorrectionFactor !== _syncedGps || _prof.cadCorrectionFactor !== _syncedCad || _prof.paceCorrectionFactor !== _syncedPace) {
     _prof.strideCorrectionFactor = _syncedStride;
     _prof.gpsDistCorrectionFactor = _syncedGps;
@@ -16463,6 +16555,7 @@ const garmin = (function () {
     // [추가] 설정 CALIB 탭 맨 아래 통합 버튼 2개(복원/팩토리리셋) 다국어 처리
     setText('btn-restore-committed-calib-all-label', isKo ? '현재 캘리브레이션으로 되돌아가기 (전체 위치)' : 'RESTORE CURRENT CALIBRATION (ALL POSITIONS)');
     setText('btn-factory-reset-calib-all-label', isKo ? '팩토리 기본값으로 초기화 (전체 위치)' : 'FACTORY RESET CALIBRATION (ALL POSITIONS)');
+    try { if (typeof ui !== 'undefined' && ui.refreshCalibFactorSwitch) ui.refreshCalibFactorSwitch(); } catch (e) {} // [추가 2026-10-08]
   }
 
   function render() {
@@ -16964,6 +17057,11 @@ const garmin = (function () {
   function selfCalibApplyDistance() {
     const isKo = isKoLang();
     if (!selfCalibLastDist) return;
+    if (!isCalibFactorsOn()) { // [추가 2026-10-08] 스위치 OFF면 적용하지 않고 안내만
+      const _rb = document.getElementById('selfcalib-dist-result');
+      if (_rb) _rb.innerHTML = '<div class="c59">' + (isKo ? '보정계수 사용이 OFF라 적용되지 않았어요. 설정에서 ON으로 바꾼 뒤 다시 눌러주세요.' : 'Not applied: calibration factors are OFF. Turn them ON in Settings first.') + '</div>';
+      return;
+    }
     const prof = storage.loadProfile();
     applyMotionCalibSuggestion(prof, selfCalibLastDist.pos, { gpsDistFactor: selfCalibLastDist.factor });
     storage.saveProfile(prof);
@@ -17006,6 +17104,11 @@ const garmin = (function () {
   function selfCalibApplyCadence() {
     const isKo = isKoLang();
     if (!selfCalibLastCad) return;
+    if (!isCalibFactorsOn()) { // [추가 2026-10-08] 스위치 OFF면 적용하지 않고 안내만
+      const _rb = document.getElementById('selfcalib-cad-result');
+      if (_rb) _rb.innerHTML = '<div class="c59">' + (isKo ? '보정계수 사용이 OFF라 적용되지 않았어요. 설정에서 ON으로 바꾼 뒤 다시 눌러주세요.' : 'Not applied: calibration factors are OFF. Turn them ON in Settings first.') + '</div>';
+      return;
+    }
     const prof = storage.loadProfile();
     applyMotionCalibSuggestion(prof, selfCalibLastCad.pos, { cadFactor: selfCalibLastCad.factor });
     storage.saveProfile(prof);
@@ -17773,6 +17876,11 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       // [수정] 예전엔 아래 5개 값이 있으면 무조건 전부 한꺼번에 적용됐음.
       // 각 항목 앞에 체크박스를 둬서, 원하는 값만 선택해서 적용/대기목록 저장할 수 있게 함.
       // 기본은 전부 체크(기존 동작과 동일)라 아무것도 안 건드리면 이전과 똑같이 동작함.
+      // [추가 2026-10-08] 보정계수 4종(보폭/GPS/페이스/케이던스) 행: 스위치 ON이면 기존 체크박스+입력칸,
+      // OFF면 체크박스 없이 "참고용(적용 안 됨)" 줄로만 표시한다. (계산 기준 현재값도 OFF일 땐 1.0)
+      const factorRow = (id, line, defaultChecked, inputId, inputValue) => isCalibFactorsOn()
+        ? checkRow(id, line, defaultChecked, inputId, inputValue)
+        : '<div style="padding:4px 0; color:#888;">' + line + ' <span class="u-color-666">' + (isKo ? '(참고용 · 적용 안 됨)' : '(reference only · not applied)') + '</span></div>';
       const checkRow = (id, line, defaultChecked, inputId, inputValue) => {
         // [추가] 체크박스 옆에 수동 입력 박스를 둬서, 권장값이 마음에 안 들면 직접 숫자를
         // 타이핑해서 적용할 수 있게 함. 기본값은 권장값으로 미리 채워두고, 사용자가 값을
@@ -17839,10 +17947,10 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         html += checkRow('calib-sel-vert', 'vertScale: ' + curVertScale.toFixed(3) + ' → <b>' + suggestedVertScale.toFixed(3) + '</b>', true, 'calib-input-vert', suggestedVertScale.toFixed(3));
       }
       if (suggestedStrideFactor != null) {
-        html += checkRow('calib-sel-stride', (isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ': ' + curStrideFactor.toFixed(3) + ' → <b>' + suggestedStrideFactor.toFixed(3) + '</b>', true, 'calib-input-stride', suggestedStrideFactor.toFixed(3));
+        html += factorRow('calib-sel-stride', (isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ': ' + curStrideFactor.toFixed(3) + ' → <b>' + suggestedStrideFactor.toFixed(3) + '</b>', true, 'calib-input-stride', suggestedStrideFactor.toFixed(3));
       }
       if (suggestedGpsDistFactor != null) {
-        html += checkRow('calib-sel-gps', (isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + curGpsDistFactor.toFixed(3) + ' → <b>' + suggestedGpsDistFactor.toFixed(3) + '</b> ' + (isKo ? '(실제 거리·페이스에 직접 반영됨)' : '(directly affects real distance/pace)'), true, 'calib-input-gps', suggestedGpsDistFactor.toFixed(3));
+        html += factorRow('calib-sel-gps', (isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + curGpsDistFactor.toFixed(3) + ' → <b>' + suggestedGpsDistFactor.toFixed(3) + '</b> ' + (isKo ? '(실제 거리·페이스에 직접 반영됨)' : '(directly affects real distance/pace)'), true, 'calib-input-gps', suggestedGpsDistFactor.toFixed(3));
         // [수정 2026-08-04] 페이스는 GPS 거리 보정계수에서 자동으로 파생되는 실효 배율
         // (paceImpliedFactor, 아래 안내문)과는 별개로, 거리는 그대로 두고 페이스 표시값만
         // 따로 미세조정할 수 있는 전용 보정계수(paceCorrectionFactor)도 추가로 지원한다.
@@ -17855,12 +17963,12 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         }
       }
       if (suggestedPaceFactor != null) {
-        html += checkRow('calib-sel-pacefactor', (isKo ? '페이스 전용 보정계수' : 'paceCorrectionFactor') + ': ' + curPaceFactor.toFixed(3) + ' → <b>' + suggestedPaceFactor.toFixed(3) + '</b> '
+        html += factorRow('calib-sel-pacefactor', (isKo ? '페이스 전용 보정계수' : 'paceCorrectionFactor') + ': ' + curPaceFactor.toFixed(3) + ' → <b>' + suggestedPaceFactor.toFixed(3) + '</b> '
           + (isKo ? '<span class="u-color-666">(거리는 그대로 두고 표시 페이스에만 곱해짐 — 계수를 올리면 페이스가 빨라짐/숫자가 작아짐)</span>' : '<span class="u-color-666">(distance untouched — only affects displayed pace; higher = faster/smaller pace number)</span>'),
           true, 'calib-input-pacefactor', suggestedPaceFactor.toFixed(3));
       }
       if (suggestedCadFactor != null) {
-        html += checkRow('calib-sel-cad', (isKo ? '케이던스 보정계수' : 'cadCorrectionFactor') + ': ' + curCadFactor.toFixed(3) + ' → <b>' + suggestedCadFactor.toFixed(3) + '</b> ' + (isKo ? '(네이티브 걸음센서 원시값은 그대로, 표시/기록값에만 반영됨)' : '(native raw value untouched, applies only to displayed/logged cadence)'), true, 'calib-input-cad', suggestedCadFactor.toFixed(3));
+        html += factorRow('calib-sel-cad', (isKo ? '케이던스 보정계수' : 'cadCorrectionFactor') + ': ' + curCadFactor.toFixed(3) + ' → <b>' + suggestedCadFactor.toFixed(3) + '</b> ' + (isKo ? '(네이티브 걸음센서 원시값은 그대로, 표시/기록값에만 반영됨)' : '(native raw value untouched, applies only to displayed/logged cadence)'), true, 'calib-input-cad', suggestedCadFactor.toFixed(3));
       }
       html += '<div style="color:#888; margin-top:8px; margin-bottom:10px;">' + (isKo
         ? '체크된 항목만 아래 버튼으로 즉시 적용/저장됩니다. 적용 후 러닝을 한 번 더 진행해서 오차가 줄었는지 다시 비교해보세요.'
@@ -17952,10 +18060,10 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       vertScale: (lastSuggestion.vertScale != null && isChecked('calib-sel-vert')) ? inputVal('calib-input-vert', lastSuggestion.vertScale) : null,
       ground: (lastSuggestion.ground != null && isChecked('calib-sel-ground')) ? inputVal('calib-input-ground', lastSuggestion.ground) : null,
       impact: (lastSuggestion.impact != null && isChecked('calib-sel-impact')) ? inputVal('calib-input-impact', lastSuggestion.impact) : null,
-      strideFactor: (lastSuggestion.strideFactor != null && isChecked('calib-sel-stride')) ? inputVal('calib-input-stride', lastSuggestion.strideFactor) : null,
-      gpsDistFactor: (lastSuggestion.gpsDistFactor != null && isChecked('calib-sel-gps')) ? inputVal('calib-input-gps', lastSuggestion.gpsDistFactor) : null,
-      cadFactor: (lastSuggestion.cadFactor != null && isChecked('calib-sel-cad')) ? inputVal('calib-input-cad', lastSuggestion.cadFactor) : null,
-      paceFactor: (lastSuggestion.paceFactor != null && isChecked('calib-sel-pacefactor')) ? inputVal('calib-input-pacefactor', lastSuggestion.paceFactor) : null
+      strideFactor: (isCalibFactorsOn() && lastSuggestion.strideFactor != null && isChecked('calib-sel-stride')) ? inputVal('calib-input-stride', lastSuggestion.strideFactor) : null,
+      gpsDistFactor: (isCalibFactorsOn() && lastSuggestion.gpsDistFactor != null && isChecked('calib-sel-gps')) ? inputVal('calib-input-gps', lastSuggestion.gpsDistFactor) : null,
+      cadFactor: (isCalibFactorsOn() && lastSuggestion.cadFactor != null && isChecked('calib-sel-cad')) ? inputVal('calib-input-cad', lastSuggestion.cadFactor) : null,
+      paceFactor: (isCalibFactorsOn() && lastSuggestion.paceFactor != null && isChecked('calib-sel-pacefactor')) ? inputVal('calib-input-pacefactor', lastSuggestion.paceFactor) : null
     };
   }
 
@@ -18118,8 +18226,8 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
         if (override.groundThreshold != null) app.motion.groundThreshold = override.groundThreshold;
         if (override.impactThreshold != null) app.motion.impactThreshold = override.impactThreshold;
         // [수정] applyCalibration()과 동일한 이유로 cad/pace 보정계수도 즉시 라이브 반영.
-        if (avgSuggestion.cadFactor != null) app.motion.cadCorrectionFactor = avgSuggestion.cadFactor;
-        if (avgSuggestion.paceFactor != null) app.motion.paceCorrectionFactor = avgSuggestion.paceFactor;
+        if (isCalibFactorsOn() && avgSuggestion.cadFactor != null) app.motion.cadCorrectionFactor = avgSuggestion.cadFactor;
+        if (isCalibFactorsOn() && avgSuggestion.paceFactor != null) app.motion.paceCorrectionFactor = avgSuggestion.paceFactor;
       }
 
       const appliedCount = list.length;
@@ -18241,8 +18349,8 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
         // 갱신되는데, 여기서는 그 함수를 다시 부르지 않아 "적용" 직후에도 옛 값으로 계산되는
         // 문제가 있었음. gct/rot/vertScale과 동일하게 즉시 라이브 반영한다(원시 걸음 신호인
         // cadRaw/네이티브 걸음 판정 자체는 건드리지 않고, 그 위에 곱해지는 보정계수만 갱신).
-        if (sel.cadFactor != null) app.motion.cadCorrectionFactor = sel.cadFactor;
-        if (sel.paceFactor != null) app.motion.paceCorrectionFactor = sel.paceFactor;
+        if (isCalibFactorsOn() && sel.cadFactor != null) app.motion.cadCorrectionFactor = sel.cadFactor;
+        if (isCalibFactorsOn() && sel.paceFactor != null) app.motion.paceCorrectionFactor = sel.paceFactor;
       }
 
       const btn = document.getElementById('btn-apply-calib');
@@ -18493,10 +18601,11 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
       if (pos && curProf && !isMotionOnlyPos(pos)) { // [추가] 프리런은 보정계수 표(DEFAULT_PROFILE_FACTORS_BY_POS)에 행이 없다
         const factorsVarIdx = html.indexOf('const DEFAULT_PROFILE_FACTORS_BY_POS = {');
         if (factorsVarIdx !== -1) {
-          const newFactorsObj = '{ stride: ' + curProf.strideCorrectionFactor.toFixed(3)
-            + ', gps: ' + curProf.gpsDistCorrectionFactor.toFixed(3)
-            + ', cad: ' + curProf.cadCorrectionFactor.toFixed(3)
-            + ', pace: ' + curProf.paceCorrectionFactor.toFixed(3) + ' }';
+          const _realF = factorsForPos(curProf, pos, true); // [추가 2026-10-08] 스위치 OFF여도 커밋엔 저장된 실제 값(ByPos)을 쓴다
+          const newFactorsObj = '{ stride: ' + _realF.stride.toFixed(3)
+            + ', gps: ' + _realF.gps.toFixed(3)
+            + ', cad: ' + _realF.cad.toFixed(3)
+            + ', pace: ' + _realF.pace.toFixed(3) + ' }';
           const slice4 = html.slice(factorsVarIdx);
           const re4 = new RegExp('(' + pos + ':\\s*)\\{[^}]*\\}');
           const m4 = slice4.match(re4);
@@ -18518,20 +18627,21 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
       const defAnchorTag = 'CALIB_ANCHOR:DEFAULT_PROFILE';
       const defAnchorIdx = html.indexOf(defAnchorTag);
       if (defAnchorIdx !== -1 && curProf && pos === 'chest') {
+        const _realF2 = factorsForPos(curProf, pos, true); // [추가 2026-10-08] 스위치 OFF여도 커밋엔 저장된 실제 값을 쓴다
         const windowLen = 500; // 앵커 주석 + 다음 줄이 들어가기 충분한 여유
         const win = html.slice(defAnchorIdx, defAnchorIdx + windowLen);
         let patchedWin = win;
-        if (typeof curProf.strideCorrectionFactor === 'number' && curProf.strideCorrectionFactor > 0) {
-          patchedWin = patchedWin.replace(/strideCorrectionFactor:\s*[0-9.]+/, 'strideCorrectionFactor: ' + curProf.strideCorrectionFactor.toFixed(3));
+        if (typeof _realF2.stride === 'number' && _realF2.stride > 0) {
+          patchedWin = patchedWin.replace(/strideCorrectionFactor:\s*[0-9.]+/, 'strideCorrectionFactor: ' + _realF2.stride.toFixed(3));
         }
-        if (typeof curProf.gpsDistCorrectionFactor === 'number' && curProf.gpsDistCorrectionFactor > 0) {
-          patchedWin = patchedWin.replace(/gpsDistCorrectionFactor:\s*[0-9.]+/, 'gpsDistCorrectionFactor: ' + curProf.gpsDistCorrectionFactor.toFixed(3));
+        if (typeof _realF2.gps === 'number' && _realF2.gps > 0) {
+          patchedWin = patchedWin.replace(/gpsDistCorrectionFactor:\s*[0-9.]+/, 'gpsDistCorrectionFactor: ' + _realF2.gps.toFixed(3));
         }
-        if (typeof curProf.cadCorrectionFactor === 'number' && curProf.cadCorrectionFactor > 0) {
-          patchedWin = patchedWin.replace(/cadCorrectionFactor:\s*[0-9.]+/, 'cadCorrectionFactor: ' + curProf.cadCorrectionFactor.toFixed(3));
+        if (typeof _realF2.cad === 'number' && _realF2.cad > 0) {
+          patchedWin = patchedWin.replace(/cadCorrectionFactor:\s*[0-9.]+/, 'cadCorrectionFactor: ' + _realF2.cad.toFixed(3));
         }
-        if (typeof curProf.paceCorrectionFactor === 'number' && curProf.paceCorrectionFactor > 0) {
-          patchedWin = patchedWin.replace(/paceCorrectionFactor:\s*[0-9.]+/, 'paceCorrectionFactor: ' + curProf.paceCorrectionFactor.toFixed(3));
+        if (typeof _realF2.pace === 'number' && _realF2.pace > 0) {
+          patchedWin = patchedWin.replace(/paceCorrectionFactor:\s*[0-9.]+/, 'paceCorrectionFactor: ' + _realF2.pace.toFixed(3));
         }
         html = html.slice(0, defAnchorIdx) + patchedWin + html.slice(defAnchorIdx + win.length);
       }
