@@ -904,7 +904,7 @@ body.prem-lock-dyn .h-det-box.lk-dyn { position:relative; }
 body.prem-lock-dyn .h-det-box.lk-dyn .h-det-val { visibility:hidden; }
 body.prem-lock-dyn .h-det-box.lk-dyn::after { content:'PRO'; position:absolute; left:0; right:0; bottom:10px; text-align:center; font-size:var(--fs-xxs); font-weight:800; letter-spacing:1px; color:#aaa; }
 body.prem-lock-garmin #btn-apply-calib::after { content:'PRO'; margin-left:8px; padding:2px 7px; border-radius:6px; background:#000; color:#ffcc66; font-size:.7em; font-weight:900; letter-spacing:1px; vertical-align:middle; }
-body.prem-lock-garmin #btn-save-pending-calib, body.prem-lock-garmin #btn-save-calib-report { display:none; }
+body.prem-lock-garmin #btn-save-pending-calib, body.prem-lock-garmin #btn-save-calib-report, body.prem-lock-garmin #btn-calib-avg3-save { display:none; }
 body.prem-lock-garmin #garmin-calib-status > * { display:none; }
 body.prem-lock-garmin #garmin-calib-status:not(:empty)::before { content: var(--lk-status-title, 'APPLIED VALUES · PRO'); display:block; text-align:center; font-weight:800; color:#aaa; font-size:var(--fs-sm); letter-spacing:1px; padding:14px 0; }
 #garmin-sample-box { display:none; }
@@ -2081,8 +2081,12 @@ alt="runner"/>
 <div id="label-preclog-auto" class="c17">AUTO-SAVED LOGS (0/15)</div>
 <!-- [수정] 자동저장 로그도 카드 나열 대신 체크 드롭다운으로 (분석실에서는 최신 15개만 다룸) -->
 <div class="u-position-relative u-margin-bottom-14px">
-  <div id="calib-autolog-select-btn" onclick="ui.toggleDropdown('calib-autolog-dropdown-options')" class="dropdown-select c13">
-    <span id="current-calib-autolog-text">-</span><span class="c08">▼</span>
+  <div style="display:flex; gap:8px; align-items:stretch;">
+    <div id="calib-autolog-select-btn" onclick="ui.toggleDropdown('calib-autolog-dropdown-options')" class="dropdown-select c13" style="flex:1; min-width:0; width:auto;">
+      <span id="current-calib-autolog-text">-</span><span class="c08">▼</span>
+    </div>
+    <!-- [추가 2026-10-10] 비교용으로 체크해 둔 로그/가민 기록 선택을 한 번에 해제 (드롭다운 줄에만 붙인다: 목록이 펼쳐져도 버튼 크기는 그대로) -->
+    <button id="btn-calib-clear-selection" type="button" style="flex:0 0 auto; white-space:nowrap; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:0 14px; border-radius:12px; font-weight:900; font-size:var(--fs-sm); cursor:pointer;" onclick="garmin.clearAllSelections()">선택해제</button>
   </div>
   <div id="calib-autolog-dropdown-options" class="precision-dropdown-options c12 log-dd-panel"></div>
 </div>
@@ -2347,6 +2351,14 @@ alt="runner"/>
 <button id="btn-start-calib" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:10px;" onclick="ui.startCalibrationRun()">START CALIBRATION RUN</button>
 <div id="calib-current-factor" style="font-size:var(--fs-xxs); color:#888; margin-top:10px;">Current correction factor: 1.00 (default, not yet calibrated)</div>
 <button id="btn-download-stride-calib" class="btn-download-stride-calib hidden" onclick="garmin.downloadPatchedHtml()"><span id="btn-download-stride-calib-label">DOWNLOAD PATCHED HTML (STRIDE CALIB)</span></button>
+</div>
+<!-- [추가 2026-10-10] "3개 평균 적용" 스위치. 일반 유저: 같은 위치 러닝 3회가 쌓이면 GCT가 자동 적용(수동 ON/OFF 가능).
+     개발자 모드: 가민 비교 결과 3개 저장 → ON, 그리고 현재 적용값을 앱 코드(패치 HTML)로 저장. -->
+<div class="settings-group" id="calib-avg3-group">
+<div id="calib-avg3-desc" class="c35"></div>
+<button id="btn-calib-avg3-save" class="hidden" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:10px;" onclick="saveCalibAvg3Result()"><span id="btn-calib-avg3-save-label"></span></button>
+<button id="btn-calib-avg3" style="background:#2a2a2a; color:#aaa; border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:10px;" onclick="toggleCalibAvg3()"><span id="btn-calib-avg3-label"></span></button>
+<button id="btn-calib-avg3-commit" class="hidden" style="background:#14261a; color:#5fd18a; border:1.5px solid #2d5a3f; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:10px;" onclick="garmin.downloadPatchedHtml()"><span id="btn-calib-avg3-commit-label"></span></button>
 </div>
 <div class="section-title" id="section-title-self-calib">SELF CALIBRATION</div>
 <div class="settings-group" id="selfcalib-group">
@@ -3708,10 +3720,10 @@ function buildDiagAxisLabelsHtml(splits) {
 // [기본값 안내] 가슴을 가민분석실에서 보정 후 "수정된 HTML 다운로드"→커밋하면, 여기 chest
 // 줄도 그 시점 값으로 자동 갱신된다(buildPatchedHtml 1-c단계). 즉 이 표 = 지금의 기본값.
 const DEFAULT_PROFILE_FACTORS_BY_POS = {
-  chest:   { stride: 1.059, gps: 0.979, cad: 1.011, pace: 0.983 }, // [수정 2026-08-16] 재실측 전 처음부터 다시 테스트하기 위해 중립값(보정없음)으로 리셋. defaultProfile과 반드시 동일하게 유지
-  waist:   { stride: 1.061, gps: 0.984, cad: 1.008, pace: 0.983 },
-  armband: { stride: 1.053, gps: 0.985, cad: 1.002, pace: 0.987 },
-  hand:    { stride: 1.054, gps: 0.980, cad: 1.003, pace: 0.981 },
+  chest:   { stride: 1.048, gps: 0.971, cad: 1.003, pace: 0.973 }, // [수정 2026-08-16] 재실측 전 처음부터 다시 테스트하기 위해 중립값(보정없음)으로 리셋. defaultProfile과 반드시 동일하게 유지
+  waist:   { stride: 1.050, gps: 0.973, cad: 0.993, pace: 0.974 },
+  armband: { stride: 1.059, gps: 0.973, cad: 0.980, pace: 0.973 },
+  hand:    { stride: 1.043, gps: 0.972, cad: 0.996, pace: 0.973 },
 };
 // [추가 2026-08-19] 진짜 "출고값(1.0, 보정없음)" — 위 DEFAULT_PROFILE_FACTORS_BY_POS와 별개다.
 // 저건 "커밋된 기본값"(신규 설치 유저가 자동으로 물려받는 값)이라 캘리브레이션을 커밋하면
@@ -3743,6 +3755,197 @@ function factorsForPos(prof, pos, on) {
     cad: pick('cadCorrectionFactorByPos', d.cad),
     pace: pick('paceCorrectionFactorByPos', d.pace)
   };
+}
+// [추가 2026-10-10] "3개 평균 적용" 스위치 — 새 계산식 없이 기존 보정값(override) 경로를 그대로 쓴다.
+// 값의 출처(위치별):
+//  (1) 가민 저장 결과: 가민 분석실의 저장된 비교 결과(대기목록) 중 같은 위치 최근 3개 → GCT 폴백비율 + vertScale + groundThreshold + impactThreshold 평균 (개발자용)
+//  (2) 본인 러닝: 가민 결과가 3개 미만이면, 같은 위치 최근 3회 러닝에서 앱이 학습한 GCT 비율 평균 → GCT 폴백비율만 (일반 유저용, vert는 기준이 없어 제외)
+// ON이면 그 위치 override(=현재값)로 적용, OFF면 켜기 전 override(avg3Prev)로 복원. 3개 미만이면 기존 방식.
+// 일반 유저(개발자 모드 OFF)는 (2)가 3회 쌓이면 위치당 1회 자동 ON(이후 OFF로 바꾸면 다시 자동으로 켜지지 않음).
+const CALIB_AVG3_PENDING_KEY = 'oppaRunPendingCalibRuns';
+const CALIB_AVG3_SELF_KEY = 'oppaRunSelfGctRatios';
+// 3개 이상의 로그를 합산해 비교한 저장 결과(logCount>=3)가 있으면 그 최신 1개가 곧 "3개 세트".
+function calibAvg3FullSet(pos) {
+  try {
+    const arr = JSON.parse(localStorage.getItem(CALIB_AVG3_PENDING_KEY) || '[]');
+    if (!Array.isArray(arr)) return null;
+    const c = arr.filter(function(i) { return i && i.devicePos === pos && i.logCount >= 3 && (typeof i.gct === 'number' || typeof i.vertScale === 'number'); });
+    return c.length ? c[c.length - 1] : null; // 저장 순서상 마지막 = 가장 최근
+  } catch (e) { return null; }
+}
+function calibAvg3GarminCount(pos) { return calibAvg3FullSet(pos) ? 3 : calibAvg3Items(pos).length; }
+function calibAvg3Items(pos) {
+  try {
+    const arr = JSON.parse(localStorage.getItem(CALIB_AVG3_PENDING_KEY) || '[]');
+    if (!Array.isArray(arr)) return [];
+    return arr.filter(function(i) { return i && i.devicePos === pos && (typeof i.gct === 'number' || typeof i.vertScale === 'number'); }).slice(-3);
+  } catch (e) { return []; }
+}
+function calibAvg3SelfRatios(pos) {
+  try {
+    const m = JSON.parse(localStorage.getItem(CALIB_AVG3_SELF_KEY) || '{}');
+    const a = m && Array.isArray(m[pos]) ? m[pos] : [];
+    return a.filter(function(x) { return typeof x === 'number'; }).slice(-3);
+  } catch (e) { return []; }
+}
+// 러닝 종료 시 호출: 이번 러닝에서 학습된 GCT 비율을 위치별로 최근 5개까지 기록(실측이 충분한 러닝만).
+function calibAvg3RecordSelfRun(pos, motion) {
+  if (!pos || pos === 'freerun' || !motion || typeof motion.gctRatioLearned !== 'number') return;
+  const meas = motion.gctMeasuredCount || 0, fb = motion.gctFallbackCount || 0;
+  if (meas < 30 || meas / (meas + fb) < 0.5) return; // 실측이 너무 적은 러닝은 제외
+  let m = {};
+  try { m = JSON.parse(localStorage.getItem(CALIB_AVG3_SELF_KEY) || '{}') || {}; } catch (e) { m = {}; }
+  m[pos] = (Array.isArray(m[pos]) ? m[pos] : []).concat([Math.round(motion.gctRatioLearned * 1000) / 1000]).slice(-5);
+  try { localStorage.setItem(CALIB_AVG3_SELF_KEY, JSON.stringify(m)); } catch (e) {}
+  // 일반 유저: 3회 쌓였고 아직 이 위치에 자동 적용한 적/개별 보정이 없으면 1회 자동 ON.
+  try {
+    if (!storage.getDevMode()) {
+      const prof = storage.loadProfile();
+      const done = prof.avg3AutoDone || {};
+      const hasOv = prof.motionCalibOverrides && prof.motionCalibOverrides[pos];
+      if (!done[pos] && !hasOv && calibAvg3SelfRatios(pos).length >= 3 && !calibAvg3SelfOutOfAutoRange(pos)) {
+        prof.avg3AutoDone = Object.assign({}, done, { [pos]: true });
+        if (calibAvg3Apply(prof, pos)) {
+          storage.saveProfile(prof);
+          calibAvg3LiveApply(prof, pos);
+        }
+      }
+    }
+  } catch (e) {}
+}
+// 현재 착용 위치의 살아있는 MotionManager에 gct 폴백비율/vertScale만 직접 반영한다.
+// applyDevicePos()는 gctRatioLearned/실측 카운트 등을 리셋하는 부수효과가 있어 러닝 중/종료 시점엔 쓰지 않는다.
+function calibAvg3LiveApply(prof, pos) {
+  try {
+    if (typeof app === 'undefined' || !app || !app.motion || (prof.devicePos || 'chest') !== pos) return;
+    const base = (DEVICE_MOTION_PROFILES[pos] || DEVICE_MOTION_PROFILES.chest || {});
+    const ov = (prof.motionCalibOverrides || {})[pos] || {};
+    app.motion.gctFallbackRatio = (typeof ov.gctFallbackRatio === 'number') ? ov.gctFallbackRatio : base.gctFallbackRatio;
+    app.motion.vertScale = (typeof ov.vertScale === 'number') ? ov.vertScale : base.vertScale;
+    app.motion.groundThreshold = (typeof ov.groundThreshold === 'number') ? ov.groundThreshold : base.groundThreshold;
+    app.motion.impactThreshold = (typeof ov.impactThreshold === 'number') ? ov.impactThreshold : base.impactThreshold;
+  } catch (e) {}
+}
+function calibAvg3Mean(vals, dec) {
+  const v = vals.filter(function(x) { return typeof x === 'number'; });
+  const k = Math.pow(10, dec == null ? 3 : dec);
+  return v.length ? Math.round(v.reduce(function(a, b) { return a + b; }, 0) / v.length * k) / k : null;
+}
+// 본인 러닝 3회 평균(클램프 전)이 그 위치 기본값에서 ±10%를 넘게 벗어났는지. 자동 적용은 이 범위 안일 때만 한다.
+const CALIB_AVG3_AUTO_MAX_DEV = 0.10;
+function calibAvg3SelfOutOfAutoRange(pos) {
+  const r = calibAvg3SelfRatios(pos);
+  if (r.length < 3) return false;
+  const g = calibAvg3Mean(r);
+  const base = (typeof DEVICE_MOTION_PROFILES !== 'undefined' && DEVICE_MOTION_PROFILES[pos]) ? DEVICE_MOTION_PROFILES[pos].gctFallbackRatio : null;
+  if (g == null || typeof base !== 'number' || !(base > 0)) return false;
+  return Math.abs(g - base) / base > CALIB_AVG3_AUTO_MAX_DEV;
+}
+// 이 위치에서 쓸 수 있는 평균값: 가민 3개 우선, 없으면 본인 러닝 3회(GCT만).
+function calibAvg3Source(pos) {
+  const full = calibAvg3FullSet(pos);
+  if (full) return { kind: 'garmin', gct: full.gct != null ? full.gct : null, vert: full.vertScale != null ? full.vertScale : null, ground: full.ground != null ? full.ground : null, impact: full.impact != null ? full.impact : null };
+  const items = calibAvg3Items(pos);
+  if (items.length >= 3) return { kind: 'garmin', gct: calibAvg3Mean(items.map(function(i) { return i.gct; })), vert: calibAvg3Mean(items.map(function(i) { return i.vertScale; })),
+      ground: calibAvg3Mean(items.map(function(i) { return i.ground; }), 2), impact: calibAvg3Mean(items.map(function(i) { return i.impact; }), 2) };
+  const r = calibAvg3SelfRatios(pos);
+  if (r.length >= 3) {
+    let g = calibAvg3Mean(r);
+    const base = (typeof DEVICE_MOTION_PROFILES !== 'undefined' && DEVICE_MOTION_PROFILES[pos]) ? DEVICE_MOTION_PROFILES[pos].gctFallbackRatio : null;
+    if (g != null && typeof base === 'number') g = Math.round(Math.max(base * 0.75, Math.min(base * 1.25, g)) * 1000) / 1000; // 기본값 ±25% 이내
+    return { kind: 'self', gct: g, vert: null, ground: null, impact: null };
+  }
+  return null;
+}
+function isCalibAvg3On(prof, pos) {
+  const ov = prof && prof.motionCalibOverrides && prof.motionCalibOverrides[pos];
+  return !!(ov && ov.avg3Applied);
+}
+function calibAvg3Apply(prof, pos) { // prof를 직접 수정. 적용됐으면 true
+  const src = calibAvg3Source(pos);
+  if (!src) return false;
+  if (!prof.motionCalibOverrides) prof.motionCalibOverrides = {};
+  const ov = prof.motionCalibOverrides[pos];
+  const next = Object.assign({}, ov || {}, { devicePos: pos, appliedAt: new Date().toISOString(), avg3Applied: true, avg3Source: src.kind, avg3Prev: (ov && ov.avg3Applied) ? ov.avg3Prev : (ov || null) });
+  if (src.gct != null) next.gctFallbackRatio = src.gct;
+  if (src.vert != null) next.vertScale = src.vert;
+  if (src.ground != null) next.groundThreshold = src.ground;
+  if (src.impact != null) next.impactThreshold = src.impact;
+  prof.motionCalibOverrides[pos] = next;
+  try { pushCalibHistory(prof, pos, next.appliedAt); } catch (e) {}
+  return true;
+}
+function toggleCalibAvg3() {
+  const prof = storage.loadProfile();
+  const pos = prof.devicePos || 'chest';
+  if (!prof.motionCalibOverrides) prof.motionCalibOverrides = {};
+  if (isCalibAvg3On(prof, pos)) {
+    const ov = prof.motionCalibOverrides[pos];
+    if (ov.avg3Prev) prof.motionCalibOverrides[pos] = ov.avg3Prev; else delete prof.motionCalibOverrides[pos];
+    prof.avg3AutoDone = Object.assign({}, prof.avg3AutoDone || {}, { [pos]: true }); // 직접 끈 위치는 자동으로 다시 켜지 않는다
+  } else if (!calibAvg3Apply(prof, pos)) { refreshCalibAvg3Switch(); return; }
+  storage.saveProfile(prof);
+  calibAvg3LiveApply(prof, pos);
+  refreshCalibAvg3Switch();
+  // [추가 2026-10-10] 내부값이 바뀌어 이 위치의 후처리 보정 저장값이 어긋나면 적용이 자동으로 멈춘다 → 안내
+  try {
+    if (typeof ui !== 'undefined' && ui.refreshPostCalibSwitch) ui.refreshPostCalibSwitch();
+    if (postCalibOn(prof) && postCalibRefMismatch(prof, pos)) {
+      const isKo = storage.getLang() === 'ko';
+      alert(isKo
+        ? '[' + getPosLabel(pos, isKo) + '] 내부값(GCT 폴백 등)이 바뀌어, 저장돼 있던 GCT/VERT 후처리 보정은 자동으로 적용을 멈췄어요. 가민분석실에서 다시 저장하면 새 내부값 기준으로 다시 적용돼요.'
+        : '[' + getPosLabel(pos, isKo) + '] Internal values (GCT fallback etc.) changed, so the saved GCT/VERT post-calibration was paused automatically. Save it again in the Garmin lab to re-apply it on the new values.');
+    }
+  } catch (e) {}
+}
+// 개발자용: 가민 분석실에서 비교한 결과를 3개 저장 목록에 추가(분석실의 "저장" 버튼과 동일).
+function saveCalibAvg3Result() {
+  const isKo = storage.getLang() === 'ko';
+  const total = function() { try { return JSON.parse(localStorage.getItem(CALIB_AVG3_PENDING_KEY) || '[]').length; } catch (e) { return 0; } };
+  const before = total();
+  try { garmin.addPendingCalib(); } catch (e) {}
+  if (total() === before) {
+    alert(isKo ? '저장할 비교 결과가 없어요. INFO > GARMIN 탭에서 가민 기록과 정밀 로그를 골라 비교를 먼저 실행해주세요.' : 'No compare result to save. Run a compare first in INFO > GARMIN.');
+  }
+  refreshCalibAvg3Switch();
+}
+function refreshCalibAvg3Switch() {
+  const btn = document.getElementById('btn-calib-avg3');
+  if (!btn) return;
+  const isKo = storage.getLang() === 'ko';
+  const prof = storage.loadProfile();
+  const pos = prof.devicePos || 'chest';
+  const dev = storage.getDevMode();
+  const nG = calibAvg3GarminCount(pos), nS = calibAvg3SelfRatios(pos).length;
+  const on = isCalibAvg3On(prof, pos);
+  const can = on || !!calibAvg3Source(pos);
+  const posLabel = getPosLabel(pos, isKo);
+  const setT = function(id, t) { const e = document.getElementById(id); if (e) e.textContent = t; };
+  setT('btn-calib-avg3-label', (isKo ? '3개 평균 적용: ' : 'USE 3-RUN AVERAGE: ') + (on ? 'ON' : 'OFF'));
+  setT('btn-calib-avg3-save-label', (isKo ? '가민 비교 결과 저장 (' : 'SAVE GARMIN RESULT (') + Math.min(nG, 3) + '/3)');
+  setT('btn-calib-avg3-commit-label', isKo ? '현재 적용값을 앱 코드로 저장 (패치 HTML)' : 'SAVE CURRENT VALUES TO APP CODE (PATCHED HTML)');
+  ['btn-calib-avg3-save', 'btn-calib-avg3-commit'].forEach(function(id) { const e = document.getElementById(id); if (e) e.classList.toggle('hidden', !dev); });
+  btn.disabled = !can;
+  btn.style.opacity = can ? '1' : '0.45';
+  btn.style.background = on ? '#14261a' : '#2a2a2a';
+  btn.style.color = on ? '#5fd18a' : '#aaa';
+  btn.style.borderColor = on ? '#2d5a3f' : '#444';
+  const d = document.getElementById('calib-avg3-desc');
+  if (d) {
+    const ov = prof.motionCalibOverrides && prof.motionCalibOverrides[pos];
+    const g = on ? ((ov.gctFallbackRatio != null ? ov.gctFallbackRatio : '-')) : null;
+    const v = on ? ((ov.vertScale != null ? ov.vertScale : '-')) : null;
+    const gi = on && ov.avg3Source !== 'self' ? ', ground ' + (ov.groundThreshold != null ? ov.groundThreshold : '-') + ', impact ' + (ov.impactThreshold != null ? ov.impactThreshold : '-') : '';
+    const skipNote = !on && !dev && !calibAvg3FullSet(pos) && calibAvg3Items(pos).length < 3 && calibAvg3SelfOutOfAutoRange(pos);
+    const how = on && ov.avg3Source === 'self' ? (isKo ? '내 러닝 3회' : 'your last 3 runs') : (isKo ? '가민 비교 3개' : 'the 3 Garmin results');
+    d.textContent = isKo
+      ? '[' + posLabel + '] 내 러닝 ' + Math.min(nS, 3) + '/3회' + (dev ? ' · 가민 저장 ' + Math.min(nG, 3) + '/3개' + (calibAvg3FullSet(pos) ? '(합산 비교)' : '') : '') + '. ' + (on
+          ? how + '의 평균(GCT 폴백 ' + g + (ov.avg3Source === 'self' ? '' : ', vertScale ' + v + gi) + ')이 현재값으로 적용 중이에요. 다음 러닝부터 화면·리스트·통계에 반영돼요.'
+          : (can ? 'ON으로 바꾸면 최근 3개 평균을 현재값으로 적용해요.' + (skipNote ? ' (측정값이 기본값과 10% 넘게 달라 자동 적용은 하지 않았어요. 직접 켤 수는 있어요.)' : '') : '같은 위치 러닝이 3회 쌓이면 켤 수 있어요(일반 유저는 자동 적용). 지금은 기존 방식으로 계산해요.'))
+      : '[' + posLabel + '] Your runs ' + Math.min(nS, 3) + '/3' + (dev ? ' · Garmin saved ' + Math.min(nG, 3) + '/3' : '') + '. ' + (on
+          ? 'Average of ' + how + ' (GCT fallback ' + g + (ov.avg3Source === 'self' ? '' : ', vertScale ' + v + gi) + ') is applied as the current values, from your next run.'
+          : (can ? 'Turn ON to apply the latest 3-average as the current values.' + (skipNote ? ' (Your measured values differ from the default by over 10%, so it was not applied automatically. You can still turn it on.)' : '') : 'Available after 3 runs at this position (applied automatically for regular users). Using the existing method for now.'));
+  }
 }
 // [추가 2026-09-20] "모션 전용" 위치 목록. 프리런은 GCT/수직진동(=motionCalibOverrides)만 보정 슬롯을 갖고,
 // 보폭/GPS거리/케이던스/페이스 보정계수 슬롯은 없다 — 프리런의 코어 지표(케이던스·거리·페이스)는
@@ -3780,16 +3983,16 @@ const FACTORY_MOTION_PROFILES = {
   // 대비 +22~24%로 거의 동일한 비율로 과대측정되는 걸 확인 — 착용위치와 무관한 필터
   // 자체의 구조적 지연이라 4개 위치 전부 같은 값(55ms)으로 시작. 대응하는 연구값은 없고
   // 순수 실측 기반이라 groundThreshold/impactThreshold와 같은 성격의 경험적 튜닝값.
-  chest:   { groundThreshold: 10.05, impactThreshold: 11.6, gctFallbackRatio: 0.303, vertScale: 0.447, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
-  waist:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.46, vertScale: 0.38, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' },
-  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.467, vertScale: 0, minStepInterval: 230, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정 2026-09-20] hand/freerun과 동일하게 vertEnabled:false로 통일 — 3개 위치 모두 "위치 전용 실측 검증 전까진 꺼두고 데이터만 쌓는다" 원칙으로 맞춤
-  hand:    { groundThreshold: 11.75, impactThreshold: 9.87, gctFallbackRatio: 0.497, vertScale: 0, minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: true, stepTrigger: 'native' }, // [수정 2026-09-13] nativeRescueEnabled 원래 의도(손 위치에서만 true)대로 복원 — 아래 DEVICE_MOTION_PROFILES와 동일하게 수정
+  chest:   { groundThreshold: 10.05, impactThreshold: 11.6, gctFallbackRatio: 0.36, vertScale: 0.491, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 },
+  waist:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.31, vertScale: 0.347, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 },
+  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.41, vertScale: 0.5, minStepInterval: 230, vertEnabled: false, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] hand/freerun과 동일하게 vertEnabled:false로 통일 — 3개 위치 모두 "위치 전용 실측 검증 전까진 꺼두고 데이터만 쌓는다" 원칙으로 맞춤
+  hand:    { groundThreshold: 11.75, impactThreshold: 9.87, gctFallbackRatio: 0.49, vertScale: 0.39, minStepInterval: 250, vertEnabled: false, rotRejectThreshold: 600, nativeRescueEnabled: true, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-13] nativeRescueEnabled 원래 의도(손 위치에서만 true)대로 복원 — 아래 DEVICE_MOTION_PROFILES와 동일하게 수정
   // [추가 2026-09-20] 5번째 슬롯(프리런) — 프리런 세션 전용 내부 모션 인스턴스(app.freerunMotion)가 쓰는 값.
   // 화면/리스트엔 GCT·수직진동을 노출하지 않고 정밀 로그에만 기록하며, 가민 분석실에서 다른 4개 위치와
   // 똑같이 비교/보정할 수 있다. 보정값은 motionCalibOverrides 의 프리런 전용 키에만 저장되므로
   // [추가 2026-09-20] chest/waist/armband/hand 에는 절대 영향이 없다. vertScale은 hand/armband와
   // 동일하게 0으로 리셋(이전엔 허리 커밋값 0.511을 시드로 빌려왔었음) — 프리런 전용 실측이 쌓이면 켠다.
-  freerun: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0, minStepInterval: 230, vertEnabled: false, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native' }, // [수정 2026-09-20] hand/armband과 동일하게 vertEnabled:false·vertScale:0으로 리셋 — 프리런 전용 실측 검증 전까진 꺼두고 원시 진폭만 쌓는다
+  freerun: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.417, vertScale: 0.408, minStepInterval: 230, vertEnabled: false, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] hand/armband과 동일하게 vertEnabled:false·vertScale:0으로 리셋 — 프리런 전용 실측 검증 전까진 꺼두고 원시 진폭만 쌓는다
 };
 // [리팩토링 2026-08-21] 위치별 모션 프로파일(gctFallbackRatio 등)이 이 파일 3곳
 // (여기 / applyDevicePos()의 profiles / DEVICE_PROFILE_DEFAULTS)에 각각 하드코딩
@@ -5060,7 +5263,7 @@ loadProfile() {
 // [기본값 안내] defaultProfile의 strideCorrectionFactor 등도 위와 동일 — 가슴(chest) 전용
 // "현재 기본값"이며, 가민분석실에서 가슴을 보정 후 다운로드→커밋하면 그 시점 값으로 자동 갱신됨.
 // [CALIB_ANCHOR:DEFAULT_PROFILE] 캘리브레이션 스니펫(코드 반영용)을 여기 strideCorrectionFactor/gpsDistCorrectionFactor/cadCorrectionFactor/paceCorrectionFactor에 반영하세요.
-const defaultProfile = { h: 175, hu: "cm", w: 70, wu: "kg", age: 30, devicePos: "chest", calibFactorsEnabled: false, strideCorrectionFactor: 1.059, gpsDistCorrectionFactor: 0.979, cadCorrectionFactor: 1.011, paceCorrectionFactor: 0.983 }; // [수정 2026-08-29] SETTINGS > SHOW CURRENT DATA 가슴 캘리브레이션 최종 적용값(노란색)으로 갱신: stride 1.078→1.006, gps 0.976→0.997, cad 1.085→1.000(중립값 유지, 이번 캘리브레이션에서 추가 조정 없었음), pace 0.992→0.995. 이전 실측값(1.078/0.976/1.085/0.992, 2026-08-16 리셋 시점 값)은 이 시점 기준으로 대체.
+const defaultProfile = { h: 175, hu: "cm", w: 70, wu: "kg", age: 30, devicePos: "chest", calibFactorsEnabled: false, strideCorrectionFactor: 1.048, gpsDistCorrectionFactor: 0.971, cadCorrectionFactor: 1.003, paceCorrectionFactor: 0.973 }; // [수정 2026-08-29] SETTINGS > SHOW CURRENT DATA 가슴 캘리브레이션 최종 적용값(노란색)으로 갱신: stride 1.078→1.006, gps 0.976→0.997, cad 1.085→1.000(중립값 유지, 이번 캘리브레이션에서 추가 조정 없었음), pace 0.992→0.995. 이전 실측값(1.078/0.976/1.085/0.992, 2026-08-16 리셋 시점 값)은 이 시점 기준으로 대체.
 const data = localStorage.getItem(this.PROFILE_KEY);
 // [수정] 기존 저장 데이터에 새 필드(age, devicePos)가 없을 경우 기본값으로 보완
 const _loaded = data ? Object.assign({}, defaultProfile, JSON.parse(data)) : defaultProfile;
@@ -6183,6 +6386,7 @@ community.renderBlockedList();
 community.renderFollowStats();
 community.refreshNotifBadge(); // [추가] 알림 배지 갱신
 } else if (target === 'calib') {
+try { refreshCalibAvg3Switch(); } catch (e) {} // [추가 2026-10-10]
 // [추가] 보정설정 탭: 트랙 캘리브레이션 현재값 + 자가보정(거리/케이던스) 로그 목록 갱신
 this.updateCalibFactorDisplay();
 if (typeof garmin !== 'undefined' && garmin.renderSelfCalib) garmin.renderSelfCalib();
@@ -6295,6 +6499,7 @@ const on = storage.getDevMode();
 // 일반 사용자는 이 버튼 자체를 볼 수 없어 원본 소스 노출 문제가 없다.
 const strideDlBtn = document.getElementById('btn-download-stride-calib');
 if (strideDlBtn) strideDlBtn.classList.toggle('hidden', !on);
+try { refreshCalibAvg3Switch(); } catch (e) {} // [추가 2026-10-10] 개발자 모드 전용 버튼 노출 갱신
 const garminBtn = document.getElementById('info-sub-tab-garmin');
 if (!garminBtn) return;
 garminBtn.classList.toggle('hidden', !on);
@@ -7072,7 +7277,8 @@ if (btn) {
 if (desc) {
   const _keys = Array.from(new Set(Object.keys(prof.postCalibByPos || {}).concat(Object.keys(DEFAULT_POSTCALIB.byPos || {}))));
   const saved = _keys.filter(k => postCalibParamsFromProf(prof, k));
-  const savedTxt = saved.length ? saved.join(', ') : (isKo ? '없음' : 'none');
+  const stale = saved.filter(k => postCalibRefMismatch(prof, k));
+  const savedTxt = (saved.length ? saved.map(k => stale.indexOf(k) >= 0 ? k + (isKo ? '(내부값 변경으로 적용 중지)' : ' (paused: internal values changed)') : k).join(', ') : (isKo ? '없음' : 'none'));
   desc.textContent = isKo
     ? (on ? '분석실에서 저장한 위치별 값이 화면 GCT/FLIGHT와 러닝 요약(GCT, VERT RATIO)에 적용돼요. 정밀 로그의 gctMs/vertOscMm도 카드와 같은 보정값으로 기록되고, 보정 전 원본은 gctRawMs/vertOscUncorrMm에 따로 남아요(가민분석실은 원본 기준).' : '꺼져 있으면 GCT/VERT는 보정 없이 그대로 표시돼요. 저장된 보정값은 지워지지 않아요.') + ' (저장된 위치: ' + savedTxt + ')'
     : (on ? 'Saved per-position values from the Garmin lab are applied to the on-screen GCT/FLIGHT and the run summary (GCT, VERT RATIO). Log gctMs/vertOscMm also hold the corrected values shown on the cards; raw values are kept in gctRawMs/vertOscUncorrMm (the Garmin lab reads raw).' : 'When OFF, GCT/VERT are shown uncorrected. Saved values are kept.') + ' (saved: ' + savedTxt + ')';
@@ -10993,7 +11199,8 @@ function postCalibSave(pos, P) {
   const sv = P.saveVert !== false, sg = P.saveGct !== false;
   prof.postCalibByPos[pos] = {
     vertGain: sv ? P.vertGain : null, vertSlopeExcess: sv ? P.exV : 0, gctOffsetMs: sg ? P.gctOffsetMs : null, gctSlopeExcess: sg ? P.exG : 0,
-    vref: P.vref, runs: P.runs, vertScaleRef: P.vertScaleRef != null ? P.vertScaleRef : null, savedAt: new Date().toISOString()
+    vref: P.vref, runs: P.runs, vertScaleRef: P.vertScaleRef != null ? P.vertScaleRef : null, savedAt: new Date().toISOString(),
+    internalRef: postCalibInternalNow(prof, pos) // [추가 2026-10-10] 저장 시점의 내부값(3개 평균 등으로 바뀌면 자동 중지)
   };
   storage.saveProfile(prof);
 }
@@ -11106,6 +11313,29 @@ function postCalibParamsFromProf(prof, pos) {
     if (v.vertGain == null && v.gctOffsetMs == null) return null;
     return v;
   } catch (e) { return null; }
+}
+// [추가 2026-10-10] 3개 평균 ↔ 후처리 보정 충돌 방지.
+// 후처리 보정값(GCT 오프셋 등)은 "저장 당시의 내부값(gctFallbackRatio / groundThreshold / impactThreshold)" 위에서 계산된 값이다.
+// 3개 평균 스위치(또는 가민분석실 적용)로 이 내부값이 바뀌면 저장값이 어긋나 이중 보정이 되므로,
+// 저장 시점의 내부값을 internalRef로 같이 기록해 두고, 현재 내부값과 다르면 그 위치의 후처리 보정 적용을 자동으로 멈춘다.
+// (internalRef가 없는 예전 저장값은 비교하지 않고 그대로 적용한다. vertScale은 vertScaleRef로 따로 환산하므로 여기서 제외.)
+function postCalibInternalNow(prof, pos) {
+  const base = (typeof DEVICE_MOTION_PROFILES !== 'undefined' && DEVICE_MOTION_PROFILES[pos]) || {};
+  const ov = (prof && prof.motionCalibOverrides && prof.motionCalibOverrides[pos]) || {};
+  const pick = function (k) { return (typeof ov[k] === 'number') ? ov[k] : (typeof base[k] === 'number' ? base[k] : null); };
+  return { gct: pick('gctFallbackRatio'), ground: pick('groundThreshold'), impact: pick('impactThreshold') };
+}
+function postCalibRefMismatch(prof, pos) {
+  const v = postCalibParamsFromProf(prof, pos);
+  if (!v || !v.internalRef) return false;
+  const cur = postCalibInternalNow(prof, pos);
+  return ['gct', 'ground', 'impact'].some(function (k) {
+    return typeof v.internalRef[k] === 'number' && typeof cur[k] === 'number' && Math.abs(v.internalRef[k] - cur[k]) > 0.006;
+  });
+}
+function postCalibActiveParams(prof, pos) {
+  const v = postCalibParamsFromProf(prof, pos);
+  return (v && !postCalibRefMismatch(prof, pos)) ? v : null;
 }
 function _pcSpeedForCalib(spd, v) { const s = parseFloat(spd); return (!isNaN(s) && s > 6 && s < 18) ? s : v.vref; }
 function postCalibGctValue(gctMs, spd, v) {
@@ -11971,7 +12201,7 @@ this.state.flightDisplayRaw = _flightShow;
 try {
   const _pcProf = storage.loadProfile();
   const _pcPos = (this.state.activityMode === 'freerun') ? 'freerun' : this.state.runDevicePos;
-  const _pcP = postCalibOn(_pcProf) ? postCalibParamsFromProf(_pcProf, _pcPos) : null;
+  const _pcP = postCalibOn(_pcProf) ? postCalibActiveParams(_pcProf, _pcPos) : null;
   if (_pcP && _pcP.gctOffsetMs != null && _gctShow > 0) {
     const _gc = postCalibGctValue(_gctShow, this.state.metricSpeedKmh, _pcP);
     const _period = (data.cycleTime > 0 && data.cycleTime <= 2000) ? data.cycleTime : (cadDisplay > 0 ? 60000 / cadDisplay : 0);
@@ -12210,7 +12440,7 @@ let _pcGctCorr = '', _pcVertCorr = '', _pcActiveL = false;
 try {
   const _pcPosL = (this.state.activityMode === 'freerun') ? 'freerun' : this.state.runDevicePos;
   const _pcProfL = storage.loadProfile();
-  const _pcPL = postCalibParamsFromProf(_pcProfL, _pcPosL);
+  const _pcPL = postCalibActiveParams(_pcProfL, _pcPosL);
   _pcActiveL = !!(_pcPL && postCalibOn(_pcProfL));
   if (_pcPL) {
     const _spdL = parseFloat(logSpeedKmh);
@@ -12230,7 +12460,15 @@ try {
 const _gctRawLog = !_hasNewStepThisSample ? '--' : (_gctInternalLog ? ((_fm && _fm.lastStepGctMs != null) ? _fm.lastStepGctMs : '--') : (this.state.gctDisplayRaw != null ? this.state.gctDisplayRaw : getTxt('gct')));
 const _gctShownLog = !_hasNewStepThisSample ? '--' : (_gctInternalLog ? ((_pcActiveL && _pcGctCorr !== '') ? _pcGctCorr : _gctRawLog) : getTxt('gct'));
 const _flRawLog = _gctInternalLog ? ((_fm && _fm.lastStepFlightPct != null) ? _fm.lastStepFlightPct : '') : (this.state.flightDisplayRaw != null ? this.state.flightDisplayRaw : getTxt('flight'));
-const _flShownLog = _gctInternalLog ? _flRawLog : getTxt('flight');
+// [수정 2026-10-10] 손/암밴드/프리러닝(내부값 경로)도 카드와 같은 값을 남긴다: 화면과 같은 식(GCT 보정 차이만큼 체공 비율 조정)으로 보정 후 값을 기록.
+let _flCorrLog = _flRawLog;
+try {
+  if (_gctInternalLog && _pcActiveL && _pcGctCorr !== '' && _gctRawLog !== '--' && _flRawLog !== '') {
+    const _fr = parseFloat(_flRawLog), _gr = parseFloat(_gctRawLog), _cd = parseFloat(_logCadence);
+    if (!isNaN(_fr) && !isNaN(_gr) && _cd > 0) _flCorrLog = Math.max(0, Math.round(_fr - (_pcGctCorr - _gr) / (60000 / _cd) * 100));
+  }
+} catch (e) {}
+const _flShownLog = _gctInternalLog ? _flCorrLog : getTxt('flight');
 const _vertShownLog = (_pcActiveL && _pcVertCorr !== '') ? _pcVertCorr : vertOscMm;
 this.state.precisionLog.push({
 t: this.state.seconds,
@@ -12723,7 +12961,7 @@ let _pcFinishOn = false;
 try {
   const _pcProfF = storage.loadProfile();
   const _pcPosF = (this.state.activityMode === 'freerun') ? 'freerun' : this.state.runDevicePos;
-  if (postCalibOn(_pcProfF) && postCalibParamsFromProf(_pcProfF, _pcPosF) && _hasPrecLogForFinish && _precLogGct != null) {
+  if (postCalibOn(_pcProfF) && postCalibActiveParams(_pcProfF, _pcPosF) && _hasPrecLogForFinish && _precLogGct != null) {
     const _rawG = avgFromPrecLogStepWeighted(_precLogForFinish, 'gctRawMs');
     if (_rawG != null && !isNaN(_rawG) && _rawG > 0) {
       // 새 로그: gctMs가 이미 카드값(보정 ON이면 보정값)이라 avgGct는 그대로 두고, FLIGHT만 보정 차이만큼 맞춘다.
@@ -12830,6 +13068,8 @@ maxHr: (() => { const hm = hrManager.getAvgMax(); return hm.max !== null ? hm.ma
 hrZone: (() => { const hm = hrManager.getAvgMax(); const refHr = hm.avg !== null ? hm.avg : hrManager._hr; return refHr > 0 ? 'Z' + hrManager.getZone(refHr).z : null; })()
 };
 storage.saveRecord(record);
+// [추가 2026-10-10] 러닝 모드일 때만 이번 러닝의 학습 GCT 비율을 "3개 평균"용으로 기록
+try { if ((record.activityMode || 'run') === 'run' || record.activityMode === 'trail') calibAvg3RecordSelfRun(this.state.runDevicePos || null, this.motion); } catch (e) {}
 // [수정 2026-09-25] logPrecisionSample()이 이제 설정과 무관하게 항상 메모리에 쌓으므로,
 // 기기 저장/가민분석실 노출 여부는 여기서 설정으로 게이팅한다(이 설정의 "로그 export 대상으로
 // 남길지" 의미는 그대로 유지, "매초 계산을 건너뛸지"는 위 logPrecisionSample() 참고).
@@ -16617,6 +16857,13 @@ const garmin = (function () {
     if (idx >= 0) selectedIds.splice(idx, 1); else selectedIds.push(id);
     render();
   }
+  // [추가 2026-10-10] 캘리브레이션 비교용으로 체크한 가민 기록/정밀 로그(자동저장·불러온 로그) 선택을 전부 해제.
+  // 로그/기록 자체는 지우지 않고 체크만 푼다.
+  function clearAllSelections() {
+    selectedIds = [];
+    selectedPrecLogIds = [];
+    render();
+  }
   function togglePrecLogSelect(id) { // [추가] 정밀 로그 체크박스 토글
     const idx = selectedPrecLogIds.indexOf(id);
     if (idx >= 0) selectedPrecLogIds.splice(idx, 1); else selectedPrecLogIds.push(id);
@@ -16994,6 +17241,7 @@ const garmin = (function () {
     setText('btn-restore-committed-calib-all-label', isKo ? '현재 캘리브레이션으로 되돌아가기 (전체 위치)' : 'RESTORE CURRENT CALIBRATION (ALL POSITIONS)');
     setText('btn-factory-reset-calib-all-label', isKo ? '팩토리 기본값으로 초기화 (전체 위치)' : 'FACTORY RESET CALIBRATION (ALL POSITIONS)');
     try { if (typeof ui !== 'undefined' && ui.refreshCalibFactorSwitch) ui.refreshCalibFactorSwitch(); } catch (e) {} // [추가 2026-10-08]
+    try { refreshCalibAvg3Switch(); } catch (e) {} // [추가 2026-10-10]
     try { if (typeof ui !== 'undefined' && ui.refreshPostCalibSwitch) ui.refreshPostCalibSwitch(); } catch (e) {} // [추가 2026-10-10]
   }
 
@@ -17018,6 +17266,15 @@ const garmin = (function () {
     // 자동으로 쌓인 정밀 로그가 있어도 드롭다운에는 절대 반영되지 않는 버그가 있었음.
     renderPrecLogDropdown(isKo);
     renderAutoLogList(isKo); // [추가] 자동저장 로그 개별 리스트도 항상 갱신
+    try { // [추가 2026-10-10] 선택해제 버튼 라벨/활성 상태
+      const _clr = document.getElementById('btn-calib-clear-selection');
+      if (_clr) {
+        const _has = (selectedIds.length + selectedPrecLogIds.length) > 0;
+        _clr.textContent = isKo ? '선택해제' : 'CLEAR';
+        _clr.disabled = !_has;
+        _clr.style.opacity = _has ? '1' : '0.45';
+      }
+    } catch (e) {}
     try { renderSelectedLogCards(isKo); } catch (e) { console.error('selected log cards', e); } // [추가] 체크한 로그를 상세 카드로 표시 (오류가 나도 FIT 카드 렌더는 계속)
 
     // [수정] 목록에서 사라진 기록(삭제/전체삭제 등)은 선택 목록에서도 제거
@@ -17805,6 +18062,45 @@ const garmin = (function () {
       }
     }
 
+    // [추가 2026-10-10] 여러 개(예: 3개) 합산 비교에서도 1:1과 동일한 시간 정렬을 쌍마다 적용한다.
+    // 각 정밀 로그를 아직 짝이 없는 가민 기록 중 "겹치는 구간이 가장 긴" 것과 짝지어, 두 기기가 동시에 기록한
+    // 구간만 남긴 뒤 합산한다. 짝이 없거나 겹침이 없거나 어긋남이 큰(2분 이상) 쌍은 정렬하지 않고 기존처럼 전체를 쓴다.
+    if (!(garminItems.length === 1 && precItems.length === 1) && garminItems.length >= 1 && precItems.length >= 1) {
+      try {
+        const usedG = {};
+        const newPrec = precItems.slice(), newGarmin = garminItems.slice();
+        let totalTrimSec = 0, pairedCount = 0;
+        precItems.forEach(function(p, pi) {
+          let best = -1, bestOv = null, bestDur = 0;
+          garminItems.forEach(function(g, gi) {
+            if (usedG[gi]) return;
+            const ov = computeOverlapWindow(p.log, g);
+            if (ov && (ov.endMs - ov.startMs) > bestDur) { best = gi; bestOv = ov; bestDur = ov.endMs - ov.startMs; }
+          });
+          if (best < 0) return;
+          const g = garminItems[best];
+          const pr = precLogTimeRangeMs(p.log), gr = garminTimeRangeMs(g);
+          if (!pr || !gr) return;
+          const trimmedLog = trimPrecLogToWindow(p.log, bestOv.startMs, bestOv.endMs);
+          const trimmedRecords = trimGarminRecordsToWindow(g.records, bestOv.startMs, bestOv.endMs);
+          const trimSec = Math.round(((pr.endMs - pr.startMs) - bestDur) / 1000 + ((gr.endMs - gr.startMs) - bestDur) / 1000);
+          if (trimmedLog.length <= 1 || trimmedRecords.length <= 1 || trimSec < 1 || trimSec >= MISALIGN_ABORT_SEC) return;
+          usedG[best] = true;
+          newPrec[pi] = Object.assign({}, p, { log: trimmedLog });
+          newGarmin[best] = Object.assign({}, g, recomputeGarminAggFromRecords(trimmedRecords), { records: trimmedRecords });
+          totalTrimSec += trimSec; pairedCount++;
+        });
+        if (pairedCount > 0) {
+          precItems = newPrec; garminItems = newGarmin;
+          alignmentTrimmedHtml = '<div style="font-size:var(--fs-xxs); color:#7fd3ff; font-weight:700; margin-bottom:10px;">'
+            + (isKo
+              ? '⏱ ' + pairedCount + '쌍의 시작/종료 타이밍이 어긋난 약 ' + totalTrimSec + '초를 제외하고, 두 기기가 동시에 기록 중이던 구간만 합산해 비교했습니다.'
+              : '⏱ Aligned ' + pairedCount + ' pair(s): excluded about ' + totalTrimSec + 's of non-overlapping time and combined only the windows both devices were recording.')
+            + '</div>';
+        }
+      } catch (e) { console.error('multi align', e); }
+    }
+
     // [추가] 선택한 정밀 로그들이 어느 착용위치로 기록됐는지 확인해서,
     // (1) 서로 다른 위치가 섞여있으면 경고, (2) 실제로 어느 위치 슬롯에 보정값이
     // 저장/적용될지 안내 문구를 만든다. 아래 lastSuggestion.devicePos에도 그대로 재사용.
@@ -18423,6 +18719,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       // 여기서는 대표값(resolvedDevicePos) 하나로만 저장한다.
       lastSuggestion = {
         devicePos: resolvedDevicePos,
+        logCount: precItems.length, // [추가 2026-10-10] 이 제안이 합산(평균)한 정밀 로그 수
         gct: suggestedGct,
         rot: suggestedRot,
         rotOS: suggestedRotOS,
@@ -18466,6 +18763,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
 
   function savePendingCalibList(list) {
     try { localStorage.setItem(PENDING_CALIB_KEY, JSON.stringify(list)); } catch (e) {}
+    try { refreshCalibAvg3Switch(); } catch (e) {} // [추가 2026-10-10]
   }
 
   // 각 필드(rot/gct/vertScale/strideFactor)의 단순 평균. null/undefined는 제외하고 평균낸다
@@ -18498,6 +18796,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       : ((lastSuggestion.rot != null && isChecked('calib-sel-rot')) ? inputVal('calib-input-rot', lastSuggestion.rot) : null);
     return {
       devicePos: lastSuggestion.devicePos,
+      logCount: lastSuggestion.logCount || 1,
       gct: (lastSuggestion.gct != null && isChecked('calib-sel-gct')) ? inputVal('calib-input-gct', lastSuggestion.gct) : null,
       rot: rotVal,
       vertScale: (lastSuggestion.vertScale != null && isChecked('calib-sel-vert')) ? inputVal('calib-input-vert', lastSuggestion.vertScale) : null,
@@ -18541,6 +18840,7 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
       id: 'pc_' + Date.now(),
       savedAt: new Date().toISOString(),
       devicePos: sel.devicePos,
+      logCount: sel.logCount || 1, // [추가 2026-10-10] 3개 이상 합산 비교 결과면 3개 세트로 취급(설정의 3개 평균 스위치)
       gct: sel.gct,
       rot: sel.rot,
       vertScale: sel.vertScale,
@@ -18589,6 +18889,7 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
 
     const rows = list.map((item, idx) => {
       const parts = [];
+      if (item.logCount > 1) parts.push((isKo ? '로그 ' : '') + item.logCount + (isKo ? '개 합산' : ' logs combined'));
       if (item.rot != null) parts.push('rot ' + item.rot);
       if (item.gct != null) parts.push('gct ' + item.gct);
       if (item.vertScale != null) parts.push('vert ' + item.vertScale);
@@ -19146,7 +19447,7 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
         const P = postCalibParamsFromProf(prof, pos);
         if (!P) return;
         const r3 = function (x) { return x == null ? null : Math.round(x * 1000) / 1000; };
-        _pcDefaults.byPos[pos] = { vertGain: r3(P.vertGain), vertSlopeExcess: r3(P.vertSlopeExcess || 0), gctOffsetMs: r3(P.gctOffsetMs), gctSlopeExcess: r3(P.gctSlopeExcess || 0), vref: r3(P.vref), vertScaleRef: r3(P.vertScaleRef), runs: P.runs || null };
+        _pcDefaults.byPos[pos] = { vertGain: r3(P.vertGain), vertSlopeExcess: r3(P.vertSlopeExcess || 0), gctOffsetMs: r3(P.gctOffsetMs), gctSlopeExcess: r3(P.gctSlopeExcess || 0), vref: r3(P.vref), vertScaleRef: r3(P.vertScaleRef), runs: P.runs || null, internalRef: P.internalRef || null };
       });
       const _hasPC = _pcDefaults.enabled || Object.keys(_pcDefaults.byPos).length > 0;
       if (!patches.length && !_hasPC) {
@@ -19493,7 +19794,7 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
           prevPostCalib: JSON.parse(JSON.stringify(v)),
           savedAt: new Date().toISOString()
         };
-        prof.motionCalibOverrides[pos] = Object.assign({}, prof.motionCalibOverrides[pos] || {}, it.set, { devicePos: pos, appliedAt: new Date().toISOString(), bakedFromPostCalib: true });
+        prof.motionCalibOverrides[pos] = Object.assign({}, prof.motionCalibOverrides[pos] || {}, it.set, { devicePos: pos, appliedAt: new Date().toISOString(), bakedFromPostCalib: true, avg3Applied: false, avg3Prev: null });
         // 확정한 항목은 후처리에서 빼고(이득=1/오프셋=0, 기준 vertScale 갱신), 속도 기울기만 남긴다.
         if (it.set.vertScale != null) { v.vertGain = 1; v.vertScaleRef = it.set.vertScale; }
         if (it.set.gctFilterDelayMs != null) { v.gctOffsetMs = 0; }
@@ -19766,7 +20067,7 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
     saveTextFileNative(reportStr, fileName, 'text/plain;charset=utf-8', isKo);
   }
 
-  return { hideAutoLog, clearHiddenList, toggleRestorePanel, toggleRestoreSel, restoreSelectedAutoLogs, importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, toggleGarminDetail, openInfo, closeInfo, togglePrecLogSelect, togglePrecLogSelectAutoMatch, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, bakePostCalib, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
+  return { clearAllSelections, bakePostCalib, hideAutoLog, clearHiddenList, toggleRestorePanel, toggleRestoreSel, restoreSelectedAutoLogs, importFitFile, deleteImport, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, toggleGarminDetail, openInfo, closeInfo, togglePrecLogSelect, togglePrecLogSelectAutoMatch, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, applyAveragedCalibration, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
