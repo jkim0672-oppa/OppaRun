@@ -17096,28 +17096,35 @@ const garmin = (function () {
   // [수정 2026-10-11] 체크박스 토글 → render()가 목록/카드를 innerHTML로 통째로 다시 그리면서
   // 스크롤 위치(페이지 스크롤 + 드롭다운 패널 자체 스크롤)가 초기화되거나 아래로 튀는 문제.
   // 다시 그리기 전에 관련 스크롤 요소들의 위치를 저장해두고, 그린 직후(+다음 프레임) 복원한다.
-  function _collectScrollState() {
-    const state = [];
-    const seen = new Set();
-    const add = (el) => { if (el && !seen.has(el)) { seen.add(el); state.push([el, el.scrollTop]); } };
-    ['calib-autolog-dropdown-options', 'calib-preclog-dropdown-options', 'garmin-record-dropdown-options'].forEach(id => {
-      const el = document.getElementById(id);
-      add(el);
-      // 이 패널을 감싸는 스크롤 가능한 부모(페이지 스크롤 컨테이너)도 전부 저장
-      let p = el ? el.parentElement : null;
-      while (p && p !== document.body) {
-        if (p.scrollHeight > p.clientHeight + 1) {
-          const oy = getComputedStyle(p).overflowY;
-          if (oy === 'auto' || oy === 'scroll') add(p);
-        }
-        p = p.parentElement;
-      }
-    });
-    add(document.scrollingElement);
-    return state;
+  // 기준(anchor) 요소의 화면상 위치를 저장했다가, 다시 그린 뒤 위치가 달라졌으면
+  // 스크롤 컨테이너를 그만큼 보정해서 "누른 자리"가 화면에서 그대로 있게 한다.
+  // (체크 시 목록 위에 FIT 카드가 생기거나 해제 시 사라져도 화면이 안 움직임)
+  function _findScroller(el) {
+    let p = el ? el.parentElement : null;
+    while (p && p !== document.body && p !== document.documentElement) {
+      const oy = getComputedStyle(p).overflowY;
+      if ((oy === 'auto' || oy === 'scroll') && p.scrollHeight > p.clientHeight + 1) return p;
+      p = p.parentElement;
+    }
+    return document.scrollingElement;
   }
-  function _restoreScrollState(state) {
-    state.forEach(([el, top]) => { if (el && el.scrollTop !== top) el.scrollTop = top; });
+  function _collectScrollState() {
+    const panelIds = ['calib-autolog-dropdown-options', 'calib-preclog-dropdown-options', 'garmin-record-dropdown-options'];
+    const panels = panelIds.map(id => document.getElementById(id)).filter(Boolean);
+    const anchor = document.getElementById('calib-autolog-select-btn') || panels[0] || null;
+    return {
+      anchor: anchor,
+      scroller: _findScroller(anchor),
+      top: anchor ? anchor.getBoundingClientRect().top : 0,
+      panels: panels.map(el => [el, el.scrollTop])
+    };
+  }
+  function _restoreScrollState(st) {
+    st.panels.forEach(([el, t]) => { if (el.scrollTop !== t) el.scrollTop = t; });
+    if (st.anchor && st.scroller) {
+      const delta = st.anchor.getBoundingClientRect().top - st.top;
+      if (Math.abs(delta) > 0.5) st.scroller.scrollTop += delta;
+    }
   }
   function render() {
     const _st = _collectScrollState();
@@ -17125,8 +17132,8 @@ const garmin = (function () {
       renderInner();
     } finally {
       _restoreScrollState(_st);
-      // 카드가 비동기로 늘어나는 경우 대비해 한 프레임 뒤에 한 번 더 복원
-      requestAnimationFrame(() => _restoreScrollState(_st));
+      // 이미지/카드가 한 프레임 뒤에 높이가 바뀌는 경우 대비
+      requestAnimationFrame(() => { _st.top = _st.top; _restoreScrollState(_st); });
     }
   }
   function renderInner() {
