@@ -1096,6 +1096,7 @@ body.prem-lock-stats #stat-filter-monthly::after, body.prem-lock-stats #stat-fil
 .dropdown-option { padding: 18px; font-size:var(--fs-lg); font-weight: 800; border-bottom: 1px solid #333; cursor: pointer; color: #fff; }
 .dropdown-option:last-child { border-bottom: none; }
 .dropdown-option:active { background: #333; }
+#diag-content-area, .sub-page, .info-garmin-area, .precision-dropdown-options.log-dd-panel { overflow-anchor:none; }
 .precision-dropdown-options.log-dd-panel { position:static; width:100%; right:auto; margin-top:6px; max-height:280px; box-shadow:none; }
 .garmin-dd-row { display:flex; align-items:center; gap:8px; padding:9px 12px; border-bottom:1px solid #333; }
 .garmin-dd-row:last-child { border-bottom:none; }
@@ -17092,7 +17093,43 @@ const garmin = (function () {
     try { refreshCalibAvg3Switch(); } catch (e) {} // [추가 2026-10-10]
   }
 
+  // [수정 2026-10-11] 체크박스 토글 → render()가 목록/카드를 innerHTML로 통째로 다시 그리면서
+  // 스크롤 위치(페이지 스크롤 + 드롭다운 패널 자체 스크롤)가 초기화되거나 아래로 튀는 문제.
+  // 다시 그리기 전에 관련 스크롤 요소들의 위치를 저장해두고, 그린 직후(+다음 프레임) 복원한다.
+  function _collectScrollState() {
+    const state = [];
+    const seen = new Set();
+    const add = (el) => { if (el && !seen.has(el)) { seen.add(el); state.push([el, el.scrollTop]); } };
+    ['calib-autolog-dropdown-options', 'calib-preclog-dropdown-options', 'garmin-record-dropdown-options'].forEach(id => {
+      const el = document.getElementById(id);
+      add(el);
+      // 이 패널을 감싸는 스크롤 가능한 부모(페이지 스크롤 컨테이너)도 전부 저장
+      let p = el ? el.parentElement : null;
+      while (p && p !== document.body) {
+        if (p.scrollHeight > p.clientHeight + 1) {
+          const oy = getComputedStyle(p).overflowY;
+          if (oy === 'auto' || oy === 'scroll') add(p);
+        }
+        p = p.parentElement;
+      }
+    });
+    add(document.scrollingElement);
+    return state;
+  }
+  function _restoreScrollState(state) {
+    state.forEach(([el, top]) => { if (el && el.scrollTop !== top) el.scrollTop = top; });
+  }
   function render() {
+    const _st = _collectScrollState();
+    try {
+      renderInner();
+    } finally {
+      _restoreScrollState(_st);
+      // 카드가 비동기로 늘어나는 경우 대비해 한 프레임 뒤에 한 번 더 복원
+      requestAnimationFrame(() => _restoreScrollState(_st));
+    }
+  }
+  function renderInner() {
     const wrap = document.getElementById('garmin-import-list');
     const dropdownOptions = document.getElementById('garmin-record-dropdown-options');
     const currentText = document.getElementById('current-garmin-record-text');
