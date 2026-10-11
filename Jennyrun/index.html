@@ -1991,7 +1991,7 @@ transform: scale(0.97) !important; background: #00b368 !important; color: #fff !
 <div class="diag-card"><div id="info-oscillation-title" class="u-title-primary">VERTICAL OSCILLATION</div><div id="info-oscillation-desc" class="u-desc-sm">Minimize bouncing. Keep energy moving forward, not up.</div></div>
 <div class="diag-card"><div id="info-rolling-title" class="u-title-primary">KNEE LEADING & ROLLING</div><div id="info-rolling-desc" class="u-desc-sm">Drive forward with your knees. Focus on smooth ankle rolling.</div></div>
 <div class="diag-card"><div id="info-posture-title" class="u-title-primary">POSTURE & BREATHING</div><div id="info-posture-desc" class="u-desc-sm">Keep your chest open and shoulders relaxed. Look straight ahead.</div></div>
-<div class="diag-card"><div id="info-ranges-title" class="u-title-primary">QUICK REFERENCE RANGES</div><div id="info-ranges-desc" class="u-desc-sm">Cadence: 170~185 SPM is a common target range. GCT: under ~240ms is generally efficient. Flight time: roughly 30~45% of cycle time. Stride length: about 0.5~0.75m (single step) for recreational runners. These are general guidelines, not strict rules — individual body types vary.</div></div>
+<div class="diag-card"><div id="info-ranges-title" class="u-title-primary">QUICK REFERENCE RANGES</div><div id="info-ranges-desc" class="u-desc-sm">Cadence: 170~185 SPM is a common target range. GCT: under ~240ms is generally efficient. Flight time: roughly 30~45% of cycle time. Stride length (single step) depends on speed and height: for a 170cm runner roughly 0.85~0.95m at 8~9km/h, 1.00~1.10m at 10~11km/h, 1.15~1.25m at 12~13km/h (about 0.5~0.7x height). These are general guidelines, not strict rules — individual body types vary.</div></div>
 <div class="diag-card"><div id="info-elite-title" class="u-title-primary">ELITE VS RECREATIONAL RUNNERS</div><div id="info-elite-desc" class="u-desc-sm">Cadence: elite ~180~200 vs recreational ~155~175 SPM. GCT: elite ~150~200 vs recreational ~250~300ms+. Flight time: elite ~35~45% vs recreational ~15~25%. This app's colors follow the recreational scale (170+/160+, ≤270/≤300, 22%+/12%+).</div></div>
 <div class="diag-card"><div id="info-balance-title" class="u-title-primary">UNDERSTANDING BALANCE METRICS</div><div id="info-balance-desc" class="u-desc-sm">GCT/Gyro Balance compare left vs right leg as an L:R ratio (50:50 = perfectly even). A 5~8 point gap is normal; 10+ persistently may signal a muscle imbalance worth checking.</div></div>
 <div class="diag-card"><div id="info-lean-title" class="u-title-primary">UNDERSTANDING LEAN ANGLE</div><div id="info-lean-desc" class="u-desc-sm">LEAN ANGLE shows your forward lean, plus total lean and lateral sway alongside. Forward lean: 4-8° good, 8-12° borderline, 12°+ excessive. Lateral sway: under 5° fine, 10°+ may signal weak core/hip stability.</div></div>
@@ -3285,12 +3285,12 @@ function _effStrideScore(record) {
   const legLen = (hcm * 0.47) / 100;
   const strideM = parseFloat(record.stride) || 0;
   if (!strideM || strideM <= 0 || !legLen) return 70;
-  // [수정] stride가 이제 한 걸음 기준값이라 legLen*2가 아닌 legLen과 비교
-  const ratio = strideM / legLen;
-  if (ratio >= 0.9 && ratio <= 1.3)  return 100;
-  if (ratio >= 0.7 && ratio < 0.9)   return Math.round(70 + (ratio - 0.7) * 150);
-  if (ratio > 1.3 && ratio <= 1.6)   return Math.round(100 - (ratio - 1.3) * 100);
-  return Math.max(0, Math.round(60 - Math.abs(ratio - 1.1) * 30));
+  // [수정 2026-10-11] 속도·키 기준 적정 범위로 판정 (strideEval 공용)
+  const e = strideEval(strideM, record.cadence, hcm);
+  if (!e) return 70;
+  if (e.dev <= 0.06) return 100;
+  if (e.dev <= 0.12) return Math.round(100 - (e.dev - 0.06) / 0.06 * 30);
+  return Math.max(0, Math.round(70 - (e.dev - 0.12) * 200));
 }
 // [추가] 간이 효율점수: 손/프리런/암밴드처럼 GCT·FLIGHT·수직진폭을 못 믿는 기록용.
 // [수정 2026-09-19] 정식 점수와 같은 가중치(케이던스 28, 보폭 15, GCT 25, 체공 18, 수직 14)를 쓰되,
@@ -3406,6 +3406,31 @@ function calcStride(speedKmh, cadence, heightCm, personalFactor) {
   }
   const pf = (typeof personalFactor === 'number' && personalFactor > 0) ? personalFactor : 1.0;
   return stride * pf;
+}
+// [추가 2026-10-11] 보폭 판정 공통 함수 — 속도·키 기준 (진단 문구/색상/효율점수/Ref 표시 공용)
+// 보폭은 목표가 아니라 결과값(속도 ÷ 케이던스)이라 속도별 적정 범위로 판정한다.
+// 키 170cm 기준 대략 8~9km/h: 0.85~0.95m, 10~11km/h: 1.00~1.10m, 12~13km/h: 1.15~1.25m (= 키의 0.5~0.74배)
+// 중심 비율 r(v) = 0.53 + (v-8.5)*0.045 (6~16km/h로 클램프), 적정 = 중심±0.06, 주의 = 중심±0.12 (키 대비 비율)
+function strideSpeedKmh(strideM, cadence) {
+  const c = parseFloat(cadence) || 0;
+  return (strideM > 0 && c > 0) ? strideM * c / 60 * 3.6 : 0;
+}
+function strideEval(strideM, cadence, heightCm) {
+  if (!(strideM > 0) || !(heightCm > 0)) return null;
+  const spd = strideSpeedKmh(strideM, cadence) || 10.5; // 케이던스 없으면 10.5km/h 가정
+  const v = Math.max(6, Math.min(16, spd));
+  const r = 0.53 + (v - 8.5) * 0.045;
+  const h = heightCm / 100;
+  const center = r * h;
+  const lo = (r - 0.06) * h, hi = (r + 0.06) * h;
+  const dev = Math.abs(strideM - center) / h;
+  const level = dev <= 0.06 ? 'good' : dev <= 0.12 ? 'warning' : 'danger';
+  const dir = strideM < lo ? 'short' : strideM > hi ? 'long' : 'ok';
+  return { level, dir, dev, lo, hi, speed: spd };
+}
+function strideRefText(strideM, cadence, heightCm) {
+  const e = strideEval(strideM, cadence, heightCm);
+  return e ? (e.lo.toFixed(2) + '~' + e.hi.toFixed(2) + 'm') : '--';
 }
 // [리팩토링] "5'30\"" 형태의 페이스 문자열을 km/h 속도로 바꾸는 로직이 기록상세/진단팝업/
 // 통계카드 등 4곳에 똑같이 복붙돼 있었음 → 여기 하나로 통합. 파싱 공식을 고칠 일이 생기면
@@ -4175,27 +4200,29 @@ function buildPersonalFeedback(record, profile, gender, isKo) {
     lines.push(parts.gct);
   }
 
-  // 3) 보폭: 키(다리길이 추정) 대비 비율, calcEffScore의 strideScore와 동일 로직
+  // 3) 보폭: 속도·키 기준 적정 범위 (strideEval 공용) — [수정 2026-10-11]
   if (strideM > 0 && profile.h) {
     const heightCm = profile.hu === 'inch' ? Math.round(profile.h * 2.54) : profile.h;
-    const legLen = (heightCm * 0.47) / 100;
-    // [수정] stride가 한 걸음 기준값이라 legLen*2가 아닌 legLen과 비교
-    const ratio = legLen ? strideM / legLen : 0;
+    const e = strideEval(strideM, cadence, heightCm);
     const strideTxt = strideM.toFixed(2);
-    if (ratio && ratio < 0.9) {
-      parts.stride = isKo
-        ? `${ageGenderLabel} 보폭 ${strideTxt}m는 다소 짧은 편입니다. 추진력을 조금 더 실어보세요.`
-        : `${ageGenderLabel}, stride of ${strideTxt}m is a bit short. Try adding a little more push-off power.`;
-    } else if (ratio && ratio > 1.3) {
-      parts.stride = isKo
-        ? `${ageGenderLabel} 보폭 ${strideTxt}m는 다소 긴 편입니다. 오버스트라이드로 인한 제동 효과에 주의하세요.`
-        : `${ageGenderLabel}, stride of ${strideTxt}m is a bit long. Watch for a braking effect from overstriding.`;
-    } else {
-      parts.stride = isKo
-        ? `${ageGenderLabel} 보폭 ${strideTxt}m는 적정 범위입니다.`
-        : `${ageGenderLabel}, stride of ${strideTxt}m is within a healthy range.`;
+    if (e) {
+      const rng = e.lo.toFixed(2) + '~' + e.hi.toFixed(2);
+      const spd = e.speed.toFixed(1);
+      if (e.dir === 'short') {
+        parts.stride = isKo
+          ? `보폭 ${strideTxt}m는 ${spd}km/h 기준 적정 범위(${rng}m)보다 짧은 편입니다. 케이던스를 유지하면서 추진력을 조금 더 실어보세요.`
+          : `Stride of ${strideTxt}m is shorter than the ${rng}m typical at ${spd}km/h. Keep cadence and add a bit more push-off.`;
+      } else if (e.dir === 'long') {
+        parts.stride = isKo
+          ? `보폭 ${strideTxt}m는 ${spd}km/h 기준 적정 범위(${rng}m)보다 긴 편입니다. 케이던스를 유지하고, 착지 위치가 몸 바로 아래인지 확인하세요. 발을 앞으로 뻗으면 제동이 생겨요.`
+          : `Stride of ${strideTxt}m is longer than the ${rng}m typical at ${spd}km/h. Keep cadence up and land under your body; reaching forward adds braking.`;
+      } else {
+        parts.stride = isKo
+          ? `보폭 ${strideTxt}m는 ${spd}km/h 속도에서 적정 범위(${rng}m)입니다.`
+          : `Stride of ${strideTxt}m is within the ${rng}m typical at ${spd}km/h.`;
+      }
+      lines.push(parts.stride);
     }
-    lines.push(parts.stride);
   }
 
   // 4) 좌우 밸런스: GCT 밸런스 기준으로만 언급 (케이던스 밸런스는 좌우를 번갈아 배정하는 가정값이라 제거)
@@ -4250,7 +4277,7 @@ infWarmup: "WARM-UP & COOL-DOWN", infWarmupD: "Start with 5~10 min of light jogg
 infHydration: "HYDRATION & FUELING", infHydrationD: "For runs over 60 minutes, drink small amounts of water regularly. For runs over 90 minutes, consider light carbohydrate intake (gels, bananas, sports drinks).",
 infRecovery: "REST & RECOVERY DAYS", infRecoveryD: "Muscles rebuild during rest. Beginners should take at least 1~2 full rest days per week, and avoid running through persistent joint pain.",
 infInjury: "INJURY WARNING SIGNS", infInjuryD: "Sharp, localized, or one-sided pain that worsens during a run is a warning sign. Stop running and rest; if pain persists more than a few days, consult a medical professional.",
-infRanges: "QUICK REFERENCE RANGES", infRangesD: "Cadence: 170~185 SPM is a common target range. GCT: under ~240ms is generally efficient. Flight time: roughly 30~45% of cycle time. Stride length: about 0.5~0.75m (single step) for recreational runners. These are general guidelines, not strict rules — individual body types vary.",
+infRanges: "QUICK REFERENCE RANGES", infRangesD: "Cadence: 170~185 SPM is a common target range. GCT: under ~240ms is generally efficient. Flight time: roughly 30~45% of cycle time. Stride length (single step) depends on speed and height: for a 170cm runner roughly 0.85~0.95m at 8~9km/h, 1.00~1.10m at 10~11km/h, 1.15~1.25m at 12~13km/h (about 0.5~0.7x height). These are general guidelines, not strict rules — individual body types vary.",
 infElite: "ELITE VS RECREATIONAL RUNNERS", infEliteD: "Cadence: elite ~180~200 vs recreational ~155~175 SPM. GCT: elite ~150~200 vs recreational ~250~300ms+. Flight time: elite ~35~45% vs recreational ~15~25%. This app's colors follow the recreational scale (170+/160+, ≤270/≤300, 22%+/12%+).",
 infBalance: "UNDERSTANDING BALANCE METRICS", infBalanceD: "GCT/Gyro Balance compare left vs right leg as an L:R ratio (50:50 = perfectly even). A 5~8 point gap is normal; 10+ persistently may signal a muscle imbalance worth checking.", infPacing: "UNDERSTANDING PACING METRICS", infPacingD: "Pace stability is how much your 100 m split pace swings (±sec). Split diff is 2nd-half minus 1st-half pace (negative = negative split). Cadence drift is how much cadence changed in the 2nd half. HR drift is how much heart rate rose in the 2nd half (10+ min runs only).",
   infLean: "UNDERSTANDING LEAN ANGLE", infLeanD: "LEAN ANGLE shows your forward lean, plus total lean and lateral sway alongside. Forward lean: 4-8° good, 8-12° borderline, 12°+ excessive. Lateral sway: under 5° fine, 10°+ may signal weak core/hip stability. It's the angle your center of mass leans forward relative to your ground contact point — ground reaction force, propulsion, and gravity combine to create it. (In the diagnosis page diagram, the lean axis, angle, center of mass, and gravity/propulsion reflect your measured data; the GRF arrow is illustrative only and not measured.)",
@@ -4285,7 +4312,7 @@ diagEffGood: "Excellent running efficiency!", diagEffAvg: "Average. Work on GCT 
 diagPaceFast: "Fast pace. Check sustainability.", diagPaceGood: "Good aerobic pace.", diagPaceEasy: "Easy pace. Try pushing a bit more.",
 diagPowerLow: "Low intensity. Good for recovery or easy runs.", diagPowerModerate: "Moderate intensity. A solid aerobic effort.", diagPowerHigh: "High intensity. Make sure to recover properly.",
 diagCadGood: "Optimal step frequency.", diagCadLow: "Slightly low cadence. Sync with metronome.",
-diagStrideGood: "Single step length. 0.5~0.75m is ideal.",
+diagStrideGood: "Single step length. The ideal range depends on your speed and height.",
 diagGctBad: "Ground contact time is prolonged. Focus on quick pull-off.", diagGctGood: "Excellent movement elasticity.",
 diagFlightShort: "Short flight time. Improve elastic energy return.", diagFlightGood: "Good flight time range.", diagFlightLong: "Long flight time. Check for excessive vertical oscillation.",
 diagHrLabel: "HEART RATE", diagHrNoData: "Connect a heart rate monitor (e.g. Garmin) to see heart rate analysis for this run.", diagHrZoneLow: "Low-intensity recovery zone. Great for building your aerobic base.", diagHrZoneGood: "Efficient aerobic zone. A solid intensity for building endurance.", diagHrZoneHigh: "High-intensity zone. Effective for speed and power, but make sure to recover properly.", diagAltLabel: "GPS ALTITUDE", diagAltNoData: "Not enough GPS split data was recorded for this run to show an elevation profile.", diagLeanLabel: "LEAN ANGLE", diagLeanDiagramTitle: "LEAN ANGLE DIAGRAM", diagLeanDiagramDesc: "Shows how far your center of mass leans forward past your ground contact point. (See the Theory Guide tab for more.)",
@@ -4364,7 +4391,7 @@ infWarmup: "워밍업 & 쿨다운", infWarmupD: "러닝 전 5~10분간 가볍게
 infHydration: "수분 & 에너지 보충", infHydrationD: "60분 이상 러닝 시 소량의 물을 규칙적으로 섭취하세요. 90분 이상 러닝 시에는 젤, 바나나, 스포츠음료 등 가벼운 탄수화물 보충을 고려하세요.",
 infRecovery: "휴식 & 회복일", infRecoveryD: "근육은 휴식 중에 회복됩니다. 초보자는 주 1~2일 이상의 완전한 휴식일을 가지는 것이 좋고, 관절 통증이 지속될 경우 무리하게 뛰지 마세요.",
 infInjury: "부상 경고 신호", infInjuryD: "러닝 중 악화되는 날카롭고 한쪽에 집중된 통증은 경고 신호입니다. 즉시 멈추고 휴식을 취하고, 며칠 이상 지속되면 전문가의 진단을 받으세요.",
-infRanges: "주요 지표 참고 범위", infRangesD: "케이던스: 일반적으로 170~185 SPM이 권장 범위입니다. GCT: 약 240ms 이하가 효율적인 편입니다. 체공시간: 한 주기의 약 30~45% 수준이 일반적입니다. 보폭: 일반 러너 기준 약 0.5~0.75m(한 걸음 기준)입니다. 이는 참고용 일반 가이드라인이며, 체형과 개인차에 따라 다를 수 있습니다.",
+infRanges: "주요 지표 참고 범위", infRangesD: "케이던스: 일반적으로 170~185 SPM이 권장 범위입니다. GCT: 약 240ms 이하가 효율적인 편입니다. 체공시간: 한 주기의 약 30~45% 수준이 일반적입니다. 보폭(한 걸음 기준)은 속도와 키에 따라 달라요. 키 170cm 기준 8~9km/h 약 0.85~0.95m, 10~11km/h 약 1.00~1.10m, 12~13km/h 약 1.15~1.25m(키의 약 0.5~0.7배)입니다. 이는 참고용 일반 가이드라인이며, 체형과 개인차에 따라 다를 수 있습니다.",
 infElite: "엘리트 vs 일반 러너 비교", infEliteD: "케이던스: 엘리트 180~200 vs 일반 155~175 SPM. GCT: 엘리트 150~200 vs 일반 250~300ms+. 체공시간: 엘리트 35~45% vs 일반 15~25%. 앱의 색상 기준은 일반 러너 기준(170↑/160↑, 270↓/300↓, 22%↑/12%↑)이에요.",
 infBalance: "밸런스 지표 이해하기", infBalanceD: "GCT/자이로 밸런스는 좌우 다리를 L:R 비율로 비교한 값이에요(50:50이 완벽한 균형). 5~8 정도 차이는 자연스럽고, 10 이상이 꾸준히 나오면 근력 불균형을 확인해보세요.", infPacing: "페이싱 지표 이해하기", infPacingD: "페이스 안정성은 100m 구간 페이스가 얼마나 흔들렸는지(±초), 전/후반 차는 후반 페이스에서 전반 페이스를 뺀 값(마이너스면 네거티브 스플릿)이에요. 케이던스 유지는 후반 케이던스 변화, 심박 드리프트는 후반 심박 상승폭이고 10분 이상 러닝에서만 표시돼요.",
   infLean: "린각도 이해하기", infLeanD: "린각도는 전방 기울기가 메인이고, 총 기울기·측방 흔들림도 함께 보여줘요. 전방 기울기는 4~8도 양호, 8~12도 주의, 12도 초과 과도. 측방 흔들림은 5도 이내 양호, 10도 초과면 코어/고관절 안정성을 체크해보세요. 몸의 무게중심이 지면 접촉점보다 앞으로 얼마나 기울어 있는지를 나타낸 각도로, 착지 시 지면 반력(GRF)과 추진력, 중력이 함께 작용해 전방 기울기를 만듭니다. (진단 페이지 다이어그램의 기울기 축·각도·무게중심·중력/추진력은 실측값 기준이며, GRF 화살표는 개념 설명용으로 측정되지 않습니다.)",
@@ -4399,7 +4426,7 @@ diagEffGood: "우수한 러닝 효율입니다!", diagEffAvg: "보통 수준입�
 diagPaceFast: "빠른 페이스입니다. 지속 가능한지 확인하세요.", diagPaceGood: "적절한 유산소 페이스입니다.", diagPaceEasy: "여유 있는 페이스입니다. 조금 더 빠르게 도전해보세요.",
 diagPowerLow: "가벼운 강도입니다. 회복 러닝이나 이지런에 적합합니다.", diagPowerModerate: "적당한 강도입니다. 무난한 유산소 강도입니다.", diagPowerHigh: "고강도입니다. 충분한 회복을 챙기세요.",
 diagCadGood: "이상적인 보폭 빈도입니다.", diagCadLow: "케이던스가 다소 낮습니다. 메트로놈에 맞춰보세요.",
-diagStrideGood: "한 걸음 기준 보폭입니다. 0.5~0.75m가 이상적입니다.",
+diagStrideGood: "한 걸음 기준 보폭입니다. 적정 범위는 속도와 키에 따라 달라집니다.",
 diagGctBad: "지면 접촉 시간이 다소 깁니다. 발을 빠르게 회수하세요.", diagGctGood: "매우 뛰어난 탄력성입니다.",
 diagFlightShort: "체공시간이 짧습니다. 탄성 에너지 활용을 높여보세요.", diagFlightGood: "적절한 체공시간입니다.", diagFlightLong: "체공시간이 깁니다. 과도한 수직 낭비가 있을 수 있습니다.",
 diagHrLabel: "심박수", diagHrNoData: "가민 등 심박계를 연결하면 이 러닝의 심박수 분석을 확인할 수 있어요.", diagHrZoneLow: "저강도 회복 구간입니다. 유산소 기초 체력을 다지기에 좋습니다.", diagHrZoneGood: "효율적인 유산소 구간입니다. 지구력 향상에 적합한 강도입니다.", diagHrZoneHigh: "고강도 구간입니다. 스피드와 파워 향상에 효과적이지만 충분한 회복이 필요합니다.", diagAltLabel: "GPS 고도", diagAltNoData: "이 러닝은 고도 그래프를 표시할 GPS 구간 데이터가 충분히 기록되지 않았습니다.", diagLeanLabel: "린각도", diagLeanDiagramTitle: "린각도 다이어그램", diagLeanDiagramDesc: "몸의 무게중심이 지면 접촉점보다 얼마나 앞으로 기울어 있는지를 보여줍니다. (자세한 설명은 이론 가이드 탭 참고)",
@@ -6907,7 +6934,7 @@ if(infoRangesD) infoRangesD.innerHTML = buildInfoListRows(isKo ? [
   ['케이던스', '170~185 SPM 목표'],
   ['GCT', '~240ms 이하 효율적'],
   ['체공시간', '한 주기의 30~45%'],
-  ['보폭', '0.5~0.75m (한 걸음 기준)']
+  ['보폭', '속도·키에 따라 다름 (170cm: 10~11km/h에 1.0~1.1m)']
 ] : [
   ['Cadence', '170–185 SPM target'],
   ['GCT', 'under ~240ms is efficient'],
@@ -7987,17 +8014,13 @@ getFlightColor(v) { const l = this.getFlightLevel(v); return l==='good'?'var(--g
 getLeanForwardColor(v) { const l = this.getLeanForwardLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
 getLeanLateralColor(v) { const l = this.getLeanLateralLevel(v); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':'var(--danger)'; }
 // [추가] 보폭(STRIDE): 키 기반 다리길이 대비 비율로 판정 (buildPersonalFeedback의 strideScore와 동일 기준)
-getStrideLevel(strideM, profile) {
+getStrideLevel(strideM, profile, cadence) {
   if (!strideM || !profile || !profile.h) return null;
   const heightCm = profile.hu === 'inch' ? Math.round(profile.h * 2.54) : profile.h;
-  const legLen = (heightCm * 0.47) / 100;
-  if (!legLen) return null;
-  const ratio = strideM / legLen;
-  if (ratio < 0.75 || ratio > 1.5) return 'danger';
-  if (ratio < 0.9 || ratio > 1.3) return 'warning';
-  return 'good';
+  const e = strideEval(strideM, cadence, heightCm); // [수정 2026-10-11] 속도·키 기준
+  return e ? e.level : null;
 }
-getStrideColor(strideM, profile) { const l = this.getStrideLevel(strideM, profile); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':l==='danger'?'var(--danger)':'#aaa'; }
+getStrideColor(strideM, profile, cadence) { const l = this.getStrideLevel(strideM, profile, cadence); return l==='good'?'var(--good)':l==='warning'?'var(--warning)':l==='danger'?'var(--danger)':'#aaa'; }
 // [추가] 좌우 밸런스: GCT 밸런스 기준 (diagBalanceExplain 안내 문구와 동일 기준: 5~8 정상, 10+ 주의)
 getBalanceLevel(gctBal) {
   const parseBalDiff = (bal) => {
@@ -8974,6 +8997,8 @@ flightComment = flightNum < 30 ? t.diagFlightShort
 const diagProfile = storage.loadProfile();
 const diagGender = storage.getGender();
 const strideNumForFeedback = parseFloat(strideVal) || 0;
+const _diagHcm = diagProfile && diagProfile.h ? (diagProfile.hu === 'inch' ? Math.round(diagProfile.h * 2.54) : diagProfile.h) : 0;
+const strideRefTxt = strideRefText(strideNumForFeedback, r.cadence, _diagHcm);
 const diagFeedback = buildPersonalFeedback(
   { cadence: r.cadence, gct: _gctUntrusted ? null : r.gct, stride: strideNumForFeedback, gctBal: _gctFlightHidden ? null : r.gctBal },
   diagProfile, diagGender, lang === 'ko'
@@ -9115,7 +9140,7 @@ contentArea.innerHTML =
 '<div class="diag-card"><div class="diag-label">' + (t.diagPaceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val">' + paceVal + (pacePeakDisplay ? (' / ' + pacePeakDisplay) : '') + ' <span class="c44">' + paceUnit + '</span></div><div class="diag-ref">Ref: 5\'00~7\'00</div></div><div class="diag-tip">' + paceComment + '</div>' + _wrapGraph('pace', paceSparkSvg, diagAxisLabelsHtml + paceNoteHtml) + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.powerLabel || "POWER") + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + (powerPeakForDiag != null ? (' / ' + powerPeakForDiag) : '') + ' <span class="c44">W</span></div><div class="diag-ref">' + (t.powerZoneLabel || 'POWER ZONE') + ': ' + powerZoneDisplay + '</div></div><div class="diag-tip">' + powerComment + '</div>' + _wrapGraph('power', powerSparkSvg, diagAxisLabelsHtml) + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagCadLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (r.cadence ? this.getCadenceColor(r.cadence) : '#aaa') + '">CAD: ' + (r.cadence || 0) + (cadPeakForDiag != null ? (' / ' + cadPeakForDiag) : '') + ' SPM</div><div class="diag-ref">Ref: 175~185</div></div><div class="diag-tip">' + cadComment + '</div>' + _wrapGraph('cadence', cadSparkSvg, diagAxisLabelsHtml + cadNoteHtml) + '</div>' +
-'<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getStrideColor(strideNumForFeedback, diagProfile) + '">' + strideVal + '</div><div class="diag-ref">Ref: 0.5~0.75m</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
+'<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getStrideColor(strideNumForFeedback, diagProfile, r.cadence) + '">' + strideVal + '</div><div class="diag-ref">Ref: ' + strideRefTxt + '</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
 '<div class="diag-card lk-dyn"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (!_gctUntrusted && r.gct && r.gct !== '--' ? this.getGctColor(r.gct) : '#aaa') + '">GCT: ' + (_gctUntrusted ? '--' : r.gct) + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
 '<div class="diag-card lk-dyn"><div class="diag-label">' + (t.diagBalanceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (_gctFlightHidden ? '#aaa' : this.getBalanceColor(r.gctBal)) + '">GCT ' + (_gctFlightHidden ? '--' : (r.gctBal || '--')) + ' <span style="font-size:var(--fs-xs);color:#aaa">L:R</span></div><div class="diag-ref">GYRO ' + (_gctFlightHidden ? '--' : (r.gyroBal || '--')) + '</div></div><div class="diag-tip">' + diagFeedback.balance + '</div><div style="font-size:var(--fs-xs);color:#888;font-weight:600;line-height:1.5;margin-top:8px;padding-top:8px;border-top:1px solid #222;">' + (t.diagBalanceExplain || '') + '</div></div>' +
 '<div class="diag-card lk-dyn"><div class="diag-label">' + (t.diagFlightLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (isNaN(flightNum)?'#aaa':this.getFlightColor(flightNum)) + '">' + flightVal + (flightVal!=='--'?' %':'') + '</div><div class="diag-ref">Ref: 30~45%</div></div><div class="diag-tip">' + flightComment + '</div></div>' +
