@@ -10962,6 +10962,30 @@ function avgFromPrecLog(log, field) {
 // 행을 단순 평균하면 스텝이 몰린/뜸한 구간이 왜곡을 준다. 행 사이 실측 걸음수
 // (stepDetectorCnt 증가분)로 가중 평균해 이를 보정 — GCT처럼 "스텝 1회당 값"의
 // 대표 평균은 이 함수를 우선 사용한다.
+// [추가 2026-10-13] 정보(LOG 카드)와 목록(LIST 카드)의 값을 같게 맞추기 위한 공용 요약.
+// 정보 화면의 summarizeLog()와 "동일한 계산"(정밀 로그 행의 단순 평균)을 쓴다.
+// 기록 저장(onFinish) 때 이 값으로 record의 케이던스/GCT/체공/보폭/심박을 덮어써서,
+// 가민 비교·보정에 쓰이는 LOG 값 = 목록에 보이는 값이 되게 한다.
+function summarizePrecLogForRecord(log) {
+  if (!Array.isArray(log) || log.length < 5) return null;
+  const num = (v) => { if (v == null || v === '') return null; const n = Number(v); return isFinite(n) ? n : null; };
+  // [2026-10-13] 시작(워밍업)·멈춤 구간 제외: 분석실과 같은 기준(케이던스 PREC_RUNNING_MIN_CAD 이상인 줄만).
+  // 달리는 줄이 전체의 20% 미만이면 precHasEnoughRunningRows()가 false → 전체 줄로 계산(손/암밴드 등).
+  const runRows = precHasEnoughRunningRows(log) ? log.filter(r => { const c = num(r.cadence); return c != null && c >= PREC_RUNNING_MIN_CAD; }) : log;
+  const avgOf = (rows, key) => { let sum = 0, n = 0; rows.forEach(r => { const v = num(r[key]); if (v != null && v > 0) { sum += v; n++; } }); return n ? sum / n : null; };
+  let maxHr = 0;
+  log.forEach(r => { const h = num(r.hrBpm); if (h != null && h > maxHr) maxHr = h; });
+  const hr = avgOf(log, 'hrBpm'); // 심박은 멈춘 구간도 실제 값이라 전체 줄 평균(가민과 동일)
+  const cad = avgOf(runRows, 'cadence'), gct = avgOf(runRows, 'gctMs'), sl = avgOf(runRows, 'stepLengthM'), fl = avgOf(runRows, 'flightPct');
+  return {
+    avgHr: hr != null ? Math.round(hr) : null,
+    maxHr: maxHr > 0 ? Math.round(maxHr) : null,
+    avgCadence: cad != null ? Math.round(cad) : null,
+    avgGct: gct != null ? Math.round(gct) : null,
+    avgFlight: fl != null ? Math.round(fl) : null,
+    strideM: sl != null ? Math.round(sl * 100) / 100 : null
+  };
+}
 function avgFromPrecLogStepWeighted(log, field) {
   let sum = 0, weightSum = 0, prevSteps = null, hasStepData = false;
   log.forEach(r => {
@@ -13068,6 +13092,20 @@ avgHr: (() => { const hm = hrManager.getAvgMax(); return hm.avg !== null ? hm.av
 maxHr: (() => { const hm = hrManager.getAvgMax(); return hm.max !== null ? hm.max : (hrManager._hr > 0 ? hrManager._hr : null); })(),
 hrZone: (() => { const hm = hrManager.getAvgMax(); const refHr = hm.avg !== null ? hm.avg : hrManager._hr; return refHr > 0 ? 'Z' + hrManager.getZone(refHr).z : null; })()
 };
+// [추가 2026-10-13] 정보(LOG) 카드와 같은 계산으로 요약값을 덮어씀 → 목록/통계/공유 모두 LOG 값과 일치.
+// 정밀 로그가 없거나 너무 짧으면(null) 기존 값을 그대로 둔다.
+try {
+  const _ls = summarizePrecLogForRecord(this.state.precisionLog);
+  if (_ls) {
+    if (_ls.avgCadence != null) record.cadence = _ls.avgCadence;
+    if (_ls.avgGct != null) record.gct = _ls.avgGct;
+    if (_ls.avgFlight != null) record.flight = _ls.avgFlight;
+    if (_ls.strideM != null) record.stride = _ls.strideM;
+    if (_ls.avgHr != null) record.avgHr = _ls.avgHr;
+    if (_ls.avgHr != null && _ls.avgHr > 0) { try { record.hrZone = 'Z' + hrManager.getZone(_ls.avgHr).z; } catch (e2) {} }
+    if (_ls.maxHr != null) record.maxHr = _ls.maxHr;
+  }
+} catch (e) {}
 storage.saveRecord(record);
 // [추가 2026-10-10] 러닝 모드일 때만 이번 러닝의 학습 GCT 비율을 "3개 평균"용으로 기록
 try { if ((record.activityMode || 'run') === 'run' || record.activityMode === 'trail') calibAvg3RecordSelfRun(this.state.runDevicePos || null, this.motion); } catch (e) {}
@@ -17008,7 +17046,10 @@ const garmin = (function () {
       if (r.altM != null && isFinite(r.altM)) { if (lastAlt != null && r.altM - lastAlt > 0.5) gain += r.altM - lastAlt; lastAlt = r.altM; }
     });
     durSec = Math.round(durSec);
-    const hr = avg('hrBpm'), cad = avg('cadence'), gct = avg('gctMs'), vo = avg('vertOscMm'), sl = avg('stepLengthM'), fl = avg('flightPct');
+    // [2026-10-13] 목록과 같은 기준: 시작·멈춤 구간(케이던스 낮은 줄) 제외, 달리는 줄이 20% 미만이면 전체 줄
+    const runRows = precHasEnoughRunningRows(rows) ? rows.filter(r => r.cadence != null && r.cadence >= PREC_RUNNING_MIN_CAD) : rows;
+    const avgRun = (key) => { let sum = 0, n = 0; runRows.forEach(r => { const v = r[key]; if (v != null && isFinite(v) && v > 0) { sum += v; n++; } }); return n ? sum / n : null; };
+    const hr = avg('hrBpm'), cad = avgRun('cadence'), gct = avgRun('gctMs'), vo = avgRun('vertOscMm'), sl = avgRun('stepLengthM'), fl = avgRun('flightPct');
     return {
       durSec: durSec, distanceKm: dist,
       avgPace: (dist > 0.01 && durSec > 0) ? durSec / dist : null,
@@ -17158,7 +17199,7 @@ const garmin = (function () {
           + (pos ? kvRow(isKo ? '착용 위치' : 'POSITION', pos) : '')
           + (l.fileName ? kvRow(isKo ? '파일명' : 'FILE', escapeHtml(l.fileName)) : '')
           + (isFinite(firstTs) ? kvRow(isKo ? '시작 시각' : 'START', fmtDate(firstTs) ) : '')
-          + (sm.avgFlight != null ? kvRow(isKo ? '평균 체공 비율' : 'AVG FLIGHT', sm.avgFlight + ' %') : '')
+          + (sm.avgFlight != null ? kvRow(isKo ? '평균 체공 비율' : 'AVG FLIGHT', Math.round(sm.avgFlight) + ' %') : '')
           + (sm.rotMax != null ? kvRow(isKo ? '최대 회전 피크' : 'MAX ROT PEAK', sm.rotMax + ' dps') : '')
           + kvRow(isKo ? '레코드 수' : 'RECORDS', sm.rows);
         html += buildSplitsHtml(normLogRows(l.log).map(r => ({ d: r.distKm, t: r.t, cad: r.cadence, gct: r.gctMs, vo: r.vertOscMm, hr: r.hrBpm })), isKo);
