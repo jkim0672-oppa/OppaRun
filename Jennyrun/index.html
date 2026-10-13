@@ -1084,10 +1084,10 @@ body.prem-lock-stats #stat-filter-monthly::after, body.prem-lock-stats #stat-fil
 .settings-group { margin-bottom: 25px; position: relative; }
 /* [추가 2026-10-12] 설정 화면 정리: ⓘ 펼치기 설명 + 접이식 캘리브레이션 관리 */
 /* [수정 2026-10-13] 버전 1: 제목 옆 = 글씨 info / 버튼 옆 = 원형 아이콘 ⓘ */
-.info-head { display:flex; justify-content:flex-start; align-items:center; gap:4px; }
+.info-head { display:flex; justify-content:flex-start; align-items:center; gap:0; }
 .info-btn { padding:0; margin:0; background:none; border:none; display:inline-flex; align-items:center; justify-content:center; font-size:0; cursor:pointer; -webkit-tap-highlight-color:transparent; }
 /* 제목 글씨 옆 = 글씨 "info" (누르면 설명 펼침) */
-.info-head .info-btn { flex:0 0 auto; width:auto; height:34px; padding:0 10px; }
+.info-head .info-btn { flex:0 0 auto; width:auto; height:34px; padding:0 12px 0 6px; }
 .info-head .info-btn::before { content:"info"; font:700 13px/1 sans-serif; letter-spacing:.3px; color:#888; }
 .info-head .info-btn.on::before { color:var(--primary); }
 .btn-info-row { display:flex; gap:4px; align-items:center; }
@@ -1493,6 +1493,13 @@ flex-wrap: wrap; justify-content: center; white-space: nowrap;
 .garmin-import-item { background: #1a1a1a; border-radius: 12px; border: 1.5px solid #2a3a2f; padding: 8px 14px; margin-top: 8px; }
 .garmin-import-item-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
 .garmin-import-item-title { font-size:var(--fs-sm); font-weight: 900; color: var(--primary); }
+/* [수정 2026-10-12] 날짜가 길면 오른쪽 '비교 선택' 라벨이 세로로 쪼개져 정보/삭제 박스가 길게 늘어나던 문제:
+   제목이 남는 폭만 쓰며 줄바꿈되고, 오른쪽 액션은 줄바꿈 없이 같은 높이로 고정한다. */
+.garmin-import-item-head { gap:8px; }
+.garmin-import-item-head .garmin-import-item-title { flex:1 1 auto; min-width:0; }
+.garmin-import-item-head .c07 { flex:0 0 auto; align-items:center; }
+.garmin-import-item-head .c24 { white-space:nowrap; flex:0 0 auto; }
+.garmin-import-item-head .garmin-import-item-info, .garmin-import-item-head .garmin-import-item-del { white-space:nowrap; flex:0 0 auto; line-height:1.2; }
 .garmin-import-item-del { font-size:var(--fs-xxs); color: #e57373; font-weight: 800; cursor: pointer; border: 1px solid #663333; border-radius: 8px; padding: 4px 8px; }
 .garmin-import-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
 .garmin-import-box { background: #111; border: 1px solid #2a2a2a; border-radius: 10px; padding: 6px 4px; text-align: center; line-height: 1.25; }
@@ -10226,7 +10233,19 @@ this.CALIB_MAX_DEV_DEG = 5;
 // 이 시간 동안은 handleMotion을 아예 건너뛰어서 "부착하는 움직임"이 캘리브레이션
 // 기준 자세로 잘못 잡히는 것을 막는다. GPS/페이스/거리 등 다른 트래킹은 이 대기와
 // 무관하게 START 즉시 정상 진행된다(린각도 계산만 지연됨).
-this.WEAR_DELAY_MS = 6000; // 착용 대기 6초 + 위 캘리브레이션 4초 = START 후 총 10초 뒤부터 린각도 값 표시 시작
+this.WEAR_DELAY_MS = 6000; // (구) 고정 착용 대기. [수정 2026-10-12] 이제 기준 자세는 "정지 감지"로 잡는다 — 아래 STILL_* 상수 참고
+// [추가 2026-10-12] 정지 감지 기반 기준 자세 캘리브레이션:
+// 고정 타이머(시작 6초 후 4초) 대신, 폰이 가슴에 붙어 거의 안 움직이는 상태가 STILL_WINDOW_MS 동안 이어질 때 그 구간 평균을 중립(0도)으로 잡는다.
+// → 착용이 늦거나 폰을 만지고 있어도, 다 붙인 뒤 가만히 서 있는 순간에 기준이 잡힌다.
+this.STILL_WINDOW_MS = 3000;     // 정지로 인정하는 연속 구간 길이
+this.STILL_MAX_DEV_DEG = 3;      // 구간 내 방향 흔들림 상한(90퍼센타일) — 걷기/만지기는 이보다 훨씬 큼
+this.STILL_MAX_MAG_DEV = 0.10;   // 구간 내 가속도 크기 변동 상한(상대값, 90퍼센타일)
+this.STILL_FALLBACK_MS = 6000;   // 시작 이후 움직임(착용 동작)이 한 번도 감지되지 않았다면, 최소 이 시간이 지난 뒤에만 정지 구간을 기준으로 인정(손에 든 채 정지한 순간을 바로 기준으로 잡는 것 방지)
+this.CALIB_HARD_MS = 15000;      // 끝내 정지 구간이 없었을 때(바로 달리기 시작 등) 이 시간이 되면 최근 구간 평균으로 강제 확정 → calibQuality='fallback'(결과는 "참고용"으로 표시)
+this.calibQuality = null;        // 'still'(정지 감지로 정상 확정) | 'fallback'(강제 확정)
+this._stillBuf = [];
+this._sawMotion = false;
+this._stillTick = 0;
 this.sessionStartTime = null;
 this.LPF_ALPHA = 0.06; // [수정] 0.02(전) → 0.06. 0.02는 착지 충격 스파이크(예: 121.9도 같은
 // 물리적으로 불가능한 값)는 잘 걸렀지만, 시상수가 스트라이드 한 주기보다 길어져 실제
@@ -10305,6 +10324,7 @@ this.sessionCountForward = 0;
 this.sessionSum = 0;
 this.sessionCount = 0;
 this.sessionStartTime = Date.now(); // [추가] 착용 대기 구간 계산의 기준 시각
+this.calibQuality = null; this._stillBuf = []; this._sawMotion = false; this._stillTick = 0; // [추가 2026-10-12] 정지 감지 캘리브레이션 상태 초기화
 this.onCalibDone = (typeof onCalibDone === 'function') ? onCalibDone : null; // [추가]
 }
 // [추가] GPS 기반 지표계산용 속도(app.state.metricSpeedKmh)를 매 GPS 갱신마다 전달받아
@@ -10377,10 +10397,26 @@ let cosA = dot / (m1 * m2);
 cosA = Math.max(-1, Math.min(1, cosA));
 return Math.acos(cosA) * (180 / Math.PI);
 }
+// [추가 2026-10-12] 정지 구간 판정용 통계: 구간 평균 벡터 + 평균 대비 방향/크기 변동(90퍼센타일)
+_stillStats(buf) {
+const n = buf.length; if (n < 10) return null;
+let sx = 0, sy = 0, sz = 0;
+for (const v of buf) { sx += v.x; sy += v.y; sz += v.z; }
+const mean = { x: sx / n, y: sy / n, z: sz / n };
+const mm = Math.sqrt(mean.x * mean.x + mean.y * mean.y + mean.z * mean.z);
+if (mm === 0) return null;
+const devs = [], mdevs = [];
+for (const v of buf) {
+const a = this._vectorAngleDeg(v, mean); devs.push(a == null ? 0 : a);
+mdevs.push(Math.abs(Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z) - mm) / mm);
+}
+devs.sort((p, q) => p - q); mdevs.sort((p, q) => p - q);
+const k = Math.min(n - 1, Math.floor(n * 0.9));
+return { mean: mean, devP90: devs[k], magDevP90: mdevs[k] };
+}
 handleMotion(e) {
 if (!this.enabled) return;
-// [추가] 착용 대기 구간(WEAR_DELAY_MS)에는 필터/캘리브레이션 자체를 시작하지 않고 그냥 건너뜀
-if (this.sessionStartTime && (Date.now() - this.sessionStartTime) < this.WEAR_DELAY_MS) return;
+// [수정 2026-10-12] 고정 착용 대기 제거 — 정지 감지가 기준 자세 확정 시점을 정한다(아래 캘리브레이션 블록)
 const acc = e.accelerationIncludingGravity;
 if (!acc || acc.x == null || acc.y == null || acc.z == null) return;
 // [추가] 0단계: median-of-3 선필터. 착지 순간처럼 한 샘플만 튀는 스파이크를 LPF보다
@@ -10404,31 +10440,31 @@ this.filtered.x += a * (accM.x - this.filtered.x);
 this.filtered.y += a * (accM.y - this.filtered.y);
 this.filtered.z += a * (accM.z - this.filtered.z);
 }
-// 2) 캘리브레이션 구간: 필터링된 벡터를 모아 평균 = 이번 러닝의 "중립 자세" 기준
+// 2) [수정 2026-10-12] 캘리브레이션: 정지 감지. 최근 STILL_WINDOW_MS 동안 폰이 거의 안 움직였을 때 그 구간 평균 = 이번 러닝의 "중립 자세" 기준
 if (!this.calibDone) {
-if (!this.calibStartTime) this.calibStartTime = Date.now();
-this.calibSamples.push({ x: this.filtered.x, y: this.filtered.y, z: this.filtered.z });
-if (Date.now() - this.calibStartTime >= this.CALIB_MS) {
-const n = this.calibSamples.length;
-if (n > 0) {
-// 1차: 전체 샘플의 단순 평균 = 잠정 기준벡터
-const rawSum = this.calibSamples.reduce((s, v) => ({ x: s.x + v.x, y: s.y + v.y, z: s.z + v.z }), { x: 0, y: 0, z: 0 });
-const rawMean = { x: rawSum.x / n, y: rawSum.y / n, z: rawSum.z / n };
-// 2차: 잠정 기준에서 CALIB_MAX_DEV_DEG(5도) 넘게 벗어난 샘플(자세 조정, 흔들림 등)은
-// 이상치로 제외하고 남은 안정 구간 샘플만으로 재평균 → 최종 기준벡터
-const stable = this.calibSamples.filter(v => {
-const dev = this._vectorAngleDeg(v, rawMean);
-return dev == null || dev <= this.CALIB_MAX_DEV_DEG;
-});
-// 전부 이상치로 걸러지는 경우(계속 심하게 흔들린 경우)엔 안전하게 원본 평균을 그대로 사용
-const finalSamples = stable.length > 0 ? stable : this.calibSamples;
-const sum = finalSamples.reduce((s, v) => ({ x: s.x + v.x, y: s.y + v.y, z: s.z + v.z }), { x: 0, y: 0, z: 0 });
-this.baseline = { x: sum.x / finalSamples.length, y: sum.y / finalSamples.length, z: sum.z / finalSamples.length };
-}
+const now = Date.now();
+if (!this.sessionStartTime) this.sessionStartTime = now;
+this._stillBuf.push({ t: now, x: accM.x, y: accM.y, z: accM.z });
+while (this._stillBuf.length && now - this._stillBuf[0].t > this.STILL_WINDOW_MS) this._stillBuf.shift();
+this._stillTick++;
+if (this._stillTick % 10 !== 0) return; // 약 5~6Hz로만 판정(연산량 절약)
+const span = now - this._stillBuf[0].t;
+if (span < this.STILL_WINDOW_MS - 300) return; // 아직 구간이 덜 찼음
+const st = this._stillStats(this._stillBuf);
+if (!st) return;
+const isStill = st.devP90 <= this.STILL_MAX_DEV_DEG && st.magDevP90 <= this.STILL_MAX_MAG_DEV;
+if (!isStill) this._sawMotion = true; // 착용 동작(움직임)을 한 번이라도 봤다
+const elapsed = now - this.sessionStartTime;
+let accept = null;
+if (isStill && (this._sawMotion || elapsed >= this.STILL_FALLBACK_MS)) accept = 'still';
+else if (elapsed >= this.CALIB_HARD_MS) accept = 'fallback'; // 끝내 가만히 있지 못함 → 최근 구간 평균으로 확정하되 "참고용" 표시
+if (accept) {
+this.baseline = { x: st.mean.x, y: st.mean.y, z: st.mean.z };
+this.calibQuality = accept;
 this.calibDone = true;
 this.calibSamples = [];
-// [추가] 기준 자세가 실제로 잡혔을 때만 "캘리브레이션 성공" 알림 콜백 호출
-if (this.baseline && this.onCalibDone) this.onCalibDone();
+this._stillBuf = [];
+if (this.onCalibDone) this.onCalibDone();
 }
 return; // 캘리브레이션 구간에는 아직 각도를 산출하지 않음
 }
@@ -10551,9 +10587,26 @@ levelForward(val) { if (typeof val !== 'number') return null; const a = Math.abs
 levelLateral(val) { if (typeof val !== 'number') return null; const a = Math.abs(val); if (a <= 5) return 'good'; if (a <= 10) return 'warning'; return 'danger'; },
 colorFor(level) { return level === 'good' ? 'var(--good)' : level === 'warning' ? 'var(--warning)' : level === 'danger' ? 'var(--danger)' : '#888'; },
 // 메인값(전방 우선, total 폴백)의 색상 — total로 폴백된 경우엔 판정 기준이 다르므로 색상 없음(null)
-colorForPrimary(totalDeg, fwdDeg) {
+// [추가 2026-10-12] 신뢰도 낮은 값 표시: 전방 기울기 15도 초과(현실적으로 드문 값)이거나 기준 자세가 강제 확정('fallback')이면 "참고용"으로 취급 → 회색 + 참고용 표시
+UNRELIABLE_DEG: 15,
+isUnreliable(totalDeg, fwdDeg, quality) {
+const p = this.primary(totalDeg, fwdDeg);
+if (!p) return false;
+return Math.abs(p.deg) > this.UNRELIABLE_DEG || quality === 'fallback';
+},
+refTagText(lang) { return (lang === 'ko') ? '참고용' : 'ref only'; },
+refTagBlockHtml(record, lang) {
+if (!record || !this.isUnreliable(record.avgLeanAngleDeg, record.avgLeanForwardDeg, record.leanCalibQuality)) return '';
+return '<div style="font-size:var(--fs-xxs); color:#888; font-weight:700; margin-top:2px;">' + this.refTagText(lang) + '</div>';
+},
+refTagInlineHtml(record, lang) {
+if (!record || !this.isUnreliable(record.avgLeanAngleDeg, record.avgLeanForwardDeg, record.leanCalibQuality)) return '';
+return ' <span style="font-size:var(--fs-xxs); color:#888; font-weight:700;">' + this.refTagText(lang) + '</span>';
+},
+colorForPrimary(totalDeg, fwdDeg, quality) {
 const p = this.primary(totalDeg, fwdDeg);
 if (!p || !p.signed) return null;
+if (this.isUnreliable(totalDeg, fwdDeg, quality)) return '#888';
 return this.colorFor(this.levelForward(p.deg));
 },
 // [추가] 크루 카드 전용 2단계(좋음/나쁨) 색상 — warning+danger를 "나쁨"(빨강) 한 단계로 합침.
@@ -10561,6 +10614,7 @@ return this.colorFor(this.levelForward(p.deg));
 colorForPrimaryCrew(totalDeg, fwdDeg) {
 const p = this.primary(totalDeg, fwdDeg);
 if (!p || !p.signed) return null;
+if (this.isUnreliable(totalDeg, fwdDeg)) return '#888'; // [추가 2026-10-12]
 return (this.levelForward(p.deg) === 'good') ? '#00aa55' : '#e53935';
 },
 // [추가] 전방 성분은 부호가 의미있음(+숙임/−반대) → +기호를 명시적으로 붙여서 표시
@@ -10611,13 +10665,14 @@ return '<div style="font-size:' + fs + '; color:#888; font-weight:700; margin-to
 // [리스트] 히스토리 카드용 h-det-box 한 칸
 listDetBoxHtml(record, lang) {
 if (!this.has(record)) return '';
-return '<div class="h-det-box"><div class="h-det-label">' + this.label(lang) + '</div><div class="h-det-val" style="color:' + (this.colorForPrimary(record.avgLeanAngleDeg, record.avgLeanForwardDeg) || '#ffb86b') + '; white-space:nowrap;">' + this.fmtPrimary(record.avgLeanAngleDeg, record.avgLeanForwardDeg) + '</div>'
+return '<div class="h-det-box"><div class="h-det-label">' + this.label(lang) + '</div><div class="h-det-val" style="color:' + (this.colorForPrimary(record.avgLeanAngleDeg, record.avgLeanForwardDeg, record.leanCalibQuality) || '#ffb86b') + '; white-space:nowrap;">' + this.fmtPrimary(record.avgLeanAngleDeg, record.avgLeanForwardDeg) + '</div>'
++ this.refTagBlockHtml(record, lang)
 + '</div>';
 },
 // [루트맵] 상세 페이지 DYNAMICS SUMMARY용 한 줄 (+ 값이 있으면 총기울기/측방 보조 줄 추가)
 routeDetailRowHtml(record, lang) {
 if (!this.has(record)) return '';
-let html = '<div class="detail-log-item"><span>' + this.label(lang) + '</span><span style="color:' + (this.colorForPrimary(record.avgLeanAngleDeg, record.avgLeanForwardDeg) || 'inherit') + ';">' + this.fmtPrimary(record.avgLeanAngleDeg, record.avgLeanForwardDeg) + '</span></div>';
+let html = '<div class="detail-log-item"><span>' + this.label(lang) + '</span><span style="color:' + (this.colorForPrimary(record.avgLeanAngleDeg, record.avgLeanForwardDeg, record.leanCalibQuality) || 'inherit') + ';">' + this.fmtPrimary(record.avgLeanAngleDeg, record.avgLeanForwardDeg) + this.refTagInlineHtml(record, lang) + '</span></div>';
 if (this.hasDirection(record.avgLeanForwardDeg, record.avgLeanLateralDeg)) {
 html += '<div class="detail-log-item"><span class="c63">' + this.labelTotal(lang) + ' / ' + this.labelLateral(lang) + '</span><span class="c63">'
 + this.fmt(record.avgLeanAngleDeg) + ' / ' + this.fmt(record.avgLeanLateralDeg) + '</span></div>';
@@ -11074,9 +11129,11 @@ function trimPrecLogToWindow(log, startMs, endMs) {
 function trimGarminRecordsToWindow(records, startMs, endMs) {
   return (records || []).filter(r => r.unixMs != null && r.unixMs >= startMs && r.unixMs <= endMs);
 }
-// [추가] 잘라낸 가민 레코드로 케이던스/GCT/수직진동/보폭 평균을 다시 계산(저장 용량 절약을
-// 위해 records엔 이 4개 필드만 남아있음 — summarize() 참고). distance/pace/HR은 초당 원본이
-// 보관되지 않아 이 방식으로는 재계산 불가하므로 원래 파일 전체 평균을 그대로 사용한다.
+// [추가] 잘라낸 가민 레코드로 케이던스/GCT/수직진동/보폭 평균을 다시 계산.
+// [수정 2026-10-12] records엔 누적 거리(distance, m)도 저장돼 있으므로, 잘라낸 구간의 거리·페이스도 같은 구간 기준으로
+// 다시 계산한다(구간 거리 = 마지막 누적거리 − 처음 누적거리, 구간 시간 = 마지막 − 처음 타임스탬프).
+// 예전엔 파일 전체 거리/시간을 그대로 써서, 제외한 시작·종료 시간(가만히 있던 구간)이 가민 페이스에 섞여
+// 폰 페이스와 시간 기준이 달랐다. 누적 거리가 없는 옛 가져오기 기록은 기존처럼 파일 전체 값(distance/pace/HR)을 그대로 쓴다.
 function recomputeGarminAggFromRecords(records) {
   let cadSum = 0, cadCount = 0, gctSum = 0, gctCount = 0, voSum = 0, voCount = 0, slSum = 0, slCount = 0;
   records.forEach(r => {
@@ -11085,12 +11142,26 @@ function recomputeGarminAggFromRecords(records) {
     if (r.verticalOscillationMm != null) { voSum += r.verticalOscillationMm; voCount++; }
     if (r.stepLengthMm != null) { slSum += r.stepLengthMm; slCount++; }
   });
-  return {
+  const agg = {
     avgCadence: cadCount ? Math.round(cadSum / cadCount) : null,
     avgGctMs: gctCount ? Math.round(gctSum / gctCount) : null,
     avgVertOscMm: voCount ? Math.round((voSum / voCount) * 10) / 10 : null,
     avgStepLengthMm: slCount ? Math.round((slSum / slCount) * 10) / 10 : null,
   };
+  try {
+    const withDist = records.filter(r => r.distance != null && r.unixMs != null);
+    if (withDist.length >= 2) {
+      const f = withDist[0], l = withDist[withDist.length - 1];
+      const dKm = (l.distance - f.distance) / 1000;
+      const dSec = (l.unixMs - f.unixMs) / 1000;
+      if (dKm > 0.01 && dSec > 0) {
+        agg.distanceKm = dKm;
+        agg.durationSec = Math.round(dSec);
+        agg.avgPaceSecPerKm = dSec / dKm;
+      }
+    }
+  } catch (e) {}
+  return agg;
 }
 // ========== [단순화 2026-10-10] 속도·지연 보정 (분석실) ==========
 // 예전의 "후처리 보정"(스위치·확정 버튼·보정 전/후 이중 열)을 없애고, 값을 만드는 모션 엔진에 직접 저장한다.
@@ -11773,7 +11844,8 @@ this.state.seconds = this.getElapsedSeconds();
 // 팝업의 "자동 멈춤 ON/OFF" 토글이 걷기 모드에서도 실제로 동작함.
 const inLeanCalibWindow = !!(this.leanTracker && this.leanTracker.enabled &&
   this.leanTracker.sessionStartTime &&
-  (Date.now() - this.leanTracker.sessionStartTime) < (this.leanTracker.WEAR_DELAY_MS + this.leanTracker.CALIB_MS));
+  !this.leanTracker.calibDone &&
+  (Date.now() - this.leanTracker.sessionStartTime) < (this.leanTracker.CALIB_HARD_MS + 1000)); // [수정 2026-10-12] 정지 감지 방식: 기준이 잡히기 전(최대 CALIB_HARD_MS)까지
 if (!this.state.autoPauseEnabled || inLeanCalibWindow) {
 this.state.lowSpeedStartTime = null;
 if (this.state.isAutoPaused) {
@@ -12985,6 +13057,7 @@ avgLeanAngleDeg: (this.leanTracker && this.leanTracker.getSessionAvg() != null) 
 // 축 학습이 세션 내내 충분히 안 됐으면(짧은 러닝 등) null일 수 있음.
 avgLeanForwardDeg: (this.leanTracker && this.leanTracker.getSessionAvgForward() != null) ? parseFloat(this.leanTracker.getSessionAvgForward().toFixed(1)) : null,
 avgLeanLateralDeg: (this.leanTracker && this.leanTracker.getSessionAvgLateral() != null) ? parseFloat(this.leanTracker.getSessionAvgLateral().toFixed(1)) : null,
+leanCalibQuality: (this.leanTracker && this.leanTracker.getSessionAvg() != null) ? (this.leanTracker.calibQuality || null) : null, // [추가 2026-10-12] 기준 자세 품질('still'|'fallback') — 'fallback'이면 린각도를 "참고용"으로 표시
 nativeStepRescueCount: this.motion.nativeRescueCount, // [추가] 네이티브 걸음센서가 자이로 노이즈 필터의 오판을 구제해준 횟수(개발자 전용, UI 비노출)
 weightKgSnapshot: weightKg,        // [추가] 당시 체중(kg) 스냅샷 저장
 alt: this.state.currentAlt,
@@ -17971,6 +18044,18 @@ const garmin = (function () {
     const last = log.length ? log[log.length - 1] : null;
     return (last && last.distKm != null) ? parseFloat(last.distKm) : null;
   }
+  // [추가 2026-10-12] 비교 구간(시간 정렬로 잘라낸 로그)의 거리 = 마지막 누적거리 − 처음 누적거리.
+  // 잘라내지 않은 로그는 처음 누적거리가 0 근처라 precLastDistKm과 같다. 잘라낸 로그에서 누적거리를 그대로 쓰면
+  // 구간 밖(시작 전)에서 쌓인 거리가 포함돼 가민(구간 기준)과 어긋난다.
+  function precWindowDistKm(log) {
+    const first = log.length ? log[0] : null;
+    const last = log.length ? log[log.length - 1] : null;
+    if (!last || last.distKm == null || last.distKm === '') return null;
+    const lastKm = parseFloat(last.distKm);
+    const firstKm = (first && first.distKm != null && first.distKm !== '') ? parseFloat(first.distKm) : 0;
+    const d = lastKm - (isNaN(firstKm) ? 0 : firstKm);
+    return d > 0 ? d : lastKm;
+  }
 
   // ── 가민 vs 자체알고리즘 캘리브레이션 비교(메인) ──
   function runCalibrationCompare() {
@@ -17991,6 +18076,9 @@ const garmin = (function () {
     // 오차처럼 보이는 문제를 막는다. 겹치는 구간이 없거나 시각 파싱에 실패하면
     // computeOverlapWindow가 null을 반환하고, 이 경우 원본 전체 데이터로 폴백한다.
     let alignmentTrimmedHtml = '';
+    // [추가 2026-10-12] 시간 정렬로 가민 구간을 잘랐는데 그 가민 기록에 구간 거리 정보(누적 distance)가 없으면,
+    // 가민 거리·페이스는 파일 전체 값이라 폰(구간 기준)과 시간 기준이 어긋난다 → 거리/페이스 보정 제안을 내지 않는다.
+    let garminWindowDistMissing = false;
     // [추가] 겹치는 구간이 아예 없거나(시간대 자체가 다른 기록), 겹치는 구간은 있어도
     // 대부분 잘려나가 남는 구간이 너무 짧으면(=비교할 의미가 없으면) 초 단위 오차가 아니라
     // 분 단위로 크게 어긋난 것이므로, 조용히 폴백하지 않고 경고 후 비교를 중단한다.
@@ -18024,6 +18112,7 @@ const garmin = (function () {
         }
         if (trimmedLog.length > 1 && trimmedRecords.length > 1 && trimmedSec >= 1) {
           const garminAgg = recomputeGarminAggFromRecords(trimmedRecords);
+          if (garminAgg.distanceKm == null) garminWindowDistMissing = true;
           precItems = [Object.assign({}, precItems[0], { log: trimmedLog })];
           garminItems = [Object.assign({}, garminItems[0], garminAgg, { records: trimmedRecords })];
           alignmentTrimmedHtml = '<div style="font-size:var(--fs-xxs); color:#7fd3ff; font-weight:700; margin-bottom:10px;">'
@@ -18060,7 +18149,9 @@ const garmin = (function () {
           if (trimmedLog.length <= 1 || trimmedRecords.length <= 1 || trimSec < 1 || trimSec >= MISALIGN_ABORT_SEC) return;
           usedG[best] = true;
           newPrec[pi] = Object.assign({}, p, { log: trimmedLog });
-          newGarmin[best] = Object.assign({}, g, recomputeGarminAggFromRecords(trimmedRecords), { records: trimmedRecords });
+          const _aggMulti = recomputeGarminAggFromRecords(trimmedRecords);
+          if (_aggMulti.distanceKm == null) garminWindowDistMissing = true;
+          newGarmin[best] = Object.assign({}, g, _aggMulti, { records: trimmedRecords });
           totalTrimSec += trimSec; pairedCount++;
         });
         if (pairedCount > 0) {
@@ -18077,6 +18168,13 @@ const garmin = (function () {
     // [추가] 선택한 정밀 로그들이 어느 착용위치로 기록됐는지 확인해서,
     // (1) 서로 다른 위치가 섞여있으면 경고, (2) 실제로 어느 위치 슬롯에 보정값이
     // 저장/적용될지 안내 문구를 만든다. 아래 lastSuggestion.devicePos에도 그대로 재사용.
+        if (garminWindowDistMissing) {
+      alignmentTrimmedHtml += '<div style="font-size:var(--fs-xxs); color:#ffb86b; font-weight:700; margin-bottom:10px;">'
+        + (isKo
+          ? '⚠ 이 가민 기록은 구간별 거리 정보가 없어 거리·페이스 행은 참고만 해주세요(두 기기의 시간 기준이 달라요). 거리/페이스 보정 제안은 건너뜁니다 — FIT을 다시 가져오면 해결돼요.'
+          : '⚠ This Garmin record has no per-segment distance, so treat the distance/pace rows as reference only (the time windows differ). Distance/pace factor suggestions are skipped — re-import the FIT file to fix.')
+        + '</div>';
+    }
     const posLabelMapLocal = getPosLabelMap(isKo);
     const posLabel = (p) => posLabelMapLocal[p] || p;
     const precDevicePosList = precItems.map(p => logPosOf(p)).filter(d => d);
@@ -18255,7 +18353,7 @@ const phoneAvgVertAmplitudeRaw = avgArr(precItems.map(p => avgFromPrecLogRunning
       const first = log.length ? log[0] : null;
       const last = log.length ? log[log.length - 1] : null;
       const durSec = (first && last) ? (parseFloat(last.t) - parseFloat(first.t)) : null;
-      const distKm = precLastDistKm(log);
+      const distKm = precWindowDistKm(log);
       if (!durSec || durSec <= 0 || !distKm || distKm <= 0) return null;
       return durSec / distKm;
     };
@@ -18276,7 +18374,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // 가민 파일의 distanceKm을 직접 비교. 여러 개면 로그별/기록별로 각각 구한 뒤 평균한다.
     // 이 값이 계속 일정한 방향으로 어긋난다면(가민보다 항상 짧거나 길게 찍힘) GPS 거리 자체의
     // 체계적 오차이므로 gpsDistCorrectionFactor로 보정 대상이 된다.
-    const phoneDistanceKm = avgArr(precItems.map(p => precLastDistKm(p.log)));
+    const phoneDistanceKm = avgArr(precItems.map(p => precWindowDistKm(p.log)));
     const distDiffPct = (phoneDistanceKm && garminDistanceKm) ? ((phoneDistanceKm - garminDistanceKm) / garminDistanceKm * 100) : null;
 
     // [수정] 예전엔 여기서 app.motion(현재 실시간으로 활성화된 착용위치 설정)을 그대로
@@ -18390,7 +18488,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       ? Math.round(curStrideFactor * stepRatio(garminAvgStepMm / phoneAvgStepMm, GENERAL_STEP_FRACTION) * 1000) / 1000 : null;
     // [추가] GPS 거리 보정계수 제안값. 화면에 찍히는 실제 거리·페이스에 직접 반영되는
     // 값이라 일반 항목(20%)보다 더 보수적인 8%만 반영.
-    const suggestedGpsDistFactor = (!isFreerunPos && phoneDistanceKm && garminDistanceKm && distDiffPct != null)
+    const suggestedGpsDistFactor = (!isFreerunPos && !garminWindowDistMissing && phoneDistanceKm && garminDistanceKm && distDiffPct != null)
       ? Math.round(curGpsDistFactor * stepRatio(garminDistanceKm / phoneDistanceKm, GPS_STEP_FRACTION) * 1000) / 1000 : null;
     // [추가] 케이던스 보정계수 제안값. gpsDistCorrectionFactor와 다르게 화면 표시값에만
     // 영향(네이티브 원시 걸음 판정엔 영향 없음)이라 일반 항목과 동일하게 20% 반영.
@@ -18406,7 +18504,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // [수정] 오차가 1% 미만이면 항목 자체가 안 보여서 실시간 페이스를 수동으로 미세조정할
     // 방법이 없었음 — 다른 항목과 달리 페이스는 오차 크기와 무관하게 항상 표를 띄워서
     // 사용자가 언제든 값을 확인/수동 입력할 수 있게 함(제안값이 현재값과 거의 같아도 노출).
-    const suggestedPaceFactor = (!isFreerunPos && phoneAvgPaceSec && garminAvgPaceSec && paceDiffPct != null)
+    const suggestedPaceFactor = (!isFreerunPos && !garminWindowDistMissing && phoneAvgPaceSec && garminAvgPaceSec && paceDiffPct != null)
       ? Math.round(curPaceFactor * stepRatio(phoneAvgPaceSec / garminAvgPaceSec, GPS_STEP_FRACTION) * 1000) / 1000 : null;
 
     // [추가] "권장 보정수치를 적용하면" 예상되는 값 — 실제로 앱 설정(gctFallbackRatio,
