@@ -3135,21 +3135,18 @@ const DIAG_SPLIT_INTERVAL_KM = 0.1;
 // [추가] 현재 앱 언어가 한국어인지 / 인원수 문구를 언어에 맞게 (한·영 혼용 방지)
 function _koNow() { try { return storage.getLang() === 'ko'; } catch (e) { return true; } }
 function fmtPersonCount(n) { return _koNow() ? (n + '명') : (n + (n === 1 ? ' person' : ' people')); }
-// [추가] 크루 피드/마이포스트용 폰 휴대 위치 라벨. abbr=true면 약자(C/W/A/H/F).
-// 걷기 기록은 위치 개념이 없어 빈 문자열. 프리런은 피드에선 이미 FREE RUN 배지가 있어 abbr일 때만 'F'.
-function postPosLabel(devicePos, activityMode, abbr) {
-  if (activityMode === 'walk') return '';
-  var ko = _koNow();
-  if (activityMode === 'freerun') return abbr ? 'F' : '';
-  var map = ko
-    ? { chest: ['가슴','C'], waist: ['허리','W'], armband: ['암밴드','A'], hand: ['손','H'] }
-    : { chest: ['Chest','C'], waist: ['Waist','W'], armband: ['Armband','A'], hand: ['Hand','H'] };
-  var e = map[devicePos];
-  return e ? (abbr ? e[1] : e[0]) : '';
-}
+// [수정 2026-10-13] 크루 화면(피드/내 게시글)에는 착용 위치(가슴/허리 등)를 표시하지 않는다. 피드 카드는 modeBadge(러닝/걷기/트레일/프리러닝)만 표시.
+// (Supabase에는 device_pos가 그대로 업로드되므로 나중에 다시 보여주고 싶으면 표시만 추가하면 된다.)
 // [추가] 자동 생성된 기본 제목("야간 러닝"/"Night Run" 등)을 현재 앱 언어로 맞춰 표시.
 // 저장된 제목은 기록 당시 언어로 박혀 있어 언어를 바꾸면 한/영이 섞여 보였음 → 표시 시점에 변환.
 // 사용자가 직접 지은 제목은 패턴에 안 맞으므로 그대로 둔다.
+// [추가 2026-10-13] 자동 생성 제목("아침 러닝"/"Night Trail Run" 등)이면 true. 제목에 이미 모드가 들어 있어
+// 크루 피드의 모드 배지를 숨길 때 쓴다. 사용자가 직접 지은 제목이면 false(배지로 모드를 알려줌).
+function isAutoRunTitle(title) {
+  if (!title) return true;
+  var t = String(title);
+  return /^(아침|오후|저녁|야간) (러닝|트레일러닝|프리러닝|걷기)$/.test(t) || /^(Morning|Afternoon|Evening|Night) (Run|Trail Run|Free Run|Walk)$/.test(t);
+}
 function localizeRunTitle(title) {
   if (!title) return title;
   var isKo = true; try { isKo = storage.getLang() === 'ko'; } catch (e) {}
@@ -4534,6 +4531,24 @@ exitClosedTitle: "앱 종료됨", exitClosedMsg: "홈 버튼을 눌러<br>홈 �
 // [추가 2026-10-13] 러닝 모드 표시: proRun === true → 'PRO', false → 'LITE', 그 외(예전 기록/걷기) → 표시 없음.
 function runModeTag(proRun) { return proRun === true ? 'PRO' : (proRun === false ? 'LITE' : ''); }
 function withRunMode(label, proRun) { var m = runModeTag(proRun); return m ? (label ? label + ' \u00b7 ' + m : m) : (label || ''); }
+// [리팩토링 2026-10-13] 기록/로그 배지 텍스트(착용 위치 + LITE/PRO)를 만드는 유일한 함수.
+// item: 기록 또는 정밀 로그 항목({devicePos, isFreerun, proRun}). opts: { lang: 'ko'|'en'|boolean, abbr: true면 C/W/A/H/F 약자,
+// noFreerun: true면 프리런 라벨 생략, unknown: true면 위치 없을 때 '알 수 없음/unknown' }.
+// 이후 배지에 새 정보를 더하려면 이 함수 한 곳만 고치면 된다.
+var POS_ABBR = { chest: 'C', waist: 'W', armband: 'A', hand: 'H' };
+function runPosText(item, opts) {
+  opts = opts || {}; item = item || {};
+  var lang = opts.lang, isKo = typeof lang === 'boolean' ? lang : lang === 'ko';
+  var pos = '';
+  if (item.isFreerun && !opts.noFreerun) {
+    pos = opts.abbr ? 'F' : (getPosLabelMap(isKo).freerun || (isKo ? '프리러닝' : 'FREE RUN'));
+  } else if (item.devicePos) {
+    pos = opts.abbr ? (POS_ABBR[item.devicePos] || item.devicePos) : (getPosLabelMap(isKo)[item.devicePos] || item.devicePos);
+  } else if (opts.unknown) {
+    pos = isKo ? '알 수 없음' : 'unknown';
+  }
+  return withRunMode(pos, item.proRun);
+}
 function getPosLabelMap(langOrIsKo) {
 const isKo = typeof langOrIsKo === 'boolean' ? langOrIsKo : langOrIsKo === 'ko';
 const tt = translations[isKo ? 'ko' : 'en'];
@@ -6504,7 +6519,6 @@ return;
 if (clearBtn) clearBtn.classList.remove('hidden');
 // [추가] 선택된 로그 id 유지 (삭제/새 로그 저장으로 사라졌으면 최신 로그 #1로 되돌림)
 if (!list.some(it => it.id === this._selPrecLogId)) this._selPrecLogId = list[0].id;
-const posLabelMap = getPosLabelMap(isKo);
 const fmtLabel = (item) => {
 const d = new Date(item.savedAt);
 const _h24 = d.getHours(), _h12 = (_h24 % 12) || 12, _mi = String(d.getMinutes()).padStart(2,'0');
@@ -6513,7 +6527,7 @@ return isKo
   ? (d.getFullYear() + '. ' + (d.getMonth()+1) + '. ' + d.getDate() + '. ' + _ampm + ' ' + _h12 + ':' + _mi)
   : (d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0') + ' ' + _h12 + ':' + _mi + ' ' + _ampm);
 };
-const posShort = (item) => withRunMode(item.isFreerun ? (isKo ? '프리러닝' : 'FREE RUN') : (item.devicePos ? (posLabelMap[item.devicePos] || item.devicePos) : ''), item.proRun);
+const posShort = (item) => runPosText(item, { lang: isKo });
 // 드롭다운 옵션: 한 줄짜리 컴팩트 항목 (#번호 · 날짜/시간 · 위치)
 if (optWrap) {
 optWrap.innerHTML = list.map((item, idx) => {
@@ -7913,8 +7927,7 @@ if(displayPace !== INVALID_PACE && this.currentUnit === 'mile') {
 displayPace = this.convertPaceToUnit(displayPace, 'mile');
 }
 // [추가] 착용 위치 배지: 어느 위치로 뛴 기록인지 제목 옆에서 바로 구분 가능하게 표시 (가민분석실 정밀로그 목록과 동일한 색/스타일)
-const hPosLabelMap = getPosLabelMap(lang);
-const _hpTxt = withRunMode(r.devicePos ? (hPosLabelMap[r.devicePos] || r.devicePos) : '', r.proRun);
+const _hpTxt = runPosText(r, { lang: lang });
 const hPosBadge = _hpTxt ? ' <span style="color:#7fd3ff; font-weight:700; font-size:var(--fs-xs);">· ' + _hpTxt + '</span>' : '';
 return '<div class="history-item">' +
 '<div class="h-top-row">' +
@@ -14733,7 +14746,7 @@ class CommunityManager {
         return `<div class="garmin-import-item" onclick="community.openMyPost('${r.id}')" style="cursor:pointer;">
         <div class="garmin-import-item-head">
           <div style="min-width:0; flex:1;">
-            <div class="garmin-import-item-title" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${title}${postPosLabel(r.device_pos, r.activity_mode, true) ? ' <span style="color:#7fd3ff; font-weight:700; font-size:var(--fs-xs);">· ' + postPosLabel(r.device_pos, r.activity_mode, true) + '</span>' : ''}</div>
+            <div class="garmin-import-item-title" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${title}</div>
             <div style="font-size:var(--fs-xxs); color:#888; margin-top:2px;">${time}</div>
           </div>
           <div class="garmin-import-item-del" onclick="event.stopPropagation(); community.deleteMyPost('${r.id}')">${t.deleteBtn || 'DELETE'}</div>
@@ -15867,8 +15880,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
         <!-- 러닝 제목 -->
         <div style="display:flex; align-items:center; gap:6px; margin-bottom:${r.message ? '4px' : '12px'};">
           <div style="font-size:var(--fs-lg); font-weight:900; color:#111;">${escapeHtml(localizeRunTitle(r.title)) || runLabel}</div>
-          <span style="font-size:var(--fs-xxs); font-weight:800; padding:3px 7px; border-radius:6px; background:${modeBadge.bg}; color:${modeBadge.color}; flex-shrink:0;">${modeBadge.label}</span>
-          ${postPosLabel(r.device_pos, activityMode, false) ? `<span style="font-size:var(--fs-xxs); font-weight:800; padding:3px 7px; border-radius:6px; background:#e0f2fe; color:#0369a1; flex-shrink:0;">${postPosLabel(r.device_pos, activityMode, false)}</span>` : ''}
+          ${isAutoRunTitle(r.title) ? '' : `<span style="font-size:var(--fs-xxs); font-weight:800; padding:3px 7px; border-radius:6px; background:${modeBadge.bg}; color:${modeBadge.color}; flex-shrink:0;">${modeBadge.label}</span>`}
         </div>
         ${r.message ? `<div style="font-size:var(--fs-base); color:#555; margin-bottom:12px;">${escapeHtml(r.message)}</div>` : ''}
 
@@ -17103,8 +17115,7 @@ const garmin = (function () {
     return { order: ii + 1, src: 'import' };
   }
   function logPosLabel(l, isKo) {
-    const posMap = getPosLabelMap(isKo);
-    return withRunMode(l.isFreerun ? (posMap.freerun || 'FREE RUN') : (l.devicePos ? (posMap[l.devicePos] || l.devicePos) : ''), l.proRun);
+    return runPosText(l, { lang: isKo });
   }
   function renderLogBox(l, isKo) {
     const sm = summarizeLog(l.log);
@@ -17529,10 +17540,9 @@ const garmin = (function () {
     if (!hiddenLogs.length) restorePanelOpen = false;
     panel.classList.toggle('hidden', !restorePanelOpen);
     if (!restorePanelOpen) { panel.innerHTML = ''; return; }
-    const posShortMap = { chest:'C', waist:'W', armband:'A', hand:'H' };
-    restoreSelIds = restoreSelIds.filter(id => hiddenLogs.some(l => l.id === id));
+        restoreSelIds = restoreSelIds.filter(id => hiddenLogs.some(l => l.id === id));
     panel.innerHTML = hiddenLogs.map((l, idx) => {
-      const _pbTxt = withRunMode(l.isFreerun ? 'F' : (l.devicePos ? (posShortMap[l.devicePos] || l.devicePos) : ''), l.proRun);
+      const _pbTxt = runPosText(l, { abbr: true });
       const posBadge = _pbTxt ? ' <span class="c27">· ' + _pbTxt + '</span>' : '';
       return ddCheckRow({
         checked: restoreSelIds.indexOf(l.id) >= 0,
@@ -17653,9 +17663,8 @@ const garmin = (function () {
       return;
     }
     // [수정] 불러온 지난 로그도 체크 드롭다운 한 줄씩: 날짜 / (행 수 · 파일명 · 위치) / 삭제.
-    const posShortMapDl = getPosLabelMap(isKo);
     dropdown.innerHTML = logs.map((l, idx) => {
-      const posLabelDl = withRunMode(l.isFreerun ? (posShortMapDl.freerun || 'FREE RUN') : (l.devicePos ? (posShortMapDl[l.devicePos] || l.devicePos) : ''), l.proRun);
+      const posLabelDl = runPosText(l, { lang: isKo });
       const line2 = l.log.length + (isKo ? '개' : ' rows')
         + (l.fileName ? ' · ' + escapeHtml(l.fileName) : '')
         + (posLabelDl ? ' <span class="c27">· ' + posLabelDl + '</span>' : '');
@@ -17717,9 +17726,8 @@ const garmin = (function () {
       return;
     }
     // [추가] 착용 위치 배지: 길면 첫글자(C/W/A/H)만 축약해서 표시
-    const posShortMap = { chest:'C', waist:'W', armband:'A', hand:'H' };
-    panel.innerHTML = autoLogs.map((l, idx) => {
-      const _pbTxt = withRunMode(l.isFreerun ? 'F' : (l.devicePos ? (posShortMap[l.devicePos] || l.devicePos) : ''), l.proRun);
+        panel.innerHTML = autoLogs.map((l, idx) => {
+      const _pbTxt = runPosText(l, { abbr: true });
       const posBadge = _pbTxt ? ' <span class="c27">· ' + _pbTxt + '</span>' : '';
       return ddCheckRow({
         checked: selectedPrecLogIds.indexOf(l.id) >= 0,
@@ -17790,7 +17798,7 @@ const garmin = (function () {
     }
     if (!selfCalibLogId || !list.find(l => l.id === selfCalibLogId)) selfCalibLogId = list[0].id;
     opts.innerHTML = list.map(item => {
-      const posTxt = withRunMode(item.devicePos ? (isKo ? (POS_LABEL_KO[item.devicePos] || item.devicePos) : (POS_LABEL_EN[item.devicePos] || item.devicePos)) : '', item.proRun);
+      const posTxt = runPosText(item, { lang: isKo, noFreerun: true });
       return '<div class="dropdown-option" onclick="garmin.selfCalibSelectLog(\'' + item.id + '\')">' + selfCalibLogLabel(item) + (posTxt ? ' · ' + posTxt : '') + '</div>';
     }).join('');
     const item = list.find(l => l.id === selfCalibLogId);
@@ -17798,7 +17806,7 @@ const garmin = (function () {
     curText.textContent = selfCalibLogLabel(item);
     const distKm = precLastDistKm(item.log);
     const cadSpm = avgFromPrecLog(item.log, 'cadence');
-    const posTxt = withRunMode(item.devicePos ? (isKo ? (POS_LABEL_KO[item.devicePos] || item.devicePos) : (POS_LABEL_EN[item.devicePos] || item.devicePos)) : (isKo ? '알 수 없음' : 'unknown'), item.proRun);
+    const posTxt = runPosText(item, { lang: isKo, noFreerun: true, unknown: true });
     infoBox.innerHTML = (isKo ? '측정 거리 ' : 'Measured dist ') + '<b>' + (distKm != null ? distKm.toFixed(3) : '--') + 'km</b> · '
       + (isKo ? '측정 케이던스 ' : 'measured cad ') + '<b>' + (cadSpm != null ? Math.round(cadSpm) : '--') + 'spm</b> · '
       + (isKo ? '위치 ' : 'pos ') + posTxt;
