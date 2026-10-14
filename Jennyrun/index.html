@@ -2428,7 +2428,7 @@ alt="runner"/>
 <div class="settings-group" id="app-defaults-group">
 <!-- [수정 2026-10-12] 보정계수 스위치 → PRO RUN / 일반 런 모드 버튼. 설명은 ⓘ를 눌러야 펼쳐진다. ON=PRO RUN, OFF=일반 런 -->
 <div id="calib-factor-switch-box" style="margin-top:14px;">
-<div class="btn-info-row"><button id="btn-calib-factor-switch" style="background:#2a2a2a; color:#aaa; border:1.5px solid #444; padding:13px; border-radius:12px; flex:1; font-weight:900; font-size:var(--fs-base);" onclick="ui.toggleCalibFactors()"><span id="btn-calib-factor-switch-label">RUN MODE: BASIC RUN</span></button><button type="button" class="info-btn" aria-label="info" onclick="toggleSettingInfo('calib-factor-switch-desc')">ⓘ</button></div>
+<div class="btn-info-row"><button id="btn-calib-factor-switch" style="background:#2a2a2a; color:#aaa; border:1.5px solid #444; padding:13px; border-radius:12px; flex:1; font-weight:900; font-size:var(--fs-base);" onclick="ui.toggleCalibFactors()"><span id="btn-calib-factor-switch-label">RUN MODE: LITE RUN</span></button><button type="button" class="info-btn" aria-label="info" onclick="toggleSettingInfo('calib-factor-switch-desc')">ⓘ</button></div>
 <div id="calib-factor-switch-desc" class="c35 info-collapsed" style="margin-top:8px;"></div>
 </div>
 <!-- [수정 2026-10-12] 캘리브레이션 관리 접이식 그룹: 앱 기본값/현재 데이터/되돌리기/초기화 -->
@@ -4531,6 +4531,9 @@ exitClosedTitle: "앱 종료됨", exitClosedMsg: "홈 버튼을 눌러<br>홈 �
 // [수정] 착용위치 라벨 맵이 4곳(가민 로그 리스트/앱 기본값 보기/현재 데이터 보기/기록 목록)에
 // 동일한 내용으로 중복 정의돼있던 것을 여기 하나로 통합. translations의 devpos* 키를 그대로
 // 재사용해서 번역 테이블과도 항상 일치하게 함. isKo(boolean) 또는 lang('ko'/'en') 어느 쪽으로 불러도 동작.
+// [추가 2026-10-13] 러닝 모드 표시: proRun === true → 'PRO', false → 'LITE', 그 외(예전 기록/걷기) → 표시 없음.
+function runModeTag(proRun) { return proRun === true ? 'PRO' : (proRun === false ? 'LITE' : ''); }
+function withRunMode(label, proRun) { var m = runModeTag(proRun); return m ? (label ? label + ' \u00b7 ' + m : m) : (label || ''); }
 function getPosLabelMap(langOrIsKo) {
 const isKo = typeof langOrIsKo === 'boolean' ? langOrIsKo : langOrIsKo === 'ko';
 const tt = translations[isKo ? 'ko' : 'en'];
@@ -4986,7 +4989,7 @@ alert(isKo
 return false;
 }
 }
-savePrecisionLog(log, devicePos, activityMode) { // [수정] 착용 위치를 로그와 함께 저장해 나중에 export해도 어느 위치 기록인지 확인 가능하게 함
+savePrecisionLog(log, devicePos, activityMode, proRun) { // [수정] 착용 위치를 로그와 함께 저장해 나중에 export해도 어느 위치 기록인지 확인 가능하게 함
 if (!log || !log.length) return;
 // [추가] 초장거리(예: 마라톤/울트라, 3시간+) 러닝은 초당 샘플이 수만 개까지 쌓여
 // localStorage 용량 한도를 넘길 수 있음. 5000개(초당 기록 기준 약 1시간 23분 분량)를
@@ -5003,7 +5006,7 @@ const list = this.loadPrecisionLogs();
 // [추가] isFreerun: 프리런은 착용 위치가 devicePos에 기록되지 않으므로(null),
 // 이 플래그로 "FREE RUN" 로그임을 구분한다. [수정 2026-09-20] 가민 분석실은 이제 이 플래그를
 // 5번째 위치('freerun')로 취급해 GCT/수직진동을 비교·보정한다(다른 4개 위치와 독립).
-list.unshift({ id: 'plog_' + Date.now(), savedAt: new Date().toISOString(), log: finalLog, downsampled: downsampled, devicePos: devicePos || null, isFreerun: activityMode === 'freerun' });
+list.unshift({ id: 'plog_' + Date.now(), savedAt: new Date().toISOString(), log: finalLog, downsampled: downsampled, devicePos: devicePos || null, isFreerun: activityMode === 'freerun', proRun: (proRun === true || proRun === false) ? proRun : null });
 // [수정] localStorage 용량 보호 + "지난 로그가 쌓여봐야 소용없다"는 사용 패턴 반영.
 // [수정] 최근 10개 → 30개까지 보관 (용량 부족 시 오래된 것부터 자동 정리: savePrecisionLogsCapped).
 this.savePrecisionLogsCapped(list);
@@ -5105,7 +5108,7 @@ if (ui.updateTotalStats) ui.updateTotalStats();
 }
 console.log('[migrateCadence] updated ' + updatedCount + ' / ' + history.length + ' records (' + (history.length - updatedCount) + ' had no matching precision log).');
 }
-buildPrecisionCsv(log, devicePos) {
+buildPrecisionCsv(log, devicePos, proRun) {
 // [수정] device_pos 컬럼 추가: 이 로그 전체가 어느 착용 위치(chest/waist/armband/hand)로
 // 뛴 러닝인지 매 행에 동일한 값으로 남겨서, export한 CSV만 봐도 확인 가능하게 함.
 // 기존엔 이 정보가 CSV 어디에도 없어서, 같은 날 위치를 바꿔가며 여러 번 뛰면
@@ -5115,8 +5118,10 @@ buildPrecisionCsv(log, devicePos) {
 // 자체 알고리즘 케이던스와 나란히 비교할 수 있게 남겨둔다 (가민 비교 화면 교차검증용).
 // [추가] alt_m 컬럼: GPS 기반 현재 고도(this.state.currentAlt, m 단위). 기존엔 정밀 로그에
 // 고도가 전혀 기록되지 않아 DIAG 화면의 고도 그래프를 이 로그만으로는 재구성할 수 없었음.
-const headers = ['t_sec','timestamp','lat','lng','gps_accuracy_m','dist_km','speed_kmh','cadence_spm','gct_ms','flight_pct','step_length_m','step_length_window_m','step_length_instant_m','vert_osc_mm','alt_m','hr_bpm','hr_zone','rot_peak_dps','gyro_alpha_dps','gyro_beta_dps','gyro_gamma_dps','device_pos','step_detector_cnt','step_counter_steps','gct_measured_cnt','gct_fallback_cnt','gct_clamped_cnt','lean_angle_deg','lean_forward_deg','lean_lateral_deg','vert_osc_raw']; // [수정 2026-09-21] vert_osc_raw(vertScale 미적용 원시 진폭) 열을 맨 끝에 추가 — 기존 열 순서는 그대로
-const rows = log.map(r => [r.t, r.timestamp || '', r.lat || '', r.lng || '', r.gpsAcc != null ? r.gpsAcc : '', r.distKm, r.speedKmh, r.cadence, r.gctMs, r.flightPct, r.stepLengthM != null ? r.stepLengthM : '', r.stepLengthWindowM != null ? r.stepLengthWindowM : '', r.stepLengthInstantM != null ? r.stepLengthInstantM : '', r.vertOscMm != null ? r.vertOscMm : '', r.altM != null ? r.altM : '', r.hrBpm, r.hrZone, r.rotPeakDps != null ? r.rotPeakDps : '', r.gyroAlpha != null ? r.gyroAlpha : '', r.gyroBeta != null ? r.gyroBeta : '', r.gyroGamma != null ? r.gyroGamma : '', devicePos || '', r.stepDetectorCnt != null ? r.stepDetectorCnt : '', r.stepCounterSteps != null ? r.stepCounterSteps : '', r.gctMeasuredCnt != null ? r.gctMeasuredCnt : '', r.gctFallbackCnt != null ? r.gctFallbackCnt : '', r.gctClampedCnt != null ? r.gctClampedCnt : '', r.leanAngleDeg != null ? r.leanAngleDeg : '', r.leanForwardDeg != null ? r.leanForwardDeg : '', r.leanLateralDeg != null ? r.leanLateralDeg : '', r.vertOscRaw != null ? r.vertOscRaw : ''].join(','));
+const headers = ['t_sec','timestamp','lat','lng','gps_accuracy_m','dist_km','speed_kmh','cadence_spm','gct_ms','flight_pct','step_length_m','step_length_window_m','step_length_instant_m','vert_osc_mm','alt_m','hr_bpm','hr_zone','rot_peak_dps','gyro_alpha_dps','gyro_beta_dps','gyro_gamma_dps','device_pos','step_detector_cnt','step_counter_steps','gct_measured_cnt','gct_fallback_cnt','gct_clamped_cnt','lean_angle_deg','lean_forward_deg','lean_lateral_deg','vert_osc_raw','run_mode']; // [수정 2026-10-13] run_mode(lite/pro) 열을 맨 끝에 추가 — 기존 열 순서는 그대로
+const _runModeStr = proRun === true ? 'pro' : (proRun === false ? 'lite' : '');
+// (이전 주석) [수정 2026-09-21] vert_osc_raw(vertScale 미적용 원시 진폭) 열을 맨 끝에 추가 — 기존 열 순서는 그대로
+const rows = log.map(r => [r.t, r.timestamp || '', r.lat || '', r.lng || '', r.gpsAcc != null ? r.gpsAcc : '', r.distKm, r.speedKmh, r.cadence, r.gctMs, r.flightPct, r.stepLengthM != null ? r.stepLengthM : '', r.stepLengthWindowM != null ? r.stepLengthWindowM : '', r.stepLengthInstantM != null ? r.stepLengthInstantM : '', r.vertOscMm != null ? r.vertOscMm : '', r.altM != null ? r.altM : '', r.hrBpm, r.hrZone, r.rotPeakDps != null ? r.rotPeakDps : '', r.gyroAlpha != null ? r.gyroAlpha : '', r.gyroBeta != null ? r.gyroBeta : '', r.gyroGamma != null ? r.gyroGamma : '', devicePos || '', r.stepDetectorCnt != null ? r.stepDetectorCnt : '', r.stepCounterSteps != null ? r.stepCounterSteps : '', r.gctMeasuredCnt != null ? r.gctMeasuredCnt : '', r.gctFallbackCnt != null ? r.gctFallbackCnt : '', r.gctClampedCnt != null ? r.gctClampedCnt : '', r.leanAngleDeg != null ? r.leanAngleDeg : '', r.leanForwardDeg != null ? r.leanForwardDeg : '', r.leanLateralDeg != null ? r.leanLateralDeg : '', r.vertOscRaw != null ? r.vertOscRaw : '', _runModeStr].join(','));
 return headers.join(',') + '\n' + rows.join('\n');
 }
 downloadCsvFile(csvStr, fileName) {
@@ -5132,7 +5137,7 @@ if (!entry || !entry.log || !entry.log.length) {
 alert(isKo ? '로그를 찾을 수 없습니다.' : 'Could not find this log.');
 return;
 }
-const csvStr = this.buildPrecisionCsv(entry.log, entry.isFreerun ? 'freerun' : entry.devicePos); // [수정] 프리런 로그는 device_pos에 'freerun'으로 남겨 재가져오기 시에도 구분
+const csvStr = this.buildPrecisionCsv(entry.log, entry.isFreerun ? 'freerun' : entry.devicePos, entry.proRun); // [수정] 프리런 로그는 device_pos에 'freerun'으로 남겨 재가져오기 시에도 구분
 const d = new Date(entry.savedAt);
 // [수정] 파일명이 'precision-log-2026-07-19-214457'처럼 너무 길어진다는 피드백에 따라
 // 화면에 표시되는 순서번호(#1, #2...)를 그대로 재사용해 짧게 축약. 연도는 생략(월일만).
@@ -5141,7 +5146,8 @@ const numStr = String(idx + 1).padStart(2, '0');
 const dateStr = String(d.getMonth() + 1).padStart(2,'0') + String(d.getDate()).padStart(2,'0'); // MMDD, 연도 생략
 const timeStr = d.toTimeString().slice(0,8).replace(/:/g,'');
 const posSuffix = entry.isFreerun ? '.freerun' : (entry.devicePos ? ('.' + entry.devicePos) : '');
-const fileName = 'log-' + numStr + '.' + dateStr + '.' + timeStr + posSuffix + '.csv';
+const modeSuffix = entry.proRun === true ? '.pro' : (entry.proRun === false ? '.lite' : '');
+const fileName = 'log-' + numStr + '.' + dateStr + '.' + timeStr + posSuffix + modeSuffix + '.csv';
 this.downloadCsvFile(csvStr, fileName);
 }
 // [추가] buildPrecisionCsv가 만든 CSV(헤더: t_sec,timestamp,lat,...,gyro_gamma_dps)를
@@ -5182,6 +5188,7 @@ gyroGamma: num(cols[idx['gyro_gamma_dps']]),
 gctMeasuredCnt: num(cols[idx['gct_measured_cnt']]),
 gctFallbackCnt: num(cols[idx['gct_fallback_cnt']]),
 gctClampedCnt: num(cols[idx['gct_clamped_cnt']]),
+runMode: cols[idx['run_mode']] || '',
 devicePos: cols[idx['device_pos']] || '', // [추가] 내보내기(device_pos 컬럼)를 다시 불러올 때도 위치 정보가 유지되도록
 leanAngleDeg: num(cols[idx['lean_angle_deg']]),
 leanForwardDeg: num(cols[idx['lean_forward_deg']]),
@@ -5227,6 +5234,7 @@ gyroGamma: num(pick(r, 'gyroGamma', 'gyro_gamma_dps')),
 gctMeasuredCnt: num(pick(r, 'gctMeasuredCnt', 'gct_measured_cnt')),
 gctFallbackCnt: num(pick(r, 'gctFallbackCnt', 'gct_fallback_cnt')),
 gctClampedCnt: num(pick(r, 'gctClampedCnt', 'gct_clamped_cnt')),
+runMode: r.runMode || r.run_mode || '',
 devicePos: r.devicePos || r.device_pos || '', // [추가] CSV와 동일하게 위치 정보 유지
 leanAngleDeg: num(pick(r, 'leanAngleDeg', 'lean_angle_deg')),
 leanForwardDeg: num(pick(r, 'leanForwardDeg', 'lean_forward_deg')),
@@ -6505,7 +6513,7 @@ return isKo
   ? (d.getFullYear() + '. ' + (d.getMonth()+1) + '. ' + d.getDate() + '. ' + _ampm + ' ' + _h12 + ':' + _mi)
   : (d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0') + ' ' + _h12 + ':' + _mi + ' ' + _ampm);
 };
-const posShort = (item) => item.isFreerun ? (isKo ? '프리러닝' : 'FREE RUN') : (item.devicePos ? (posLabelMap[item.devicePos] || item.devicePos) : '');
+const posShort = (item) => withRunMode(item.isFreerun ? (isKo ? '프리러닝' : 'FREE RUN') : (item.devicePos ? (posLabelMap[item.devicePos] || item.devicePos) : ''), item.proRun);
 // 드롭다운 옵션: 한 줄짜리 컴팩트 항목 (#번호 · 날짜/시간 · 위치)
 if (optWrap) {
 optWrap.innerHTML = list.map((item, idx) => {
@@ -7304,15 +7312,15 @@ const isKo = storage.getLang() === 'ko';
 const btn = document.getElementById('btn-calib-factor-switch');
 const lab = document.getElementById('btn-calib-factor-switch-label');
 const desc = document.getElementById('calib-factor-switch-desc');
-if (lab) lab.textContent = (isKo ? '러닝 모드: ' : 'RUN MODE: ') + (on ? 'PRO RUN' : (isKo ? '일반 런' : 'BASIC RUN'));
+if (lab) lab.textContent = (isKo ? '러닝 모드: ' : 'RUN MODE: ') + (on ? 'PRO RUN' : (isKo ? '라이트 런' : 'LITE RUN'));
 if (btn) {
   btn.style.background = on ? '#14261a' : '#2a2a2a';
   btn.style.color = on ? '#5fd18a' : '#aaa';
   btn.style.borderColor = on ? '#2d5a3f' : '#444';
 }
 if (desc) desc.textContent = isKo
-  ? (on ? 'PRO RUN: 위치별로 저장된 보정계수(걸음 길이·GPS·케이던스·페이스)를 적용해 더 정밀하게 측정해요.' : '일반 런: 걸음 길이·GPS·케이던스·페이스 계수를 모두 1.0(원본값)으로 써요. 분석실의 4개 계수는 참고용으로만 보여요. 접지시간/수직진동 보정은 항상 적용돼요.')
-  : (on ? 'PRO RUN: saved per-position factors (stride/GPS/cadence/pace) are applied for more precise measurement.' : 'BASIC RUN: stride/GPS/cadence/pace factors are 1.0 (raw) at every position. The Garmin lab shows the 4 factors as reference only. GCT/vertical-oscillation calibration always applies.');
+  ? (on ? 'PRO RUN: 위치별로 저장된 보정계수(걸음 길이·GPS·케이던스·페이스)를 적용해 더 정밀하게 측정해요.' : '라이트 런: 걸음 길이·GPS·케이던스·페이스 계수를 모두 1.0(원본값)으로 써요. 분석실의 4개 계수는 참고용으로만 보여요. 접지시간/수직진동 보정은 항상 적용돼요.')
+  : (on ? 'PRO RUN: saved per-position factors (stride/GPS/cadence/pace) are applied for more precise measurement.' : 'LITE RUN: stride/GPS/cadence/pace factors are 1.0 (raw) at every position. The Garmin lab shows the 4 factors as reference only. GCT/vertical-oscillation calibration always applies.');
 }
 toggleCalibFactors() {
 const prof = storage.loadProfile();
@@ -7906,7 +7914,8 @@ displayPace = this.convertPaceToUnit(displayPace, 'mile');
 }
 // [추가] 착용 위치 배지: 어느 위치로 뛴 기록인지 제목 옆에서 바로 구분 가능하게 표시 (가민분석실 정밀로그 목록과 동일한 색/스타일)
 const hPosLabelMap = getPosLabelMap(lang);
-const hPosBadge = r.devicePos ? ' <span style="color:#7fd3ff; font-weight:700; font-size:var(--fs-xs);">· ' + (hPosLabelMap[r.devicePos] || r.devicePos) + '</span>' : '';
+const _hpTxt = withRunMode(r.devicePos ? (hPosLabelMap[r.devicePos] || r.devicePos) : '', r.proRun);
+const hPosBadge = _hpTxt ? ' <span style="color:#7fd3ff; font-weight:700; font-size:var(--fs-xs);">· ' + _hpTxt + '</span>' : '';
 return '<div class="history-item">' +
 '<div class="h-top-row">' +
 '<div style="display:flex;flex-direction:column;gap:2px">' +
@@ -12694,6 +12703,7 @@ if (typeof hrManager !== 'undefined') hrManager.reset(); // [추가] 새 러닝 
 // 이러면 "이번 러닝 도중/종료 후 다음 러닝 전에 설정을 바꾼 경우" 실제로 이번 러닝에
 // 적용된 위치가 아니라 나중에 바뀐 값이 로그에 저장되는 문제가 있었음.
 this.state.runDevicePos = (() => { try { return storage.loadProfile().devicePos || 'chest'; } catch(e) { return 'chest'; } })();
+this.state.runPro = isCalibFactorsOn(); // [추가 2026-10-13] 시작 시점의 LITE/PRO 모드를 세션 동안 고정
 if(this.motion) this.motion.reset();
 // [신규] 걷기 모드 상태 초기화 (러닝 상태 초기화와 완전 분리, 시작 시점의 설정값을 세션 내내 고정)
 this.state.activityMode = storage.getActivityMode();
@@ -13076,6 +13086,7 @@ power: calculatedPower,            // [신규] 러닝 파워(와트) 추정치 �
 powerWkg: calculatedPowerWkg,      // [신규] 체중당 파워(W/kg) — 강도 구간(Z1~Z5) 색상 판정용
 stride: _snapshotStride,           // [추가] 보폭 스냅샷 저장
 sensorDiag: _strideSensorFlag,     // [추가] 개발자 전용 진단 플래그. 클램프가 발동한 기록에만 값이 있음(UI 비노출, export로만 확인)
+proRun: !!this.state.runPro, // [추가 2026-10-13] true=PRO, false=LITE
 devicePos: (this.state.activityMode === 'freerun') ? null : (this.state.runDevicePos || null), // [수정] 프리러닝은 착용 위치와 무관하므로 기록하지 않음(그 외 모드는 클램프 여부와 무관하게 항상 기록)
 // [신규] 가슴 착용 러닝일 때만 값이 채워지는 세션 평균 린각도(도). 그 외 착용위치/걷기 기록은 null.
 avgLeanAngleDeg: (this.leanTracker && this.leanTracker.getSessionAvg() != null) ? parseFloat(this.leanTracker.getSessionAvg().toFixed(1)) : null,
@@ -13115,7 +13126,7 @@ try { if ((record.activityMode || 'run') === 'run' || record.activityMode === 't
 // 기기 저장/가민분석실 노출 여부는 여기서 설정으로 게이팅한다(이 설정의 "로그 export 대상으로
 // 남길지" 의미는 그대로 유지, "매초 계산을 건너뛸지"는 위 logPrecisionSample() 참고).
 if (storage.getPrecisionLogEnabled()) {
-storage.savePrecisionLog(this.state.precisionLog, (this.state.activityMode === 'freerun') ? null : (this.state.runDevicePos || null), this.state.activityMode); // [수정] 정밀 로그 영구 저장 (앱 재시작/새 러닝 후에도 내보내기 가능) + 착용위치 동봉 — record.devicePos와 동일 규칙으로 프리런 예외 적용, activityMode는 목록에 FREE RUN 배지 표시용
+storage.savePrecisionLog(this.state.precisionLog, (this.state.activityMode === 'freerun') ? null : (this.state.runDevicePos || null), this.state.activityMode, !!this.state.runPro); // [수정] 정밀 로그 영구 저장 (앱 재시작/새 러닝 후에도 내보내기 가능) + 착용위치 동봉 — record.devicePos와 동일 규칙으로 프리런 예외 적용, activityMode는 목록에 FREE RUN 배지 표시용
 }
 // 커뮤니티 업로드는 선택사항: 공유 모달을 띄워 사용자가 선택
 storage.clearTempSession();
@@ -13193,7 +13204,7 @@ maxHr: (() => { const hm = hrManager.getAvgMax(); return hm.max !== null ? hm.ma
 hrZone: (() => { const hm = hrManager.getAvgMax(); const refHr = hm.avg !== null ? hm.avg : hrManager._hr; return refHr > 0 ? 'Z' + hrManager.getZone(refHr).z : null; })()
 };
 storage.saveRecord(record);
-storage.savePrecisionLog(this.state.precisionLog, null, this.state.activityMode); // [수정] 걷기는 착용 위치 설정이 없으므로 정밀 로그에도 위치를 기록하지 않음(위 record.devicePos와 동일 규칙)
+storage.savePrecisionLog(this.state.precisionLog, null, this.state.activityMode, null); // [수정] 걷기는 착용 위치 설정이 없으므로 정밀 로그에도 위치를 기록하지 않음(위 record.devicePos와 동일 규칙)
 storage.clearTempSession();
 this.state.isRunning = false;
 this.state.isPaused = false;
@@ -17093,7 +17104,7 @@ const garmin = (function () {
   }
   function logPosLabel(l, isKo) {
     const posMap = getPosLabelMap(isKo);
-    return l.isFreerun ? (posMap.freerun || 'FREE RUN') : (l.devicePos ? (posMap[l.devicePos] || l.devicePos) : '');
+    return withRunMode(l.isFreerun ? (posMap.freerun || 'FREE RUN') : (l.devicePos ? (posMap[l.devicePos] || l.devicePos) : ''), l.proRun);
   }
   function renderLogBox(l, isKo) {
     const sm = summarizeLog(l.log);
@@ -17521,7 +17532,8 @@ const garmin = (function () {
     const posShortMap = { chest:'C', waist:'W', armband:'A', hand:'H' };
     restoreSelIds = restoreSelIds.filter(id => hiddenLogs.some(l => l.id === id));
     panel.innerHTML = hiddenLogs.map((l, idx) => {
-      const posBadge = l.isFreerun ? ' <span class="c27">· F</span>' : (l.devicePos ? ' <span class="c27">· ' + (posShortMap[l.devicePos] || l.devicePos) + '</span>' : '');
+      const _pbTxt = withRunMode(l.isFreerun ? 'F' : (l.devicePos ? (posShortMap[l.devicePos] || l.devicePos) : ''), l.proRun);
+      const posBadge = _pbTxt ? ' <span class="c27">· ' + _pbTxt + '</span>' : '';
       return ddCheckRow({
         checked: restoreSelIds.indexOf(l.id) >= 0,
         onToggle: "garmin.toggleRestoreSel('" + l.id + "')",
@@ -17590,7 +17602,9 @@ const garmin = (function () {
         const rowWithPos = log.find(r => r.devicePos);
         const importedDevicePos = rowWithPos ? rowWithPos.devicePos : null;
         const importedIsFreerun = importedDevicePos === 'freerun'; // [추가] 프리런 로그는 isFreerun 플래그로 복원(devicePos는 null 유지)
-        const entry = { id: 'pcmp_' + Date.now(), savedAt: new Date().toISOString(), log: log, imported: true, devicePos: importedIsFreerun ? null : importedDevicePos, isFreerun: importedIsFreerun, fileName: file.name || null };
+        const rowWithMode = log.find(r => r.runMode);
+        const importedProRun = rowWithMode ? (rowWithMode.runMode === 'pro' ? true : (rowWithMode.runMode === 'lite' ? false : null)) : null;
+        const entry = { id: 'pcmp_' + Date.now(), savedAt: new Date().toISOString(), log: log, imported: true, proRun: importedProRun, devicePos: importedIsFreerun ? null : importedDevicePos, isFreerun: importedIsFreerun, fileName: file.name || null };
         list.unshift(entry);
         savePrecLogImportsList(list.slice(0, MAX_PRECLOG_IMPORTS));
         if (selectedPrecLogIds.indexOf(entry.id) < 0) selectedPrecLogIds.push(entry.id); // [수정] 방금 불러온 로그를 다중선택 배열에 추가
@@ -17641,7 +17655,7 @@ const garmin = (function () {
     // [수정] 불러온 지난 로그도 체크 드롭다운 한 줄씩: 날짜 / (행 수 · 파일명 · 위치) / 삭제.
     const posShortMapDl = getPosLabelMap(isKo);
     dropdown.innerHTML = logs.map((l, idx) => {
-      const posLabelDl = l.isFreerun ? (posShortMapDl.freerun || 'FREE RUN') : (l.devicePos ? (posShortMapDl[l.devicePos] || l.devicePos) : '');
+      const posLabelDl = withRunMode(l.isFreerun ? (posShortMapDl.freerun || 'FREE RUN') : (l.devicePos ? (posShortMapDl[l.devicePos] || l.devicePos) : ''), l.proRun);
       const line2 = l.log.length + (isKo ? '개' : ' rows')
         + (l.fileName ? ' · ' + escapeHtml(l.fileName) : '')
         + (posLabelDl ? ' <span class="c27">· ' + posLabelDl + '</span>' : '');
@@ -17705,7 +17719,8 @@ const garmin = (function () {
     // [추가] 착용 위치 배지: 길면 첫글자(C/W/A/H)만 축약해서 표시
     const posShortMap = { chest:'C', waist:'W', armband:'A', hand:'H' };
     panel.innerHTML = autoLogs.map((l, idx) => {
-      const posBadge = l.isFreerun ? ' <span class="c27">· F</span>' : (l.devicePos ? ' <span class="c27">· ' + (posShortMap[l.devicePos] || l.devicePos) + '</span>' : '');
+      const _pbTxt = withRunMode(l.isFreerun ? 'F' : (l.devicePos ? (posShortMap[l.devicePos] || l.devicePos) : ''), l.proRun);
+      const posBadge = _pbTxt ? ' <span class="c27">· ' + _pbTxt + '</span>' : '';
       return ddCheckRow({
         checked: selectedPrecLogIds.indexOf(l.id) >= 0,
         onToggle: "garmin.togglePrecLogSelectAutoMatch('" + l.id + "')",
