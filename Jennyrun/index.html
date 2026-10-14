@@ -911,6 +911,8 @@ body.prem-lock-garmin #garmin-calib-status:not(:empty)::before { content: var(--
 body.prem-lock-garmin #garmin-sample-box { display:block; }
 /* [추가 2026-10-10] 앱 코드/기본값을 바꾸는 도구는 관리자 전용: 패치 HTML 다운로드, 앱 코드로 저장, 앱 현재값으로 확정 */
 body.not-admin #btn-download-stride-calib, body.not-admin #btn-calib-avg3-commit, body.not-admin button[onclick*="downloadPatchedHtml"] { display:none !important; }
+/* [추가 2026-10-14] 원시 센서 기록(분석용)도 관리자 전용: 토글/내보내기 박스 전체 숨김 */
+body.not-admin #raw-capture-box { display:none !important; }
 .gs-row { margin:8px 0; font-size:var(--fs-xs); color:#ccc; font-weight:700; }
 .gs-bar { height:6px; border-radius:3px; background:#2a2a2a; margin-top:4px; overflow:hidden; }
 .gs-bar > i { display:block; height:100%; background:var(--primary); }
@@ -2430,6 +2432,12 @@ alt="runner"/>
 <div id="calib-factor-switch-box" style="margin-top:14px;">
 <div class="btn-info-row"><button id="btn-calib-factor-switch" style="background:#2a2a2a; color:#aaa; border:1.5px solid #444; padding:13px; border-radius:12px; flex:1; font-weight:900; font-size:var(--fs-base);" onclick="ui.toggleCalibFactors()"><span id="btn-calib-factor-switch-label">RUN MODE: LITE RUN</span></button><button type="button" class="info-btn" aria-label="info" onclick="toggleSettingInfo('calib-factor-switch-desc')">ⓘ</button></div>
 <div id="calib-factor-switch-desc" class="c35 info-collapsed" style="margin-top:8px;"></div>
+</div>
+<!-- [추가 2026-10-14] 원시 센서 기록(분석용): 켜고 뛰면 가속도/자이로 원시값을 러닝 끝난 뒤 CSV로 내보낼 수 있다. 기본 OFF -->
+<div id="raw-capture-box" style="margin-top:14px;">
+<button id="btn-raw-capture" style="background:#2a2a2a; color:#aaa; border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base);" onclick="ui.toggleRawCapture()"><span id="btn-raw-capture-label">RAW SENSOR LOG: OFF</span></button>
+<button id="btn-raw-export" style="background:#2a2a2a; color:#aaa; border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:8px; color:var(--primary);" onclick="ui.exportRawSensorCsv()"><span id="btn-raw-export-label">EXPORT LAST RAW SENSOR CSV</span></button>
+<div id="raw-capture-desc" class="c35" style="margin-top:8px;"></div>
 </div>
 <!-- [수정 2026-10-12] 캘리브레이션 관리 접이식 그룹: 앱 기본값/현재 데이터/되돌리기/초기화 -->
 <details id="calib-manage-details" class="calib-manage">
@@ -7357,6 +7365,48 @@ try {
 console.log('[calib-factor-switch]', next ? 'ON' : 'OFF', 'pos=' + pos, JSON.stringify(f));
 this.refreshCalibFactorSwitch();
 }
+// [추가 2026-10-14] 원시 센서 기록(분석용). 켜 두면 다음 러닝부터 가속도(중력 포함/제외)·자이로 원시값과
+// 걸음 확정 시점(GCT/수직진동 값)을 메모리에 모았다가, 러닝 후 설정에서 CSV로 내보낼 수 있다. 기본 OFF.
+refreshRawCaptureSwitch() {
+  const isKo = storage.getLang() === 'ko';
+  let on = false; try { on = !!storage.loadProfile().rawSensorCapture; } catch (e) {}
+  const btn = document.getElementById('btn-raw-capture');
+  const lab = document.getElementById('btn-raw-capture-label');
+  const exl = document.getElementById('btn-raw-export-label');
+  const desc = document.getElementById('raw-capture-desc');
+  if (lab) lab.textContent = (isKo ? '원시 센서 기록: ' : 'RAW SENSOR LOG: ') + (on ? 'ON' : 'OFF');
+  if (exl) exl.textContent = isKo ? '마지막 러닝 원시 센서 CSV 내보내기' : 'EXPORT LAST RAW SENSOR CSV';
+  if (btn) {
+    btn.style.background = on ? '#14261a' : '#2a2a2a';
+    btn.style.color = on ? '#5fd18a' : '#aaa';
+    btn.style.borderColor = on ? '#2d5a3f' : '#444';
+  }
+  if (desc) {
+    let n = 0; try { n = (typeof app !== 'undefined' && app && app.rawSensorBuf) ? app.rawSensorBuf.length : 0; } catch (e) {}
+    desc.textContent = isKo
+      ? ('분석용이에요. ON으로 두고 러닝을 시작하면 그 러닝의 센서 원시값을 모아요(메모리에만 저장, 앱을 종료하면 사라져요). 러닝이 끝난 뒤 내보내기를 누르세요. 최대 약 40분. 현재 저장된 행: ' + n)
+      : ('For analysis. With this ON, raw sensor values of the next run are collected in memory only (lost when the app closes). Export after the run. Up to ~40 min. Rows stored: ' + n);
+  }
+}
+toggleRawCapture() {
+if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'Admin-only feature.'); return; }
+  const prof = storage.loadProfile();
+  prof.rawSensorCapture = !prof.rawSensorCapture;
+  storage.saveProfile(prof);
+  this.refreshRawCaptureSwitch();
+}
+exportRawSensorCsv() {
+if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'Admin-only feature.'); return; }
+  const isKo = storage.getLang() === 'ko';
+  try {
+    if (typeof app === 'undefined' || !app || !app.rawSensorBuf || !app.rawSensorBuf.length) {
+      alert(isKo ? '저장된 원시 센서 기록이 없어요. 위 스위치를 ON으로 하고 러닝한 뒤 다시 눌러주세요.' : 'No raw sensor data stored. Turn the switch ON, run, then try again.');
+      return;
+    }
+    const built = app.buildRawSensorCsv();
+    storage.downloadCsvFile(built.csv, built.fileName);
+  } catch (e) { alert((isKo ? '내보내기 실패: ' : 'Export failed: ') + (e && e.message ? e.message : e)); }
+}
 updateCalibFactorDisplay() {
 const lang = storage.getLang();
 const t = translations[lang] || translations['en'];
@@ -9323,6 +9373,7 @@ this.vertCmCount = 0;
 // [추가] 정밀 로그(초당) 비교용: 가장 최근 걸음 1회의 순간 수직진동(cm). 러닝 누적 평균과 별개로,
 // 가민 FIT의 초당 vertical_oscillation 값과 같은 시간 해상도로 비교할 수 있도록 스텝마다 갱신됨.
 this.lastStepVertOscCm = null;
+this.recentVertCm = []; this.lastStepVertMedianCm = null; // [추가 2026-10-14] 로그 기록용: 최근 20초 수직진동 중앙값 (순간값 lastStepVertOscCm는 그대로 유지)
 // [추가] 잔진동(2차 충격) 오감지 필터용 최근 걸음 주기 버퍼
 this.recentCycleTimes = [];
 this.cycleArtifactStreak = 0; // [추가 2026-09-19] 아래 commitStep의 사이클 보정 락인 방지용
@@ -9583,6 +9634,7 @@ this.vertAmplitudeCount = 0;
 this.vertCmAccumulator = 0; // [단순화 2026-10-10] 속도 보정까지 반영된 걸음별 수직진동(cm) 누적 → VERT RATIO 평균에 사용
 this.vertCmCount = 0;
 this.lastStepVertOscCm = null; // [추가] 정밀 로그용 순간 수직진동값도 매 러닝 시작 시 초기화
+this.recentVertCm = []; this.lastStepVertMedianCm = null; // [추가 2026-10-14] 중앙값 버퍼도 매 러닝 시작 시 초기화(이전 러닝 값이 섞이지 않게)
 this.recentCycleTimes = [];
 this.cycleArtifactStreak = 0; // [추가 2026-09-19] 아래 commitStep의 사이클 보정 락인 방지용
 this.rotPeakSinceLastStep = 0;
@@ -9902,6 +9954,18 @@ if (this.vertSpeedSlope) {
 }
 if (this.vertEnabled) { this.vertCmAccumulator += _vertCm; this.vertCmCount++; }
 this.lastStepVertOscCm = this.vertEnabled ? +_vertCm.toFixed(2) : null;
+// [추가 2026-10-14] 1초 단위 값은 걸음마다 튀는 잡음이 커서(가민은 거의 일정), 로그에는 최근 20초 중앙값을 기록한다.
+// 순간값(lastStepVertOscCm)·원시 진폭(lastStepVertAmplitudeRaw)·VERT RATIO 누적평균은 그대로. 5걸음 미만이면 null → 로그는 기존 순간값 사용.
+if (this.vertEnabled) {
+  const _vNow = Date.now();
+  this.recentVertCm.push({ t: _vNow, v: _vertCm });
+  while (this.recentVertCm.length && _vNow - this.recentVertCm[0].t > 20000) this.recentVertCm.shift();
+  if (this.recentVertCm.length >= 5) {
+    const _vs = this.recentVertCm.map(function(o) { return o.v; }).sort(function(a, b) { return a - b; });
+    const _mid = Math.floor(_vs.length / 2);
+    this.lastStepVertMedianCm = +(_vs.length % 2 ? _vs[_mid] : (_vs[_mid - 1] + _vs[_mid]) / 2).toFixed(2);
+  } else { this.lastStepVertMedianCm = null; }
+} else { this.lastStepVertMedianCm = null; }
 // [추가] 표시/분석용 vertScale 적용값과 별개로, 손모드(vertEnabled=false)에서도
 // 항상 원시 진폭(가속도 단위, 스케일 미적용)을 기록해둔다 — 화면/리스트엔 절대 노출 안 하고
 // 가민 대조 정밀 로그(precisionLog)에만 실어 사후 분석용으로만 쓴다.
@@ -9918,13 +9982,17 @@ if (this.isFeetOnGround) {
 // 안정 구간 감지가 안 된 경우(데이터 누락 등)에는 cycleTime의
 // 35%를 폴백값으로만 사용 (이전 동작과 호환 유지)
 let measuredGCT;
-if (this.belowThresholdSince > 0 && this.belowThresholdSince > this.impactTime) {
+// [수정 2026-10-14] 실측값이 GCT_MIN_TRUSTED_MS(100ms) 미만이면 실측 실패로 보고 폴백 경로로 보낸다.
+// 예전엔 이런 수십ms 값도 그대로 GCT로 표시/기록돼 가민 대비 한참 낮은 값이 섞였다(정밀 로그로 확인).
+const _gctRawMeasured = (this.belowThresholdSince > 0 && this.belowThresholdSince > this.impactTime)
+  ? ((this.belowThresholdSince - this.impactTime) - this.gctFilterDelayMs) : -1;
+if (_gctRawMeasured >= 100) {
 // [수정 2026-08-26] belowThresholdSince는 저역통과 필터(forceLpfAlpha)를 거친
 // filteredForce가 groundThreshold 아래로 내려간 시점이라, 필터 자체의 지연(lag)만큼
 // 실제 접지 종료보다 항상 늦게 찍힌다 — 그 결과 GCT가 구조적으로 더 길게 측정됨
 // (가민 FIT 대비 실측 성공 스텝만 비교 시 가슴/손 공통으로 +22~24% 과대측정 확인,
 // 위치와 무관한 필터 지연 버그로 판단). gctFilterDelayMs만큼 빼서 보정한다.
-measuredGCT = (this.belowThresholdSince - this.impactTime) - this.gctFilterDelayMs;
+measuredGCT = _gctRawMeasured;
 this.gctMeasuredCount++;
 // [개선-2] 이번 세션의 실측 성공 사례로부터 GCT/cycleTime 비율을 느린 EMA로 학습.
 // 이후 폴백이 발동하면(예: 일시적 노이즈로 안정구간 감지 실패) 위치별 고정 상수보다
@@ -9943,13 +10011,19 @@ const observedRatio = Math.max(0.15, Math.min(0.75, measuredGCT / gctCycleTime))
 this.gctRatioLearned = (this.gctRatioLearned == null) ? observedRatio : (this.gctRatioLearned * 0.9 + observedRatio * 0.1);
 }
 } else {
-this.gctFallbackCount++;
+// [수정 2026-10-14b] 실측값이 있었지만 100ms 미만이라 버려진 경우는 예전처럼 "실측" 카운트로 센다.
+// (실측 비율 게이팅 — ground/impact 제안, 자가보정 기록 — 이 폴백 비중으로 잘못 읽히지 않게. 비율 학습에는 위에서 이미 제외됨)
+if (_gctRawMeasured >= 0) this.gctMeasuredCount++; else this.gctFallbackCount++;
 // 학습된 세션 비율이 있고(최소 5회 실측 후) 신뢰할 만하면 그걸 우선 사용하되,
 // 노이즈로 극단값에 수렴하는 걸 막기 위해 위치별 기본값의 ±25% 이내로만 허용한다.
 const base = this.gctFallbackRatio;
+// [수정 2026-10-14] 정밀 로그 6개를 가민 FIT과 비교한 결과, 폴백 GCT가 실제의 약 절반(걸음 간격×0.4, 실제 GCT는 걸음 간격의 약 0.7배)으로
+// 나와 GCT가 이중분포로 흔들렸다. gctRatioLearned(이번 러닝의 실측 GCT/걸음 간격 비율)는 폴백과 같은 단위인데도
+// 위치별 기본값의 ±25%로 잘려 쓰이지 못했다. 실측이 5회 이상 쌓였으면 학습 비율을 그대로 쓰되 생리적 범위(0.5~0.85)로만 제한한다.
+// (실측이 5회 미만이면 예전처럼 위치별 기본값 사용. gctFallbackRatio 설정값의 의미/단위는 바꾸지 않음)
 const effectiveRatio = (this.gctRatioLearned != null && this.gctMeasuredCount >= 5)
-? Math.max(base * 0.75, Math.min(base * 1.25, this.gctRatioLearned))
-: base;
+? Math.max(0.5, Math.min(0.85, this.gctRatioLearned))
+: Math.max(base, 0.70); // [수정 2026-10-14b] 가민 FIT 6개 대조: 실제 GCT/걸음간격 = 0.705~0.73 (전 위치 공통). 위치별 base(0.31~0.49)는 폴백 시 GCT를 절반으로 만들어 이중분포의 원인 → 학습값이 없을 땐 최소 0.70 보장
 measuredGCT = gctCycleTime * effectiveRatio; // 위치별 폴백 비율(또는 세션 학습값)
 }
 // 비정상 범위(50ms 미만, cycleTime 초과) 보정 — 여기도 gctCycleTime 기준
@@ -12491,7 +12565,7 @@ if (stepLengthWindowM != null && stepLengthInstantM != null) {
   stepLengthM = stepLengthInstantM.toFixed(2);
 }
 const vertOscMm = (_fm && _fm.lastStepVertOscCm != null)
-  ? (_fm.lastStepVertOscCm * 10).toFixed(1) : '';
+  ? ((_fm.lastStepVertMedianCm != null ? _fm.lastStepVertMedianCm : _fm.lastStepVertOscCm) * 10).toFixed(1) : ''; // [수정 2026-10-14] 최근 20초 중앙값 우선, 없으면 기존 순간값
 // [추가] 좌우 판별 진단용: 가장 최근 완료된 스텝 1회의 축별 부호 있는 자이로 평균(deg/s).
 // alpha/beta/gamma 중 어느 축이 실제 좌우와 상관관계가 있는지 실측으로 확인하기 위한 원시값.
 const gyroA = (_fm && _fm.lastStepGyroA != null) ? _fm.lastStepGyroA : '';
@@ -12633,14 +12707,51 @@ if (this.motionListenerAttached) return;
 window.addEventListener('devicemotion', (e) => this.handleDeviceMotionEvent(e));
 this.motionListenerAttached = true;
 }
+// [추가 2026-10-14] 원시 센서 기록(분석용): rawSensorBuf가 있을 때(설정 스위치 ON으로 시작한 러닝)만 쌓는다.
+// 행 형식: 샘플 [t_ms, ax, ay, az, rotAlpha, rotBeta, rotGamma, linX, linY, linZ, interval] / 걸음 확정 ['S', t_ms, gct, vertCm, vertRaw]
+captureRawSensor(e) {
+  const buf = this.rawSensorBuf;
+  if (!buf || buf.length >= 150000) return; // 약 40분(60Hz) 상한 — 메모리 보호
+  const a = e.accelerationIncludingGravity || {}, l = e.acceleration || {}, r = e.rotationRate || {};
+  buf.push([Date.now(), a.x, a.y, a.z, r.alpha, r.beta, r.gamma, l.x, l.y, l.z, e.interval]);
+}
+captureRawStepMarker() {
+  const buf = this.rawSensorBuf;
+  if (!buf || buf.length >= 150000) return;
+  const m = (this.state.activityMode === 'freerun') ? this.freerunMotion : (this.state.activityMode === 'walk' ? this.walkMotion : this.motion);
+  if (!m || m.gctCount === undefined || m.gctCount === this._rawGctSeen) return;
+  this._rawGctSeen = m.gctCount;
+  buf.push(['S', Date.now(), m.lastStepGctMs, m.lastStepVertOscCm, m.lastStepVertAmplitudeRaw]);
+}
+buildRawSensorCsv() {
+  const f3 = v => (typeof v === 'number' && isFinite(v)) ? v.toFixed(3) : '';
+  const meta = this.rawSensorMeta || {};
+  const lines = [];
+  lines.push('# raw sensor log (analysis). start_iso=' + (meta.startIso || '') + ' device_pos=' + (meta.devicePos || '') + ' run_mode=' + (meta.runMode || '') + ' activity=' + (meta.activity || '') + ' ua=' + String(navigator.userAgent || '').replace(/[,\n\r]/g, ' '));
+  lines.push('ev,t_ms,ax,ay,az,rot_alpha,rot_beta,rot_gamma,lin_x,lin_y,lin_z,interval,step_gct_ms,step_vert_cm,step_vert_raw');
+  for (const r of this.rawSensorBuf) {
+    if (r[0] === 'S') {
+      lines.push(['s', r[1], '', '', '', '', '', '', '', '', '', '', r[2] != null ? r[2] : '', r[3] != null ? r[3] : '', r[4] != null ? r[4] : ''].join(','));
+    } else {
+      lines.push(['a', r[0], f3(r[1]), f3(r[2]), f3(r[3]), f3(r[4]), f3(r[5]), f3(r[6]), f3(r[7]), f3(r[8]), f3(r[9]), f3(r[10]), '', '', ''].join(','));
+    }
+  }
+  const d = new Date(meta.startMs || Date.now());
+  const pad = n => String(n).padStart(2, '0');
+  const fileName = 'raw-' + pad(d.getMonth() + 1) + pad(d.getDate()) + '_' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds())
+    + '_' + (meta.activity === 'freerun' ? 'freerun' : (meta.devicePos || 'pos')) + (meta.runMode ? ('_' + meta.runMode) : '') + '.csv';
+  return { csv: lines.join('\n'), fileName: fileName };
+}
 handleDeviceMotionEvent(e) {
 if (!this.state.isRunning || this.state.isPaused) return;
+if (this.rawSensorBuf) this.captureRawSensor(e);
 // [수정] 프리러닝도 이제 완전한 no-op이 아니라, 화면에는 절대 노출하지 않는 별도
 // 인스턴스(freerunMotion, 프리런 전용 프로필 기준)로 자이로/가속도를 내부적으로만 처리한다.
 // 케이던스/거리/페이스/보폭 등 화면에 보이는 코어 지표는 여전히 네이티브 스텝 감지기+GPS로만
 // 산출되므로 전혀 영향 없음 — 값은 오직 정밀 로그(가민 대조용) 기록에만 쓰인다.
 if (this.state.activityMode === "freerun") { if (this.freerunMotion) this.freerunMotion.handleMotion(e); }
 else if (this.state.activityMode === "walk") { this.walkMotion.handleMotion(e); } else { this.motion.handleMotion(e); }
+if (this.rawSensorBuf) this.captureRawStepMarker(); // [추가 2026-10-14]
 if (this.leanTracker) this.leanTracker.handleMotion(e); // [신규] 린각도 추출기: 완전 분리된 별도 경로, 걸음 감지에는 관여하지 않음
 if (!this.state.isAutoPaused && typeof this.maybeLogPrecisionSample === 'function') { this.maybeLogPrecisionSample(); }
 }
@@ -12683,6 +12794,15 @@ this.state.lastDiagCheckpoint = 0;
 this.state.lastDiagSeconds = 0;
 this.state.lastDiagAlt = null;
 this.state.precisionLog = []; // [추가] 정밀 비교용 초당 로그 (가민 워치 데이터와 대조용)
+// [추가 2026-10-14] 원시 센서 기록 스위치가 ON이면 이번 러닝용 버퍼를 새로 시작(이전 러닝 버퍼는 교체). OFF면 이전 버퍼를 그대로 둔다.
+try {
+  if (storage.loadProfile().rawSensorCapture && premium.isAdmin) { // [수정 2026-10-14] 관리자 전용: 예전에 ON으로 저장된 일반 계정은 기록하지 않음
+    this.rawSensorBuf = [];
+    this._rawGctSeen = undefined;
+    this.rawSensorMeta = { startMs: Date.now(), startIso: new Date().toISOString(), devicePos: (storage.loadProfile().devicePos || 'chest'),
+      runMode: isCalibFactorsOn() ? 'pro' : 'lite', activity: this.state.activityMode || 'run' };
+  }
+} catch (e) {}
 // [수정 2026-09-01] gctMs 스테일 값 감지용: commitStep()에서 GCT가 실제로 새로 계산될 때마다
 // 증가하는 motion.gctCount의 "직전 로그 시점 값"을 저장해둔다. 새 스텝이 안 커밋된 초에는
 // 화면(getTxt('gct'))이 마지막 스텝 값을 계속 보여주는데, 이걸 그대로 로그에 찍으면 러닝
@@ -17309,7 +17429,7 @@ const garmin = (function () {
     setText('calib-manage-summary-text', isKo ? '캘리브레이션 관리' : 'CALIBRATION TOOLS');
     setText('btn-restore-committed-calib-all-label', isKo ? '현재 캘리브레이션으로 되돌아가기 (전체 위치)' : 'RESTORE CURRENT CALIBRATION (ALL POSITIONS)');
     setText('btn-factory-reset-calib-all-label', isKo ? '팩토리 기본값으로 초기화 (전체 위치)' : 'FACTORY RESET CALIBRATION (ALL POSITIONS)');
-    try { if (typeof ui !== 'undefined' && ui.refreshCalibFactorSwitch) ui.refreshCalibFactorSwitch(); } catch (e) {} // [추가 2026-10-08]
+    try { if (typeof ui !== 'undefined' && ui.refreshCalibFactorSwitch) ui.refreshCalibFactorSwitch(); if (typeof ui !== 'undefined' && ui.refreshRawCaptureSwitch) ui.refreshRawCaptureSwitch(); } catch (e) {} // [추가 2026-10-08]
     try { refreshCalibAvg3Switch(); } catch (e) {} // [추가 2026-10-10]
   }
 
