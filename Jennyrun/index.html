@@ -2511,23 +2511,28 @@ window.onAndroidSaveResult = function(success, fileName) {
     alert(isKo ? ('저장되었습니다' + (fileName ? (': ' + fileName) : '.')) : ('Saved' + (fileName ? (': ' + fileName) : '.')));
   }
 };
-// [리팩토링] GCT/VERT(및 이를 재료로 하는 효율점수)를 신뢰할 수 없는 기록인지 판단하는 조건이
-// 여러 곳(경로 공유카드, 공유모달, 크루 업로드, UIManager)에 똑같이 복붙돼 있던 것을 여기 전역
-// 함수 하나로 통합. UIManager.isGctVertUnreliable()을 포함한 모든 호출부는 이제 이 함수만 참조하므로,
-// 신뢰 조건이 바뀌어도(예: 착용 위치 추가/알고리즘 개선) 한 곳만 고치면 전체에 반영된다.
-function isGctVertUnreliable(record) {
-  // [수정 2026-10-11] GCT/VERT/FLIGHT(및 이를 재료로 하는 효율점수)는 모든 착용 위치/모드에서 표시한다.
-  // (일단 다 보여주고 가민 비교로 보정해 가는 방식. 기존엔 손/암밴드/프리런을 여기서 숨겼음)
-  // 좌우 밸런스·린각도는 아래 isBalanceUnreliable()로 분리돼 기존처럼 숨겨진다.
-  // [수정 2026-10-15] 손/암밴드/프리런은 몸통 진동·접지 충격을 제대로 못 받아 GCT/VERT/FLIGHT가 가민과 크게 어긋나므로
-  // 표시하지 않는다(옛 조건 복원 = isBalanceUnreliable과 동일). 정밀 로그에는 값이 그대로 기록되어 분석에는 계속 쓸 수 있다.
-  return isBalanceUnreliable(record);
+// [리팩토링 2026-10-15b] 지표별 "어떤 기록에서 보여줄지" 규칙의 단일 출처.
+// 리스트·통계·상세·공유카드·크루·진단 등 메인(라이브) 화면을 뺀 모든 곳이 이 표만 참조한다.
+// 규칙을 바꾸려면(착용 위치 추가 등) 아래 표 한 곳만 고치면 전체에 반영된다.
+//   positions: 표시를 허용할 착용 위치 / modes: 허용할 활동모드(생략하면 프리런 제외 전체)
+// 메인(라이브) 화면은 이 표와 무관하게 모든 모드/위치에서 GCT/FLIGHT를 표시한다.
+// 정밀 로그에는 이 표와 무관하게 모든 값이 기록되어 가민 비교·분석에 계속 쓸 수 있다.
+const METRIC_VISIBILITY = {
+  gctFlight: { positions: ['chest', 'waist'] },            // GCT / FLIGHT / VERT / 효율점수
+  balance:   { positions: ['chest', 'waist'] },            // 좌우 밸런스
+  lean:      { positions: ['chest'], modes: ['run'] }      // 린각도 (러닝 + 가슴만)
+};
+function isMetricVisible(record, metric) {
+  const rule = METRIC_VISIBILITY[metric];
+  if (!rule || !record) return false;
+  const mode = record.activityMode || 'run';
+  if (mode === 'freerun') return false;                    // 프리런은 착용 위치와 무관 → 항상 숨김
+  if (rule.modes && rule.modes.indexOf(mode) < 0) return false;
+  return rule.positions.indexOf(record.devicePos || 'chest') >= 0; // 위치 값 없는 옛 기록 = 가슴으로 간주
 }
-// [추가 2026-10-11] 좌우 밸런스(자이로 기반) 신뢰 불가 판정 — 옛 isGctVertUnreliable 조건 그대로.
-// [수정 2026-09-19] 암밴드: GCT가 두 덩어리(약 175ms / 약 370ms)로 갈라지고 49%가 폴백 → 밸런스 의미 없음.
-function isBalanceUnreliable(record) {
-  return !!record && (record.activityMode === 'freerun' || record.devicePos === 'hand' || record.devicePos === 'armband');
-}
+// 기존 호출부(공유카드/공유모달/크루 업로드/UIManager 등)가 쓰던 이름은 그대로 유지하되 위 표에 위임한다.
+function isGctVertUnreliable(record) { return !isMetricVisible(record, 'gctFlight'); }
+function isBalanceUnreliable(record) { return !isMetricVisible(record, 'balance'); }
 function generateRunCardCanvas(data, isKo) {
     const PAD = 40;
     const GREEN = '#00aa55';
@@ -6000,32 +6005,8 @@ if (labelFlight) labelFlight.textContent = _tMode.flight;
 if (gctUnit) gctUnit.textContent = ' MS';
 if (flightUnit) flightUnit.textContent = ' %';
 }
-// [수정] GCT/FLIGHT 카드 비활성화 여부는 별도 메서드(updateGctFlightAvailability)로 분리 —
-// 위치(devicePos) 전환 시(setDevicePos)에도 같은 로직을 재사용해야 하기 때문.
-this.updateGctFlightAvailability();
 // [신규] 하단 탭바의 RUN 탭 라벨도 선택된 모드에 맞춰 즉시 갱신
 this.updateTabRunLabel();
-}
-// [수정] GCT/FLIGHT 카드 비활성화: 프리런 모드이거나(자이로/가속도 지표 자체를 안 씀),
-// 손(hand) 착용 위치일 때(가속도 기반 추정치라 부정확 — 이전엔 경고 문구만 달았는데,
-// 추정 수치를 그대로 노출하면 사용자가 실측값처럼 믿고 추이 비교를 할 위험이 있어
-// 프리런과 동일하게 카드 자체를 흐리게 숨기는 방식으로 통일함).
-// 걷기 모드는 이 카드를 STRIDE(보폭)로 재활용하며 모션 기반 GCT와 무관하므로 제외.
-// 모드 전환(setActivityMode)과 위치 전환(setDevicePos) 양쪽에서 호출해 항상 최신 상태 유지.
-updateGctFlightAvailability() {
-const mode = this.currentActivityMode;
-const pos = (function () { try { return storage.loadProfile().devicePos || 'chest'; } catch (e) { return 'chest'; } })();
-const cardGctEl = document.getElementById('card-gct');
-const cardFlightEl = document.getElementById('card-flight');
-const gctFlightDisabled = (mode === 'freerun') || ((pos === 'hand' || pos === 'armband') && mode !== 'walk'); // [수정 2026-10-15] 손/암밴드/프리런은 GCT/FLIGHT 카드를 숨김(10-11 '모든 위치 표시'를 원복)
-if (cardGctEl) { cardGctEl.style.opacity = gctFlightDisabled ? '0.6' : '1'; cardGctEl.style.pointerEvents = gctFlightDisabled ? 'none' : 'auto'; }
-if (cardFlightEl) { cardFlightEl.style.opacity = gctFlightDisabled ? '0.6' : '1'; cardFlightEl.style.pointerEvents = gctFlightDisabled ? 'none' : 'auto'; }
-if (gctFlightDisabled) {
-const gctValEl = document.getElementById('gct');
-const flightValEl = document.getElementById('flight');
-if (gctValEl) gctValEl.textContent = '--';
-if (flightValEl) flightValEl.textContent = '--';
-}
 }
 // [추가] 최초 실행 온보딩 화면 - 활동모드 선택 (아직 확정 저장은 안 하고 화면 표시만 갱신)
 onbSelectMode(mode) {
@@ -6424,18 +6405,13 @@ if (data.cadence !== undefined) {
 this.dom.cadence.textContent = data.cadence;
 this.updateCardColor(this.dom.cardCadence, this.getCadenceLevel(data.cadence));
 }
-// [수정] 프리러닝은 자이로/가속도 기반 GCT/FLIGHT 계산 자체를 하지 않고,
-// 손(hand) 착용도 추정치가 부정확해 updateGctFlightAvailability()에서 카드를 흐리게 숨기므로,
-// commitStep에서 폴백값이 올라오더라도 매 틱마다 실측값처럼 텍스트를 덮어쓰지 않도록
-// 여기서도 동일한 조건으로 걸러 "--" 고정 상태를 유지한다.
-const _isFreerunDisplay = this.currentActivityMode === 'freerun';
-const _isHandDisplay = (function () { try { const _dp = storage.loadProfile().devicePos; return (_dp === 'hand' || _dp === 'armband') && (this.currentActivityMode !== 'walk'); } catch (e) { return false; } }).call(this);
-const _gctFlightDisplayBlocked = _isFreerunDisplay || _isHandDisplay; // [수정 2026-10-15] 손/암밴드/프리런은 GCT/FLIGHT 표시 안 함(10-11 변경 원복)
-if (data.gct !== undefined && !_gctFlightDisplayBlocked) {
+// 메인(라이브) 화면은 모든 모드/착용 위치에서 GCT/FLIGHT를 그대로 표시한다.
+// (다른 페이지의 표시 규칙은 METRIC_VISIBILITY 참고)
+if (data.gct !== undefined) {
 this.dom.gct.textContent = data.gct;
 this.updateCardColor(this.dom.cardGct, this.getGctLevel(data.gct));
 }
-if (data.flight !== undefined && !_gctFlightDisplayBlocked) {
+if (data.flight !== undefined) {
 this.dom.flight.textContent = data.flight;
 this.updateCardColor(this.dom.cardFlight, this.getFlightLevel(data.flight));
 }
@@ -7325,8 +7301,6 @@ const p = storage.loadProfile();
 p.devicePos = pos;
 storage.saveProfile(p);
 this.updateDevicePosUI(pos);
-// [추가] 착용 위치가 바뀌면(특히 HAND ↔ 다른 위치) GCT/FLIGHT 카드 표시 여부도 재평가
-this.updateGctFlightAvailability();
 // [추가] 착용 위치가 바뀌면 린각도 스위치 사용 가능 여부(러닝+가슴)도 재평가
 this.updateLeanAngleAvailability();
 // MotionManager에 즉시 반영 (러닝 중에 바꿔도 바로 적용됨)
@@ -10694,7 +10668,8 @@ const LeanAngleUI = {
 ENABLED: true,
 // record(저장된 러닝 기록)에 화면에 낼 수 있는 유효한 린각도가 있는지
 has(record) {
-return this.ENABLED && !!record && record.avgLeanAngleDeg != null;
+// 린각도 표시 규칙(러닝+가슴)은 METRIC_VISIBILITY.lean 한 곳에서 관리
+return this.ENABLED && !!record && record.avgLeanAngleDeg != null && isMetricVisible(record, 'lean');
 },
 // [추가] 전방/측방 분해값이 있는지 (짧은 러닝 등 축 학습이 덜 됐으면 없을 수 있음 → 이땐 total만 표시)
 hasDirection(fwd, lat) {
@@ -12627,11 +12602,9 @@ const logSpeedKmh = (_windowDistM > 0 && _winElapsedSec > 0)
 const _curGctCount = (_fm && typeof _fm.gctCount === 'number') ? _fm.gctCount : null;
 const _hasNewStepThisSample = (_curGctCount == null) || (_curGctCount !== this.state.lastLoggedGctCount);
 if (_curGctCount != null) this.state.lastLoggedGctCount = _curGctCount;
-// [수정 2026-09-21] 손/암밴드도 프리런과 동일하게 GCT/FLIGHT를 화면 텍스트가 아니라 내부 계산값에서
-// 읽어 정밀 로그에 기록한다. 손/암밴드는 화면 GCT/FLIGHT를 '--'로 고정해 두는데(4906줄
-// updateGctFlightAvailability, 5346줄 표시 차단), 로그가 getTxt('gct')(=화면 텍스트)를 읽고 있어서
-// 로그에도 항상 '--'이 찍히고 가민분석실 비교표의 PHONE GCT가 비어 있었다. 화면/리스트/통계/진단/
-// 크루 표시는 기존 게이트(isGctVertUnreliable 등)가 그대로 막으므로 앱 데이터카드에는 여전히 노출되지 않는다.
+// [수정 2026-09-21] 손/암밴드/프리런은 GCT/FLIGHT를 화면 텍스트(getTxt)가 아니라 내부 계산값에서 읽어
+// 정밀 로그에 기록한다(가민분석실 비교표의 PHONE GCT용). 다른 페이지의 표시 여부는 METRIC_VISIBILITY가 결정하므로
+// 로그 기록과 화면 표시는 서로 독립이다.
 // 걷기 모드는 정밀 로그를 남기지 않으므로 제외. 가슴/허리는 기존 경로(getTxt) 그대로.
 const _gctInternalLog = this.state.activityMode === 'freerun'
   || ((this.state.runDevicePos === 'hand' || this.state.runDevicePos === 'armband') && this.state.activityMode !== 'walk');
