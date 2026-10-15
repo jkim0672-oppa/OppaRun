@@ -4605,6 +4605,36 @@ return mode === 'walk' ? 'Walk' : mode === 'trail' ? 'Trail Run' : mode === 'fre
 // 하나로 통합. 폴백 경로는 Blob+ObjectURL로 통일(data URI보다 대용량 문자열에 안전하고,
 // 기존에 없던 URL.revokeObjectURL도 추가해 메모리 누수를 방지). 저장 성공 알림 문구는 항상
 // 파일명을 포함하도록 통일(기존엔 일부 호출부만 파일명을 표시했음).
+// [추가 2026-10-15] 원시 센서 기록 영구 저장소(IndexedDB). 예전에는 app.rawSensorBuf(메모리)에만 있어서
+// 러닝 종료 후 location.reload()가 실행되면 통째로 사라졌다. 용량이 커서(최대 15만 행) localStorage 대신 IndexedDB 사용.
+const RawSensorStore = {
+  _open() {
+    return new Promise((resolve, reject) => {
+      if (!window.indexedDB) { reject(new Error('IndexedDB unavailable')); return; }
+      const rq = indexedDB.open('jennyrun-raw', 1);
+      rq.onupgradeneeded = () => { rq.result.createObjectStore('raw'); };
+      rq.onsuccess = () => resolve(rq.result);
+      rq.onerror = () => reject(rq.error);
+    });
+  },
+  async put(buf, meta) {
+    const db = await this._open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('raw', 'readwrite');
+      tx.objectStore('raw').put({ buf: buf, meta: meta, savedAt: Date.now() }, 'last');
+      tx.oncomplete = () => { db.close(); resolve(true); };
+      tx.onerror = tx.onabort = () => { db.close(); reject(tx.error); };
+    });
+  },
+  async get() {
+    const db = await this._open();
+    return new Promise((resolve, reject) => {
+      const rq = db.transaction('raw', 'readonly').objectStore('raw').get('last');
+      rq.onsuccess = () => { db.close(); resolve(rq.result || null); };
+      rq.onerror = () => { db.close(); reject(rq.error); };
+    });
+  }
+};
 function saveTextFileNative(content, fileName, mimeType, isKo) {
 if (window.AndroidDownload && typeof window.AndroidDownload.saveFileAs === 'function') {
 // 저장 위치(폴더)를 사용자가 직접 고르는 새 브릿지 - 결과는 window.onAndroidSaveResult 콜백으로 옴
@@ -7383,8 +7413,8 @@ refreshRawCaptureSwitch() {
   if (desc) {
     let n = 0; try { n = (typeof app !== 'undefined' && app && app.rawSensorBuf) ? app.rawSensorBuf.length : 0; } catch (e) {}
     desc.textContent = isKo
-      ? ('분석용이에요. ON으로 두고 러닝을 시작하면 그 러닝의 센서 원시값을 모아요(메모리에만 저장, 앱을 종료하면 사라져요). 러닝이 끝난 뒤 내보내기를 누르세요. 최대 약 40분. 현재 저장된 행: ' + n)
-      : ('For analysis. With this ON, raw sensor values of the next run are collected in memory only (lost when the app closes). Export after the run. Up to ~40 min. Rows stored: ' + n);
+      ? ('분석용이에요. ON으로 두고 러닝을 시작하면 그 러닝의 센서 원시값을 모아요(기기에 저장돼서 러닝 종료 후 앱이 새로고침돼도 남아요. 다음 기록을 시작하면 교체돼요). 러닝이 끝난 뒤 내보내기를 누르세요. 최대 약 40분. 현재 메모리 행: ' + n)
+      : ('For analysis. With this ON, raw sensor values of the next run are kept on device and survive the post-run reload (replaced by the next recorded run). Export after the run. Up to ~40 min. Rows in memory: ' + n);
   }
 }
 toggleRawCapture() {
@@ -7394,15 +7424,21 @@ if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'A
   storage.saveProfile(prof);
   this.refreshRawCaptureSwitch();
 }
-exportRawSensorCsv() {
+async exportRawSensorCsv() {
 if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'Admin-only feature.'); return; }
   const isKo = storage.getLang() === 'ko';
   try {
-    if (typeof app === 'undefined' || !app || !app.rawSensorBuf || !app.rawSensorBuf.length) {
+    let buf = (typeof app !== 'undefined' && app && app.rawSensorBuf && app.rawSensorBuf.length) ? app.rawSensorBuf : null;
+    let meta = buf ? app.rawSensorMeta : null;
+    if (!buf) { // 러닝 후 앱이 새로고침되면 메모리는 비어 있으므로 영구 저장소에서 읽는다
+      const saved = await RawSensorStore.get();
+      if (saved && saved.buf && saved.buf.length) { buf = saved.buf; meta = saved.meta; }
+    }
+    if (!buf) {
       alert(isKo ? '저장된 원시 센서 기록이 없어요. 위 스위치를 ON으로 하고 러닝한 뒤 다시 눌러주세요.' : 'No raw sensor data stored. Turn the switch ON, run, then try again.');
       return;
     }
-    const built = app.buildRawSensorCsv();
+    const built = app.buildRawSensorCsv(buf, meta);
     storage.downloadCsvFile(built.csv, built.fileName);
   } catch (e) { alert((isKo ? '내보내기 실패: ' : 'Export failed: ') + (e && e.message ? e.message : e)); }
 }
@@ -12712,6 +12748,14 @@ captureRawSensor(e) {
   if (!buf || buf.length >= 150000) return; // 약 40분(60Hz) 상한 — 메모리 보호
   const a = e.accelerationIncludingGravity || {}, l = e.acceleration || {}, r = e.rotationRate || {};
   buf.push([Date.now(), a.x, a.y, a.z, r.alpha, r.beta, r.gamma, l.x, l.y, l.z, e.interval]);
+  // [추가 2026-10-15] 약 30초마다 영구 저장소에 스냅샷(앱이 중간에 죽거나 종료 직후 새로고침돼도 남도록)
+  const now = Date.now();
+  if (!this._rawPersistAt || now - this._rawPersistAt > 30000) { this._rawPersistAt = now; this.persistRawSensor(); }
+}
+persistRawSensor() {
+  const buf = this.rawSensorBuf;
+  if (!buf || !buf.length) return Promise.resolve(false);
+  return RawSensorStore.put(buf, this.rawSensorMeta || {}).then(() => true).catch(err => { console.warn('[raw-persist] failed', err); return false; });
 }
 captureRawStepMarker() {
   const buf = this.rawSensorBuf;
@@ -12721,13 +12765,14 @@ captureRawStepMarker() {
   this._rawGctSeen = m.gctCount;
   buf.push(['S', Date.now(), m.lastStepGctMs, m.lastStepVertOscCm, m.lastStepVertAmplitudeRaw]);
 }
-buildRawSensorCsv() {
+buildRawSensorCsv(bufArg, metaArg) {
   const f3 = v => (typeof v === 'number' && isFinite(v)) ? v.toFixed(3) : '';
-  const meta = this.rawSensorMeta || {};
+  const meta = metaArg || this.rawSensorMeta || {};
+  const rawBuf = bufArg || this.rawSensorBuf || [];
   const lines = [];
   lines.push('# raw sensor log (analysis). start_iso=' + (meta.startIso || '') + ' device_pos=' + (meta.devicePos || '') + ' run_mode=' + (meta.runMode || '') + ' activity=' + (meta.activity || '') + ' ua=' + String(navigator.userAgent || '').replace(/[,\n\r]/g, ' '));
   lines.push('ev,t_ms,ax,ay,az,rot_alpha,rot_beta,rot_gamma,lin_x,lin_y,lin_z,interval,step_gct_ms,step_vert_cm,step_vert_raw');
-  for (const r of this.rawSensorBuf) {
+  for (const r of rawBuf) {
     if (r[0] === 'S') {
       lines.push(['s', r[1], '', '', '', '', '', '', '', '', '', '', r[2] != null ? r[2] : '', r[3] != null ? r[3] : '', r[4] != null ? r[4] : ''].join(','));
     } else {
@@ -12736,8 +12781,10 @@ buildRawSensorCsv() {
   }
   const d = new Date(meta.startMs || Date.now());
   const pad = n => String(n).padStart(2, '0');
-  const fileName = 'raw-' + pad(d.getMonth() + 1) + pad(d.getDate()) + '_' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds())
-    + '_' + (meta.activity === 'freerun' ? 'freerun' : (meta.devicePos || 'pos')) + (meta.runMode ? ('_' + meta.runMode) : '') + '.csv';
+  // [수정 2026-10-15] 파일명: raw_<폰위치>_<YYYYMMDD>_<HHMMSS>[_freerun][_pro|lite].csv — 폰 위치와 시작 시각을 항상 포함
+  const posStr = String(meta.devicePos || 'pos').replace(/[^A-Za-z0-9_-]/g, '-');
+  const fileName = 'raw_' + posStr + '_' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '_' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds())
+    + (meta.activity === 'freerun' ? '_freerun' : '') + (meta.runMode ? ('_' + meta.runMode) : '') + '.csv';
   return { csv: lines.join('\n'), fileName: fileName };
 }
 handleDeviceMotionEvent(e) {
@@ -13070,6 +13117,7 @@ stride = parseFloat(calcStride(spd, cadenceForFallback, hcm, prof.strideCorrecti
 return { stride, sensorFlag };
 }
 onFinish() {
+this.persistRawSensor(); // [추가 2026-10-15] 종료 직후 새로고침 전에 원시 센서 기록을 영구 저장
 if(this.timer) clearInterval(this.timer);
 this.stopSilentKeepAlive();
 // [추가] 캘리브레이션 러닝(4번 개선사항)이면 일반 기록 저장 대신
