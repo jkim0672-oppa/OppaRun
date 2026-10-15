@@ -2498,7 +2498,9 @@ function isGctVertUnreliable(record) {
   // [수정 2026-10-11] GCT/VERT/FLIGHT(및 이를 재료로 하는 효율점수)는 모든 착용 위치/모드에서 표시한다.
   // (일단 다 보여주고 가민 비교로 보정해 가는 방식. 기존엔 손/암밴드/프리런을 여기서 숨겼음)
   // 좌우 밸런스·린각도는 아래 isBalanceUnreliable()로 분리돼 기존처럼 숨겨진다.
-  return false;
+  // [수정 2026-10-15] 손/암밴드/프리런은 몸통 진동·접지 충격을 제대로 못 받아 GCT/VERT/FLIGHT가 가민과 크게 어긋나므로
+  // 표시하지 않는다(옛 조건 복원 = isBalanceUnreliable과 동일). 정밀 로그에는 값이 그대로 기록되어 분석에는 계속 쓸 수 있다.
+  return isBalanceUnreliable(record);
 }
 // [추가 2026-10-11] 좌우 밸런스(자이로 기반) 신뢰 불가 판정 — 옛 isGctVertUnreliable 조건 그대로.
 // [수정 2026-09-19] 암밴드: GCT가 두 덩어리(약 175ms / 약 370ms)로 갈라지고 49%가 폴백 → 밸런스 의미 없음.
@@ -5994,7 +5996,7 @@ const mode = this.currentActivityMode;
 const pos = (function () { try { return storage.loadProfile().devicePos || 'chest'; } catch (e) { return 'chest'; } })();
 const cardGctEl = document.getElementById('card-gct');
 const cardFlightEl = document.getElementById('card-flight');
-const gctFlightDisabled = false; // [수정 2026-10-11] 모든 위치/모드에서 GCT/FLIGHT 카드 표시
+const gctFlightDisabled = (mode === 'freerun') || ((pos === 'hand' || pos === 'armband') && mode !== 'walk'); // [수정 2026-10-15] 손/암밴드/프리런은 GCT/FLIGHT 카드를 숨김(10-11 '모든 위치 표시'를 원복)
 if (cardGctEl) { cardGctEl.style.opacity = gctFlightDisabled ? '0.6' : '1'; cardGctEl.style.pointerEvents = gctFlightDisabled ? 'none' : 'auto'; }
 if (cardFlightEl) { cardFlightEl.style.opacity = gctFlightDisabled ? '0.6' : '1'; cardFlightEl.style.pointerEvents = gctFlightDisabled ? 'none' : 'auto'; }
 if (gctFlightDisabled) {
@@ -6407,7 +6409,7 @@ this.updateCardColor(this.dom.cardCadence, this.getCadenceLevel(data.cadence));
 // 여기서도 동일한 조건으로 걸러 "--" 고정 상태를 유지한다.
 const _isFreerunDisplay = this.currentActivityMode === 'freerun';
 const _isHandDisplay = (function () { try { const _dp = storage.loadProfile().devicePos; return (_dp === 'hand' || _dp === 'armband') && (this.currentActivityMode !== 'walk'); } catch (e) { return false; } }).call(this);
-const _gctFlightDisplayBlocked = false; // [수정 2026-10-11] 손/암밴드/프리런도 GCT/FLIGHT 표시
+const _gctFlightDisplayBlocked = _isFreerunDisplay || _isHandDisplay; // [수정 2026-10-15] 손/암밴드/프리런은 GCT/FLIGHT 표시 안 함(10-11 변경 원복)
 if (data.gct !== undefined && !_gctFlightDisplayBlocked) {
 this.dom.gct.textContent = data.gct;
 this.updateCardColor(this.dom.cardGct, this.getGctLevel(data.gct));
@@ -13170,9 +13172,7 @@ strideForVert = calcStride(speedKmh, avgCadence, _hcmVert, _profVert.strideCorre
 // [수정] VERT(수직진동 비율)는 손(hand)에서 이미 vertEnabled:false로 계산 자체가 안 되는데,
 // 프리런은 착용위치와 무관하게 동작하다 보니 이 null 처리가 안 걸려있었음 — 손과 동일하게
 // 프리런도 실측 VERT 대신 null(→ calcEffScore의 케이던스 기반 추정값으로 폴백)로 맞춤.
-let measuredVertRatio = (this.state.activityMode === 'freerun')
-  ? (this.freerunMotion ? this.freerunMotion.getVertRatio(strideForVert) : null) // [수정 2026-10-11] 프리런도 freerunMotion으로 VERT 산출
-  : (this.motion ? this.motion.getVertRatio(strideForVert) : null);
+let measuredVertRatio = (this.motion && this.state.activityMode !== 'freerun') ? this.motion.getVertRatio(strideForVert) : null; // [수정 2026-10-15] 프리런 VERT는 다시 null(효율점수는 케이던스 기반 추정값으로) — 10-11 변경 원복. 정밀 로그에는 계속 기록됨
 this.pushKmSplitIfNeeded();
 this.pushDiagSplitIfNeeded();
 const _now = new Date();
