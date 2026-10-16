@@ -897,6 +897,9 @@ filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
 .card { background: var(--card-bg); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px solid #333; height: 68px; padding: 0; transition: border-color 0.3s ease; }
 /* [추가 2026-10-03] 프리미엄 잠금: 해제되지 않은 계정은 GCT/FLIGHT 값을 가리고 자물쇠 표시 */
 .card.premium-locked { position: relative; }
+/* [추가 2026-10-15] 메인 GCT/FLIGHT 카드: 가슴·허리(러닝)가 아니면 색 평가 없이 회색 + "참고용" 표시 */
+.card[data-ref]:not(.premium-locked) { position: relative; }
+.card[data-ref]:not(.premium-locked)::before { content: attr(data-ref); position: absolute; top: 4px; right: 8px; font-size: 9px; font-weight: 800; color: #888; letter-spacing: .3px; }
 body.prem-lock-dyn .diag-card.lk-dyn > *:not(.diag-label) { display:none; }
 body.prem-lock-dyn .h-group.lk-dyn > *:not(.h-group-title) { display:none; }
 body.prem-lock-dyn .diag-card.lk-dyn::after, body.prem-lock-dyn .h-group.lk-dyn::after { content:'PRO'; display:block; letter-spacing:1px; text-align:center; font-weight:800; color:#aaa; font-size:var(--fs-sm); padding:14px 0 6px; }
@@ -6439,12 +6442,31 @@ this.updateCardColor(this.dom.cardCadence, this.getCadenceLevel(data.cadence));
 // (다른 페이지의 표시 규칙은 METRIC_VISIBILITY 참고)
 if (data.gct !== undefined) {
 this.dom.gct.textContent = data.gct;
-this.updateCardColor(this.dom.cardGct, this.getGctLevel(data.gct));
+this.paintGctFlightCard(this.dom.cardGct, this.getGctLevel(data.gct));
 }
 if (data.flight !== undefined) {
 this.dom.flight.textContent = data.flight;
-this.updateCardColor(this.dom.cardFlight, this.getFlightLevel(data.flight));
+this.paintGctFlightCard(this.dom.cardFlight, this.getFlightLevel(data.flight));
 }
+}
+// [추가 2026-10-15] 메인 GCT/FLIGHT 카드 색/표시 규칙 — 리스트·통계 등과 같은 표(METRIC_VISIBILITY)를 따른다.
+// 가슴·허리(러닝/걷기/트레일)면 기존처럼 값에 따른 색(good/warning/danger), 그 외(암밴드·손·프리런)는 중립 테두리 + 회색 값 + "참고용".
+isMainGctFlightReliable() {
+  try {
+    return isMetricVisible({ activityMode: storage.getActivityMode(), devicePos: storage.loadProfile().devicePos || 'chest' }, 'gctFlight');
+  } catch (e) { return true; }
+}
+paintGctFlightCard(el, level) {
+  if (!el) return;
+  if (this.isMainGctFlightReliable()) {
+    el.removeAttribute('data-ref');
+    this.updateCardColor(el, level);
+  } else {
+    el.setAttribute('data-ref', storage.getLang() === 'ko' ? '참고용' : 'ref only');
+    el.style.borderColor = '#333';                  // 중립 테두리
+    const valEl = el.querySelector('.value');
+    if (valEl) valEl.style.color = '#888';          // 값은 회색(updateCardColor의 'normal'은 #333이라 거의 안 보임)
+  }
 }
 getCadenceLevel(val) { if (val >= 170) return 'good'; if (val >= 160) return 'warning'; return 'danger'; } // [수정] 일반 러너 기준으로 하향(기존 엘리트 기준 180/170 → 170/160)
 getGctLevel(val) { if (val <= 270) return 'good'; if (val <= 300) return 'warning'; return 'danger'; } // [수정] 일반 러너 기준으로 상향(기존 엘리트 기준 240/270 → 270/300)
@@ -12654,8 +12676,8 @@ const _vertShownLog = vertOscMm;
 // [추가 2026-10-11] 프리런은 this.motion을 쓰지 않아 카드(GCT/FLIGHT)가 갱신되지 않았음 → freerunMotion 값을 카드에 반영
 if (this.state.activityMode === 'freerun' && _fm && typeof ui !== 'undefined' && ui.dom) {
   try {
-    if (_fm.lastStepGctMs != null && ui.dom.gct) { ui.dom.gct.textContent = _fm.lastStepGctMs; ui.updateCardColor(ui.dom.cardGct, ui.getGctLevel(_fm.lastStepGctMs)); }
-    if (_fm.lastStepFlightPct != null && ui.dom.flight) { ui.dom.flight.textContent = _fm.lastStepFlightPct; ui.updateCardColor(ui.dom.cardFlight, ui.getFlightLevel(_fm.lastStepFlightPct)); }
+    if (_fm.lastStepGctMs != null && ui.dom.gct) { ui.dom.gct.textContent = _fm.lastStepGctMs; ui.paintGctFlightCard(ui.dom.cardGct, ui.getGctLevel(_fm.lastStepGctMs)); }
+    if (_fm.lastStepFlightPct != null && ui.dom.flight) { ui.dom.flight.textContent = _fm.lastStepFlightPct; ui.paintGctFlightCard(ui.dom.cardFlight, ui.getFlightLevel(_fm.lastStepFlightPct)); }
   } catch (e) {}
 }
 this.state.precisionLog.push({
@@ -12904,6 +12926,7 @@ if (this.state.activityMode === 'walk') {
 if (ui.dom.cadence) ui.dom.cadence.textContent = '0';
 if (ui.dom.gct) ui.dom.gct.textContent = '--';
 if (ui.dom.flight) ui.dom.flight.textContent = '0';
+[ui.dom.cardGct, ui.dom.cardFlight].forEach(c => { if (!c) return; if (ui.isMainGctFlightReliable()) c.removeAttribute('data-ref'); else c.setAttribute('data-ref', storage.getLang() === 'ko' ? '참고용' : 'ref only'); }); // [추가 2026-10-15] 시작 시 위치에 맞게 "참고용" 표시 갱신
 }
 // [신규] 프리러닝은 GCT/FLIGHT를 계산하지 않으므로 시작 시점에 "--"로 고정
 // (CADENCE는 네이티브 스텝 디텍터 기반으로 정상 표시되므로 건드리지 않음)
