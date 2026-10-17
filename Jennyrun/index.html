@@ -3927,10 +3927,9 @@ function calibAvg3RecordSelfRun(pos, motion) {
 function calibAvg3LiveApply(prof, pos) {
   try {
     if (typeof app === 'undefined' || !app || !app.motion || (prof.devicePos || 'chest') !== pos) return;
-    const base = (DEVICE_MOTION_PROFILES[pos] || DEVICE_MOTION_PROFILES.chest || {});
-    const ov = (prof.motionCalibOverrides || {})[pos] || {};
+    const base = (DEVICE_MOTION_PROFILES[motionCalibKey(pos)] || DEVICE_MOTION_PROFILES.chest || {});
+    const ov = (prof.motionCalibOverrides || {})[motionCalibKey(pos)] || {};
     app.motion.gctFallbackRatio = (typeof ov.gctFallbackRatio === 'number') ? ov.gctFallbackRatio : base.gctFallbackRatio;
-    app.motion.gctDutyK = gctDutyKFor(pos, app.motion.gctFallbackRatio); // [추가 2026-10-16c]
     app.motion.vertScale = (typeof ov.vertScale === 'number') ? ov.vertScale : base.vertScale;
     app.motion.groundThreshold = (typeof ov.groundThreshold === 'number') ? ov.groundThreshold : base.groundThreshold;
     app.motion.impactThreshold = (typeof ov.impactThreshold === 'number') ? ov.impactThreshold : base.impactThreshold;
@@ -4077,24 +4076,11 @@ function isMotionOnlyPos(pos) { return MOTION_ONLY_POS.indexOf(pos) >= 0; }
 // 필드는 "대응하는 팩토리 원점이 없다"는 이유로 커밋값(DEVICE_MOTION_PROFILES)에 그대로
 // 폴백시켰었는데, 실제로는 이 표가 곧 그 원점이었다 — 커밋을 반복하면 "앱 기본값 보기"와
 // "FACTORY RESET"이 진짜 출고값이 아니라 최근 커밋값을 보여주는 버그였음(사용자 리포트로 발견).
-// [추가 2026-10-16] 걸음 간격 안정화 GCT용 듀티비(GCT/걸음간격). 가민 FIT 6개 런 대조값:
-// 가슴 0.707/0.706, 허리 0.729/0.723, 손(프리런) 0.731/0.716. 데이터 없는 암밴드는 프리런(손)과 동일.
-// 라이트/프로 모드, 러닝/트레일 등 모든 모드 공통(모션 엔진에서 한 번만 적용). 값만 바꾸면 전 모드에 반영됨.
-const GCT_DUTY_K = { chest: 0.707, waist: 0.726, armband: 0.724, hand: 0.724, freerun: 0.724, default: 0.724 };
-// [추가 2026-10-16c] 안정화 GCT에도 캘리브레이션(gctFallbackRatio)이 반영되도록 하는 기준값.
-// GCT_DUTY_K는 "gctFallbackRatio가 아래 값이었을 때" 가민과 맞춘 듀티비다. 가민 비교 제안은 gctFallbackRatio를
-// (가민/폰) 오차 비율만큼 조금씩 올리고 내리므로, 실제 듀티비 = GCT_DUTY_K × (현재 gctFallbackRatio / 이 기준값)으로
-// 같은 비율을 그대로 곱해준다. 이 표는 [CALIB_ANCHOR:DEVICE_PROFILES] 앵커보다 앞이라 커밋 patch로 바뀌지 않는다
-// (커밋돼서 DEVICE_MOTION_PROFILES 값이 바뀌어도 이 기준은 고정 → 보정이 커밋 후에도 유지됨).
-const GCT_DUTY_REF_RATIO = { chest: 0.36, waist: 0.40, armband: 0.40, hand: 0.43, freerun: 0.40, default: 0.40 };
-function gctDutyKFor(pos, gctFallbackRatio) {
-  const k = GCT_DUTY_K[pos] || GCT_DUTY_K.default;
-  const ref = GCT_DUTY_REF_RATIO[pos] || GCT_DUTY_REF_RATIO.default;
-  if (typeof gctFallbackRatio !== 'number' || !(gctFallbackRatio > 0) || !(ref > 0)) return k;
-  // 생리적 범위(0.55~0.85)로만 제한 — 이상한 override 값이 들어와도 GCT가 튀지 않게
-  const scale = Math.max(0.85, Math.min(1.15, gctFallbackRatio / ref)); // 예전 용도로 저장된 override가 있어도 한 번에 ±15% 넘게 튀지 않게
-  return Math.max(0.55, Math.min(0.85, k * scale));
-}
+// [추가 2026-10-16] 손/암밴드/프리런은 GCT·수직진동 보정(접지/충격 임계값, gctFallbackRatio, 필터 지연, 수직진동 배율)을 '프리런' 한 벌로 공유한다.
+// 가슴/허리는 각자 따로 보정한다. 스텝 감지 파라미터(minStepInterval/rotReject/nativeRescue/stepTrigger)는 위치별 그대로.
+const JITTER_PRONE_POS = ['hand', 'armband', 'freerun'];
+function isJitterPronePos(pos) { return JITTER_PRONE_POS.indexOf(pos) >= 0; }
+function motionCalibKey(pos) { return isJitterPronePos(pos) ? 'freerun' : pos; }
 const FACTORY_MOTION_PROFILES = {
   // [수정] 가슴 0.151 / 손 0.193은 폰 1대 실측 기반이던 예전 값 — 사용자 확인 결과
   // 진짜 팩토리 기본값은 4개 위치 전부 0.40(Malisoux 2019 인구평균 듀티팩터)으로
@@ -4105,16 +4091,16 @@ const FACTORY_MOTION_PROFILES = {
   // 대비 +22~24%로 거의 동일한 비율로 과대측정되는 걸 확인 — 착용위치와 무관한 필터
   // 자체의 구조적 지연이라 4개 위치 전부 같은 값(55ms)으로 시작. 대응하는 연구값은 없고
   // 순수 실측 기반이라 groundThreshold/impactThreshold와 같은 성격의 경험적 튜닝값.
-  chest:   { groundThreshold: 10.05, impactThreshold: 11.6, gctFallbackRatio: 0.36, vertScale: 0.491, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 },
-  waist:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.31, vertScale: 0.347, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 },
-  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.41, vertScale: 0.5, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] hand/freerun과 동일하게 vertEnabled:false로 통일 — 3개 위치 모두 "위치 전용 실측 검증 전까진 꺼두고 데이터만 쌓는다" 원칙으로 맞춤
-  hand:    { groundThreshold: 11.75, impactThreshold: 9.87, gctFallbackRatio: 0.49, vertScale: 0.39, minStepInterval: 250, vertEnabled: true, rotRejectThreshold: 600, nativeRescueEnabled: true, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-13] nativeRescueEnabled 원래 의도(손 위치에서만 true)대로 복원 — 아래 DEVICE_MOTION_PROFILES와 동일하게 수정
+  chest:   { groundThreshold: 10.05, impactThreshold: 11.6, gctFallbackRatio: 0.71, vertScale: 0.491, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 },
+  waist:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.347, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 },
+  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.5, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] hand/freerun과 동일하게 vertEnabled:false로 통일 — 3개 위치 모두 "위치 전용 실측 검증 전까진 꺼두고 데이터만 쌓는다" 원칙으로 맞춤
+  hand:    { groundThreshold: 11.75, impactThreshold: 9.87, gctFallbackRatio: 0.73, vertScale: 0.39, minStepInterval: 250, vertEnabled: true, rotRejectThreshold: 600, nativeRescueEnabled: true, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-13] nativeRescueEnabled 원래 의도(손 위치에서만 true)대로 복원 — 아래 DEVICE_MOTION_PROFILES와 동일하게 수정
   // [추가 2026-09-20] 5번째 슬롯(프리런) — 프리런 세션 전용 내부 모션 인스턴스(app.freerunMotion)가 쓰는 값.
   // 화면/리스트엔 GCT·수직진동을 노출하지 않고 정밀 로그에만 기록하며, 가민 분석실에서 다른 4개 위치와
   // 똑같이 비교/보정할 수 있다. 보정값은 motionCalibOverrides 의 프리런 전용 키에만 저장되므로
   // [추가 2026-09-20] chest/waist/armband/hand 에는 절대 영향이 없다. vertScale은 hand/armband와
   // 동일하게 0으로 리셋(이전엔 허리 커밋값 0.511을 시드로 빌려왔었음) — 프리런 전용 실측이 쌓이면 켠다.
-  freerun: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.417, vertScale: 0.408, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] hand/armband과 동일하게 vertEnabled:false·vertScale:0으로 리셋 — 프리런 전용 실측 검증 전까진 꺼두고 원시 진폭만 쌓는다
+  freerun: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.408, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] hand/armband과 동일하게 vertEnabled:false·vertScale:0으로 리셋 — 프리런 전용 실측 검증 전까진 꺼두고 원시 진폭만 쌓는다
 };
 // [리팩토링 2026-08-21] 위치별 모션 프로파일(gctFallbackRatio 등)이 이 파일 3곳
 // (여기 / applyDevicePos()의 profiles / DEVICE_PROFILE_DEFAULTS)에 각각 하드코딩
@@ -4128,14 +4114,14 @@ const FACTORY_MOTION_PROFILES = {
 // FACTORY_MOTION_PROFILES, "SHOW CURRENT DATA"의 회색(커밋값) 칼럼은 이 DEVICE_MOTION_PROFILES.
 // [CALIB_ANCHOR:DEVICE_PROFILES] 캘리브레이션 스니펫(코드 반영용)을 여기 표에 붙여넣으세요.
 const DEVICE_MOTION_PROFILES = {
-  chest:   { groundThreshold: 10.05, impactThreshold: 11.6, gctFallbackRatio: 0.36, vertScale: 0.492, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-08-29] SETTINGS > SHOW CURRENT DATA에서 확인한 이번 캘리브레이션 최종 적용값(노란색)을 코드 기본값으로 커밋: groundThreshold 11→10.05, impactThreshold 10.5→11.6, gctFallbackRatio 0.40→0.36, vertScale 0.511→0.492. rotRejectThreshold는 이번 캘리브레이션에서 변경 없음(220 유지).
-  waist:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0.511, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-08-21] 허리 위치의 신호 패턴이 가슴과 크게 다르지 않다는 판단 하에, 팩토리 기본값을 가슴과 완전히 통일
+  chest:   { groundThreshold: 10.05, impactThreshold: 11.6, gctFallbackRatio: 0.71, vertScale: 0.492, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-08-29] SETTINGS > SHOW CURRENT DATA에서 확인한 이번 캘리브레이션 최종 적용값(노란색)을 코드 기본값으로 커밋: groundThreshold 11→10.05, impactThreshold 10.5→11.6, gctFallbackRatio 0.40→0.36, vertScale 0.511→0.492. rotRejectThreshold는 이번 캘리브레이션에서 변경 없음(220 유지).
+  waist:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.511, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-08-21] 허리 위치의 신호 패턴이 가슴과 크게 다르지 않다는 판단 하에, 팩토리 기본값을 가슴과 완전히 통일
   // [수정 2026-09-21] 가민 분석실 비교표/그래프가 vertScale===0인 위치에서 "폰 VERT" 값을
   // 계속 '--'로 표시하는 문제(9/21 원시진폭 폴백 로직이 curVertScale>0 조건에서만 동작) 때문에,
   // 최초 비교값이 뜰 수 있도록 vertScale에 가슴 커밋값(0.492)을 시드로 넣음. vertEnabled는
   // 그대로 false라 메인 화면·기록에는 이전과 동일하게 절대 노출되지 않음 — 가민 분석실
   // 표시 전용 시작점이며, 실측이 쌓이면 제안식이 알아서 가민 쪽으로 수렴시킨다.
-  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0.492, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] 8/21에 가슴 값(0.511)을 그대로 빌려와 vertEnabled:true로 켜뒀던 걸 되돌림 — hand/freerun과 동일하게 vertEnabled:false·vertScale:0으로 리셋하고, 암밴드 전용 가민 대조 데이터가 충분히 쌓이면 그때 다시 켠다. gctFallbackRatio/ground/impact 등 GCT 쪽 보정값은 이 변경과 무관하게 그대로 유지.
+  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.492, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] 8/21에 가슴 값(0.511)을 그대로 빌려와 vertEnabled:true로 켜뒀던 걸 되돌림 — hand/freerun과 동일하게 vertEnabled:false·vertScale:0으로 리셋하고, 암밴드 전용 가민 대조 데이터가 충분히 쌓이면 그때 다시 켠다. gctFallbackRatio/ground/impact 등 GCT 쪽 보정값은 이 변경과 무관하게 그대로 유지.
   // [수정] 손에 들고 뛸 때는 자체 가속도/자이로 임계값 알고리즘으로 걸음을 "직접 판정"하지 않고
   // 안드로이드 표준 방식(TYPE_STEP_DETECTOR)을 걸음 판정의 주(主) 신호로 쓴다. groundThreshold/
   // impactThreshold/rotRejectThreshold는 이제 걸음을 세는 데 쓰이지 않고 GCT 추정 등 보조 계산에만
@@ -4151,11 +4137,11 @@ const DEVICE_MOTION_PROFILES = {
   // gctFilterDelayMs 보정과는 독립적인 별개 수정(폴백 경로는 필터를 거치지 않음).
   // [수정 2026-09-21] armband와 동일한 이유로 vertScale 시드 적용(0 → 가슴 커밋값 0.492).
   // vertEnabled는 false 그대로 유지 — 가민 분석실 비교표 표시 전용, 메인 화면·기록엔 영향 없음.
-  hand:    { groundThreshold: 11.75, impactThreshold: 9.87, gctFallbackRatio: 0.43, vertScale: 0.492, minStepInterval: 250, vertEnabled: true, rotRejectThreshold: 600, nativeRescueEnabled: true, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-08-29] SETTINGS > SHOW CURRENT DATA에서 확인한 이번 캘리브레이션 최종 적용값(노란색)을 코드 기본값으로 커밋: groundThreshold 13.5→11.75, impactThreshold 14→9.87, gctFallbackRatio 0.51(2026-08-26 필터지연 수정 시점 잠정치)→0.43(실제 캘리브레이션 랩 결과로 대체). vertScale/rotRejectThreshold는 변경 없음.
+  hand:    { groundThreshold: 11.75, impactThreshold: 9.87, gctFallbackRatio: 0.73, vertScale: 0.492, minStepInterval: 250, vertEnabled: true, rotRejectThreshold: 600, nativeRescueEnabled: true, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-08-29] SETTINGS > SHOW CURRENT DATA에서 확인한 이번 캘리브레이션 최종 적용값(노란색)을 코드 기본값으로 커밋: groundThreshold 13.5→11.75, impactThreshold 14→9.87, gctFallbackRatio 0.51(2026-08-26 필터지연 수정 시점 잠정치)→0.43(실제 캘리브레이션 랩 결과로 대체). vertScale/rotRejectThreshold는 변경 없음.
   // [추가 2026-09-20] 프리런 전용 슬롯 (위 FACTORY 표 주석 참고). 허리 커밋값으로 시드, 이후 독립적으로 보정됨.
   // [수정 2026-09-21] armband/hand와 동일한 이유로 vertScale 시드 적용(0 → 가슴 커밋값 0.492).
   // vertEnabled는 false 그대로 유지 — 가민 분석실 비교표 표시 전용, 메인 화면·기록엔 영향 없음.
-  freerun: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.40, vertScale: 0.492, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] 허리 커밋값(0.511)을 시드로 빌려와 vertEnabled:true였던 걸 되돌림 — hand/armband과 동일하게 꺼두고 프리런 전용 데이터로 새로 검증한다. GCT 쪽(gctFallbackRatio 등)은 그대로.
+  freerun: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.492, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] 허리 커밋값(0.511)을 시드로 빌려와 vertEnabled:true였던 걸 되돌림 — hand/armband과 동일하게 꺼두고 프리런 전용 데이터로 새로 검증한다. GCT 쪽(gctFallbackRatio 등)은 그대로.
 };
 // [삭제 2026-08-22] 예전엔 APP_DEFAULT_MOTION_PROFILES(=DEVICE_MOTION_PROFILES 별칭)라는
 // 이름으로 "앱 기본값 보기" 화면과 "SHOW CURRENT DATA"의 커밋값 칼럼이 같은 걸 참조했는데,
@@ -4226,6 +4212,7 @@ savedAt: new Date().toISOString()
     if (override[k] === undefined && typeof _keep[k] === 'number') override[k] = _keep[k];
   }); }
 prof.motionCalibOverrides[pos] = override;
+if (motionCalibKey(pos) !== pos) prof.motionCalibOverrides[motionCalibKey(pos)] = Object.assign({}, override, { devicePos: motionCalibKey(pos) }); // [추가 2026-10-16] 손/암밴드 보정은 프리런 공유 슬롯에도 반영
 const _factorSwitchOn = calibFactorsFlag(prof); // [추가 2026-10-08] OFF면 4개 계수는 저장/적용하지 않음(모션 보정은 그대로)
 if (!isMotionOnlyPos(pos) && _factorSwitchOn) { // [추가] 프리런 같은 모션 전용 슬롯은 보정계수 맵에 아무것도 쓰지 않는다
 if (suggestion.strideFactor != null) prof.strideCorrectionFactorByPos[pos] = suggestion.strideFactor;
@@ -4395,7 +4382,7 @@ saveBtn: "SAVE", shareBtn: "SHARE",
 confirmSingleSave: "Are you sure you want to save this running record to your device?",
 saveSuccessMsg: "Record data has been successfully saved!",
 infoTabTheory: "Theory Guide", infoTabPrecision: "Form Analysis", infoTabGarmin: "GARMIN",
-infCalibMotion: "CALIBRATION: MOTION DETECTION", infCalibMotionD: "gctFallbackRatio: GCT correction ratio. It scales the stepping-interval-based GCT (average step interval × duty ratio) shown on screen and in logs, and is also the fallback ratio when GCT can't be measured directly. Raising it lengthens GCT, lowering it shortens GCT (Garmin comparison adjusts it a little at a time). vertScale: converts raw vertical acceleration amplitude into cm. rotRejectThreshold: gyro (rotation) noise filter that rejects arm-swing motion so it isn't miscounted as a footstrike. groundThreshold / impactThreshold: force thresholds used to judge \"foot on ground\" and \"landing impact\" for per-step GCT (used for left/right balance, not for the displayed GCT) (step counting itself mainly relies on the phone's native step detector).",
+infCalibMotion: "CALIBRATION: MOTION DETECTION", infCalibMotionD: "gctFallbackRatio: GCT-to-step-interval ratio. Displayed GCT = average step interval \u00d7 this ratio (so it also sets FLIGHT); 0.66~0.78 is accepted. Tune it gradually with Garmin comparisons. vertScale: converts raw vertical acceleration amplitude into cm. rotRejectThreshold: gyro (rotation) noise filter that rejects arm-swing motion so it isn't miscounted as a footstrike. groundThreshold / impactThreshold: force thresholds used to judge \"foot on ground\" and \"landing impact\" for GCT estimation (step counting itself mainly relies on the phone's native step detector).",
 infCalibFactors: "CALIBRATION: DISPLAY CORRECTION FACTORS", infCalibFactorsD: "These multiply the raw calculated values (default 1.0 = no correction). stride: corrects stride-length calculation, which also affects distance. gps: corrects GPS-measured distance directly. cad: corrects displayed cadence (steps per minute). pace: corrects only the displayed pace number — unlike the gps factor, it does not affect total distance.",
 tapToExpand: "TAP TO EXPAND", gpsInit: "GPS INITIALIZING... | ALT: --m", mfsPaceLabel: "AVG PACE", mfsCadenceLabel: "AVG CADENCE", mfsStrideLabel: "AVG STRIDE",
 metroOn: "METRO ON", metroOff: "METRO OFF",
@@ -4509,7 +4496,7 @@ saveBtn: "저장", shareBtn: "공유",
 confirmSingleSave: "이 러닝 기록 데이터를 기기에 정말 저장할까요?",
 saveSuccessMsg: "기록 데이터가 기기에 안전하게 저장되었습니다!",
 infoTabTheory: "이론 가이드", infoTabPrecision: "폼 정밀 분석실", infoTabGarmin: "가민 데이터",
-infCalibMotion: "캘리브레이션: 걸음 감지 관련 값", infCalibMotionD: "gctFallbackRatio: GCT 보정 비율. 화면·로그에 표시되는 걸음 간격 기반 GCT(평균 걸음 간격 × 듀티비)의 크기를 조절하고, 지면 접촉시간을 직접 측정 못 할 때 대신 쓰는 비율이기도 해요. 올리면 GCT가 길어지고 내리면 짧아져요(가민 비교로 조금씩 보정). vertScale: 수직 진동 원시 가속도값을 cm 단위로 환산하는 배율. rotRejectThreshold: 팔 흔들림 같은 회전을 착지 충격으로 잘못 세지 않게 걸러내는 자이로 노이즈 필터 임계값. groundThreshold / impactThreshold: 걸음별 GCT 추정에 쓰이는 \"접지 상태\"·\"착지 충격\" 판정용 힘(force) 임계값 (좌우 밸런스에 쓰이며 화면 GCT 값에는 영향 없음) (실제 걸음 카운트 자체는 폰의 네이티브 스텝 감지가 주로 담당).",
+infCalibMotion: "캘리브레이션: 걸음 감지 관련 값", infCalibMotionD: "gctFallbackRatio: 걸음 간격 대비 GCT 비율. 화면·로그의 GCT = 평균 걸음 간격 × 이 비율이라 FLIGHT에도 영향을 줘요(0.66~0.78 범위만 인정). 가민 비교로 조금씩 보정하세요. vertScale: 수직 진동 원시 가속도값을 cm 단위로 환산하는 배율. rotRejectThreshold: 팔 흔들림 같은 회전을 착지 충격으로 잘못 세지 않게 걸러내는 자이로 노이즈 필터 임계값. groundThreshold / impactThreshold: GCT 추정에 쓰이는 \"접지 상태\"·\"착지 충격\" 판정용 힘(force) 임계값 (실제 걸음 카운트 자체는 폰의 네이티브 스텝 감지가 주로 담당).",
 infCalibFactors: "캘리브레이션: 표시 수치 보정 계수", infCalibFactorsD: "계산된 원시 값에 곱해지는 보정값 (기본 1.0 = 보정 없음). stride: 보폭 계산 보정, 거리에도 영향을 줌. gps: GPS로 측정된 거리를 직접 보정. cad: 화면에 표시되는 케이던스(분당 걸음수)를 보정. pace: 화면에 찍히는 페이스 숫자만 보정 — gps 계수와 달리 총 이동거리에는 영향을 주지 않음.",
 tapToExpand: "탭하여 확대", gpsInit: "GPS 초기화 중... | 고도: --m", mfsPaceLabel: "평균 페이스", mfsCadenceLabel: "평균 케이던스", mfsStrideLabel: "평균 보폭",
 metroOn: "메트로 ON", metroOff: "메트로 OFF",
@@ -9395,6 +9382,17 @@ async toggle() { if (this.isPlaying) { await this.stop(); } else { await this.st
 updateDisplay() { const bpmInput = document.getElementById('metro-bpm'); const bpm = bpmInput ? bpmInput.value : 180; if(ui.dom.metroBpmVal) ui.dom.metroBpmVal.textContent = bpm; if(this.isPlaying && ui.menuBpmDisplay) { const lang = storage.getLang(); ui.menuBpmDisplay.textContent = bpm + (lang === 'ko' ? ' 비트' : ' BPM'); } }
 }
 // ========== MotionManager ==========
+// [추가 2026-10-16] GCT/FLIGHT 안정화 (가민 FIT 6개·정밀 로그 6개 대조 결과).
+// 원인: 걸음 확정을 OS 걸음감지센서(TYPE_STEP_DETECTOR)가 맡는데 그 이벤트 시각이 위치에 따라 흔들린다
+//       (손: 긴 간격/짧은 간격이 번갈아 나옴, 허리: 한 걸음 안의 2차 혹 때문에 ±수십 ms). 실제 GCT는 걸음 간격의 약 0.70~0.73배라
+//       걸음 간격 1개의 흔들림이 그대로 GCT·FLIGHT로 튀었다(손 GCT 표준편차 ~75ms, 가민은 3~5ms).
+// 해법: 최근 걸음 간격 16개의 절사평균(좌우 번갈아 나오는 긴/짧은 간격은 평균에서 상쇄)으로 "기준 걸음 주기"를 만들고
+//       GCT = 기준 주기 × 듀티비(위치별), FLIGHT = (주기 - GCT) / 주기. LITE/PRO 모두 이 엔진을 공유하므로 동일하게 적용된다.
+// 듀티비 가민 대조값(GCT/걸음간격): 가슴 0.706~0.712, 허리 0.725~0.731, 손 0.719~0.735.
+// 가슴/허리는 각각 보정, 손·암밴드·프리런은 같은 값(0.73)을 쓴다.
+const GCT_DUTY_BY_POS = { chest: 0.71, waist: 0.73, armband: 0.73, hand: 0.73, freerun: 0.73 };
+const GCT_DUTY_MIN = 0.66, GCT_DUTY_MAX = 0.78; // 이 범위를 벗어난 저장값(예전 0.31~0.49 override 등)은 무시하고 위치 기본값 사용
+const GCT_PERIOD_WINDOW = 16; // 기준 걸음 주기 계산에 쓰는 최근 걸음 수(약 5초)
 class MotionManager {
 constructor(onStepCallback) {
 this.onStep = onStepCallback;
@@ -9405,7 +9403,6 @@ this.gctCount = 0;
 // [추가] 화면 표시용 GCT 스무딩: 순간값의 튐을 줄이기 위해 최근 N걸음만 보관(중앙값 사용).
 // 러닝 시작부터의 누적평균(gctAccumulator)과 달리 최근 걸음에만 반응해 페이스 변화에 민감함.
 this.recentGctValues = [];
-this.recentStepStamps = []; // [추가 2026-10-16] 걸음 간격 안정화 GCT용 최근 걸음 시각(ms)
 this.stepSide = 0;
 this.sideGctAccumulator = [0, 0];
 this.sideGctCount = [0, 0];
@@ -9426,13 +9423,13 @@ this.forceLpfAlpha = 0.35; // 걸음 1주기(약 0.3~0.6초) 대비 충분히 �
 // 접지 종료 시점보다 항상 늦게 찍혀 GCT가 구조적으로 더 길게 측정되는 문제를 보정하는 값(ms).
 // applyDevicePos()에서 위치별 프로필 값으로 덮어써짐 — 여긴 프로필 적용 전 임시 기본값.
 this.gctFilterDelayMs = 55;
-this.gctDutyK = GCT_DUTY_K.default; // [추가 2026-10-16] applyDevicePos()에서 위치별 값으로 덮어씀
 // [개선-2] GCT 폴백(실측 실패 시 cycleTime*비율로 대체) 정확도 개선: 위치별 고정 상수 대신,
 // 이번 세션에서 "실제로 측정에 성공한" GCT/cycleTime 비율을 느린 EMA로 학습해두었다가
 // 폴백이 발동할 때 우선 사용한다. 노이즈로 학습값이 튀는 걸 막기 위해 위치별 기본값의
 // ±25% 이내로만 허용하고, 최소 5회 실측 전에는 학습값을 신뢰하지 않고 기존 고정값을 쓴다.
 this.gctRatioLearned = null;
 this.gctMeasuredCount = 0; // 진단용: 실측 성공 횟수
+this.gctPosKey = 'chest'; // [추가 2026-10-16] GCT 듀티비 기본값을 고르는 위치 키 (applyDevicePos/프리런 시작에서 갱신)
 this.gctFallbackCount = 0; // 진단용: 폴백 발동 횟수
 this.gctClampedCount = 0; // [추가 2026-09-13] 진단용: 50ms/상한 클램프 발동 횟수(실측+폴백 합산)
 // 착용 위치별 기본값 (chest 기준)
@@ -9456,6 +9453,8 @@ this.lastStepVertOscCm = null;
 this.recentVertCm = []; this.lastStepVertMedianCm = null; // [추가 2026-10-14] 로그 기록용: 최근 20초 수직진동 중앙값 (순간값 lastStepVertOscCm는 그대로 유지)
 // [추가] 잔진동(2차 충격) 오감지 필터용 최근 걸음 주기 버퍼
 this.recentCycleTimes = [];
+this.gctPeriodBuf = []; // [추가 2026-10-16] 기준 걸음 주기 계산용 버퍼
+this.lastStepGctRawMs = null;
 this.cycleArtifactStreak = 0; // [추가 2026-09-19] 아래 commitStep의 사이클 보정 락인 방지용
 // [추가] 자이로스코프 기반 노이즈 필터: 스텝 사이클 동안의 최대 회전각속도(deg/s)
 // 임계값은 1차 추정치 — 실측 테스트로 조정이 필요할 수 있음.
@@ -9552,15 +9551,16 @@ applyDevicePos(pos) {
 // 영향을 받지 않는다. 헷갈리지 말 것: DEVICE_MOTION_PROFILES=최근 커밋값, FACTORY_MOTION_PROFILES=원본.
 const profiles = DEVICE_MOTION_PROFILES;
 const p = profiles[pos] || profiles.chest;
-this.groundThreshold  = p.groundThreshold;
-this.impactThreshold  = p.impactThreshold;
-this.gctFallbackRatio = p.gctFallbackRatio;
-this.vertScale        = p.vertScale;
+const pc = profiles[motionCalibKey(pos)] || p; // [추가 2026-10-16] 손/암밴드는 프리런 보정 슬롯 공유
+this.groundThreshold  = pc.groundThreshold;
+this.impactThreshold  = pc.impactThreshold;
+this.gctFallbackRatio = pc.gctFallbackRatio;
+this.gctPosKey = profiles[pos] ? pos : 'chest'; // [추가 2026-10-16]
+this.vertScale        = pc.vertScale;
 this.minStepInterval  = p.minStepInterval;
-this.vertEnabled      = p.vertEnabled;
+this.vertEnabled      = pc.vertEnabled;
 this.rotRejectThreshold = p.rotRejectThreshold;
-this.gctFilterDelayMs = p.gctFilterDelayMs; // [추가 2026-08-26] 필터 지연 보정값(ms), 위치별 프로필 참조
-this.gctDutyK = GCT_DUTY_K[pos] || GCT_DUTY_K.default; // [추가 2026-10-16] 걸음 간격 안정화 GCT 듀티비
+this.gctFilterDelayMs = pc.gctFilterDelayMs; // [추가 2026-08-26] 필터 지연 보정값(ms), 위치별 프로필 참조
 this.vertSpeedSlope = 0; this.vertRefSpeed = 0; // [단순화 2026-10-10] 위치별 override가 있을 때만 아래에서 채움
 this.nativeRescueEnabled = !!p.nativeRescueEnabled; // [추가] 네이티브 걸음센서 구제는 이 위치에서만 허용할지 여부 (기본 손만 true)
 // [추가] 이 위치에서는 자체 가속도/자이로 알고리즘 대신 안드로이드 표준(TYPE_STEP_DETECTOR)을
@@ -9616,10 +9616,10 @@ try {
     }
   }
 
-  const _calibOv = _prof.motionCalibOverrides[pos];
+  const _calibOv = _prof.motionCalibOverrides[motionCalibKey(pos)]; // [수정 2026-10-16] 손/암밴드는 프리런 보정 슬롯을 읽는다
   if (_calibOv) {
     if (typeof _calibOv.gctFallbackRatio === 'number') this.gctFallbackRatio = _calibOv.gctFallbackRatio;
-    if (typeof _calibOv.rotRejectThreshold === 'number') this.rotRejectThreshold = _calibOv.rotRejectThreshold;
+    if (typeof _calibOv.rotRejectThreshold === 'number' && motionCalibKey(pos) === pos) this.rotRejectThreshold = _calibOv.rotRejectThreshold; // 스텝 감지용 값이라 공유 슬롯에서는 가져오지 않는다
     if (typeof _calibOv.vertScale === 'number') this.vertScale = _calibOv.vertScale;
     // [추가 2026-08-15] groundThreshold/impactThreshold 캘리브레이션 결과도 위치별 override로 반영.
     if (typeof _calibOv.groundThreshold === 'number') this.groundThreshold = _calibOv.groundThreshold;
@@ -9663,8 +9663,6 @@ try {
 // 캘리브레이션 결과가 무시되는 문제가 있었음.
 this.baseGroundThreshold = this.groundThreshold;
 this.baseImpactThreshold = this.impactThreshold;
-// [추가 2026-10-16c] 위 _calibOv가 반영된 gctFallbackRatio로 안정화 GCT 듀티비를 보정
-this.gctDutyK = gctDutyKFor(pos, this.gctFallbackRatio);
 // 착용 위치가 바뀌면 그 위치 기준으로 다시 캘리브레이션해야 하므로 초기화
 this.calibDone = false;
 this.calibStartTime = null;
@@ -9696,7 +9694,6 @@ this.isFeetOnGround = false;
 this.gctAccumulator = 0;
 this.gctCount = 0;
 this.recentGctValues = [];
-this.recentStepStamps = []; // [추가 2026-10-16] 걸음 간격 안정화 GCT용 최근 걸음 시각(ms)
 this.stepSide = 0;
 this.sideGctAccumulator = [0, 0];
 this.sideGctCount = [0, 0];
@@ -9720,6 +9717,8 @@ this.vertCmCount = 0;
 this.lastStepVertOscCm = null; // [추가] 정밀 로그용 순간 수직진동값도 매 러닝 시작 시 초기화
 this.recentVertCm = []; this.lastStepVertMedianCm = null; // [추가 2026-10-14] 중앙값 버퍼도 매 러닝 시작 시 초기화(이전 러닝 값이 섞이지 않게)
 this.recentCycleTimes = [];
+this.gctPeriodBuf = []; // [추가 2026-10-16] 기준 걸음 주기 계산용 버퍼
+this.lastStepGctRawMs = null;
 this.cycleArtifactStreak = 0; // [추가 2026-09-19] 아래 commitStep의 사이클 보정 락인 방지용
 this.rotPeakSinceLastStep = 0;
 // [추가] 네이티브 걸음 센서 하이브리드 상태도 매 러닝 시작 시 초기화
@@ -9977,6 +9976,44 @@ this.commitStep(now, cycleTime, missedStepsToResync);
 // 트리거 경로가 공유). GCT/수직진동/좌우밸런스는 handleMotion()에서 계속 누적해 온
 // vertMin/vertMax, belowThresholdSince, gyroCycleSum 등을 그대로 재사용해 계산하므로,
 // 어느 쪽이 "걸음이 있었다"고 트리거했는지와 무관하게 항상 동일한 방식으로 산출된다.
+// [추가 2026-10-16] 기준 걸음 주기(ms): 최근 걸음 간격의 절사평균. 개별 걸음 간격이 OS 센서 타이밍 때문에 흔들려도(손: 480/182/480/223ms처럼
+// 번갈아 나옴) 합은 정상이라 평균이 안정적이다. 양 끝 1/6씩 버려 배치 아티팩트·누락 걸음(2배 간격)도 걸러낸다.
+_trimMean(arr) {
+  const n = arr.length;
+  if (n === 0) return 0;
+  if (n < 4) return arr.reduce((a, b) => a + b, 0) / n;
+  const srt = arr.slice().sort((a, b) => a - b);
+  const trim = Math.floor(n / 6);
+  const core = srt.slice(trim, n - trim);
+  return core.reduce((a, b) => a + b, 0) / core.length;
+}
+// [수정 2026-10-16] missed: 놓친 걸음 수. 놓친 걸음이 있으면 그 간격을 (놓친수+1)등분해 넣어 평균이 부풀지 않게 한다(최대 3걸음).
+// 페이스가 바뀌면(인터벌·가속·감속) 최근 10걸음 평균이 전체 16걸음 평균과 8% 넘게 다를 때 짧은 창을 써서 반응을 빠르게 한다.
+// (4%/8걸음으로 하면 손 착용에서 걸음 시각 흔들림에 반응해 오히려 GCT가 튀어서, 가민 6개 대조로 8%/10걸음으로 정함)
+_smoothedGctPeriod(c, missed) {
+  const buf = this.gctPeriodBuf;
+  if (c > 0 && c <= 2000) {
+    const m = Math.max(0, Math.min(missed || 0, 3));
+    if (m > 0) { for (let k = 0; k <= m; k++) buf.push(c / (m + 1)); }
+    else buf.push(c);
+    while (buf.length > GCT_PERIOD_WINDOW) buf.shift();
+  }
+  const n = buf.length;
+  if (n === 0) return c;
+  const longP = this._trimMean(buf);
+  if (n >= 12) {
+    const shortP = this._trimMean(buf.slice(-10));
+    if (Math.abs(shortP - longP) / longP > 0.08) return shortP;
+  }
+  return longP;
+}
+// [추가 2026-10-16] GCT/걸음주기 비율. gctFallbackRatio(가민 분석실·3개 평균 보정이 쓰는 값)를 그대로 쓰되,
+// 허용 범위 밖이면 위치별 기본값으로 대체한다.
+_gctDuty() {
+  const def = GCT_DUTY_BY_POS[this.gctPosKey] || 0.72;
+  const r = this.gctFallbackRatio;
+  return (typeof r === 'number' && r >= GCT_DUTY_MIN && r <= GCT_DUTY_MAX) ? r : def;
+}
 // ── 걸음 확정(공통) ──
 commitStep(now, cycleTime, missedStepsToResync) {
 // [수정] GCT 계산용 "유효 사이클타임" 산출: 네이티브 걸음 브릿지가 걸음 이벤트를
@@ -10002,6 +10039,7 @@ let _isCycleArtifact = (priorRollingAvg != null && cycleTime < priorRollingAvg *
 this.cycleArtifactStreak = _isCycleArtifact ? ((this.cycleArtifactStreak || 0) + 1) : 0;
 if (_isCycleArtifact && this.cycleArtifactStreak > 5) {
 this.recentCycleTimes = [];
+this.gctPeriodBuf = [];
 this.cycleArtifactStreak = 0;
 _isCycleArtifact = false;
 }
@@ -10018,30 +10056,6 @@ if (this.recentCycleTimes.length > 8) this.recentCycleTimes.shift();
 
 this.lastStepTime = now;
 this.quietPhaseSinceLastStep = false; // 다음 걸음 판정을 위해 리셋
-// [추가 2026-10-16] 걸음 간격 안정화 GCT: 정밀 로그 6개(가슴2/허리2/손2)를 가민 FIT과 대조한 결과, 손·허리는 걸음 이벤트
-// 시각이 한 걸음 안에서 번갈아 밀려(간격 480/230ms 식, 두 걸음 합은 정상) 걸음별 GCT가 간격에 비례해 크게 튀었다.
-// 최근 약 8초 걸음 시각의 평균 간격(=케이던스의 역수)에 위치별 듀티비를 곱하면 밀림이 상쇄되어 가민 대비 평균오차가
-// 가슴 7~9→~1.5ms, 허리 14~15→~2ms, 손 62~75→~4ms로 줄었다(시뮬레이션). 공백(2초 초과) 후엔 창을 새로 시작한다.
-if (this.recentStepStamps.length && (now - this.recentStepStamps[this.recentStepStamps.length - 1]) > 2000) this.recentStepStamps.length = 0;
-// [수정 2026-10-16b] 놓친 걸음(missedStepsToResync)이 있으면 직전 걸음~이번 걸음 사이를 균등 분할한 가상 시각을 채워 넣는다.
-// 안 채우면 8초 창의 평균 간격이 (1+놓친수/걸음수)배로 부풀어 GCT가 같은 비율로 길어진다. 최대 3걸음까지만 보정.
-if (missedStepsToResync > 0 && this.recentStepStamps.length) {
-  const _prev = this.recentStepStamps[this.recentStepStamps.length - 1];
-  const _m = Math.min(missedStepsToResync, 3);
-  for (let _k = 1; _k <= _m; _k++) this.recentStepStamps.push(_prev + (now - _prev) * _k / (_m + 1));
-}
-this.recentStepStamps.push(now);
-while (this.recentStepStamps.length > 2 && (now - this.recentStepStamps[0]) > 8000) this.recentStepStamps.shift();
-let _stabPeriod = null;
-if (this.recentStepStamps.length >= 8) {
-  // [수정 2026-10-16b] 간격 수를 짝수로 맞춘다(홀수면 가장 오래된 걸음 1개 제외). 걸음 시각이 번갈아 밀리는 패턴(+d,-d,...)은
-  // 짝수 간격일 때 양 끝 오차가 상쇄되고, 홀수면 끝 걸음의 밀림 d가 평균 간격에 d/(n-1)만큼 남는다.
-  const _st = this.recentStepStamps;
-  const _i0 = ((_st.length - 1) % 2 === 1) ? 1 : 0;
-  const _p = (now - _st[_i0]) / (_st.length - 1 - _i0);
-  // 230~460ms = 케이던스 약 130~260spm. 걷기(약 500ms 이상)는 기존 경로 유지.
-  if (_p >= 230 && _p <= 460) _stabPeriod = _p;
-}
 let result = { cycleTime, gct: 0, flight: 0, side: this.stepSide };
 
 // [추가] 이번 스텝 사이클 동안의 z축 진폭(최대-최소)을 누적, 평균 진폭(m/s^2) 산출
@@ -10152,15 +10166,12 @@ measuredGCT = Math.max(50, Math.min(measuredGCT, gctCycleTime * 0.9, GCT_ABS_MAX
 // 않도록 별도로 집계해둔다(아래 gctClampedCount, computeGctClampedFrac 참고).
 if (measuredGCT !== preClampGCT) this.gctClampedCount++;
 let currentGCT = Math.round(measuredGCT);
-// [수정 2026-10-16b] 좌우 GCT 밸런스는 걸음별 값으로 비교해야 한다. 안정화 값(8초 평균)은 좌/우 걸음에 거의 같아 밸런스가 50:50으로 고정됨.
-const _rawStepGCT = currentGCT;
-// [추가 2026-10-16] 안정화 창이 찼으면 위의 걸음별 값(실측/폴백) 대신 평균 간격×듀티비를 GCT로 쓴다.
-// 위 실측/폴백 계산과 카운트(gctMeasuredCount 등)는 그대로 두어 진단·캘리브레이션 집계는 유지.
-let _flightBase = gctCycleTime;
-if (_stabPeriod != null) {
-  currentGCT = Math.round(_stabPeriod * this.gctDutyK);
-  _flightBase = _stabPeriod; // flight도 같은 간격 기준 → GCT와 항상 일관(1-GCT×케이던스/60000)
-}
+// [추가 2026-10-16] 좌우 밸런스용으로는 기존 걸음별 값을 그대로 쓰고(smoothing하면 좌우 차이가 사라짐),
+// 화면/로그/요약에 나가는 GCT·FLIGHT는 기준 걸음 주기 × 듀티비로 안정화한다. (위의 실측/폴백 값은 진단 카운트와 밸런스에만 쓰임)
+const rawStepGCT = currentGCT;
+this.lastStepGctRawMs = rawStepGCT; // [추가 2026-10-16] 안정화 전 걸음별 원시 GCT — 원시 센서 로그에 기록(듀티비 검증용)
+const _gp = this._smoothedGctPeriod(gctCycleTime, missedStepsToResync);
+currentGCT = Math.round(Math.max(50, Math.min(_gp * this._gctDuty(), _gp * 0.9, GCT_ABS_MAX_MS)));
 
 // [수정] result.gct는 이번 스텝의 순간 측정값을 그대로 사용한다.
 // 예전에는 러닝 시작부터의 누적평균(gctAccumulator/gctCount)을 result.gct에
@@ -10173,7 +10184,7 @@ this.lastStepGctMs = currentGCT; // [추가] UI(getTxt) 의존 없이 값을 읽
 // [수정] flight%도 GCT와 짝 맞춰 gctCycleTime 기준으로 계산. 원본 cycleTime(배치 아티팩트로
 // 짧을 수 있음)을 그대로 쓰면 currentGCT가 gctCycleTime 기준으로 보정된 뒤에도 분모만
 // 옛날처럼 짧아서 flight%가 음수로 튀는 모순이 생김.
-result.flight = Math.round(((_flightBase - currentGCT) / _flightBase) * 100);
+result.flight = Math.round(((_gp - currentGCT) / _gp) * 100);
 this.lastStepFlightPct = result.flight; // [추가] freerunMotion 등 UI 미노출 인스턴스용
 
 // 러닝 시작부터의 누적 평균은 계속 별도로 유지(다른 곳에서 필요할 수 있어 보관만 함).
@@ -10189,18 +10200,18 @@ if (this.recentGctValues.length > 5) this.recentGctValues.shift();
 result.gctDisplay = this.recentGctValues.length >= 3
 ? [...this.recentGctValues].sort((a, b) => a - b)[Math.floor(this.recentGctValues.length / 2)]
 : currentGCT;
-result.flightDisplay = Math.round(((_flightBase - result.gctDisplay) / _flightBase) * 100);
+result.flightDisplay = Math.round(((_gp - result.gctDisplay) / _gp) * 100);
 
 // [추가] 좌/우 측 GCT 및 케이던스 누적 (밸런스 산출용)
 let side = this.stepSide;
-// [수정 2026-10-16c] 폴백 걸음(간격×비율)은 좌우 정보가 없고 걸음 시각 흔들림만 담겨 밸런스를 왜곡하므로 실측 걸음만 반영
+// [수정 2026-10-16] 폴백 걸음(간격×비율)은 좌우 정보가 없고 걸음 시각 흔들림만 담겨 밸런스를 왜곡하므로 실측 걸음만 반영
 if (_gctRawMeasured >= 100) {
-this.sideGctAccumulator[side] += _rawStepGCT;
+this.sideGctAccumulator[side] += rawStepGCT;
 this.sideGctCount[side]++;
 // [추가] 밸런스 안정구간 탐지용 원시 로그
-this.stepGctSideLog.push({ side, value: _rawStepGCT });
+this.stepGctSideLog.push({ side, value: rawStepGCT });
 }
-result.sideGct = _rawStepGCT;
+result.sideGct = rawStepGCT;
 result.cycleTime = cycleTime;
 }
 
@@ -12848,7 +12859,7 @@ captureRawStepMarker() {
   const m = (this.state.activityMode === 'freerun') ? this.freerunMotion : (this.state.activityMode === 'walk' ? this.walkMotion : this.motion);
   if (!m || m.gctCount === undefined || m.gctCount === this._rawGctSeen) return;
   this._rawGctSeen = m.gctCount;
-  buf.push(['S', Date.now(), m.lastStepGctMs, m.lastStepVertOscCm, m.lastStepVertAmplitudeRaw]);
+  buf.push(['S', Date.now(), (m.lastStepGctRawMs != null ? m.lastStepGctRawMs : m.lastStepGctMs), m.lastStepVertOscCm, m.lastStepVertAmplitudeRaw]);
 }
 buildRawSensorCsv(bufArg, metaArg) {
   const f3 = v => (typeof v === 'number' && isFinite(v)) ? v.toFixed(3) : '';
@@ -13010,12 +13021,12 @@ const _wp = DEVICE_MOTION_PROFILES.freerun || DEVICE_MOTION_PROFILES.waist; // [
 this.freerunMotion.groundThreshold = _wp.groundThreshold;
 this.freerunMotion.impactThreshold = _wp.impactThreshold;
 this.freerunMotion.gctFallbackRatio = _wp.gctFallbackRatio;
+this.freerunMotion.gctPosKey = 'freerun'; // [추가 2026-10-16]
 this.freerunMotion.vertScale = _wp.vertScale;
 this.freerunMotion.minStepInterval = _wp.minStepInterval;
 this.freerunMotion.vertEnabled = _wp.vertEnabled;
 this.freerunMotion.rotRejectThreshold = _wp.rotRejectThreshold;
 this.freerunMotion.gctFilterDelayMs = _wp.gctFilterDelayMs;
-this.freerunMotion.gctDutyK = GCT_DUTY_K.freerun; // [추가 2026-10-16]
 this.freerunMotion.nativeRescueEnabled = !!_wp.nativeRescueEnabled;
 this.freerunMotion.useNativeStepTrigger = (_wp.stepTrigger === 'native');
 try {
@@ -13028,7 +13039,6 @@ try {
     if (typeof _ov.impactThreshold === 'number') this.freerunMotion.impactThreshold = _ov.impactThreshold;
     if (typeof _ov.gctFilterDelayMs === 'number') this.freerunMotion.gctFilterDelayMs = _ov.gctFilterDelayMs;
   }
-  this.freerunMotion.gctDutyK = gctDutyKFor('freerun', this.freerunMotion.gctFallbackRatio); // [추가 2026-10-16c]
 } catch (e) {}
 this.freerunMotion.baseGroundThreshold = this.freerunMotion.groundThreshold;
 this.freerunMotion.baseImpactThreshold = this.freerunMotion.impactThreshold;
@@ -18775,7 +18785,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // 점진적으로 좁혀감. 오차 임계값은 기존대로 1% 유지(작은 오차도 놓치지 않게).
     // [수정] 페이스와 동일하게, 오차 크기와 무관하게 항상 항목이 뜨도록 1% 임계값 제거.
     // [수정 2026-10-10] 실측 비율이 70% 이상이면 폴백 경로는 거의 안 쓰였으므로 gctFallbackRatio는 제안하지 않는다(ground/impact만).
-    const suggestedGct = (curGct != null && phoneAvgGct && garminAvgGct && gctDiffPct != null) // [수정 2026-10-16c] 표시 GCT가 안정화(간격×듀티비×gctFallbackRatio 보정)라 실측 비율 게이트 제거
+    const suggestedGct = (curGct != null && phoneAvgGct && garminAvgGct && gctDiffPct != null) // [수정 2026-10-16] 표시 GCT가 안정화(간격×gctFallbackRatio)라 실측 비율 게이트 제거
       ? Math.round(curGct * stepRatio(garminAvgGct / phoneAvgGct, GCT_VERT_STEP_FRACTION) * 1000) / 1000 : null;
     // [추가 2026-08-15] groundThreshold/impactThreshold 제안값. gctFallbackRatio는 폴백 경로만
     // 보정하므로, 이 러닝의 GCT가 "대체로 실측(측정성공)"으로 계산됐을 때만(gctMeasuredFrac이
@@ -18787,7 +18797,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // gctMeasuredFrac만으로는 "실측 비중은 충분하지만 그 실측값 상당수가 비정상 범위라
     // 클램프에 걸렸던" 경우를 걸러내지 못한다(허리 로그에서 확인된 GCT 이중분포 패턴).
     // 20% 이상이 클램프에 걸렸으면 phoneAvgGct 자체를 신뢰하기 어렵다고 보고 제안을 생략.
-    const gctThresholdTrustworthy = false; // [수정 2026-10-16c] 표시 GCT가 안정화 값(간격×듀티비)이라 ground/impact는 영향이 없다 → 가민 GCT 오차로 조정하지 않음
+    const gctThresholdTrustworthy = false; // [수정 2026-10-16] 표시 GCT가 안정화 값이라 ground/impact는 영향이 없다 → 가민 GCT 오차로 조정하지 않음
     const suggestedGround = (curGround != null && phoneAvgGct && garminAvgGct && gctDiffPct != null && gctThresholdTrustworthy)
       ? Math.round(curGround * stepRatio(garminAvgGct / phoneAvgGct, GCT_VERT_STEP_FRACTION / 2) * 100) / 100 : null; // [수정 2026-10-10] ground+impact 두 노브가 같은 GCT 오차를 동시에 따라가 과보정되므로 각각 절반만 반영
     const suggestedImpact = (curImpact != null && phoneAvgGct && garminAvgGct && gctDiffPct != null && gctThresholdTrustworthy)
