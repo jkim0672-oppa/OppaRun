@@ -920,7 +920,10 @@ body.not-admin #raw-capture-box { display:none !important; }
 .gs-bar { height:6px; border-radius:3px; background:#2a2a2a; margin-top:4px; overflow:hidden; }
 .gs-bar > i { display:block; height:100%; background:var(--primary); }
 body.prem-lock-stats #stat-filter-monthly::after, body.prem-lock-stats #stat-filter-yearly::after { content:' PRO'; font-size:.7em; color:#ffcc66; font-weight:800; margin-left:3px; }
-#settings-calib-area.premium-locked-area > *:not(.premium-banner):not(#settings-garmin-area) { opacity: .35; pointer-events: none; }
+#settings-garmin-area { display:none; }
+#settings-calib-area.garmin-open > *:not(#settings-garmin-area) { display:none !important; }
+#settings-calib-area.garmin-open > #settings-garmin-area { display:block; }
+#settings-calib-area.premium-locked-area > *:not(.premium-banner):not(#settings-garmin-area):not(#calib-garmin-entry) { opacity: .35; pointer-events: none; }
 .premium-banner { display:none; background:#2a2a2a; border:1.5px solid #555; border-radius:12px; padding:14px 16px; margin:0 0 12px; font-size:var(--fs-sm); font-weight:800; color:#ddd; text-align:center; }
 #settings-calib-area.premium-locked-area > .premium-banner { display:block; }
 .card.premium-locked .value { visibility: hidden; }
@@ -2297,8 +2300,13 @@ alt="runner"/>
      (applyMotionCalibSuggestion, motionCalibOverrides)를 재사용해서 INFO 탭의
      "적용된 보정값" 상태 표시와도 항상 일치한다. -->
 <div id="settings-calib-area" class="hidden">
+<!-- [추가] 관리자 전용: 누르면 CALIB 내용 대신 GARMIN 페이지만 보여준다 -->
+<div id="calib-garmin-entry" class="hidden" style="padding:6px 0 12px;">
+<button id="btn-open-garmin-page" type="button" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base);" onclick="ui.openGarminPage()"><span id="info-tab-garmin-label">GARMIN</span></button>
+</div>
 <!-- ===== [GARMIN IMPORT] 독립 모듈: SETTINGS > CALIB 탭 맨 위로 이동 (관리자 전용, 위치만 변경) ===== -->
-<div id="settings-garmin-area" class="hidden">
+<div id="settings-garmin-area">
+<div style="padding:6px 0 12px;"><button id="btn-close-garmin-page" type="button" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base);" onclick="ui.closeGarminPage()">◀ CALIB</button></div>
 <div id="info-garmin-area" class="info-garmin-area is-open">
 <div id="garmin-sample-box" class="diag-card u-margin-0-0-10px-0"></div>
 <div class="diag-card u-margin-0-0-10px-0">
@@ -6541,7 +6549,8 @@ const appArea = document.getElementById('settings-app-area');
 const crewArea = document.getElementById('settings-crew-area');
 const calibArea = document.getElementById('settings-calib-area');
 if (!appBtn || !crewBtn || !calibBtn || !appArea || !crewArea || !calibArea) return;
-if (target === 'garmin') target = 'calib'; // [수정] GARMIN 서브탭은 CALIB 맨 위로 이동 (관리자 전용 노출은 applyDevModeVisibility가 처리)
+if (target === 'garmin') target = 'calib';
+calibArea.classList.remove('garmin-open'); // [수정] 탭을 바꾸거나 다시 열면 항상 CALIB 본 화면부터
 appBtn.classList.toggle('active', target === 'app');
 crewBtn.classList.toggle('active', target === 'crew');
 calibBtn.classList.toggle('active', target === 'calib');
@@ -6556,7 +6565,6 @@ community.renderFollowStats();
 community.refreshNotifBadge(); // [추가] 알림 배지 갱신
 } else if (target === 'calib') {
 try { refreshCalibAvg3Switch(); } catch (e) {} // [추가 2026-10-10]
-if (storage.getDevMode() && typeof garmin !== 'undefined' && garmin.render) garmin.render(); // [수정] 맨 위로 옮긴 GARMIN 영역 렌더 (관리자만)
 // [추가] 보정설정 탭: 트랙 캘리브레이션 현재값 + 자가보정(거리/케이던스) 로그 목록 갱신
 this.updateCalibFactorDisplay();
 if (typeof garmin !== 'undefined' && garmin.renderSelfCalib) garmin.renderSelfCalib();
@@ -6644,11 +6652,24 @@ const on = storage.getDevMode(); // [수정 2026-10-16] 이제 '관리자 계정
 const strideDlBtn = document.getElementById('btn-download-stride-calib');
 if (strideDlBtn) strideDlBtn.classList.toggle('hidden', !on);
 try { refreshCalibAvg3Switch(); } catch (e) {}
-// [수정] GARMIN 영역은 이제 CALIB 탭 맨 위에 있고, 관리자일 때만 보인다 (탭 버튼은 삭제됨)
-const garminArea = document.getElementById('settings-garmin-area');
-if (garminArea) garminArea.classList.toggle('hidden', !on);
-if (on) { try { if (typeof garmin !== 'undefined' && garmin.render) garmin.render(); } catch (e) {} }
+// [수정] CALIB 맨 위 GARMIN 진입 버튼은 관리자만 보인다. 관리자가 아니면 GARMIN 페이지도 닫는다.
+const garminEntry = document.getElementById('calib-garmin-entry');
+if (garminEntry) garminEntry.classList.toggle('hidden', !on);
+if (!on) { const ca = document.getElementById('settings-calib-area'); if (ca) ca.classList.remove('garmin-open'); }
 }
+openGarminPage() {
+if (!storage.getDevMode()) return;
+const ca = document.getElementById('settings-calib-area');
+if (!ca) return;
+ca.classList.add('garmin-open');
+try { if (typeof garmin !== 'undefined' && garmin.render) garmin.render(); } catch (e) {}
+window.scrollTo(0, 0);
+}
+closeGarminPage() {
+const ca = document.getElementById('settings-calib-area');
+if (ca) ca.classList.remove('garmin-open');
+}
+
 toggleInfoSubTab(target) {
 const theoryBtn = document.getElementById('info-sub-tab-theory');
 const precisionBtn = document.getElementById('info-sub-tab-precision');
