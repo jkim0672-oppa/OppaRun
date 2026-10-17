@@ -1265,6 +1265,15 @@ margin-top: 10px; font-family: -apple-system, system-ui;
 /* 홈 종목 카드: 설정/CREW 박스와 같은 높이·테두리(한 줄) */
 .type-card { display: grid; grid-template-columns: 1fr auto auto 44px; align-items: center; gap: 12px; width: 100%; box-sizing: border-box; text-align: left; background: #2a2a2a; border: 1.5px solid #444; border-radius: 12px; padding: 16px 14px; margin-bottom: 10px; color: var(--text-main); cursor: pointer; font-family: inherit; }
 .type-card:active { border-color: var(--primary); background: rgba(0,255,136,0.05); }
+#total-home .type-card { padding: 11px 14px; margin-bottom: 6px; }
+.today-hero { background: #1c1c1c; border: 1.5px solid #3a3a3a; border-radius: 16px; padding: 16px 16px 14px; margin: 6px 0 4px; text-align: center; }
+.today-hero .th-label { color: #aaa; font-size: var(--fs-xs); font-weight: 900; letter-spacing: 0.5px; }
+.today-hero .th-dist { color: var(--primary); font-size: 46px; font-weight: 900; line-height: 1.15; margin: 4px 0 10px; font-variant-numeric: tabular-nums; }
+.today-hero .th-unit { font-size: var(--fs-base); font-weight: 900; color: var(--primary); }
+.today-hero .th-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; border-top: 1px solid #333; padding-top: 10px; }
+.today-hero .th-cell b { display: block; color: var(--text-main); font-size: var(--fs-md); font-weight: 900; font-variant-numeric: tabular-nums; }
+.today-hero .th-cell small { color: var(--text-dim); font-size: var(--fs-xs); font-weight: 700; }
+.today-hero .th-empty { color: var(--text-dim); font-size: var(--fs-sm); font-weight: 700; margin-top: 10px; }
 .type-card .tc-name { color: var(--primary); font-size: var(--fs-base); font-weight: 900; letter-spacing: 0.5px; white-space: nowrap; }
 .type-card .tc-val { color: var(--text-main); font-size: var(--fs-base); font-weight: 900; white-space: nowrap; text-align: right; }
 .type-card .tc-dist { color: var(--primary); }
@@ -8712,10 +8721,25 @@ const fmtT = fmtHMS;
 const toUnit = v => this.currentUnit === 'km' ? v : (v * 0.621371);
 const unitLabel = this.currentUnit === 'km' ? 'km' : 'mi';
 const inType = (r, type) => { const m = (r.activityMode || 'run'); return type === 'all' ? m !== 'walk' : m === type; };
-const types = [['all','ALL RUN'],['run','RUN'],['trail','TRAIL'],['freerun','FREE RUN'],['walk','WALK']];
+const types = isKo ? [['all','전체 러닝'],['run','러닝'],['trail','트레일'],['freerun','프리러닝'],['walk','걷기']] : [['all','ALL RUN'],['run','RUN'],['trail','TRAIL'],['freerun','FREE RUN'],['walk','WALK']];
+const cntUnit = isKo ? '회' : '\u00d7';
 const lblDist = isKo ? '거리' : 'DIST', lblTime = isKo ? '시간' : 'TIME', lblCnt = isKo ? '횟수' : 'COUNT';
 const isTodayRec = r => { const d = this.parseRecordDate(r.date); return !isNaN(d.getTime()) && this.dayKey(d) === this.dayKey(new Date()); };
-let html = '<div class="stats-section-title">' + (isKo ? '종목별 · 오늘' : 'BY ACTIVITY · TODAY') + '</div>';
+// [추가] 오늘 요약 히어로 카드 (전체 러닝 기준) - 맨 위에 크게
+const heroRows = hAll.filter(r => inType(r, 'all') && isTodayRec(r));
+let hd = 0, hs = 0, hk = 0;
+heroRows.forEach(r => { hd += parseFloat(r.dist) || 0; hs += secOf(r); hk += parseInt(r.kcal) || 0; });
+let html = '<div class="today-hero">' +
+'<div class="th-label">' + (isKo ? '오늘 · 전체 러닝' : "TODAY · ALL RUN") + '</div>' +
+'<div class="th-dist">' + toUnit(hd).toFixed(2) + '<span class="th-unit"> ' + unitLabel + '</span></div>' +
+'<div class="th-row">' +
+'<div class="th-cell"><b>' + fmtT(hs) + '</b><small>' + lblTime + '</small></div>' +
+'<div class="th-cell"><b>' + hk + '</b><small>kcal</small></div>' +
+'<div class="th-cell"><b>' + heroRows.length + '</b><small>' + lblCnt + '</small></div>' +
+'</div>' +
+(heroRows.length === 0 ? '<div class="th-empty">' + (isKo ? '오늘은 아직 뛴 기록이 없어요' : 'No runs yet today') + '</div>' : '') +
+'</div>';
+html += '<div class="stats-section-title">' + (isKo ? '종목별 · 오늘' : 'BY ACTIVITY · TODAY') + '</div>';
 types.forEach(([key, name]) => {
 const rows = hAll.filter(r => inType(r, key) && isTodayRec(r));
 let d = 0, sec = 0;
@@ -8724,27 +8748,26 @@ html += '<button class="type-card tc-key-' + key + '" onclick="ui.openStatDetail
 '<span class="tc-name">' + name + '</span>' +
 '<span class="tc-val tc-dist">' + toUnit(d).toFixed(2) + ' ' + unitLabel + '</span>' +
 '<span class="tc-val">' + fmtT(sec) + '</span>' +
-'<span class="tc-val">' + rows.length + '\u00d7</span></button>';
+'<span class="tc-val">' + rows.length + cntUnit + '</span></button>';
 });
 // 오늘 리포트: 러닝(걷기 제외)과 걷기를 분리해서 표시
 const todayKey = this.dayKey(new Date());
 const isToday = r => { const d = this.parseRecordDate(r.date); return !isNaN(d.getTime()) && this.dayKey(d) === todayKey; };
 const card = (l, v, cls) => '<div class="card"><div class="label">' + l + '</div><div class="value' + (cls ? ' ' + cls : '') + '">' + v + '</div></div>';
-const todayBlock = (title, type, emptyTxt) => {
+const todayBlock = (title, type, emptyTxt, hideEmpty) => {
 const tone = 'rp-' + type;
 const rows = hAll.filter(r => inType(r, type) && isToday(r));
 let td = 0, ts = 0, tk = 0;
 rows.forEach(r => { td += parseFloat(r.dist) || 0; ts += secOf(r); tk += parseInt(r.kcal) || 0; });
 let out = '<div class="stats-section-title ' + tone + '">' + title + '</div>';
-if (rows.length === 0) return out + '<div class="today-summary-bar today-summary-empty">' + emptyTxt + '</div>';
+if (rows.length === 0) return hideEmpty ? '' : out + '<div class="today-summary-bar today-summary-empty">' + emptyTxt + '</div>';
 return out + '<div class="stat-grid-dashboard ' + tone + '">' +
 card(lblDist, toUnit(td).toFixed(2) + ' ' + unitLabel, 'c25') +
 card(lblTime, fmtT(ts)) +
 card(isKo ? '칼로리' : 'CALORIES', tk + ' kcal') +
 card(lblCnt, rows.length) + '</div>';
 };
-html += todayBlock(isKo ? '오늘의 리포트 · 전체 러닝' : "TODAY'S REPORT · ALL RUN", 'all', isKo ? '오늘은 아직 뛴 기록이 없어요' : 'No runs yet today');
-html += todayBlock(isKo ? '오늘의 리포트 · 걷기' : "TODAY'S REPORT · WALK", 'walk', isKo ? '오늘은 아직 걸은 기록이 없어요' : 'No walks yet today');
+html += todayBlock(isKo ? '오늘의 리포트 · 걷기' : "TODAY'S REPORT · WALK", 'walk', isKo ? '오늘은 아직 걸은 기록이 없어요' : 'No walks yet today', true);
 home.innerHTML = html;
 }
 updateTotalStats() {
