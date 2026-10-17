@@ -920,10 +920,7 @@ body.not-admin #raw-capture-box { display:none !important; }
 .gs-bar { height:6px; border-radius:3px; background:#2a2a2a; margin-top:4px; overflow:hidden; }
 .gs-bar > i { display:block; height:100%; background:var(--primary); }
 body.prem-lock-stats #stat-filter-monthly::after, body.prem-lock-stats #stat-filter-yearly::after { content:' PRO'; font-size:.7em; color:#ffcc66; font-weight:800; margin-left:3px; }
-#settings-garmin-area { display:none; }
-#settings-calib-area.garmin-open > *:not(#settings-garmin-area) { display:none !important; }
-#settings-calib-area.garmin-open > #settings-garmin-area { display:block; }
-#settings-calib-area.premium-locked-area > *:not(.premium-banner):not(#settings-garmin-area):not(#calib-garmin-entry) { opacity: .35; pointer-events: none; }
+#settings-calib-area.premium-locked-area > *:not(.premium-banner) { opacity: .35; pointer-events: none; }
 .premium-banner { display:none; background:#2a2a2a; border:1.5px solid #555; border-radius:12px; padding:14px 16px; margin:0 0 12px; font-size:var(--fs-sm); font-weight:800; color:#ddd; text-align:center; }
 #settings-calib-area.premium-locked-area > .premium-banner { display:block; }
 .card.premium-locked .value { visibility: hidden; }
@@ -2103,6 +2100,7 @@ alt="runner"/>
 <button id="settings-sub-tab-app" class="info-sub-btn active" onclick="ui.toggleSettingsSubTab('app')"><span id="settings-tab-app-label">APP</span></button>
 <button id="settings-sub-tab-crew" class="info-sub-btn" onclick="ui.toggleSettingsSubTab('crew')"><span id="settings-tab-crew-label">CREW</span></button>
 <button id="settings-sub-tab-calib" class="info-sub-btn" onclick="ui.toggleSettingsSubTab('calib')"><span id="settings-tab-calib-label">CALIB</span></button>
+<button id="settings-sub-tab-garmin" class="info-sub-btn hidden" onclick="ui.toggleSettingsSubTab('garmin')"><span id="info-tab-garmin-label">GARMIN</span></button>
 </div>
 <div class="settings-container">
 <div id="settings-app-area">
@@ -2300,13 +2298,86 @@ alt="runner"/>
      (applyMotionCalibSuggestion, motionCalibOverrides)를 재사용해서 INFO 탭의
      "적용된 보정값" 상태 표시와도 항상 일치한다. -->
 <div id="settings-calib-area" class="hidden">
-<!-- [추가] 관리자 전용: 누르면 CALIB 내용 대신 GARMIN 페이지만 보여준다 -->
-<div id="calib-garmin-entry" class="hidden" style="padding:6px 0 12px;">
-<button id="btn-open-garmin-page" type="button" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base);" onclick="ui.openGarminPage()"><span id="info-tab-garmin-label">GARMIN</span></button>
+<div class="section-title" id="section-title-track-calib">TRACK CALIBRATION</div>
+<div class="settings-group" id="calib-group">
+<div class="info-head" style="margin-bottom:6px;"><div id="label-calib-title" class="settings-label">STRIDE CALIBRATION</div><button type="button" class="info-btn sm" aria-label="info" onclick="toggleSettingInfo('calib-desc')">ⓘ</button></div>
+<div id="calib-desc" class="c35 info-collapsed">Run a known, exact distance (a track lap, etc.) so the app can learn your real stride length instead of an estimate — this improves stride, cadence, and efficiency-score accuracy going forward.</div>
+<div class="gender-toggle-row">
+<div id="calib-dist-400" class="gender-btn active" onclick="ui.selectCalibDist(400)">400 m (track)</div>
+<div id="calib-dist-1000" class="gender-btn" onclick="ui.selectCalibDist(1000)">1000 m</div>
 </div>
-<!-- ===== [GARMIN IMPORT] 독립 모듈: SETTINGS > CALIB 탭 맨 위로 이동 (관리자 전용, 위치만 변경) ===== -->
-<div id="settings-garmin-area">
-<div style="padding:6px 0 12px;"><button id="btn-close-garmin-page" type="button" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base);" onclick="ui.closeGarminPage()">◀ CALIB</button></div>
+<button id="btn-start-calib" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:10px;" onclick="ui.startCalibrationRun()">START CALIBRATION RUN</button>
+<div id="calib-current-factor" style="font-size:var(--fs-xxs); color:#888; margin-top:10px;">Current correction factor: 1.00 (default, not yet calibrated)</div>
+<button id="btn-download-stride-calib" class="btn-download-stride-calib hidden" onclick="garmin.downloadPatchedHtml()"><span id="btn-download-stride-calib-label">DOWNLOAD PATCHED HTML (STRIDE CALIB)</span></button>
+</div>
+<!-- [추가 2026-10-10] "3개 평균 적용" 스위치. 일반 유저: 같은 위치 러닝 3회가 쌓이면 GCT가 자동 적용(수동 ON/OFF 가능).
+     개발자 모드: 가민 비교 결과 저장/패치 HTML은 가민 페이지에서만 한다(설정 중복 버튼 제거 2026-10-13). -->
+<div class="settings-group" id="calib-avg3-group">
+<div class="btn-info-row" style="margin-top:10px;"><button id="btn-calib-avg3" style="background:#2a2a2a; color:#aaa; border:1.5px solid #444; padding:13px; border-radius:12px; flex:1; font-weight:900; font-size:var(--fs-base);" onclick="toggleCalibAvg3()"><span id="btn-calib-avg3-label"></span></button><button type="button" class="info-btn" aria-label="info" onclick="toggleSettingInfo('calib-avg3-info')">ⓘ</button></div>
+<div id="calib-avg3-info" class="info-collapsed" style="margin-top:8px;">
+<div id="calib-avg3-help" class="c35" style="margin-bottom:8px;"></div>
+<div id="calib-avg3-desc" class="c35"></div>
+</div>
+</div>
+<div class="section-title" id="section-title-self-calib">SELF CALIBRATION</div>
+<div class="settings-group" id="selfcalib-group">
+<div class="info-head" style="margin-bottom:8px;"><div id="selfcalib-info-title" class="settings-label">SELF CALIBRATION</div><button type="button" class="info-btn sm" aria-label="info" onclick="toggleSettingInfo('selfcalib-desc')">ⓘ</button></div>
+<div id="selfcalib-desc" class="info-collapsed" style="font-size:var(--fs-xxs); color:#888; margin:2px 0 12px; line-height:1.6;">No Garmin? Calibrate distance against a known course (e.g. a track) and cadence against a metronome — both are independently verifiable. GCT and L/R balance can't be checked this way, so they stay at the population-average default.</div>
+<div style="position:relative; margin-bottom:8px;">
+  <div id="selfcalib-run-select-btn" onclick="ui.toggleDropdown('selfcalib-run-dropdown-options')" class="dropdown-select c13">
+    <span id="current-selfcalib-run-text">SELECT A SAVED LOG</span><span class="c08">▼</span>
+  </div>
+  <div id="selfcalib-run-dropdown-options" class="precision-dropdown-options c12"></div>
+</div>
+<div id="selfcalib-run-info" style="font-size:var(--fs-xs); color:#ccc; margin-bottom:16px; line-height:1.6;"></div>
+<div id="label-selfcalib-dist" class="c17">DISTANCE CALIBRATION (KNOWN COURSE)</div>
+<div class="c54">
+  <input id="selfcalib-actual-dist" type="number" step="0.001" inputmode="decimal" placeholder="1.600" class="c48">
+  <button id="btn-selfcalib-dist-check" class="c67" onclick="garmin.selfCalibComputeDistance()">CHECK</button>
+</div>
+<div id="selfcalib-dist-result" style="margin-bottom:16px;"></div>
+<div id="label-selfcalib-cad" class="c17">CADENCE CALIBRATION (METRONOME)</div>
+<div class="c54">
+  <input id="selfcalib-actual-cad" type="number" step="1" inputmode="numeric" placeholder="170" class="c48">
+  <button id="btn-selfcalib-cad-check" class="c67" onclick="garmin.selfCalibComputeCadence()">CHECK</button>
+</div>
+<div id="selfcalib-cad-result"></div>
+</div>
+<!-- [추가] 앱 기본값 보기: 현재 러닝 로직이 실제로 쓰는 코드상의 기본 보정값
+     (gctFallbackRatio 40%, stride/gps/cad/pace factor 1.0 등)을 로컬에서도
+     바로 확인할 수 있게 하는 버튼. -->
+<div class="section-title" id="section-title-app-defaults">APP DEFAULTS</div>
+<div class="settings-group" id="app-defaults-group">
+<!-- [수정 2026-10-12] 보정계수 스위치 → PRO RUN / LITE RUN(라이트 런) 모드 버튼. 설명은 ⓘ를 눌러야 펼쳐진다. ON=PRO RUN, OFF=LITE RUN -->
+<div id="calib-factor-switch-box" style="margin-top:14px;">
+<div class="btn-info-row"><button id="btn-calib-factor-switch" style="background:#2a2a2a; color:#aaa; border:1.5px solid #444; padding:13px; border-radius:12px; flex:1; font-weight:900; font-size:var(--fs-base);" onclick="ui.toggleCalibFactors()"><span id="btn-calib-factor-switch-label">RUN MODE: LITE RUN</span></button><button type="button" class="info-btn" aria-label="info" onclick="toggleSettingInfo('calib-factor-switch-desc')">ⓘ</button></div>
+<div id="calib-factor-switch-desc" class="c35 info-collapsed" style="margin-top:8px;"></div>
+</div>
+<!-- [추가 2026-10-14] 원시 센서 기록(분석용): 켜고 뛰면 가속도/자이로 원시값을 러닝 끝난 뒤 CSV로 내보낼 수 있다. 기본 OFF -->
+<div id="raw-capture-box" style="margin-top:22px;">
+<div id="raw-capture-title" class="settings-label" style="margin-bottom:8px;">RAW SENSOR LOG</div>
+<div class="btn-info-row"><button id="btn-raw-capture" style="background:#2a2a2a; color:#aaa; border:1.5px solid #444; padding:13px; border-radius:12px; flex:1; font-weight:900; font-size:var(--fs-base);" onclick="ui.toggleRawCapture()"><span id="btn-raw-capture-label">RAW SENSOR LOG: OFF</span></button><button type="button" class="info-btn" aria-label="info" onclick="toggleSettingInfo('raw-capture-desc')">ⓘ</button></div>
+<div id="raw-capture-desc" class="c35 info-collapsed" style="margin-top:8px;"></div>
+<button id="btn-raw-export" style="background:#2a2a2a; color:#aaa; border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:10px;" onclick="ui.exportRawSensorCsv()"><span id="btn-raw-export-label">EXPORT LAST RAW SENSOR CSV</span></button>
+</div>
+<!-- [수정 2026-10-12] 캘리브레이션 관리 접이식 그룹: 앱 기본값/현재 데이터/되돌리기/초기화 -->
+<details id="calib-manage-details" class="calib-manage">
+<summary id="calib-manage-summary"><span id="calib-manage-summary-text">CALIBRATION TOOLS</span><span class="cm-arrow">▾</span></summary>
+<div class="calib-manage-body">
+<div class="btn-info-row"><button id="btn-show-app-defaults" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:13px; border-radius:12px; flex:1; font-weight:900; font-size:var(--fs-base);" onclick="ui.toggleAppDefaults()"><span id="btn-show-app-defaults-label">SHOW APP DEFAULTS</span></button><button type="button" class="info-btn" aria-label="info" onclick="toggleSettingInfo('app-defaults-desc')">ⓘ</button></div>
+<div id="app-defaults-desc" class="c35 info-collapsed">Show the built-in default values the running logic currently uses (before any calibration is applied).</div>
+<div id="app-defaults-result" class="app-defaults-result"></div>
+<button id="btn-show-current-data" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:8px;" onclick="ui.toggleCurrentData()"><span id="btn-show-current-data-label">SHOW CURRENT DATA</span></button>
+<div id="current-data-result" class="current-data-result"></div>
+<button id="btn-restore-committed-calib-all" style="background:#14261a; color:#5fd18a; border:1.5px solid #2d5a3f; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:8px;" onclick="garmin.applyCommittedDefaultAllPos()"><span id="btn-restore-committed-calib-all-label">RESTORE CURRENT CALIBRATION (ALL POSITIONS)</span></button>
+<button id="btn-factory-reset-calib-all" style="background:#2a1414; color:var(--danger); border:1.5px solid #663333; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:8px;" onclick="garmin.resetCalibrationAllPos()"><span id="btn-factory-reset-calib-all-label">FACTORY RESET CALIBRATION (ALL POSITIONS)</span></button>
+</div>
+</details>
+</div>
+<!-- ===== [/CALIBRATION SETTINGS] ===== -->
+</div>
+<!-- ===== [GARMIN IMPORT] 독립 모듈: SETTINGS 탭의 4번째 서브탭 (관리자 전용) ===== -->
+<div id="settings-garmin-area" class="hidden">
 <div id="info-garmin-area" class="info-garmin-area is-open">
 <div id="garmin-sample-box" class="diag-card u-margin-0-0-10px-0"></div>
 <div class="diag-card u-margin-0-0-10px-0">
@@ -2410,84 +2481,6 @@ alt="runner"/>
 </div>
 </div>
 <!-- ===== [/GARMIN IMPORT] ===== -->
-<div class="section-title" id="section-title-track-calib">TRACK CALIBRATION</div>
-<div class="settings-group" id="calib-group">
-<div class="info-head" style="margin-bottom:6px;"><div id="label-calib-title" class="settings-label">STRIDE CALIBRATION</div><button type="button" class="info-btn sm" aria-label="info" onclick="toggleSettingInfo('calib-desc')">ⓘ</button></div>
-<div id="calib-desc" class="c35 info-collapsed">Run a known, exact distance (a track lap, etc.) so the app can learn your real stride length instead of an estimate — this improves stride, cadence, and efficiency-score accuracy going forward.</div>
-<div class="gender-toggle-row">
-<div id="calib-dist-400" class="gender-btn active" onclick="ui.selectCalibDist(400)">400 m (track)</div>
-<div id="calib-dist-1000" class="gender-btn" onclick="ui.selectCalibDist(1000)">1000 m</div>
-</div>
-<button id="btn-start-calib" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:10px;" onclick="ui.startCalibrationRun()">START CALIBRATION RUN</button>
-<div id="calib-current-factor" style="font-size:var(--fs-xxs); color:#888; margin-top:10px;">Current correction factor: 1.00 (default, not yet calibrated)</div>
-<button id="btn-download-stride-calib" class="btn-download-stride-calib hidden" onclick="garmin.downloadPatchedHtml()"><span id="btn-download-stride-calib-label">DOWNLOAD PATCHED HTML (STRIDE CALIB)</span></button>
-</div>
-<!-- [추가 2026-10-10] "3개 평균 적용" 스위치. 일반 유저: 같은 위치 러닝 3회가 쌓이면 GCT가 자동 적용(수동 ON/OFF 가능).
-     개발자 모드: 가민 비교 결과 저장/패치 HTML은 가민 페이지에서만 한다(설정 중복 버튼 제거 2026-10-13). -->
-<div class="settings-group" id="calib-avg3-group">
-<div class="btn-info-row" style="margin-top:10px;"><button id="btn-calib-avg3" style="background:#2a2a2a; color:#aaa; border:1.5px solid #444; padding:13px; border-radius:12px; flex:1; font-weight:900; font-size:var(--fs-base);" onclick="toggleCalibAvg3()"><span id="btn-calib-avg3-label"></span></button><button type="button" class="info-btn" aria-label="info" onclick="toggleSettingInfo('calib-avg3-info')">ⓘ</button></div>
-<div id="calib-avg3-info" class="info-collapsed" style="margin-top:8px;">
-<div id="calib-avg3-help" class="c35" style="margin-bottom:8px;"></div>
-<div id="calib-avg3-desc" class="c35"></div>
-</div>
-</div>
-<div class="section-title" id="section-title-self-calib">SELF CALIBRATION</div>
-<div class="settings-group" id="selfcalib-group">
-<div class="info-head" style="margin-bottom:8px;"><div id="selfcalib-info-title" class="settings-label">SELF CALIBRATION</div><button type="button" class="info-btn sm" aria-label="info" onclick="toggleSettingInfo('selfcalib-desc')">ⓘ</button></div>
-<div id="selfcalib-desc" class="info-collapsed" style="font-size:var(--fs-xxs); color:#888; margin:2px 0 12px; line-height:1.6;">No Garmin? Calibrate distance against a known course (e.g. a track) and cadence against a metronome — both are independently verifiable. GCT and L/R balance can't be checked this way, so they stay at the population-average default.</div>
-<div style="position:relative; margin-bottom:8px;">
-  <div id="selfcalib-run-select-btn" onclick="ui.toggleDropdown('selfcalib-run-dropdown-options')" class="dropdown-select c13">
-    <span id="current-selfcalib-run-text">SELECT A SAVED LOG</span><span class="c08">▼</span>
-  </div>
-  <div id="selfcalib-run-dropdown-options" class="precision-dropdown-options c12"></div>
-</div>
-<div id="selfcalib-run-info" style="font-size:var(--fs-xs); color:#ccc; margin-bottom:16px; line-height:1.6;"></div>
-<div id="label-selfcalib-dist" class="c17">DISTANCE CALIBRATION (KNOWN COURSE)</div>
-<div class="c54">
-  <input id="selfcalib-actual-dist" type="number" step="0.001" inputmode="decimal" placeholder="1.600" class="c48">
-  <button id="btn-selfcalib-dist-check" class="c67" onclick="garmin.selfCalibComputeDistance()">CHECK</button>
-</div>
-<div id="selfcalib-dist-result" style="margin-bottom:16px;"></div>
-<div id="label-selfcalib-cad" class="c17">CADENCE CALIBRATION (METRONOME)</div>
-<div class="c54">
-  <input id="selfcalib-actual-cad" type="number" step="1" inputmode="numeric" placeholder="170" class="c48">
-  <button id="btn-selfcalib-cad-check" class="c67" onclick="garmin.selfCalibComputeCadence()">CHECK</button>
-</div>
-<div id="selfcalib-cad-result"></div>
-</div>
-<!-- [추가] 앱 기본값 보기: 현재 러닝 로직이 실제로 쓰는 코드상의 기본 보정값
-     (gctFallbackRatio 40%, stride/gps/cad/pace factor 1.0 등)을 로컬에서도
-     바로 확인할 수 있게 하는 버튼. -->
-<div class="section-title" id="section-title-app-defaults">APP DEFAULTS</div>
-<div class="settings-group" id="app-defaults-group">
-<!-- [수정 2026-10-12] 보정계수 스위치 → PRO RUN / LITE RUN(라이트 런) 모드 버튼. 설명은 ⓘ를 눌러야 펼쳐진다. ON=PRO RUN, OFF=LITE RUN -->
-<div id="calib-factor-switch-box" style="margin-top:14px;">
-<div class="btn-info-row"><button id="btn-calib-factor-switch" style="background:#2a2a2a; color:#aaa; border:1.5px solid #444; padding:13px; border-radius:12px; flex:1; font-weight:900; font-size:var(--fs-base);" onclick="ui.toggleCalibFactors()"><span id="btn-calib-factor-switch-label">RUN MODE: LITE RUN</span></button><button type="button" class="info-btn" aria-label="info" onclick="toggleSettingInfo('calib-factor-switch-desc')">ⓘ</button></div>
-<div id="calib-factor-switch-desc" class="c35 info-collapsed" style="margin-top:8px;"></div>
-</div>
-<!-- [추가 2026-10-14] 원시 센서 기록(분석용): 켜고 뛰면 가속도/자이로 원시값을 러닝 끝난 뒤 CSV로 내보낼 수 있다. 기본 OFF -->
-<div id="raw-capture-box" style="margin-top:22px;">
-<div id="raw-capture-title" class="settings-label" style="margin-bottom:8px;">RAW SENSOR LOG</div>
-<div class="btn-info-row"><button id="btn-raw-capture" style="background:#2a2a2a; color:#aaa; border:1.5px solid #444; padding:13px; border-radius:12px; flex:1; font-weight:900; font-size:var(--fs-base);" onclick="ui.toggleRawCapture()"><span id="btn-raw-capture-label">RAW SENSOR LOG: OFF</span></button><button type="button" class="info-btn" aria-label="info" onclick="toggleSettingInfo('raw-capture-desc')">ⓘ</button></div>
-<div id="raw-capture-desc" class="c35 info-collapsed" style="margin-top:8px;"></div>
-<button id="btn-raw-export" style="background:#2a2a2a; color:#aaa; border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:10px;" onclick="ui.exportRawSensorCsv()"><span id="btn-raw-export-label">EXPORT LAST RAW SENSOR CSV</span></button>
-</div>
-<!-- [수정 2026-10-12] 캘리브레이션 관리 접이식 그룹: 앱 기본값/현재 데이터/되돌리기/초기화 -->
-<details id="calib-manage-details" class="calib-manage">
-<summary id="calib-manage-summary"><span id="calib-manage-summary-text">CALIBRATION TOOLS</span><span class="cm-arrow">▾</span></summary>
-<div class="calib-manage-body">
-<div class="btn-info-row"><button id="btn-show-app-defaults" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:13px; border-radius:12px; flex:1; font-weight:900; font-size:var(--fs-base);" onclick="ui.toggleAppDefaults()"><span id="btn-show-app-defaults-label">SHOW APP DEFAULTS</span></button><button type="button" class="info-btn" aria-label="info" onclick="toggleSettingInfo('app-defaults-desc')">ⓘ</button></div>
-<div id="app-defaults-desc" class="c35 info-collapsed">Show the built-in default values the running logic currently uses (before any calibration is applied).</div>
-<div id="app-defaults-result" class="app-defaults-result"></div>
-<button id="btn-show-current-data" style="background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:8px;" onclick="ui.toggleCurrentData()"><span id="btn-show-current-data-label">SHOW CURRENT DATA</span></button>
-<div id="current-data-result" class="current-data-result"></div>
-<button id="btn-restore-committed-calib-all" style="background:#14261a; color:#5fd18a; border:1.5px solid #2d5a3f; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:8px;" onclick="garmin.applyCommittedDefaultAllPos()"><span id="btn-restore-committed-calib-all-label">RESTORE CURRENT CALIBRATION (ALL POSITIONS)</span></button>
-<button id="btn-factory-reset-calib-all" style="background:#2a1414; color:var(--danger); border:1.5px solid #663333; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:8px;" onclick="garmin.resetCalibrationAllPos()"><span id="btn-factory-reset-calib-all-label">FACTORY RESET CALIBRATION (ALL POSITIONS)</span></button>
-</div>
-</details>
-</div>
-<!-- ===== [/CALIBRATION SETTINGS] ===== -->
-</div>
 
 </div>
 </div>
@@ -6548,15 +6541,19 @@ const calibBtn = document.getElementById('settings-sub-tab-calib');
 const appArea = document.getElementById('settings-app-area');
 const crewArea = document.getElementById('settings-crew-area');
 const calibArea = document.getElementById('settings-calib-area');
+const garminBtn = document.getElementById('settings-sub-tab-garmin');
+const garminArea = document.getElementById('settings-garmin-area');
 if (!appBtn || !crewBtn || !calibBtn || !appArea || !crewArea || !calibArea) return;
-if (target === 'garmin') target = 'calib';
-calibArea.classList.remove('garmin-open'); // [수정] 탭을 바꾸거나 다시 열면 항상 CALIB 본 화면부터
+if (target === 'garmin' && !storage.getDevMode()) target = 'app'; // [추가 2026-10-16] GARMIN은 관리자 전용
 appBtn.classList.toggle('active', target === 'app');
 crewBtn.classList.toggle('active', target === 'crew');
 calibBtn.classList.toggle('active', target === 'calib');
 appArea.classList.toggle('hidden', target !== 'app');
 crewArea.classList.toggle('hidden', target !== 'crew');
 calibArea.classList.toggle('hidden', target !== 'calib');
+if (garminBtn) garminBtn.classList.toggle('active', target === 'garmin');
+if (garminArea) garminArea.classList.toggle('hidden', target !== 'garmin');
+if (target === 'garmin' && typeof garmin !== 'undefined' && garmin.render) garmin.render();
 if (target === 'app') {
 this.renderPrecisionLogList(); // [수정] 정밀 로그 리스트 갱신
 } else if (target === 'crew') {
@@ -6652,24 +6649,14 @@ const on = storage.getDevMode(); // [수정 2026-10-16] 이제 '관리자 계정
 const strideDlBtn = document.getElementById('btn-download-stride-calib');
 if (strideDlBtn) strideDlBtn.classList.toggle('hidden', !on);
 try { refreshCalibAvg3Switch(); } catch (e) {}
-// [수정] CALIB 맨 위 GARMIN 진입 버튼은 관리자만 보인다. 관리자가 아니면 GARMIN 페이지도 닫는다.
-const garminEntry = document.getElementById('calib-garmin-entry');
-if (garminEntry) garminEntry.classList.toggle('hidden', !on);
-if (!on) { const ca = document.getElementById('settings-calib-area'); if (ca) ca.classList.remove('garmin-open'); }
+const garminBtn = document.getElementById('settings-sub-tab-garmin');
+if (garminBtn) garminBtn.classList.toggle('hidden', !on);
+if (!on) {
+// 관리자가 아닌데 GARMIN 화면이 열려 있었다면(로그아웃 등) APP 탭으로 되돌림
+const garminArea = document.getElementById('settings-garmin-area');
+if (garminArea && !garminArea.classList.contains('hidden')) this.toggleSettingsSubTab('app');
 }
-openGarminPage() {
-if (!storage.getDevMode()) return;
-const ca = document.getElementById('settings-calib-area');
-if (!ca) return;
-ca.classList.add('garmin-open');
-try { if (typeof garmin !== 'undefined' && garmin.render) garmin.render(); } catch (e) {}
-window.scrollTo(0, 0);
 }
-closeGarminPage() {
-const ca = document.getElementById('settings-calib-area');
-if (ca) ca.classList.remove('garmin-open');
-}
-
 toggleInfoSubTab(target) {
 const theoryBtn = document.getElementById('info-sub-tab-theory');
 const precisionBtn = document.getElementById('info-sub-tab-precision');
