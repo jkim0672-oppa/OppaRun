@@ -913,7 +913,7 @@ body.prem-lock-garmin #garmin-calib-status:not(:empty)::before { content: var(--
 #garmin-sample-box { display:none; }
 body.prem-lock-garmin #garmin-sample-box { display:block; }
 /* [추가 2026-10-10] 앱 코드/기본값을 바꾸는 도구는 관리자 전용: 패치 HTML 다운로드, 앱 코드로 저장, 앱 현재값으로 확정 */
-body.not-admin #btn-download-stride-calib, body.not-admin #btn-calib-avg3-commit, body.not-admin button[onclick*="downloadPatchedHtml"] { display:none !important; }
+body.not-admin #btn-download-stride-calib, body.not-admin #btn-errlog-copy, body.not-admin #btn-calib-avg3-commit, body.not-admin button[onclick*="downloadPatchedHtml"] { display:none !important; }
 /* [추가 2026-10-14] 원시 센서 기록(분석용)도 관리자 전용: 토글/내보내기 박스 전체 숨김 */
 body.not-admin #raw-capture-box { display:none !important; }
 .gs-row { margin:8px 0; font-size:var(--fs-xs); color:#ccc; font-weight:700; }
@@ -1280,6 +1280,7 @@ margin-top: 10px; font-family: -apple-system, system-ui;
 .type-card.tc-key-all:active { border-color: #ffffff; background: rgba(255,255,255,0.06); }
 .type-card.tc-key-walk .tc-name, .type-card.tc-key-walk .tc-dist { color: #4fc3f7; }
 .type-card.tc-key-walk:active { border-color: #4fc3f7; background: rgba(79,195,247,0.06); }
+.ref-tag { font-size: 0.8em; font-weight: 700; color: #aaa; opacity: 0.8; margin-left: 4px; white-space: nowrap; }
 .type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
 .type-card.tc-sq { display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; gap: 6px; margin-bottom: 0; padding: 14px; min-height: 104px; }
 .type-card.tc-sq .tc-dist { font-size: var(--fs-xl); text-align: left; line-height: 1.1; font-variant-numeric: tabular-nums; }
@@ -2244,6 +2245,8 @@ alt="runner"/>
 <a id="link-privacy" href="privacy-policy.html" target="_blank" rel="noopener" style="color: #999; font-size:var(--fs-xs); text-decoration: none;">Privacy Policy</a>
 <span style="color:#555; font-size:var(--fs-xs); margin: 0 8px;">·</span>
 <a id="link-terms" href="terms.html" target="_blank" rel="noopener" style="color: #999; font-size:var(--fs-xs); text-decoration: none;">Terms of Service</a>
+<span style="color:#555; font-size:var(--fs-xs); margin: 0 8px;">·</span>
+<a id="link-report" href="javascript:void(0)" onclick="ui.reportProblem()" style="color: #999; font-size:var(--fs-xs); text-decoration: none;">Report a problem</a>
 </div>
 <div style="margin-top: 10px; text-align: center;">
 <span id="app-version-label" style="color: #999; font-size:var(--fs-xs);"></span><span id="app-update-time-label" style="color: #999; font-size:var(--fs-xs);"></span>
@@ -2380,6 +2383,7 @@ alt="runner"/>
 <div class="btn-info-row"><button id="btn-raw-capture" style="background:#2a2a2a; color:#aaa; border:1.5px solid #444; padding:13px; border-radius:12px; flex:1; font-weight:900; font-size:var(--fs-base);" onclick="ui.toggleRawCapture()"><span id="btn-raw-capture-label">RAW SENSOR LOG: OFF</span></button><button type="button" class="info-btn" aria-label="info" onclick="toggleSettingInfo('raw-capture-desc')">ⓘ</button></div>
 <div id="raw-capture-desc" class="c35 info-collapsed" style="margin-top:8px;"></div>
 <button id="btn-raw-export" style="background:#2a2a2a; color:#aaa; border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:10px;" onclick="ui.exportRawSensorCsv()"><span id="btn-raw-export-label">EXPORT LAST RAW SENSOR CSV</span></button>
+<button id="btn-errlog-copy" style="background:#2a2a2a; color:#aaa; border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:900; font-size:var(--fs-base); margin-top:10px;" onclick="ui.copyErrorLog()"><span id="btn-errlog-copy-label">COPY ERROR LOG</span></button>
 </div>
 <!-- [수정 2026-10-12] 캘리브레이션 관리 접이식 그룹: 앱 기본값/현재 데이터/되돌리기/초기화 -->
 <details id="calib-manage-details" class="calib-manage">
@@ -2561,6 +2565,9 @@ function isMetricVisible(record, metric) {
 // 기존 호출부(공유카드/공유모달/크루 업로드/UIManager 등)가 쓰던 이름은 그대로 유지하되 위 표에 위임한다.
 function isGctVertUnreliable(record) { return !isMetricVisible(record, 'gctFlight'); }
 function isBalanceUnreliable(record) { return !isMetricVisible(record, 'balance'); }
+// [추가] 목록·상세·위치별 통계는 isGctVertUnreliable()인 기록(러닝의 암밴드·손, 트레일, 프리런)의 GCT/FLIGHT/VERT도 보여주되
+// 이 '참고용' 표시를 붙인다(걷기는 별도 분기라 해당 없음). 통계 SUMMARY 평균·공유카드·크루 업로드는 같은 함수로 계속 제외/숨김.
+function gctRefTagHtml(lang) { return ' <span class="ref-tag">' + (lang === 'ko' ? '참고용' : 'ref only') + '</span>'; }
 function generateRunCardCanvas(data, isKo) {
     const PAD = 40;
     const GREEN = '#00aa55';
@@ -3123,6 +3130,27 @@ async function shareCanvasImage(canvas, isKo, shareText) {
   a.click();
   appAlert(isKo ? '이미지가 저장되었습니다! SNS에 공유해보세요' : 'Image saved! Share it on SNS');
 }
+
+// [추가] 조용히 삼키던 중요 오류(저장·센서 설정·기록 저장·화면 켜짐 등)를 남기는 로거.
+// 같은 태그는 10초에 1번만 기록(반복 오류 폭주 방지). 최근 50건을 메모리와 localStorage('jr_errlog')에 보관하고 console.warn으로도 출력한다.
+// 이 함수 자체의 오류는 다시 던지지 않는다(앱 동작에 영향 없음).
+const JR_SUPPORT_EMAIL = 'jkim0672@gmail.com'; // [추가] 문제 신고 수신 주소
+window.__jrErrLog = [];
+function jrLogErr(tag, e) {
+  try {
+    const now = Date.now();
+    const last = jrLogErr._last || (jrLogErr._last = {});
+    if (last[tag] && now - last[tag] < 10000) return;
+    last[tag] = now;
+    const msg = (e && e.message) ? e.message : String(e);
+    window.__jrErrLog.push({ t: new Date(now).toISOString(), tag: tag, msg: String(msg).slice(0, 200) });
+    if (window.__jrErrLog.length > 50) window.__jrErrLog.shift();
+    console.warn('[JR]', tag, msg);
+    try { localStorage.setItem('jr_errlog', JSON.stringify(window.__jrErrLog)); } catch (_) {}
+  } catch (_) {}
+}
+window.addEventListener('error', function (ev) { jrLogErr('window.error', ev && (ev.error || ev.message)); });
+window.addEventListener('unhandledrejection', function (ev) { jrLogErr('promise', ev && ev.reason); });
 
 function appAlert(msg) {
   return new Promise((resolve) => {
@@ -3930,7 +3958,7 @@ function calibAvg3RecordSelfRun(pos, motion) {
   let m = {};
   try { m = JSON.parse(localStorage.getItem(CALIB_AVG3_SELF_KEY) || '{}') || {}; } catch (e) { m = {}; }
   m[pos] = (Array.isArray(m[pos]) ? m[pos] : []).concat([Math.round(motion.gctRatioLearned * 1000) / 1000]).slice(-5);
-  try { localStorage.setItem(CALIB_AVG3_SELF_KEY, JSON.stringify(m)); } catch (e) {}
+  try { localStorage.setItem(CALIB_AVG3_SELF_KEY, JSON.stringify(m)); } catch (e) { jrLogErr('calibAvg3Save', e); }
   // 일반 유저: 3회 쌓였고 아직 이 위치에 자동 적용한 적/개별 보정이 없으면 1회 자동 ON.
   try {
     if (!storage.getDevMode()) {
@@ -3945,7 +3973,7 @@ function calibAvg3RecordSelfRun(pos, motion) {
         }
       }
     }
-  } catch (e) {}
+  } catch (e) { jrLogErr('motionOverrideApply1', e); }
 }
 // 현재 착용 위치의 살아있는 MotionManager에 gct 폴백비율/vertScale만 직접 반영한다.
 // applyDevicePos()는 gctRatioLearned/실측 카운트 등을 리셋하는 부수효과가 있어 러닝 중/종료 시점엔 쓰지 않는다.
@@ -3958,7 +3986,7 @@ function calibAvg3LiveApply(prof, pos) {
     app.motion.vertScale = (typeof ov.vertScale === 'number') ? ov.vertScale : base.vertScale;
     app.motion.groundThreshold = (typeof ov.groundThreshold === 'number') ? ov.groundThreshold : base.groundThreshold;
     app.motion.impactThreshold = (typeof ov.impactThreshold === 'number') ? ov.impactThreshold : base.impactThreshold;
-  } catch (e) {}
+  } catch (e) { jrLogErr('motionOverrideApply2', e); }
 }
 function calibAvg3Mean(vals, dec) {
   const v = vals.filter(function(x) { return typeof x === 'number'; });
@@ -4006,7 +4034,7 @@ function calibAvg3Apply(prof, pos) { // prof를 직접 수정. 적용됐으면 t
   if (src.ground != null) next.groundThreshold = src.ground;
   if (src.impact != null) next.impactThreshold = src.impact;
   prof.motionCalibOverrides[pos] = next;
-  try { pushCalibHistory(prof, pos, next.appliedAt); } catch (e) {}
+  try { pushCalibHistory(prof, pos, next.appliedAt); } catch (e) { jrLogErr('calibHistory', e); }
   return true;
 }
 function toggleCalibAvg3() {
@@ -4027,7 +4055,7 @@ function saveCalibAvg3Result() {
   const isKo = storage.getLang() === 'ko';
   const total = function() { try { return JSON.parse(localStorage.getItem(CALIB_AVG3_PENDING_KEY) || '[]').length; } catch (e) { return 0; } };
   const before = total();
-  try { garmin.addPendingCalib(); } catch (e) {}
+  try { garmin.addPendingCalib(); } catch (e) { jrLogErr('pendingCalibAdd', e); }
   if (total() === before) {
     alert(isKo ? '저장할 비교 결과가 없어요. SETTINGS > GARMIN 탭에서 가민 기록과 정밀 로그를 골라 비교를 먼저 실행해주세요.' : 'No compare result to save. Run a compare first in SETTINGS > GARMIN.');
   }
@@ -5455,7 +5483,7 @@ try {
     profile.strideCorrectionFactor = 1.0; profile.gpsDistCorrectionFactor = 1.0;
     profile.cadCorrectionFactor = 1.0; profile.paceCorrectionFactor = 1.0;
   }
-} catch (e) {}
+} catch (e) { jrLogErr('profileFactorReset', e); }
 localStorage.setItem(this.PROFILE_KEY, JSON.stringify(profile));
 }
 loadProfile() {
@@ -6711,6 +6739,8 @@ if (linkPrivacyEl) linkPrivacyEl.href = 'privacy-policy.html?lang=' + lang;
 const linkTermsEl = document.getElementById('link-terms');
 if (linkTermsEl) { linkTermsEl.href = 'terms.html?lang=' + lang; linkTermsEl.textContent = (lang === 'ko') ? '이용약관' : 'Terms of Service'; }
 if (linkPrivacyEl) linkPrivacyEl.textContent = (lang === 'ko') ? '개인정보처리방침' : 'Privacy Policy';
+const linkReportEl = document.getElementById('link-report');
+if (linkReportEl) linkReportEl.textContent = (lang === 'ko') ? '문제 신고' : 'Report a problem';
 // [추가] 뒤로가기 종료 확인 다이얼로그 / 검은 종료화면 텍스트도 함께 갱신
 if (window.applyExitDialogLang) window.applyExitDialogLang();
 ['pace','dist','time','avg','cadence','gct','flight'].forEach(id => {
@@ -7416,7 +7446,7 @@ try {
     app.motion.cadCorrectionFactor = f.cad;
     app.motion.paceCorrectionFactor = f.pace;
   }
-} catch (e) {}
+} catch (e) { jrLogErr('paceFactorApply', e); }
 console.log('[calib-factor-switch]', next ? 'ON' : 'OFF', 'pos=' + pos, JSON.stringify(f));
 this.refreshCalibFactorSwitch();
 }
@@ -7433,6 +7463,8 @@ refreshRawCaptureSwitch() {
   if (rawTitle) rawTitle.textContent = isKo ? '원시 센서 기록' : 'RAW SENSOR LOG';
   if (lab) lab.textContent = (isKo ? '원시 센서 기록: ' : 'RAW SENSOR LOG: ') + (on ? 'ON' : 'OFF');
   if (exl) exl.textContent = isKo ? '마지막 러닝 원시 센서 CSV 내보내기' : 'EXPORT LAST RAW SENSOR CSV';
+  const errLbl = document.getElementById('btn-errlog-copy-label');
+  if (errLbl) errLbl.textContent = isKo ? '오류 기록 복사' : 'COPY ERROR LOG';
   if (btn) {
     btn.style.background = on ? '#14261a' : '#2a2a2a';
     btn.style.color = on ? '#5fd18a' : '#aaa';
@@ -7469,6 +7501,54 @@ if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'A
     const built = app.buildRawSensorCsv(buf, meta);
     storage.downloadCsvFile(built.csv, built.fileName);
   } catch (e) { alert((isKo ? '내보내기 실패: ' : 'Export failed: ') + (e && e.message ? e.message : e)); }
+}
+// [추가] 오류 기록 복사/신고 공용 헬퍼 — jrLogErr()가 모아 둔 최근 오류(메모리 → localStorage 순)를 읽는다.
+_loadErrList() {
+  let list = (window.__jrErrLog && window.__jrErrLog.length) ? window.__jrErrLog : [];
+  if (!list.length) { try { list = JSON.parse(localStorage.getItem('jr_errlog') || '[]'); } catch (e) { list = []; } }
+  return list;
+}
+_buildErrReportText(list) {
+  let ver = ''; try { ver = window.AndroidAppInfo.getContentVersion(); } catch (e) {}
+  const lines = ['JennyRun problem report', 'generated: ' + new Date().toISOString(), 'content: ' + ver, 'lang: ' + storage.getLang(), 'ua: ' + navigator.userAgent, ''];
+  if (list.length) list.forEach(x => lines.push(x.t + ' [' + x.tag + '] ' + x.msg)); else lines.push('(no errors logged)');
+  return lines.join('\n');
+}
+// 클립보드 복사 → 안 되면 숨은 입력칸 복사 → 그것도 안 되면 Downloads에 txt 저장. true면 클립보드에 복사됨.
+async _copyOrSaveText(text, isKo) {
+  try { if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); return true; } } catch (e) {}
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;';
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    if (ok) return true;
+  } catch (e) {}
+  const d = new Date();
+  const stamp = String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0') + '_' + d.toTimeString().slice(0, 8).replace(/:/g, '');
+  saveTextFileNative(text, 'jr_errlog_' + stamp + '.txt', 'text/plain;charset=utf-8', isKo);
+  return false;
+}
+// [추가] 관리자 전용: 오류 기록 복사
+async copyErrorLog() {
+  if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'Admin-only feature.'); return; }
+  const isKo = storage.getLang() === 'ko';
+  const list = this._loadErrList();
+  if (!list.length) { alert(isKo ? '기록된 오류가 없어요.' : 'No errors logged.'); return; }
+  const copied = await this._copyOrSaveText(this._buildErrReportText(list), isKo);
+  if (copied) alert(isKo ? ('오류 기록 ' + list.length + '건을 복사했어요.') : ('Copied ' + list.length + ' error log entries.'));
+}
+// [추가] 모든 사용자: 설정 하단 "문제 신고" — 기기 정보와 최근 오류 기록을 복사하고 보낼 주소를 안내한다.
+// (메일 앱 자동 실행은 WebView에서 mailto 처리가 보장되지 않아 쓰지 않는다. 위치·러닝 기록 등 개인 데이터는 포함하지 않음.)
+async reportProblem() {
+  const isKo = storage.getLang() === 'ko';
+  const list = this._loadErrList();
+  const copied = await this._copyOrSaveText(this._buildErrReportText(list), isKo);
+  if (!copied) return; // 파일로 저장된 경우 저장 완료 안내가 이미 뜬다
+  alert(isKo
+    ? ('문제 신고 내용을 복사했어요.\n' + JR_SUPPORT_EMAIL + ' 로 메일을 쓰면서 붙여넣고, 어떤 상황이었는지 함께 적어 주세요.\n(기기 정보와 최근 오류 기록만 들어 있어요. 위치나 러닝 기록은 포함되지 않아요.)')
+    : ('Problem report copied.\nPaste it into an email to ' + JR_SUPPORT_EMAIL + ' and describe what happened.\n(It only contains device info and recent error logs — no location or run data.)'));
 }
 updateCalibFactorDisplay() {
 const lang = storage.getLang();
@@ -8096,11 +8176,13 @@ this.buildHrBoxHtml(r, t) +
 '<div class="h-det-box"><div class="h-det-label">' + t.pace + '</div><div class="h-det-val">' + displayPace + '</div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.cadence + '</div><div class="h-det-val" style="color:' + this.getCadenceColor(r.cadence) + '">' + (r.cadence || 0) + '</div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.cal + '</div><div class="h-det-val">' + (r.kcal || 0) + '<span class="c34">' + (r.weightKgSnapshot ? r.weightKgSnapshot.toFixed(1)+'kg' : '') + '</span></div></div>' +
-// [수정] 손/암밴드/프리런은 GCT·FLIGHT 칸을 '--'로 채우지 않고 아예 그리지 않는다
-(this.isGctVertUnreliable(r) ? '' : (
-'<div class="h-det-box lk-dyn"><div class="h-det-label">' + t.gct + '</div><div class="h-det-val" style="color:' + this.getGctColor(r.gct) + '">' + (r.gct || '--') + ' <span class="u-font-size-fs-xxs">MS</span></div></div>' +
-'<div class="h-det-box lk-dyn"><div class="h-det-label">' + t.flight + '</div><div class="h-det-val" style="color:' + this.getFlightColor(r.flight) + '">' + (r.flight || '--') + ' <span class="u-font-size-fs-xxs">%</span></div></div>'
-)) +
+// [수정] 가슴·허리(러닝)가 아닌 기록은 GCT·FLIGHT에 '참고용' 표시 + 회색 값 (걷기는 위의 별도 분기)
+(() => {
+const _ref = this.isGctVertUnreliable(r);
+const _tag = _ref ? gctRefTagHtml(lang) : '';
+return '<div class="h-det-box lk-dyn"><div class="h-det-label">' + t.gct + _tag + '</div><div class="h-det-val" style="color:' + (_ref ? '#888' : this.getGctColor(r.gct)) + '">' + (r.gct || '--') + ' <span class="u-font-size-fs-xxs">MS</span></div></div>' +
+'<div class="h-det-box lk-dyn"><div class="h-det-label">' + t.flight + _tag + '</div><div class="h-det-val" style="color:' + (_ref ? '#888' : this.getFlightColor(r.flight)) + '">' + (r.flight || '--') + ' <span class="u-font-size-fs-xxs">%</span></div></div>';
+})() +
 ((() => {
 let strideVal = '--';
 if (r.stride) {
@@ -8590,8 +8672,8 @@ return '<div class="stats-section-title">' + (t.modeSplitTitle || 'BY ACTIVITY')
 }
 // [추가] 통계 페이지 전용 "위치별 통계" 섹션. 기존 SUMMARY 집계와는 완전히 별개로 계산한다.
 // 기존 SUMMARY/기록목록/진단/크루의 GCT·VERT 숨김 규칙(isGctVertUnreliable)은 건드리지 않고,
-// 이 섹션에서만 손/암밴드/프리런의 GCT·체공시간을 그대로 표시한다. (나중에 다른 페이지에도 표시하려면
-// 전역 isGctVertUnreliable() 한 곳만 바꾸면 되고, 이 섹션은 그 함수를 참조하지 않는다.)
+// GCT·체공시간·VERT는 모든 위치 그룹에 표시하되, isGctVertUnreliable() 그룹에는 '참고용' 표시를 붙인다.
+// (판단은 전역 METRIC_VISIBILITY 한 곳. 집계 방식만 SUMMARY와 별개로 그룹별로 계산한다.)
 buildPositionStatsHtml(records, statType, t, lang) {
 const isKo = (lang === 'ko');
 const posMap = getPosLabelMap(lang);
@@ -8648,8 +8730,8 @@ const spm = avgOf(rs.map(r => num(r.walkSpm)), 1, 400, 0);
 boxes = box(t.dist || 'DIST', distVal, distUnit, tagSum) + box(t.posCount || 'COUNT', n > 0 ? n : null) + box(t.pace || 'PACE', paceStr, null, tagAvg) +
 box(t.cal || 'KCAL', n > 0 ? kcal : null, 'kcal', tagSum) + box(t.stepsLabel || 'STEPS', n > 0 ? steps : null, null, tagSum) + box(t.spmLabel || 'SPM', spm, null, tagAvg);
 } else {
-// [수정] GCT/FLIGHT/VERT는 러닝 모드의 가슴·허리 그룹만 표시(전역 METRIC_VISIBILITY 규칙). 관리자 계정은 비교·분석용으로 전부 표시.
-const showDyn = storage.getDevMode() || isMetricVisible({ activityMode: statType, devicePos: g.key }, 'gctFlight');
+// [수정] 러닝의 가슴·허리가 아닌 그룹(암밴드·손·OTHER·트레일·프리런)은 GCT/FLIGHT/VERT에 '참고용' 표시를 붙인다.
+const _refTag = isGctVertUnreliable({ activityMode: statType, devicePos: g.key }) ? gctRefTagHtml(lang) : '';
 const cad = avgOf(rs.map(r => num(r.cadence)), 1, 400, 0);
 const pw = avgOf(rs.map(r => num(r.power)), 0, 5000, 0);
 const gct = avgOf(rs.map(r => num(r.gct)), 100, 400, 0);
@@ -8657,7 +8739,7 @@ const fl = avgOf(rs.map(r => num(r.flight)), 0, 100, 0);
 const vert = avgOf(rs.map(r => num(r.vertRatio)), 0.1, 50, 1);
 boxes = box(t.dist || 'DIST', distVal, distUnit, tagSum) + box(t.posCount || 'COUNT', n > 0 ? n : null) + box(t.pace || 'PACE', paceStr, null, tagAvg) +
 box(t.cal || 'KCAL', n > 0 ? kcal : null, 'kcal', tagSum) + box(t.cadence || 'CADENCE', cad, 'SPM', tagAvg) + box(t.powerLabel || 'POWER', pw, 'W', tagAvg) +
-(showDyn ? (lkBox(box(t.gct || 'GCT', gct, 'ms', tagAvg)) + lkBox(box(t.flight || 'FLIGHT', fl, '%', tagAvg)) + lkBox(box(t.statVert || 'VERT', vert, '%', tagAvg))) : '');
+lkBox(box(t.gct || 'GCT', gct, 'ms', tagAvg + _refTag)) + lkBox(box(t.flight || 'FLIGHT', fl, '%', tagAvg + _refTag)) + lkBox(box(t.statVert || 'VERT', vert, '%', tagAvg + _refTag));
 }
 const isOpen = n > 0 && !!(this._posOpen && this._posOpen[g.key]);
 const detailHtml = isOpen ? rs.map(r => this.buildHistoryItemHtml(r, t, lang)).join('') : '';
@@ -9029,9 +9111,9 @@ let dynamicsHtml = '<div class="detail-log-box u-margin-top-12px"><div class="de
 '<div class="detail-log-item"><span>' + t.spmLabel + '</span><span>' + (record.walkSpm || 0) + '</span></div>' +
 '<div class="detail-log-item"><span>' + (t.stride || "Stride") + '</span><span>' + (record.stride ? parseFloat(record.stride).toFixed(2) + ' m' : '--') + '</span></div>'
 ) : (
-// [수정] 프리런/손 착용 기록은 GCT/FLIGHT를 신뢰할 수 없으므로 경로 상세 페이지 요약 박스에서도 "--" 처리
-'<div class="detail-log-item"><span>' + (t.avgGct || "Average GCT") + '</span><span>' + (this.isGctVertUnreliable(record) ? '--' : (record.gct || '--')) + ' ms.</span></div>' +
-'<div class="detail-log-item"><span>' + (t.avgFlight || "Average Flight") + '</span><span>' + (this.isGctVertUnreliable(record) ? '--' : (record.flight || '--')) + ' %.</span></div>' +
+// [수정] 가슴·허리(러닝)가 아닌 기록은 경로 상세 요약 박스에서도 값에 '참고용' 표시를 붙인다
+'<div class="detail-log-item"><span>' + (t.avgGct || "Average GCT") + '</span><span>' + (record.gct || '--') + ' ms.' + (this.isGctVertUnreliable(record) ? gctRefTagHtml(storage.getLang()) : '') + '</span></div>' +
+'<div class="detail-log-item"><span>' + (t.avgFlight || "Average Flight") + '</span><span>' + (record.flight || '--') + ' %.' + (this.isGctVertUnreliable(record) ? gctRefTagHtml(storage.getLang()) : '') + '</span></div>' +
 '<div class="detail-log-item"><span>' + (t.avgCadence || "Average Cadence") + '</span><span>' + (record.cadence || 0) + ' SPM.</span></div>' +
 '<div class="detail-log-item"><span>' + (t.avgPowerLabel || "Average Power") + '</span><span>' + (record.power != null ? record.power : '--') + ' W.</span></div>' +
 '<div class="detail-log-item"><span>' + (t.stride || "Stride") + '</span><span>' + (() => { const c=record.cadence; const p=record.avgPace||record.pace; if(c&&p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60);return ((kmh/3.6)/(c/60)).toFixed(2)+' m';} return '--'; })() + '</span></div>' +
@@ -9681,7 +9763,7 @@ try {
   // 케이던스 보정계수를 인스턴스 필드에도 캐싱해둔다 (nativeCadenceSpm 계산부에서 사용).
   this.cadCorrectionFactor = _syncedCad;
   this.paceCorrectionFactor = _syncedPace; // [추가] 실시간 페이스 표시(avgKmh/smoothedKmh 변환부)에서 사용
-} catch (e) {}
+} catch (e) { jrLogErr('factorSync', e); }
 // [추가] 적응형 보정의 기준(중심)이 되는 위치별 기본값을 별도 보관.
 // 보정된 threshold는 항상 이 기본값의 ±15% 이내로만 움직이게 해서 과보정을 방지.
 // [수정 2026-08-15] p.groundThreshold(위치별 원본 기본값)가 아니라 this.groundThreshold(위의
@@ -11930,13 +12012,13 @@ if (typeof NoSleep !== 'undefined') {
 if (!this.noSleep) this.noSleep = new NoSleep();
 this.noSleep.enable();
 }
-} catch(e) {}
+} catch (e) { jrLogErr('noSleepEnable', e); }
 }
 stopSilentKeepAlive() {
 if (this._silentKeepAliveTimeout) { clearTimeout(this._silentKeepAliveTimeout); this._silentKeepAliveTimeout = null; }
 if (this.silentAudio) { this.silentAudio.close().catch(()=>{}); this.silentAudio = null; }
 // [수정] 러닝 종료 시 화면 꺼짐 방지 잠금도 함께 해제 (배터리 절약)
-if (this.noSleep) { try { this.noSleep.disable(); } catch(e) {} }
+if (this.noSleep) { try { this.noSleep.disable(); } catch (e) { jrLogErr('noSleepDisable', e); } }
 }
 // [리팩토링] 원래 onStart/onResume/checkResume 3곳에 각각 통째로 복붙돼 있던 "매초 실행"
 // 콜백을 하나로 통합. 이제 매초 로직은 runTick() 한 곳에만 존재하고, 3곳은 모두
@@ -12852,7 +12934,7 @@ const permissionState = await DeviceMotionEvent.requestPermission();
 if (permissionState === 'granted') {
 this.attachMotionListener();
 }
-} catch (err) {}
+} catch (err) { jrLogErr('attachMotionListener', err); }
 } else {
 this.attachMotionListener();
 }
@@ -13066,7 +13148,7 @@ try {
     if (typeof _ov.impactThreshold === 'number') this.freerunMotion.impactThreshold = _ov.impactThreshold;
     if (typeof _ov.gctFilterDelayMs === 'number') this.freerunMotion.gctFilterDelayMs = _ov.gctFilterDelayMs;
   }
-} catch (e) {}
+} catch (e) { jrLogErr('freerunOverrides', e); }
 this.freerunMotion.baseGroundThreshold = this.freerunMotion.groundThreshold;
 this.freerunMotion.baseImpactThreshold = this.freerunMotion.impactThreshold;
 this.freerunMotion.calibDone = false;
@@ -13126,7 +13208,7 @@ if (this.silentAudio && this.silentAudio.state === 'suspended') {
 this.silentAudio.resume().catch(()=>{});
 }
 // [수정] 재개 시 화면 꺼짐 방지 잠금도 다시 걸어준다 (일시정지 중 OS가 해제했을 가능성 대비)
-try { if (this.noSleep) this.noSleep.enable(); } catch(e) {}
+try { if (this.noSleep) this.noSleep.enable(); } catch (e) { jrLogErr('noSleepEnable2', e); }
 // [신규] 재개 시 화면 고정도 다시 걸기
 if (window.AndroidLockBridge && AndroidLockBridge.lockRun) {
 AndroidLockBridge.lockRun();
@@ -13417,13 +13499,13 @@ try {
     if (_ls.avgFlight != null) record.flight = _ls.avgFlight;
     if (_ls.strideM != null) record.stride = _ls.strideM;
     if (_ls.avgHr != null) record.avgHr = _ls.avgHr;
-    if (_ls.avgHr != null && _ls.avgHr > 0) { try { record.hrZone = 'Z' + hrManager.getZone(_ls.avgHr).z; } catch (e2) {} }
+    if (_ls.avgHr != null && _ls.avgHr > 0) { try { record.hrZone = 'Z' + hrManager.getZone(_ls.avgHr).z; } catch (e2) { jrLogErr('recordHrZone', e2); } }
     if (_ls.maxHr != null) record.maxHr = _ls.maxHr;
   }
-} catch (e) {}
+} catch (e) { jrLogErr('recordHrFields', e); }
 storage.saveRecord(record);
 // [추가 2026-10-10] 러닝 모드일 때만 이번 러닝의 학습 GCT 비율을 "3개 평균"용으로 기록
-try { if ((record.activityMode || 'run') === 'run' || record.activityMode === 'trail') calibAvg3RecordSelfRun(this.state.runDevicePos || null, this.motion); } catch (e) {}
+try { if ((record.activityMode || 'run') === 'run' || record.activityMode === 'trail') calibAvg3RecordSelfRun(this.state.runDevicePos || null, this.motion); } catch (e) { jrLogErr('calibSelfRun', e); }
 // [수정 2026-09-25] logPrecisionSample()이 이제 설정과 무관하게 항상 메모리에 쌓으므로,
 // 기기 저장/가민분석실 노출 여부는 여기서 설정으로 게이팅한다(이 설정의 "로그 export 대상으로
 // 남길지" 의미는 그대로 유지, "매초 계산을 건너뛸지"는 위 logPrecisionSample() 참고).
@@ -13856,9 +13938,9 @@ const premium = {
         if (!lr.error && lr.data) {
           const m = {}; lr.data.forEach(r => { m[r.key] = r.locked; });
           this.locks = m;
-          try { localStorage.setItem(this.LOCKS_KEY, JSON.stringify(m)); } catch (e) {}
+          try { localStorage.setItem(this.LOCKS_KEY, JSON.stringify(m)); } catch (e) { jrLogErr('locksSave', e); }
         }
-      } catch (e) {}
+      } catch (e) { jrLogErr('locksSave2', e); }
       const { data } = await _sb.auth.getSession();
       const user = data && data.session && data.session.user;
       if (!user || !user.email || user.is_anonymous) {
@@ -13874,7 +13956,7 @@ const premium = {
       if (ent.error || adm.error) return; // 네트워크 실패 시 캐시된 상태 유지
       this.unlocked = !!ent.data;
       this.isAdmin = adm.data === true;
-      try { localStorage.setItem(this.CACHE_KEY, JSON.stringify({ uid: user.id, unlocked: this.unlocked, isAdmin: this.isAdmin })); } catch (e) {}
+      try { localStorage.setItem(this.CACHE_KEY, JSON.stringify({ uid: user.id, unlocked: this.unlocked, isAdmin: this.isAdmin })); } catch (e) { jrLogErr('premiumCacheSave', e); }
       this.apply();
       if (this.isAdmin) this.loadList();
     } catch (e) {
@@ -13956,7 +14038,7 @@ const premium = {
     const { error } = await _sb.rpc('admin_set_lock', { p_key: k, p_locked: locked });
     if (error) { await appAlert(this._s('변경 실패: ', 'Failed: ') + error.message); return; }
     this.locks[k] = locked;
-    try { localStorage.setItem(this.LOCKS_KEY, JSON.stringify(this.locks)); } catch (e) {}
+    try { localStorage.setItem(this.LOCKS_KEY, JSON.stringify(this.locks)); } catch (e) { jrLogErr('locksSave3', e); }
     this.apply();
   },
   async loadList() {
@@ -14176,7 +14258,7 @@ class CommunityManager {
             await appAlert(t.nicknameTaken);
           } else if (r === 'ok') {
             const av = this.getAvatarUrl();
-            if (av && /^https?:/.test(av)) { try { await _sb.rpc('set_avatar', { p_url: av }); } catch(e) {} }
+            if (av && /^https?:/.test(av)) { try { await _sb.rpc('set_avatar', { p_url: av }); } catch (e) { jrLogErr('avatarRpc1', e); } }
           }
         }
       }
@@ -14247,7 +14329,7 @@ class CommunityManager {
     const uid = await this.ensureUserId();
     try {
       if (uid) await _sb.storage.from('run-photos').remove(['avatars/' + uid + '.jpg']);
-      if (uid) { try { await _sb.rpc('set_avatar', { p_url: '' }); } catch(e2) {} }
+      if (uid) { try { await _sb.rpc('set_avatar', { p_url: '' }); } catch (e2) { jrLogErr('avatarRpc2', e2); } }
     } catch(e) { console.warn('Avatar storage delete failed', e); }
     localStorage.removeItem(this.AVATAR_KEY);
     localStorage.removeItem(this.AVATAR_POS_KEY);
@@ -14416,7 +14498,7 @@ class CommunityManager {
       if (!url) { await fail('URL'); return; }
       try { localStorage.setItem(this.AVATAR_KEY, url); } catch (e) { console.warn('아바타 URL 저장 실패', e); }
       this.refreshAvatarPreview();
-      try { await _sb.rpc('set_avatar', { p_url: url }); } catch(e2) {}
+      try { await _sb.rpc('set_avatar', { p_url: url }); } catch (e2) { jrLogErr('avatarRpc3', e2); }
     } catch(e) {
       await fail(e && e.message);
     }
@@ -16709,7 +16791,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
     try {
       const { data } = await _sb.from('follows').select('follower_id, follower_nickname').eq('following_id', p.userId);
       p.followers = (data || []).filter(f => !this.blockedIds.has(f.follower_id));
-    } catch (e) {}
+    } catch (e) { jrLogErr('followsFetch', e); }
     this._renderProfileHeader();
   }
 
@@ -17737,7 +17819,7 @@ const garmin = (function () {
     try { const a = JSON.parse(localStorage.getItem(HIDDEN_AUTOLOG_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
   }
   function saveHiddenAutoLogIds(ids) {
-    try { localStorage.setItem(HIDDEN_AUTOLOG_KEY, JSON.stringify(ids)); } catch (e) {}
+    try { localStorage.setItem(HIDDEN_AUTOLOG_KEY, JSON.stringify(ids)); } catch (e) { jrLogErr('autologHiddenSave', e); }
   }
   // [추가] "분석실에서 영구 제거": 설정 로그는 그대로 두고, 분석실 목록과 복원 목록 양쪽에서 모두 뺀다.
   const DISMISSED_AUTOLOG_KEY = 'garmin_dismissed_autolog_ids';
@@ -17745,7 +17827,7 @@ const garmin = (function () {
     try { const a = JSON.parse(localStorage.getItem(DISMISSED_AUTOLOG_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
   }
   function saveDismissedAutoLogIds(ids) {
-    try { localStorage.setItem(DISMISSED_AUTOLOG_KEY, JSON.stringify(ids)); } catch (e) {}
+    try { localStorage.setItem(DISMISSED_AUTOLOG_KEY, JSON.stringify(ids)); } catch (e) { jrLogErr('autologDismissSave', e); }
   }
   function loadLabAutoLogs() {
     let all = [];
@@ -17767,7 +17849,7 @@ const garmin = (function () {
     try { const a = JSON.parse(localStorage.getItem(PINNED_AUTOLOG_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
   }
   function savePinnedAutoLogIds(ids) {
-    try { localStorage.setItem(PINNED_AUTOLOG_KEY, JSON.stringify(ids)); } catch (e) {}
+    try { localStorage.setItem(PINNED_AUTOLOG_KEY, JSON.stringify(ids)); } catch (e) { jrLogErr('autologPinSave', e); }
   }
   function hideAutoLog(id) {
     savePinnedAutoLogIds(loadPinnedAutoLogIds().filter(x => x !== id));
@@ -19192,7 +19274,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
   }
 
   function savePendingCalibList(list) {
-    try { localStorage.setItem(PENDING_CALIB_KEY, JSON.stringify(list)); } catch (e) {}
+    try { localStorage.setItem(PENDING_CALIB_KEY, JSON.stringify(list)); } catch (e) { jrLogErr('pendingCalibSave', e); }
     try { refreshCalibAvg3Switch(); } catch (e) {} // [추가 2026-10-10]
   }
 
@@ -20143,7 +20225,7 @@ if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'A
         const prof = storage.loadProfile();
         prof.motionCalibUndos = {};
         storage.saveProfile(prof);
-      } catch (e) {}
+      } catch (e) { jrLogErr('profileSaveReset1', e); }
 
       // 3) 화면 상태(마지막 비교결과/제안값) 및 관련 UI 초기화
       lastSuggestion = null;
@@ -20183,7 +20265,7 @@ if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'A
         const prof = storage.loadProfile();
         prof.motionCalibUndos = {};
         storage.saveProfile(prof);
-      } catch (e) {}
+      } catch (e) { jrLogErr('profileSaveReset2', e); }
 
       // 3) 화면 상태(마지막 비교결과/제안값) 및 관련 UI 초기화
       lastSuggestion = null;
@@ -20460,7 +20542,7 @@ app.silentAudio.resume().catch(()=>{});
 }
 /* [수정] 화면 꺼짐 방지(NoSleep) 재활성화 */
 if (app && app.noSleep && app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
-try { app.noSleep.enable(); } catch(e) {}
+try { app.noSleep.enable(); } catch (e) { jrLogErr('noSleepEnable3', e); }
 }
 /* 화면이 켜지자마자 시간을 즉시 정확한 값으로 재계산해서 화면에 반영 */
 if (app && app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused && typeof app.getElapsedSeconds === 'function') {
