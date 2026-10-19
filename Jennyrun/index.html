@@ -1233,15 +1233,16 @@ button.tone-amber:active { color:#ffcc66 !important; border-color:#ffcc66 !impor
 .gender-toggle-row { display: flex; gap: 10px; margin-top: 10px; }
 .gender-btn { flex: 1; padding: 13px 12px; background: #2a2a2a; border: 1.5px solid #444; border-radius: 12px; color: #aaa; font-weight: 900; font-size:var(--fs-base); text-align: center; cursor: pointer; }
 .gender-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
-/* [추가 2026-10-18] 온보딩: 위 버튼을 누르면 그 아래에서 지금 누를 수 있는 박스만 잠깐 연하게 반짝임 (선택된 버튼/비활성 박스 제외) */
+/* [수정 2026-10-18] 온보딩/퀵 팝업: 위 버튼을 누르면 그 아래에서 지금 누를 수 있는 박스가 2초 주기로 계속 연하게 깜빡임.
+   박스를 직접 누르거나 START/CONFIRM/CANCEL/BACK 을 누르면 멈춘다 (ui.clearTapHints). 선택된 버튼/비활성 박스는 제외. */
 @keyframes onbFlash {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(0,255,136,0); }
-  35% { box-shadow: 0 0 0 2px rgba(0,255,136,0.5), 0 0 12px rgba(0,255,136,0.28); border-color: rgba(0,255,136,0.7); }
+  0%, 70%, 100% { box-shadow: 0 0 0 0 rgba(0,255,136,0); }
+  30% { box-shadow: 0 0 0 2px rgba(0,255,136,0.5), 0 0 12px rgba(0,255,136,0.28); border-color: rgba(0,255,136,0.7); }
 }
+/* [비교용 버전] 깜빡임 없이 연한 초록 테두리를 고정으로 표시 (멈추는 조건은 동일) */
 .unit-btn.onb-flash:not(.active),
-.gender-toggle-row.onb-flash > .gender-btn:not(.active) { animation: onbFlash 1.1s ease-out 1; }
-@media (prefers-reduced-motion: reduce) {
-  .unit-btn.onb-flash:not(.active), .gender-toggle-row.onb-flash > .gender-btn:not(.active) { animation: none; }
+.gender-toggle-row.onb-flash > .gender-btn:not(.active) {
+  animation: none; box-shadow: 0 0 0 2px rgba(0,255,136,0.4), 0 0 10px rgba(0,255,136,0.18); border-color: rgba(0,255,136,0.65);
 }
 /* [신규] 가슴이 아닌 위치를 골랐을 때 린각도 ON/OFF 버튼을 흐리게 비활성화 (팝업 크기 변화 방지용) */
 #quick-lean-angle-section.disabled { opacity: 0.35; pointer-events: none; }
@@ -5843,11 +5844,13 @@ const modal = document.getElementById('quick-mode-modal');
 openModal(modal);
 }
 closeQuickModeSwitch() {
+this.clearTapHints();
 const modal = document.getElementById('quick-mode-modal');
 closeModal(modal);
 }
 // [신규] 퀵 팝업 2단계 → 1단계 복귀. 화면 전환(hidden 토글)만 하고 펜딩 값/저장값은 건드리지 않음.
 quickBackToModeStep() {
+this.clearTapHints();
 const step1 = document.getElementById('quick-mode-step1');
 const step2 = document.getElementById('quick-mode-step2');
 if (step1) step1.classList.remove('hidden');
@@ -5859,6 +5862,8 @@ if (step2) step2.classList.add('hidden');
 // [추가] 퀵 팝업: 위쪽 선택을 누르면 그 아래에서 '지금 누를 수 있는' 박스만 잠깐 하이라이트(온보딩과 동일한 효과).
 // 비활성(.disabled / pointer-events:none) 박스는 computed 값으로 걸러서 제외한다.
 quickFlashTappable(from) {
+this._bindTapHint();
+this.clearTapHints();
 const ids = ['quick-autopause-switch', 'quick-precision-log-switch', 'quick-metro-switch'];
 if (from === 'mode') ids.push('quick-devpos-row');
 ids.push('quick-lean-angle-row');
@@ -5988,6 +5993,7 @@ if (offBtn) offBtn.classList.toggle('active', enabled !== true);
 // setLeanAngleEnabled를 실제로 호출하고 팝업을 닫는다. 배경(백드롭) 탭이나 개별 버튼
 // 탭만으로는 아무것도 저장되지 않으며, 반드시 이 CONFIRM 버튼을 눌러야 화면이 바뀐다.
 quickConfirmModeSwitch() {
+this.clearTapHints();
 const mode = this._pendingMode || this.currentActivityMode || 'run';
 this.setActivityMode(mode);
 // [추가] 로그 기록: 걷기가 아닌 모드로 확정될 때만 펜딩 값을 실제로 적용한다.
@@ -6167,8 +6173,22 @@ if (flightUnit) flightUnit.textContent = ' %';
 this.updateTabRunLabel();
 }
 // [추가] 최초 실행 온보딩 화면 - 활동모드 선택 (아직 확정 저장은 안 하고 화면 표시만 갱신)
-// [추가] 위쪽 선택을 누르면 그 아래 단계 중 '지금 누를 수 있는' 박스(pointerEvents != none)만 잠깐 하이라이트
+// [추가] 깜빡임 힌트 공통: 전부 끄기 / 박스를 직접 누르면 그 박스의 깜빡임만 끄는 캡처 리스너(1회 등록)
+clearTapHints() {
+document.querySelectorAll('.onb-flash').forEach(e => e.classList.remove('onb-flash'));
+}
+_bindTapHint() {
+if (this._tapHintBound) return;
+this._tapHintBound = true;
+document.addEventListener('click', (e) => {
+const el = e.target && e.target.closest ? e.target.closest('.onb-flash') : null;
+if (el) el.classList.remove('onb-flash');
+}, true);
+}
+// [추가] 위쪽 선택을 누르면 그 아래 단계 중 '지금 누를 수 있는' 박스(pointerEvents != none)가 계속 깜빡이며 안내
 onbFlashTappable(from) {
+this._bindTapHint();
+this.clearTapHints();
 const ids = from === 'mode'
 ? ['onb-device-pos-row', 'onb-autopause-switch', 'onb-precision-log-switch', 'onb-lean-angle-switch']
 : ['onb-autopause-switch', 'onb-precision-log-switch', 'onb-lean-angle-switch'];
@@ -6322,6 +6342,7 @@ btn.style.borderColor = ready ? 'var(--primary)' : '#444';
 // [추가] 온보딩에서 선택한 값을 실제로 저장/적용하고 메인화면으로 전환
 onbConfirm() {
 if (!this.onbMode || !this.onbPos) return;
+this.clearTapHints();
 this.setActivityMode(this.onbMode);
 this.setDevicePos(this.onbPos);
 this.setAutoPause(this.onbAutoPause);
@@ -6333,6 +6354,7 @@ if (overlay) overlay.classList.remove('is-open');
 }
 // [추가] 온보딩에서 선택 없이 바로 전체 설정 화면으로 이동 (설정 화면에서 직접 고르도록)
 onbGoToSettings() {
+this.clearTapHints();
 storage.setOnboardingDone(true);
 const overlay = document.getElementById('onboarding-overlay');
 if (overlay) overlay.classList.remove('is-open');
