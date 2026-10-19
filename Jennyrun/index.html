@@ -1233,16 +1233,11 @@ button.tone-amber:active { color:#ffcc66 !important; border-color:#ffcc66 !impor
 .gender-toggle-row { display: flex; gap: 10px; margin-top: 10px; }
 .gender-btn { flex: 1; padding: 13px 12px; background: #2a2a2a; border: 1.5px solid #444; border-radius: 12px; color: #aaa; font-weight: 900; font-size:var(--fs-base); text-align: center; cursor: pointer; }
 .gender-btn.active { background: var(--primary); color: #000; border-color: var(--primary); }
-/* [수정 2026-10-18] 온보딩/퀵 팝업: 위 버튼을 누르면 그 아래에서 지금 누를 수 있는 박스가 2초 주기로 계속 연하게 깜빡임.
-   박스를 직접 누르거나 START/CONFIRM/CANCEL/BACK 을 누르면 멈춘다 (ui.clearTapHints). 선택된 버튼/비활성 박스는 제외. */
-@keyframes onbFlash {
-  0%, 70%, 100% { box-shadow: 0 0 0 0 rgba(0,255,136,0); }
-  30% { box-shadow: 0 0 0 2px rgba(0,255,136,0.5), 0 0 12px rgba(0,255,136,0.28); border-color: rgba(0,255,136,0.7); }
-}
-/* [비교용 버전] 깜빡임 없이 연한 초록 테두리를 고정으로 표시 (멈추는 조건은 동일) */
+/* [A안 2026-10-18] 위 버튼을 누르면 '방금 새로 활성화된 박스'와 '아직 안 고른 필수 단계'만 안쪽 얇은 초록 테두리로 고정 표시.
+   박스를 직접 누르거나 START/CONFIRM/CANCEL/BACK 을 누르면 사라짐 (ui.clearTapHints). 선택된 버튼/비활성 박스는 제외. */
 .unit-btn.onb-flash:not(.active),
 .gender-toggle-row.onb-flash > .gender-btn:not(.active) {
-  animation: none; box-shadow: 0 0 0 2px rgba(0,255,136,0.4), 0 0 10px rgba(0,255,136,0.18); border-color: rgba(0,255,136,0.65);
+  box-shadow: inset 0 0 0 1.5px rgba(0,255,136,0.55); border-color: rgba(0,255,136,0.55);
 }
 /* [신규] 가슴이 아닌 위치를 골랐을 때 린각도 ON/OFF 버튼을 흐리게 비활성화 (팝업 크기 변화 방지용) */
 #quick-lean-angle-section.disabled { opacity: 0.35; pointer-events: none; }
@@ -5861,7 +5856,7 @@ if (step2) step2.classList.add('hidden');
 // 바로 CONFIRM 버튼이 있는 화면으로 넘어가며, 실제 적용은 CONFIRM을 눌러야 일어난다.
 // [추가] 퀵 팝업: 위쪽 선택을 누르면 그 아래에서 '지금 누를 수 있는' 박스만 잠깐 하이라이트(온보딩과 동일한 효과).
 // 비활성(.disabled / pointer-events:none) 박스는 computed 값으로 걸러서 제외한다.
-quickFlashTappable(from) {
+quickFlashTappable(from, before) {
 this._bindTapHint();
 this.clearTapHints();
 const ids = ['quick-autopause-switch', 'quick-precision-log-switch', 'quick-metro-switch'];
@@ -5870,12 +5865,14 @@ ids.push('quick-lean-angle-row');
 ids.forEach(id => {
 const el = document.getElementById(id);
 if (!el || getComputedStyle(el).pointerEvents === 'none') return;
-el.classList.remove('onb-flash');
-void el.offsetWidth;
-el.classList.add('onb-flash');
+const required = (id === 'quick-devpos-row' && this._isPosGated(this._pendingMode) && !this._pendingDevicePos);
+const newlyOn = !(before && before[id]);
+if (required) el.classList.add('onb-flash', 'onb-need');
+else if (newlyOn) el.classList.add('onb-flash');
 });
 }
 quickSetActivityMode(mode) {
+const _snap = this._tapSnap(['quick-autopause-switch', 'quick-precision-log-switch', 'quick-metro-switch', 'quick-devpos-row', 'quick-lean-angle-row']);
 this._pendingMode = mode;
 const runBtn = document.getElementById('quick-mode-run');
 const walkBtn = document.getElementById('quick-mode-walk');
@@ -5894,7 +5891,7 @@ if (mode === 'walk') {
 if (typeof metro !== 'undefined' && metro.isPlaying) metro.stop();
 }
 this.showQuickDevicePosStep();
-this.quickFlashTappable('mode');
+this.quickFlashTappable('mode', _snap);
 }
 // [수정] 퀵 팝업 2단계: 폰 착용 위치 확인. WALK/FREE RUN은 착용 위치와 무관하게 동작하므로
 // (기존 게이팅 로직과 동일) 위치/린각도 섹션은 흐리게 비활성화해 숨기고, RUN/TRAIL일 때만
@@ -5936,6 +5933,7 @@ this.syncQuickTogglesUI(); // [추가] 자동멈춤/로그기록/메트로놈 �
 // 실제 저장(setDevicePos)과 팝업 닫힘은 오직 CONFIRM(quickConfirmModeSwitch)에서만 일어난다.
 quickSetDevicePos(pos) {
 if (this._pendingMode !== 'run' && this._pendingMode !== 'trail') return; // WALK/FREE RUN에서는 비활성 상태이므로 무시
+const _snap = this._tapSnap(['quick-autopause-switch', 'quick-precision-log-switch', 'quick-metro-switch', 'quick-devpos-row', 'quick-lean-angle-row']);
 this._pendingDevicePos = pos;
 const chestBtn = document.getElementById('quick-devpos-chest');
 const waistBtn = document.getElementById('quick-devpos-waist');
@@ -5950,7 +5948,7 @@ this.showQuickLeanAngleToggle();
 } else {
 this.disableQuickLeanAngleToggle();
 }
-this.quickFlashTappable('pos');
+this.quickFlashTappable('pos', _snap);
 }
 // [신규] 퀵 팝업의 린각도 ON/OFF 버튼 활성화 - 라벨 다국어 처리 + 현재 펜딩 값으로 버튼 하이라이트
 showQuickLeanAngleToggle() {
@@ -6175,32 +6173,40 @@ this.updateTabRunLabel();
 // [추가] 최초 실행 온보딩 화면 - 활동모드 선택 (아직 확정 저장은 안 하고 화면 표시만 갱신)
 // [추가] 깜빡임 힌트 공통: 전부 끄기 / 박스를 직접 누르면 그 박스의 깜빡임만 끄는 캡처 리스너(1회 등록)
 clearTapHints() {
-document.querySelectorAll('.onb-flash').forEach(e => e.classList.remove('onb-flash'));
+document.querySelectorAll('.onb-flash, .onb-need').forEach(e => e.classList.remove('onb-flash', 'onb-need'));
+}
+// [추가] 선택 전 '누를 수 있는지' 상태를 저장해 두었다가, 선택 후 새로 활성화된 박스만 찾는 데 쓴다
+_tapSnap(ids) {
+const m = {};
+ids.forEach(id => { const el = document.getElementById(id); m[id] = !!el && getComputedStyle(el).pointerEvents !== 'none'; });
+return m;
 }
 _bindTapHint() {
 if (this._tapHintBound) return;
 this._tapHintBound = true;
 document.addEventListener('click', (e) => {
 const el = e.target && e.target.closest ? e.target.closest('.onb-flash') : null;
-if (el) el.classList.remove('onb-flash');
+if (el) el.classList.remove('onb-flash', 'onb-need');
 }, true);
 }
 // [추가] 위쪽 선택을 누르면 그 아래 단계 중 '지금 누를 수 있는' 박스(pointerEvents != none)가 계속 깜빡이며 안내
-onbFlashTappable(from) {
+onbFlashTappable(from, before) {
 this._bindTapHint();
 this.clearTapHints();
-const ids = from === 'mode'
-? ['onb-device-pos-row', 'onb-autopause-switch', 'onb-precision-log-switch', 'onb-lean-angle-switch']
-: ['onb-autopause-switch', 'onb-precision-log-switch', 'onb-lean-angle-switch'];
+const ids = ['onb-autopause-switch', 'onb-precision-log-switch', 'onb-lean-angle-switch'];
+if (from === 'mode') ids.unshift('onb-device-pos-row');
 ids.forEach(id => {
 const el = document.getElementById(id);
-if (!el || el.style.pointerEvents === 'none') return;
-el.classList.remove('onb-flash');
-void el.offsetWidth;
-el.classList.add('onb-flash');
+if (!el || getComputedStyle(el).pointerEvents === 'none') return;
+// 필수인데 아직 안 고른 단계(RUN/TRAIL인데 착용 위치 미선택)
+const required = (id === 'onb-device-pos-row' && this._isPosGated(this.onbMode) && !this.onbPos);
+const newlyOn = !(before && before[id]);
+if (required) el.classList.add('onb-flash', 'onb-need');
+else if (newlyOn) el.classList.add('onb-flash');
 });
 }
 onbSelectMode(mode) {
+const _snap = this._tapSnap(['onb-device-pos-row', 'onb-autopause-switch', 'onb-precision-log-switch', 'onb-lean-angle-switch']);
 this.onbMode = mode;
 ['run','walk','trail','freerun'].forEach(m => {
 const el = document.getElementById('onb-mode-' + m);
@@ -6218,7 +6224,7 @@ this.onbUpdateStartBtn();
 this.onbUpdatePosAvailability();
 this.onbUpdatePrecisionLogAvailability();
 this.onbUpdateLeanAngleAvailability();
-this.onbFlashTappable('mode');
+this.onbFlashTappable('mode', _snap);
 // [변경] 온보딩에서 바로 저장/적용해 설정 페이지와 항상 동일한 상태 유지
 this.setActivityMode(mode);
 }
@@ -6226,6 +6232,7 @@ this.setActivityMode(mode);
 onbSelectPos(pos) {
 // [수정] 걷기+프리러닝 모드에서는 착용 위치 선택이 필요 없으므로 변경 불가
 if (!this._isPosGated(this.onbMode)) return;
+const _snap = this._tapSnap(['onb-device-pos-row', 'onb-autopause-switch', 'onb-precision-log-switch', 'onb-lean-angle-switch']);
 this.onbPos = pos;
 ['chest','waist','armband','hand'].forEach(p => {
 const el = document.getElementById('onb-devpos-' + p);
@@ -6234,7 +6241,7 @@ if (el) el.classList.toggle('active', p === pos);
 this.onbUpdateStartBtn();
 // [추가] 착용 위치가 바뀌면 린각도 스위치 사용 가능 여부(러닝+가슴)도 재평가
 this.onbUpdateLeanAngleAvailability();
-this.onbFlashTappable('pos');
+this.onbFlashTappable('pos', _snap);
 // [변경] 온보딩에서 바로 저장/적용해 설정 페이지와 항상 동일한 상태 유지
 this.setDevicePos(pos);
 }
