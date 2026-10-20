@@ -4233,8 +4233,7 @@ function isMotionOnlyPos(pos) { return MOTION_ONLY_POS.indexOf(pos) >= 0; }
 // 가슴/허리는 각자 따로 보정한다. 스텝 감지 파라미터(minStepInterval/rotReject/nativeRescue/stepTrigger)는 위치별 그대로.
 const JITTER_PRONE_POS = ['hand', 'armband', 'freerun'];
 function isJitterPronePos(pos) { return JITTER_PRONE_POS.indexOf(pos) >= 0; }
-// [수정 2026-10-20] 암밴드는 가슴/허리처럼 독립 보정슬롯('armband')을 쓴다. 손/프리런만 '프리런' 슬롯을 공유한다.
-// [수정 2026-10-20] 손도 독립 슬롯('hand')으로 분리 — 이제 모든 위치가 자기 이름의 슬롯을 쓴다(프리런은 'freerun').
+// [수정 2026-10-20] 암밴드·손도 가슴/허리처럼 독립 보정슬롯을 쓴다. 프리런만 자기 슬롯('freerun')을 쓴다.
 function motionCalibKey(pos) { return (isJitterPronePos(pos) && pos !== 'armband' && pos !== 'hand') ? 'freerun' : pos; }
 const FACTORY_MOTION_PROFILES = {
   // [수정] 가슴 0.151 / 손 0.193은 폰 1대 실측 기반이던 예전 값 — 사용자 확인 결과
@@ -9934,32 +9933,23 @@ try {
     }
   }
 
-  // [추가 2026-10-20] 암밴드 보정슬롯 분리: 그동안 암밴드가 쓰던 공유(프리런) 슬롯의 현재 값을 독립 슬롯의 초기값으로 1회만 복사한다.
-  // 스텝 감지 값(rotRejectThreshold)과 3개 평균 표식(avg3Prev/avg3Applied)은 가져오지 않는다.
-  if (!_prof.armbandSlotSplitDone) {
-    const _shared = _prof.motionCalibOverrides.freerun;
-    if (_shared && typeof _shared === 'object') {
-      const _cp = JSON.parse(JSON.stringify(_shared));
-      delete _cp.rotRejectThreshold; delete _cp.avg3Prev; delete _cp.avg3Applied;
-      _cp.devicePos = 'armband';
-      _prof.motionCalibOverrides.armband = _cp;
-    }
-    _prof.armbandSlotSplitDone = true;
-    _migrated = true;
-  }
-
-  // [추가 2026-10-20] 손 보정슬롯 분리: 현재 프리런 슬롯의 값을 손 독립 슬롯의 초기값으로 1회만 복사한다(암밴드와 동일한 규칙).
-  if (!_prof.handSlotSplitDone) {
-    const _shared2 = _prof.motionCalibOverrides.freerun;
-    if (_shared2 && typeof _shared2 === 'object') {
-      const _cp2 = JSON.parse(JSON.stringify(_shared2));
-      delete _cp2.rotRejectThreshold; delete _cp2.avg3Prev; delete _cp2.avg3Applied;
-      _cp2.devicePos = 'hand';
-      _prof.motionCalibOverrides.hand = _cp2;
-    }
-    _prof.handSlotSplitDone = true;
-    _migrated = true;
-  }
+  // [추가 2026-10-20] 암밴드/손 보정슬롯 분리: 현재 프리런 슬롯 값을 각 슬롯의 초기값으로 1회만 복사한다.
+  // 걸음 감지값(rotRejectThreshold)과 3회 평균 표식(avg3Prev/avg3Applied)은 가져오지 않는다. 실패해도 앱 시작에는 영향 없도록 try/catch.
+  try {
+    ['armband', 'hand'].forEach(function(_sp) {
+      const _flag = _sp + 'SlotSplitDone';
+      if (_prof[_flag]) return;
+      const _src = _prof.motionCalibOverrides && _prof.motionCalibOverrides.freerun;
+      if (_src && typeof _src === 'object') {
+        const _cp = JSON.parse(JSON.stringify(_src));
+        delete _cp.rotRejectThreshold; delete _cp.avg3Prev; delete _cp.avg3Applied;
+        _cp.devicePos = _sp;
+        _prof.motionCalibOverrides[_sp] = _cp;
+      }
+      _prof[_flag] = true;
+      _migrated = true;
+    });
+  } catch (_e) { try { jrLogErr('slotSplit', _e); } catch (_e2) {} }
 
   const _calibOv = _prof.motionCalibOverrides[motionCalibKey(pos)]; // [수정 2026-10-16] 손/암밴드는 프리런 보정 슬롯을 읽는다
   if (_calibOv) {
