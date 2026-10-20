@@ -4233,7 +4233,8 @@ function isMotionOnlyPos(pos) { return MOTION_ONLY_POS.indexOf(pos) >= 0; }
 // 가슴/허리는 각자 따로 보정한다. 스텝 감지 파라미터(minStepInterval/rotReject/nativeRescue/stepTrigger)는 위치별 그대로.
 const JITTER_PRONE_POS = ['hand', 'armband', 'freerun'];
 function isJitterPronePos(pos) { return JITTER_PRONE_POS.indexOf(pos) >= 0; }
-function motionCalibKey(pos) { return isJitterPronePos(pos) ? 'freerun' : pos; }
+// [수정 2026-10-20] 암밴드는 가슴/허리처럼 독립 보정슬롯('armband')을 쓴다. 손/프리런만 '프리런' 슬롯을 공유한다.
+function motionCalibKey(pos) { return (isJitterPronePos(pos) && pos !== 'armband') ? 'freerun' : pos; }
 const FACTORY_MOTION_PROFILES = {
   // [수정] 가슴 0.151 / 손 0.193은 폰 1대 실측 기반이던 예전 값 — 사용자 확인 결과
   // 진짜 팩토리 기본값은 4개 위치 전부 0.40(Malisoux 2019 인구평균 듀티팩터)으로
@@ -9932,10 +9933,24 @@ try {
     }
   }
 
+  // [추가 2026-10-20] 암밴드 보정슬롯 분리: 그동안 암밴드가 쓰던 공유(프리런) 슬롯의 현재 값을 독립 슬롯의 초기값으로 1회만 복사한다.
+  // 스텝 감지 값(rotRejectThreshold)과 3개 평균 표식(avg3Prev/avg3Applied)은 가져오지 않는다.
+  if (!_prof.armbandSlotSplitDone) {
+    const _shared = _prof.motionCalibOverrides.freerun;
+    if (_shared && typeof _shared === 'object') {
+      const _cp = JSON.parse(JSON.stringify(_shared));
+      delete _cp.rotRejectThreshold; delete _cp.avg3Prev; delete _cp.avg3Applied;
+      _cp.devicePos = 'armband';
+      _prof.motionCalibOverrides.armband = _cp;
+    }
+    _prof.armbandSlotSplitDone = true;
+    _migrated = true;
+  }
+
   const _calibOv = _prof.motionCalibOverrides[motionCalibKey(pos)]; // [수정 2026-10-16] 손/암밴드는 프리런 보정 슬롯을 읽는다
   if (_calibOv) {
     if (typeof _calibOv.gctFallbackRatio === 'number') this.gctFallbackRatio = _calibOv.gctFallbackRatio;
-    if (typeof _calibOv.rotRejectThreshold === 'number' && motionCalibKey(pos) === pos) this.rotRejectThreshold = _calibOv.rotRejectThreshold; // 스텝 감지용 값이라 공유 슬롯에서는 가져오지 않는다
+    if (typeof _calibOv.rotRejectThreshold === 'number' && pos !== 'hand' && pos !== 'armband') this.rotRejectThreshold = _calibOv.rotRejectThreshold; // 스텝 감지용 값이라 공유 슬롯에서는 가져오지 않는다
     if (typeof _calibOv.vertScale === 'number') this.vertScale = _calibOv.vertScale;
     // [추가 2026-08-15] groundThreshold/impactThreshold 캘리브레이션 결과도 위치별 override로 반영.
     if (typeof _calibOv.groundThreshold === 'number') this.groundThreshold = _calibOv.groundThreshold;
