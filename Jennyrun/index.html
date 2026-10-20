@@ -13196,7 +13196,8 @@ buildRawSensorCsv(bufArg, metaArg) {
   // [수정 2026-10-15] 파일명: raw_<폰위치>_<YYYYMMDD>_<HHMMSS>[_freerun][_pro|lite].csv — 폰 위치와 시작 시각을 항상 포함
   const posStr = String(meta.devicePos || 'pos').replace(/[^A-Za-z0-9_-]/g, '-');
   const fileName = 'raw_' + posStr + '_' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '_' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds())
-    + (meta.activity === 'freerun' ? '_freerun' : '') + (meta.runMode ? ('_' + meta.runMode) : '') + '.csv';
+    // [수정 2026-10-20] 프리런은 위치 자리에 이미 freerun이 들어가므로 뒤쪽 '_freerun' 접미사는 제거(다른 로그와 같은 형식: raw_<위치>_<날짜>_<시각>[_pro|lite].csv)
+    + (meta.runMode ? ('_' + meta.runMode) : '') + '.csv';
   return { csv: lines.join('\n'), fileName: fileName };
 }
 handleDeviceMotionEvent(e) {
@@ -13256,8 +13257,10 @@ try {
   if (storage.loadProfile().rawSensorCapture && premium.isAdmin) { // [수정 2026-10-14] 관리자 전용: 예전에 ON으로 저장된 일반 계정은 기록하지 않음
     this.rawSensorBuf = [];
     this._rawGctSeen = undefined;
-    this.rawSensorMeta = { startMs: Date.now(), startIso: new Date().toISOString(), devicePos: (storage.loadProfile().devicePos || 'chest'),
-      runMode: isCalibFactorsOn() ? 'pro' : 'lite', activity: this.state.activityMode || 'run' };
+    this.rawSensorMeta = { startMs: Date.now(), startIso: new Date().toISOString(), devicePos: (storage.getActivityMode() === 'freerun' ? 'freerun' : (storage.loadProfile().devicePos || 'chest')), // [수정 2026-10-20] 프리런은 착용 위치가 없으므로 위치 자리에 'freerun'을 기록 → 파일명 raw_freerun_...
+      runMode: isCalibFactorsOn() ? 'pro' : 'lite', activity: storage.getActivityMode() || 'run' };
+    // [수정 2026-10-20] 원본: activity: this.state.activityMode || 'run' — 이 시점엔 this.state.activityMode가 아직 갱신 전(아래 줄에서 대입)이라
+    // 항상 초기값 'run'이 들어가 프리런 로그도 파일명에 _freerun이 안 붙고 마지막 착용 위치(waist 등) 파일처럼 저장됐음. 시작 시점의 설정값을 직접 읽도록 수정
   }
 } catch (e) {}
 // [수정 2026-09-01] gctMs 스테일 값 감지용: commitStep()에서 GCT가 실제로 새로 계산될 때마다
