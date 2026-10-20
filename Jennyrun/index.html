@@ -782,6 +782,9 @@ background: rgba(0,0,0,0.65); border: 1px solid #555; border-radius: 6px;
 color: #aaa; font-size:var(--fs-xxs); font-weight: 900; padding: 4px 8px;
 pointer-events: none; letter-spacing: 0.5px;
 }
+/* [신규 2026-10-19] 메인 지도 좌상단 모드 칩 (예: RUN · CHEST ▾) - 누르면 모드 전환 팝업. USE_MODE_CHIP=false면 숨김 */
+#mode-chip { display: none; position: absolute; top: 10px; left: 10px; z-index: 1000; background: rgba(0,0,0,0.7); border: 1.5px solid var(--primary); border-radius: 999px; color: var(--primary); font-size:var(--fs-xs); font-weight: 900; letter-spacing: .6px; padding: 5px 12px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.5); -webkit-tap-highlight-color: transparent; }
+#mode-chip:active { transform: scale(0.95); background: rgba(0,255,136,0.18); }
 /* [리팩토링 2026-09] 맵/히스토리맵/크루피드맵, 3곳의 "전체화면 오버레이"가 오버레이·inner·el·
    닫기버튼·재생버튼까지 완전히 동일한 CSS를 각자 따로 갖고 있던 것을 공용 클래스로 통합.
    ID는 JS(getElementById, .active/.playing 토글)에서 계속 쓰이므로 그대로 두고, 스타일 규칙만
@@ -1904,6 +1907,7 @@ button[style*="--danger"]:active, button[style*="#e57373"]:active, .c33:active, 
 <div id="map-container" onclick="ui.openMainMapFullscreen()">
 <div id="map"></div>
 <button id="map-theme-toggle" class="btn-map-theme" onclick="event.stopPropagation(); ui.toggleMapTheme()">🌙</button>
+<button id="mode-chip" onclick="event.stopPropagation(); ui.handleModeChipClick()"></button>
 <div id="map-expand-hint">⛶ TAP TO EXPAND</div>
 <!-- 초기값은 영어, applyLang에서 동적 교체됨 -->
 </div>
@@ -4484,6 +4488,9 @@ function buildPersonalFeedback(record, profile, gender, isKo) {
   return parts;
 }
 // ========== 번역 객체 (원본 유지) ==========
+// [신규 2026-10-19] 모드 전환 방식 스위치: true = 메인 지도의 모드 칩으로 전환(RUN 탭은 화면 이동만),
+// false = 기존 방식(칩 숨김, 메인 화면에서 RUN 탭을 누르면 모드 전환 팝업)
+const USE_MODE_CHIP = true;
 const translations = {
 en: {
 pace: "PACE", dist: "DIST", time: "TIME", avg: "AVG", speed: "SPEED", cadence: "CADENCE", gct: "GCT", flight: "FLIGHT", cal: "KCAL", start: "START", stop: "STOP", resume: "RESUME", reset: "RESET", finish: "FINISH", run: "RUN", history: "HISTORY", historyTab: "REC•SET", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", selLang: "SELECT LANGUAGE", unitLabel: "DISTANCE UNIT", genderLabel: "GENDER", genderMale: "MALE", genderFemale: "FEMALE", autoPauseLabel: "AUTO PAUSE", calibSoundLabel: "CALIBRATION ALERT SOUND", calibSoundOpeningBell: "Open Bell", calibSoundCamBell: "Cam Bell", calibSoundTimeBell: "Time Bell", calibVolumeLabel: "VOLUME", calibPreviewLabel: "Preview sound", metro: "RHYTHM ASSISTANT", clear: "CLEAR ALL HISTORY", confirmClear: "Are you sure?", alertCleared: "History cleared.", clearLogs: "CLEAR ALL LOGS", confirmClearLogs: "Delete all phone precision logs and imported Garmin FIT data? This cannot be undone.", alertLogsCleared: "Log records cleared.", route: "ROUTE", diag: "DIAG", close: "CLOSE", alt: "ALT", mapStart: "START", mapFinish: "FINISH", activityModeLabel: "ACTIVITY MODE", modeRunLabel: "RUN", modeWalkLabel: "WALK", modeTrailLabel: "TRAIL", modeFreerunLabel: "FREE RUN", modeAllLabel: "ALL RUN", stepsLabel: "STEPS", spmLabel: "SPM", walksCountLabel: "WALKS COUNT", totalStepsLabel: "TOTAL STEPS", quickModeTitle: "SWITCH MODE", confirmBtnLabel: "CONFIRM", cancelBtnLabel: "CANCEL", backBtnLabel: "BACK", onbSubtitle: "Set up your run before you start", onbGoSettings: "GO TO SETTINGS", onbLogRecordLabel: "LOG RECORDING", onbLeanAngleLabel: "LEAN ANGLE", resetConfirmMsg: "Discard this run and go back to start? This cannot be undone.", hSecRunData: "RUN DATA", hSecWalkData: "WALK DATA", hSecBalance: "BALANCE", hSecPacing: "PACING", paceStab: "PACE STABILITY", splitDiff: "SPLIT DIFF", cadDrift: "CADENCE DRIFT", hrDrift: "HR DRIFT", hSecEtc: "ETC",
@@ -5812,6 +5819,7 @@ return Math.round(met * weightKg * hours * genderBonus * inclineBonus * ageBonus
 // [신규] 하단 탭바의 RUN 탭 라벨을 현재 선택된 활동 모드(RUN/WALK/TRAIL)에 맞춰 동기화
 // ── 러닝 중 실시간 표시(걷기 모드/칼로리 라이브) ──
 updateTabRunLabel() {
+this.updateModeChip(); // [신규] 모드 칩도 같이 갱신
 const t = translations[storage.getLang()] || translations['en'];
 const tabRun = document.getElementById('tab-run');
 if (!tabRun) return;
@@ -5837,10 +5845,44 @@ const isTracking = !!(typeof app !== 'undefined' && app.state && app.state.isRun
 // 다른 탭(REC·SET/CREW)에 있으면 첫 탭은 RUN 화면 이동으로만 소모되어
 // 팝업을 보려면 두 번 눌러야 하는 문제가 있었음. 어느 탭에 있든 대기 상태(비러닝 중)면
 // 탭 전환과 동시에 바로 팝업이 뜨도록 통일.
+// [수정 2026-10-19 v2] 위 통일 방식은 설정/인포/CREW 등 다른 페이지에서 RUN을 눌러도 항상 팝업이 뜨는
+// 문제가 있어서 되돌림: 이미 메인(RUN) 화면을 보고 있고(메트로놈/상세/진단 오버레이도 안 열린 상태),
+// 러닝 중이 아닐 때만 모드 전환 팝업을 띄움. 그 외 페이지에서는 메인 화면으로 이동만 함.
+// [신규 2026-10-19] 모드 칩 방식이면 RUN 탭은 화면 이동만 담당 (팝업은 칩에서만 열림)
+if (USE_MODE_CHIP) { this.showTab('run'); return; }
+const tabRunEl = document.getElementById('tab-run');
+const overlayOpen = !!document.querySelector('#metronome-view.is-open, #diag-view.is-open, #detail-view.is-open');
+const wasOnMain = !!(tabRunEl && tabRunEl.classList.contains('active')) && !overlayOpen;
 this.showTab('run');
-if (!isTracking) {
+if (wasOnMain && !isTracking) {
 this.showQuickModeSwitch();
 }
+}
+// [신규 2026-10-19] 모드 칩 텍스트 갱신 (RUN · CHEST / TRAIL · WAIST / WALK / FREE RUN + ▾)
+// updateTabRunLabel()에서 같이 호출되므로 모드/착용 위치/언어가 바뀔 때마다 자동 동기화됨
+updateModeChip() {
+const chip = document.getElementById('mode-chip');
+if (!chip) return;
+if (!USE_MODE_CHIP) { chip.style.display = 'none'; return; }
+const t = translations[storage.getLang()] || translations['en'];
+const mode = this.currentActivityMode || 'run';
+let text;
+if (mode === 'walk') text = t.modeWalkLabel;
+else if (mode === 'freerun') text = t.modeFreerunLabel;
+else {
+const posKeyMap = { chest: 'devposChest', waist: 'devposWaist', armband: 'devposArmband', hand: 'devposHand' };
+const pos = (function () { try { return storage.loadProfile().devicePos || 'chest'; } catch (e) { return 'chest'; } })();
+const base = (mode === 'trail') ? t.modeTrailLabel : t.run;
+text = base + ' · ' + (t[posKeyMap[pos]] || '');
+}
+chip.textContent = text + ' ▾';
+chip.style.display = 'block';
+}
+// [신규 2026-10-19] 모드 칩 클릭 - 러닝 중에는 모드를 바꿀 수 없으므로 무시, 대기 중이면 기존 퀵 모드 팝업을 그대로 사용
+handleModeChipClick() {
+const isTracking = !!(typeof app !== 'undefined' && app.state && app.state.isRunning);
+if (isTracking) return;
+this.showQuickModeSwitch();
 }
 // [신규] 퀵 모드 전환 팝업 열기 - 기기 착용 위치 등 다른 온보딩 항목은 건드리지 않고
 // setActivityMode()가 이미 저장해둔 착용 위치를 그대로 유지한 채 모드만 전환 대상으로 노출
