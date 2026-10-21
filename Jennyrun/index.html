@@ -4206,8 +4206,11 @@ function refreshCalibAvg3Switch() {
 // [추가 2026-09-20] "모션 전용" 위치 목록. 프리런은 GCT/수직진동(=motionCalibOverrides)만 보정 슬롯을 갖고,
 // 보폭/GPS거리/케이던스/페이스 보정계수 슬롯은 없다 — 프리런의 코어 지표(케이던스·거리·페이스)는
 // 네이티브 걸음센서/GPS 그대로 유지하기 위함. 위치별 보정계수 맵(...ByPos)에는 이 위치를 절대 쓰지 않는다.
-const MOTION_ONLY_POS = ['freerun'];
+const MOTION_ONLY_POS = ['freerun', 'trail']; // [수정 2026-10-20] 트레일도 프리런과 같은 모션 전용 슬롯(보정계수 슬롯 없음)
 function isMotionOnlyPos(pos) { return MOTION_ONLY_POS.indexOf(pos) >= 0; }
+// [추가 2026-10-20] 트레일 = 프리런과 같은 구조(착용 위치 무관 · 전용 내부 모션 엔진 · 모션 전용 슬롯)이되 보정 슬롯은 'trail'로 독립.
+function isFreerunLikeMode(mode) { return mode === 'freerun' || mode === 'trail'; }
+function engineSlotKeyOf(mode) { return mode === 'trail' ? 'trail' : 'freerun'; }
 // [추가 2026-08-21] gctFallbackRatio만 예외적으로 "진짜 팩토리 원점"이 있다 — Malisoux 2019
 // (레크리에이션 러너 860명 평균 듀티팩터, 남 39%/여 41%)에 근거한 인구평균값 0.40으로,
 // 특정 폰/사용자 실측이 아닌 독립적 연구값이라 FACTORY_DEFAULT_FACTORS(1.0)와 같은 자격을 가짐.
@@ -4255,6 +4258,7 @@ const FACTORY_MOTION_PROFILES = {
   // [추가 2026-09-20] chest/waist/armband/hand 에는 절대 영향이 없다. vertScale은 hand/armband와
   // 동일하게 0으로 리셋(이전엔 허리 커밋값 0.511을 시드로 빌려왔었음) — 프리런 전용 실측이 쌓이면 켠다.
   freerun: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.408, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] hand/armband과 동일하게 vertEnabled:false·vertScale:0으로 리셋 — 프리런 전용 실측 검증 전까진 꺼두고 원시 진폭만 쌓는다
+  trail: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.408, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [추가 2026-10-20] 트레일 전용 슬롯(프리런 구조, 위치 무관) — 프리런 값을 시작값으로 복사
 };
 // [리팩토링 2026-08-21] 위치별 모션 프로파일(gctFallbackRatio 등)이 이 파일 3곳
 // (여기 / applyDevicePos()의 profiles / DEVICE_PROFILE_DEFAULTS)에 각각 하드코딩
@@ -4296,6 +4300,7 @@ const DEVICE_MOTION_PROFILES = {
   // [수정 2026-09-21] armband/hand와 동일한 이유로 vertScale 시드 적용(0 → 가슴 커밋값 0.492).
   // vertEnabled는 false 그대로 유지 — 가민 분석실 비교표 표시 전용, 메인 화면·기록엔 영향 없음.
   freerun: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.492, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] 허리 커밋값(0.511)을 시드로 빌려와 vertEnabled:true였던 걸 되돌림 — hand/armband과 동일하게 꺼두고 프리런 전용 데이터로 새로 검증한다. GCT 쪽(gctFallbackRatio 등)은 그대로.
+  trail: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.492, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [추가 2026-10-20] 트레일 전용 슬롯(프리런 구조, 위치 무관) — 프리런 값을 시작값으로 복사
 };
 // [삭제 2026-08-22] 예전엔 APP_DEFAULT_MOTION_PROFILES(=DEVICE_MOTION_PROFILES 별칭)라는
 // 이름으로 "앱 기본값 보기" 화면과 "SHOW CURRENT DATA"의 커밋값 칼럼이 같은 걸 참조했는데,
@@ -4742,7 +4747,9 @@ function runPosText(item, opts) {
   opts = opts || {}; item = item || {};
   var lang = opts.lang, isKo = typeof lang === 'boolean' ? lang : lang === 'ko';
   var pos = '';
-  if (item.isFreerun && !opts.noFreerun) {
+  if (item.isTrail && !opts.noFreerun) {
+    pos = opts.abbr ? 'T' : (getPosLabelMap(isKo).trail || (isKo ? '트레일러닝' : 'TRAIL'));
+  } else if (item.isFreerun && !opts.noFreerun) {
     pos = opts.abbr ? 'F' : (getPosLabelMap(isKo).freerun || (isKo ? '프리러닝' : 'FREE RUN'));
   } else if (item.devicePos) {
     pos = opts.abbr ? (POS_ABBR[item.devicePos] || item.devicePos) : (getPosLabelMap(isKo)[item.devicePos] || item.devicePos);
@@ -4754,7 +4761,7 @@ function runPosText(item, opts) {
 function getPosLabelMap(langOrIsKo) {
 const isKo = typeof langOrIsKo === 'boolean' ? langOrIsKo : langOrIsKo === 'ko';
 const tt = translations[isKo ? 'ko' : 'en'];
-return { chest: tt.devposChest, waist: tt.devposWaist, armband: tt.devposArmband, hand: tt.devposHand, freerun: tt.modeFreerunLabel };
+return { chest: tt.devposChest, waist: tt.devposWaist, armband: tt.devposArmband, hand: tt.devposHand, freerun: tt.modeFreerunLabel, trail: tt.modeTrailLabel };
 }
 // [수정] 활동모드 명사 라벨(트레일러닝/프리러닝 등)이 2곳(SNS 공유카드/크루피드 공유텍스트)에서
 // 표기가 어긋나 있던 것(트레일런/프리런 vs 트레일러닝/프리러닝)을 앱 전체 표기(modeFreerunLabel 등)와
@@ -5253,7 +5260,7 @@ const list = this.loadPrecisionLogs();
 // [추가] isFreerun: 프리런은 착용 위치가 devicePos에 기록되지 않으므로(null),
 // 이 플래그로 "FREE RUN" 로그임을 구분한다. [수정 2026-09-20] 가민 분석실은 이제 이 플래그를
 // 5번째 위치('freerun')로 취급해 GCT/수직진동을 비교·보정한다(다른 4개 위치와 독립).
-list.unshift({ id: 'plog_' + Date.now(), savedAt: new Date().toISOString(), log: finalLog, downsampled: downsampled, devicePos: devicePos || null, isFreerun: activityMode === 'freerun', proRun: (proRun === true || proRun === false) ? proRun : null });
+list.unshift({ id: 'plog_' + Date.now(), savedAt: new Date().toISOString(), log: finalLog, downsampled: downsampled, devicePos: devicePos || null, isFreerun: activityMode === 'freerun', isTrail: activityMode === 'trail', proRun: (proRun === true || proRun === false) ? proRun : null });
 // [수정] localStorage 용량 보호 + "지난 로그가 쌓여봐야 소용없다"는 사용 패턴 반영.
 // [수정] 최근 10개 → 30개까지 보관 (용량 부족 시 오래된 것부터 자동 정리: savePrecisionLogsCapped).
 this.savePrecisionLogsCapped(list);
@@ -5384,7 +5391,7 @@ if (!entry || !entry.log || !entry.log.length) {
 alert(isKo ? '로그를 찾을 수 없습니다.' : 'Could not find this log.');
 return;
 }
-const csvStr = this.buildPrecisionCsv(entry.log, entry.isFreerun ? 'freerun' : entry.devicePos, entry.proRun); // [수정] 프리런 로그는 device_pos에 'freerun'으로 남겨 재가져오기 시에도 구분
+const csvStr = this.buildPrecisionCsv(entry.log, entry.isFreerun ? 'freerun' : (entry.isTrail ? 'trail' : entry.devicePos), entry.proRun); // [수정] 프리런 로그는 device_pos에 'freerun'으로 남겨 재가져오기 시에도 구분
 const d = new Date(entry.savedAt);
 // [수정] 파일명이 'precision-log-2026-07-19-214457'처럼 너무 길어진다는 피드백에 따라
 // 화면에 표시되는 순서번호(#1, #2...)를 그대로 재사용해 짧게 축약. 연도는 생략(월일만).
@@ -5392,7 +5399,7 @@ const d = new Date(entry.savedAt);
 const numStr = String(idx + 1).padStart(2, '0');
 const dateStr = String(d.getMonth() + 1).padStart(2,'0') + String(d.getDate()).padStart(2,'0'); // MMDD, 연도 생략
 const timeStr = d.toTimeString().slice(0,8).replace(/:/g,'');
-const posSuffix = entry.isFreerun ? '.freerun' : (entry.devicePos ? ('.' + entry.devicePos) : '');
+const posSuffix = entry.isFreerun ? '.freerun' : entry.isTrail ? '.trail' : (entry.devicePos ? ('.' + entry.devicePos) : '');
 const modeSuffix = entry.proRun === true ? '.pro' : (entry.proRun === false ? '.lite' : '');
 const fileName = 'log-' + numStr + '.' + dateStr + '.' + timeStr + posSuffix + modeSuffix + '.csv';
 this.downloadCsvFile(csvStr, fileName);
@@ -5838,6 +5845,7 @@ if (!tabRun) return;
 const mode = this.currentActivityMode || 'run';
 if (mode === 'walk') { tabRun.textContent = t.modeWalkLabel; return; }
 if (mode === 'freerun') { tabRun.textContent = t.modeFreerunLabel; return; }
+if (mode === 'trail') { tabRun.textContent = t.modeTrailLabel; return; }
 const posSuffixMap = { chest: 'C', waist: 'W', armband: 'A', hand: 'H' };
 const pos = (function () { try { return storage.loadProfile().devicePos || 'chest'; } catch (e) { return 'chest'; } })();
 const suffix = posSuffixMap[pos];
@@ -5885,6 +5893,7 @@ const mode = this.currentActivityMode || 'run';
 let text;
 if (mode === 'walk') text = t.modeWalkLabel;
 else if (mode === 'freerun') text = t.modeFreerunLabel;
+else if (mode === 'trail') text = t.modeTrailLabel;
 else {
 const posKeyMap = { chest: 'devposChest', waist: 'devposWaist', armband: 'devposArmband', hand: 'devposHand' };
 const pos = (function () { try { return storage.loadProfile().devicePos || 'chest'; } catch (e) { return 'chest'; } })();
@@ -6313,7 +6322,7 @@ if (el) el.classList.toggle('active', m === mode);
 // 오해를 방지. 러닝/트레일로 다시 돌아오면 저장된 위치로 하이라이트 복원.
 ['chest','waist','armband','hand'].forEach(p => {
 const el = document.getElementById('onb-devpos-' + p);
-if (el) el.classList.toggle('active', mode !== 'walk' && mode !== 'freerun' && p === this.onbPos);
+if (el) el.classList.toggle('active', mode !== 'walk' && mode !== 'freerun' && mode !== 'trail' && p === this.onbPos);
 });
 this.onbUpdateStartBtn();
 // [추가] 모드가 바뀌면 폰위치/로그기록/린각도 스위치 사용 가능 여부를 모두 재평가
@@ -6383,7 +6392,7 @@ return mode !== 'walk';
 // [신규] 기기 착용 위치 선택은 걷기+프리러닝 모두 위치와 무관하게 동작하므로 비활성화 대상.
 // 로그기록은 걷기에서만 막히므로(_isWalkGated) 별도 기준으로 분리.
 _isPosGated(mode) {
-return mode !== 'walk' && mode !== 'freerun';
+return mode !== 'walk' && mode !== 'freerun' && mode !== 'trail';
 }
 // 린각도는 러닝 모드 + 가슴 착용일 때만 사용 가능하다는 조건 판정을 한 곳에 모음
 _isLeanAngleGated(mode, pos) {
@@ -6436,7 +6445,7 @@ onbUpdateStartBtn() {
 const btn = document.getElementById('btn-onb-start');
 if (!btn) return;
 // [수정] 걷기+프리러닝 모드는 착용 위치 선택이 필요 없으므로 START 활성화 조건에서 제외
-const ready = !!(this.onbMode && (this.onbMode === 'walk' || this.onbMode === 'freerun' || this.onbPos));
+const ready = !!(this.onbMode && (this.onbMode === 'walk' || this.onbMode === 'freerun' || this.onbMode === 'trail' || this.onbPos));
 btn.style.background = ready ? 'var(--primary)' : '#2a2a2a';
 btn.style.color = ready ? '#000' : '#777';
 btn.style.borderColor = ready ? 'var(--primary)' : '#444';
@@ -6483,7 +6492,7 @@ this.onbPos = currentProfile.devicePos;
 // [수정] 저장된 모드가 걷기/프리러닝이면, 온보딩을 처음 열 때부터 위치 하이라이트를 꺼서 표시
 ['chest','waist','armband','hand'].forEach(p => {
 const el = document.getElementById('onb-devpos-' + p);
-if (el) el.classList.toggle('active', this.onbMode !== 'walk' && this.onbMode !== 'freerun' && p === this.onbPos);
+if (el) el.classList.toggle('active', this.onbMode !== 'walk' && this.onbMode !== 'freerun' && this.onbMode !== 'trail' && p === this.onbPos);
 });
 this.onbUpdateStartBtn();
 // [추가] 최초 표시 시에도 걷기 모드면 폰위치/로그기록을 비활성화 처리
@@ -7791,7 +7800,7 @@ const isKo = lang === 'ko';
 const prof = storage.loadProfile();
 const curPos = (prof && prof.devicePos) || 'chest';
 const POS_LABEL = getPosLabelMap(isKo);
-const order = ['chest', 'waist', 'armband', 'hand', 'freerun'];
+const order = ['chest', 'waist', 'armband', 'hand', 'freerun', 'trail'];
 let html = '<div class="c69">';
 html += '<div class="c37">' +
   (isKo ? '보정을 한 번도 적용하지 않았을 때 앱이 실제로 쓰는 기본값입니다.' : 'These are the raw defaults the app uses before any calibration is applied.') +
@@ -7840,7 +7849,7 @@ const isKo = lang === 'ko';
 const prof = storage.loadProfile();
 const curPos = (prof && prof.devicePos) || 'chest';
 const POS_LABEL = getPosLabelMap(isKo);
-const order = ['chest', 'waist', 'armband', 'hand', 'freerun'];
+const order = ['chest', 'waist', 'armband', 'hand', 'freerun', 'trail'];
 const overridesMap = prof.motionCalibOverrides || {};
 const factorMapKeys = { stride: 'strideCorrectionFactorByPos', gps: 'gpsDistCorrectionFactorByPos', cad: 'cadCorrectionFactorByPos', pace: 'paceCorrectionFactorByPos' };
 
@@ -9707,7 +9716,7 @@ updateDisplay() { const bpmInput = document.getElementById('metro-bpm'); const b
 //       GCT = 기준 주기 × 듀티비(위치별), FLIGHT = (주기 - GCT) / 주기. LITE/PRO 모두 이 엔진을 공유하므로 동일하게 적용된다.
 // 듀티비 가민 대조값(GCT/걸음간격): 가슴 0.706~0.712, 허리 0.725~0.731, 손 0.719~0.735.
 // 가슴/허리는 각각 보정, 손·암밴드·프리런은 같은 값(0.73)을 쓴다.
-const GCT_DUTY_BY_POS = { chest: 0.71, waist: 0.73, armband: 0.73, hand: 0.73, freerun: 0.73 };
+const GCT_DUTY_BY_POS = { chest: 0.71, waist: 0.73, armband: 0.73, hand: 0.73, freerun: 0.73, trail: 0.73 };
 const GCT_DUTY_MIN = 0.66, GCT_DUTY_MAX = 0.78; // 이 범위를 벗어난 저장값(예전 0.31~0.49 override 등)은 무시하고 위치 기본값 사용
 const GCT_PERIOD_WINDOW = 16; // 기준 걸음 주기 계산에 쓰는 최근 걸음 수(약 5초)
 class MotionManager {
@@ -9936,7 +9945,7 @@ try {
   // [추가 2026-10-20] 암밴드/손 보정슬롯 분리: 현재 프리런 슬롯 값을 각 슬롯의 초기값으로 1회만 복사한다.
   // 걸음 감지값(rotRejectThreshold)과 3회 평균 표식(avg3Prev/avg3Applied)은 가져오지 않는다. 실패해도 앱 시작에는 영향 없도록 try/catch.
   try {
-    ['armband', 'hand'].forEach(function(_sp) {
+    ['armband', 'hand', 'trail'].forEach(function(_sp) {
       const _flag = _sp + 'SlotSplitDone';
       if (_prof[_flag]) return;
       const _src = _prof.motionCalibOverrides && _prof.motionCalibOverrides.freerun;
@@ -12967,7 +12976,7 @@ const getTxt = (id) => { const el = document.getElementById(id); return el ? el.
 // [추가] 프리런은 this.motion을 전혀 건드리지 않고 별도 인스턴스(freerunMotion)로만
 // 계산하므로, 아래 gct/vert/gyro/rot 등 모션 파생 필드는 이 alias를 통해 세션에 맞는
 // 인스턴스에서 읽는다 (걷기/러닝/트레일 등은 기존과 동일하게 this.motion 그대로 사용).
-const _fm = (this.state.activityMode === 'freerun') ? this.freerunMotion : this.motion;
+const _fm = isFreerunLikeMode(this.state.activityMode) ? this.freerunMotion : this.motion;
 // [추가] 가민 워치 데이터와의 정밀 대조를 위한 실제 시각 / GPS 좌표 / 정확도
 // (기존엔 "러닝 시작 후 경과초"만 있어서, 앱과 워치를 정확히 동시에 누르지 않으면
 //  시간축이 어긋나 비교가 부정확했음 → 실제 시각(timestamp)으로 정렬 가능하게 함)
@@ -13073,7 +13082,7 @@ if (_curGctCount != null) this.state.lastLoggedGctCount = _curGctCount;
 // 정밀 로그에 기록한다(가민분석실 비교표의 PHONE GCT용). 다른 페이지의 표시 여부는 METRIC_VISIBILITY가 결정하므로
 // 로그 기록과 화면 표시는 서로 독립이다.
 // 걷기 모드는 정밀 로그를 남기지 않으므로 제외. 가슴/허리는 기존 경로(getTxt) 그대로.
-const _gctInternalLog = this.state.activityMode === 'freerun'
+const _gctInternalLog = isFreerunLikeMode(this.state.activityMode)
   || ((this.state.runDevicePos === 'hand' || this.state.runDevicePos === 'armband') && this.state.activityMode !== 'walk');
 // [추가 2026-09-25] 로그 cadence 컬럼용 stepDetectorCnt 기반 재계산(위 computeRecentLogCadence 참고).
 // 화면 실시간 표시는 그대로 getTxt('cadence')를 쓰되, 로그에는 이 값을 우선 저장.
@@ -13083,7 +13092,7 @@ const _gctShownLog = !_hasNewStepThisSample ? '--' : (_gctInternalLog ? ((_fm &&
 const _flShownLog = _gctInternalLog ? ((_fm && _fm.lastStepFlightPct != null) ? _fm.lastStepFlightPct : '') : getTxt('flight');
 const _vertShownLog = vertOscMm;
 // [추가 2026-10-11] 프리런은 this.motion을 쓰지 않아 카드(GCT/FLIGHT)가 갱신되지 않았음 → freerunMotion 값을 카드에 반영
-if (this.state.activityMode === 'freerun' && _fm && typeof ui !== 'undefined' && ui.dom) {
+if (isFreerunLikeMode(this.state.activityMode) && _fm && typeof ui !== 'undefined' && ui.dom) {
   try {
     if (_fm.lastStepGctMs != null && ui.dom.gct) { ui.dom.gct.textContent = _fm.lastStepGctMs; ui.paintGctFlightCard(ui.dom.cardGct, ui.getGctLevel(_fm.lastStepGctMs)); }
     if (_fm.lastStepFlightPct != null && ui.dom.flight) { ui.dom.flight.textContent = _fm.lastStepFlightPct; ui.paintGctFlightCard(ui.dom.cardFlight, ui.getFlightLevel(_fm.lastStepFlightPct)); }
@@ -13191,7 +13200,7 @@ persistRawSensor() {
 captureRawStepMarker() {
   const buf = this.rawSensorBuf;
   if (!buf || buf.length >= 150000) return;
-  const m = (this.state.activityMode === 'freerun') ? this.freerunMotion : (this.state.activityMode === 'walk' ? this.walkMotion : this.motion);
+  const m = isFreerunLikeMode(this.state.activityMode) ? this.freerunMotion : (this.state.activityMode === 'walk' ? this.walkMotion : this.motion);
   if (!m || m.gctCount === undefined || m.gctCount === this._rawGctSeen) return;
   this._rawGctSeen = m.gctCount;
   buf.push(['S', Date.now(), (m.lastStepGctRawMs != null ? m.lastStepGctRawMs : m.lastStepGctMs), m.lastStepVertOscCm, m.lastStepVertAmplitudeRaw]);
@@ -13226,7 +13235,7 @@ if (this.rawSensorBuf) this.captureRawSensor(e);
 // 인스턴스(freerunMotion, 프리런 전용 프로필 기준)로 자이로/가속도를 내부적으로만 처리한다.
 // 케이던스/거리/페이스/보폭 등 화면에 보이는 코어 지표는 여전히 네이티브 스텝 감지기+GPS로만
 // 산출되므로 전혀 영향 없음 — 값은 오직 정밀 로그(가민 대조용) 기록에만 쓰인다.
-if (this.state.activityMode === "freerun") { if (this.freerunMotion) this.freerunMotion.handleMotion(e); }
+if (isFreerunLikeMode(this.state.activityMode)) { if (this.freerunMotion) this.freerunMotion.handleMotion(e); }
 else if (this.state.activityMode === "walk") { this.walkMotion.handleMotion(e); } else { this.motion.handleMotion(e); }
 if (this.rawSensorBuf) this.captureRawStepMarker(); // [추가 2026-10-14]
 if (this.leanTracker) this.leanTracker.handleMotion(e); // [신규] 린각도 추출기: 완전 분리된 별도 경로, 걸음 감지에는 관여하지 않음
@@ -13276,7 +13285,7 @@ try {
   if (storage.loadProfile().rawSensorCapture && premium.isAdmin) { // [수정 2026-10-14] 관리자 전용: 예전에 ON으로 저장된 일반 계정은 기록하지 않음
     this.rawSensorBuf = [];
     this._rawGctSeen = undefined;
-    this.rawSensorMeta = { startMs: Date.now(), startIso: new Date().toISOString(), devicePos: (storage.getActivityMode() === 'freerun' ? 'freerun' : (storage.loadProfile().devicePos || 'chest')), // [수정 2026-10-20] 프리런은 착용 위치가 없으므로 위치 자리에 'freerun'을 기록 → 파일명 raw_freerun_...
+    this.rawSensorMeta = { startMs: Date.now(), startIso: new Date().toISOString(), devicePos: (isFreerunLikeMode(storage.getActivityMode()) ? engineSlotKeyOf(storage.getActivityMode()) : (storage.loadProfile().devicePos || 'chest')), // [수정 2026-10-20] 프리런은 착용 위치가 없으므로 위치 자리에 'freerun'을 기록 → 파일명 raw_freerun_...
       runMode: isCalibFactorsOn() ? 'pro' : 'lite', activity: storage.getActivityMode() || 'run' };
     // [수정 2026-10-20] 원본: activity: this.state.activityMode || 'run' — 이 시점엔 this.state.activityMode가 아직 갱신 전(아래 줄에서 대입)이라
     // 항상 초기값 'run'이 들어가 프리런 로그도 파일명에 _freerun이 안 붙고 마지막 착용 위치(waist 등) 파일처럼 저장됐음. 시작 시점의 설정값을 직접 읽도록 수정
@@ -13342,7 +13351,7 @@ if (ui.dom.flight) ui.dom.flight.textContent = '0';
 }
 // [신규] 프리러닝은 GCT/FLIGHT를 계산하지 않으므로 시작 시점에 "--"로 고정
 // (CADENCE는 네이티브 스텝 디텍터 기반으로 정상 표시되므로 건드리지 않음)
-if (this.state.activityMode === 'freerun') {
+if (isFreerunLikeMode(this.state.activityMode)) {
 if (ui.dom.gct) ui.dom.gct.textContent = '--'; // 시작 직후엔 값이 없으므로 '--' (이후 logPrecisionSample에서 freerunMotion 값으로 갱신)
 if (ui.dom.flight) ui.dom.flight.textContent = '--';
 // [추가] 화면/리스트엔 계속 "--"로 고정해두되, 내부적으로는 별도 인스턴스(freerunMotion)를
@@ -13355,11 +13364,12 @@ this.freerunMotion.reset();
 // 기준으로 덮어쓴다. 여기서 그걸 그대로 썼다간, 실제 저장된 착용 위치가 예를 들어 hand인데도
 // 프리런을 시작할 때마다 그 캐시가 waist 값으로 덮여써져서, 다음 실제 hand 러닝이 잘못된
 // 보정계수로 시작하는 문제가 생긴다. 그래서 필요한 필드만 직접 복사하고 저장소엔 쓰지 않는다.
-const _wp = DEVICE_MOTION_PROFILES.freerun || DEVICE_MOTION_PROFILES.waist; // [수정 2026-09-20] 프리런 전용 슬롯 사용(허리 값과 분리)
+const _slot = engineSlotKeyOf(this.state.activityMode); // [추가 2026-10-20] 프리런='freerun' / 트레일='trail'
+const _wp = DEVICE_MOTION_PROFILES[_slot] || DEVICE_MOTION_PROFILES.freerun || DEVICE_MOTION_PROFILES.waist; // [수정 2026-09-20] 프리런 전용 슬롯 사용(허리 값과 분리)
 this.freerunMotion.groundThreshold = _wp.groundThreshold;
 this.freerunMotion.impactThreshold = _wp.impactThreshold;
 this.freerunMotion.gctFallbackRatio = _wp.gctFallbackRatio;
-this.freerunMotion.gctPosKey = 'freerun'; // [추가 2026-10-16]
+this.freerunMotion.gctPosKey = _slot; // [추가 2026-10-16]
 this.freerunMotion.vertScale = _wp.vertScale;
 this.freerunMotion.minStepInterval = _wp.minStepInterval;
 this.freerunMotion.vertEnabled = _wp.vertEnabled;
@@ -13368,7 +13378,7 @@ this.freerunMotion.gctFilterDelayMs = _wp.gctFilterDelayMs;
 this.freerunMotion.nativeRescueEnabled = !!_wp.nativeRescueEnabled;
 this.freerunMotion.useNativeStepTrigger = (_wp.stepTrigger === 'native');
 try {
-  const _ov = (storage.loadProfile().motionCalibOverrides || {}).freerun; // 읽기만 함 [수정 2026-09-20] 프리런 전용 보정값 — 저장소엔 절대 쓰지 않음
+  const _ov = (storage.loadProfile().motionCalibOverrides || {})[_slot]; // 읽기만 함 [수정 2026-09-20] 프리런 전용 보정값 — 저장소엔 절대 쓰지 않음
   if (_ov) {
     if (typeof _ov.gctFallbackRatio === 'number') this.freerunMotion.gctFallbackRatio = _ov.gctFallbackRatio;
     if (typeof _ov.rotRejectThreshold === 'number') this.freerunMotion.rotRejectThreshold = _ov.rotRejectThreshold;
@@ -13633,7 +13643,7 @@ let avgGct = _precLogGct != null
   : (this.state.stepCount > 0 ? Math.round(this.state.totalGct / this.state.stepCount) : 0);
 let avgFlight = this.state.stepCount > 0 ? Math.round(this.state.totalFlight / this.state.stepCount) : 0;
 // [추가 2026-10-11] 프리런은 this.motion 콜백이 없어 totalFlight가 쌓이지 않음 → 정밀 로그(freerunMotion 값)에서 스텝 가중평균
-if (this.state.activityMode === 'freerun' && _hasPrecLogForFinish) {
+if (isFreerunLikeMode(this.state.activityMode) && _hasPrecLogForFinish) {
   const _flLog = avgFromPrecLogStepWeighted(_precLogForFinish, 'flightPct');
   if (_flLog != null && !isNaN(_flLog) && _flLog > 0) avgFlight = Math.round(_flLog);
 }
@@ -13652,7 +13662,7 @@ strideForVert = calcStride(speedKmh, avgCadence, _hcmVert, _profVert.strideCorre
 // [수정] VERT(수직진동 비율)는 손(hand)에서 이미 vertEnabled:false로 계산 자체가 안 되는데,
 // 프리런은 착용위치와 무관하게 동작하다 보니 이 null 처리가 안 걸려있었음 — 손과 동일하게
 // 프리런도 실측 VERT 대신 null(→ calcEffScore의 케이던스 기반 추정값으로 폴백)로 맞춤.
-let measuredVertRatio = (this.motion && this.state.activityMode !== 'freerun') ? this.motion.getVertRatio(strideForVert) : null; // [수정 2026-10-15] 프리런 VERT는 다시 null(효율점수는 케이던스 기반 추정값으로) — 10-11 변경 원복. 정밀 로그에는 계속 기록됨
+let measuredVertRatio = (this.motion && !isFreerunLikeMode(this.state.activityMode)) ? this.motion.getVertRatio(strideForVert) : null; // [수정 2026-10-15] 프리런 VERT는 다시 null(효율점수는 케이던스 기반 추정값으로) — 10-11 변경 원복. 정밀 로그에는 계속 기록됨
 this.pushKmSplitIfNeeded();
 this.pushDiagSplitIfNeeded();
 const _now = new Date();
@@ -13700,7 +13710,7 @@ powerWkg: calculatedPowerWkg,      // [신규] 체중당 파워(W/kg) — 강도
 stride: _snapshotStride,           // [추가] 보폭 스냅샷 저장
 sensorDiag: _strideSensorFlag,     // [추가] 개발자 전용 진단 플래그. 클램프가 발동한 기록에만 값이 있음(UI 비노출, export로만 확인)
 proRun: !!this.state.runPro, // [추가 2026-10-13] true=PRO, false=LITE
-devicePos: (this.state.activityMode === 'freerun') ? null : (this.state.runDevicePos || null), // [수정] 프리러닝은 착용 위치와 무관하므로 기록하지 않음(그 외 모드는 클램프 여부와 무관하게 항상 기록)
+devicePos: isFreerunLikeMode(this.state.activityMode) ? null : (this.state.runDevicePos || null), // [수정] 프리러닝은 착용 위치와 무관하므로 기록하지 않음(그 외 모드는 클램프 여부와 무관하게 항상 기록)
 // [신규] 가슴 착용 러닝일 때만 값이 채워지는 세션 평균 린각도(도). 그 외 착용위치/걷기 기록은 null.
 avgLeanAngleDeg: (this.leanTracker && this.leanTracker.getSessionAvg() != null) ? parseFloat(this.leanTracker.getSessionAvg().toFixed(1)) : null,
 // [추가] 전방/측방 분해 평균값. avgLeanAngleDeg와 별개 필드라 기존 UI/저장 스키마는 안 건드림.
@@ -13734,12 +13744,12 @@ try {
 } catch (e) { jrLogErr('recordHrFields', e); }
 storage.saveRecord(record);
 // [추가 2026-10-10] 러닝 모드일 때만 이번 러닝의 학습 GCT 비율을 "3개 평균"용으로 기록
-try { if ((record.activityMode || 'run') === 'run' || record.activityMode === 'trail') calibAvg3RecordSelfRun(this.state.runDevicePos || null, this.motion); } catch (e) { jrLogErr('calibSelfRun', e); }
+try { if ((record.activityMode || 'run') === 'run') calibAvg3RecordSelfRun(this.state.runDevicePos || null, this.motion); } catch (e) { jrLogErr('calibSelfRun', e); }
 // [수정 2026-09-25] logPrecisionSample()이 이제 설정과 무관하게 항상 메모리에 쌓으므로,
 // 기기 저장/가민분석실 노출 여부는 여기서 설정으로 게이팅한다(이 설정의 "로그 export 대상으로
 // 남길지" 의미는 그대로 유지, "매초 계산을 건너뛸지"는 위 logPrecisionSample() 참고).
 if (storage.getPrecisionLogEnabled()) {
-storage.savePrecisionLog(this.state.precisionLog, (this.state.activityMode === 'freerun') ? null : (this.state.runDevicePos || null), this.state.activityMode, !!this.state.runPro); // [수정] 정밀 로그 영구 저장 (앱 재시작/새 러닝 후에도 내보내기 가능) + 착용위치 동봉 — record.devicePos와 동일 규칙으로 프리런 예외 적용, activityMode는 목록에 FREE RUN 배지 표시용
+storage.savePrecisionLog(this.state.precisionLog, isFreerunLikeMode(this.state.activityMode) ? null : (this.state.runDevicePos || null), this.state.activityMode, !!this.state.runPro); // [수정] 정밀 로그 영구 저장 (앱 재시작/새 러닝 후에도 내보내기 가능) + 착용위치 동봉 — record.devicePos와 동일 규칙으로 프리런 예외 적용, activityMode는 목록에 FREE RUN 배지 표시용
 }
 // 커뮤니티 업로드는 선택사항: 공유 모달을 띄워 사용자가 선택
 storage.clearTempSession();
@@ -14010,7 +14020,7 @@ if (app.motion) app.motion.handleMotion(evt);
 // (freerunMotion)는 브라우저 경로(handleDeviceMotionEvent)에서만 데이터를 받고 있어서, 안드로이드에서는
 // 걸음 이벤트를 전달해도 가속도 데이터가 없어 GCT가 전부 폴백(비율×주기)으로만 계산되고 수직진동 원시값도
 // 비었다. 기존 app.motion 호출은 그대로 두고 프리런일 때만 freerunMotion에도 같은 데이터를 추가 전달한다.
-if (app.state.activityMode === 'freerun' && app.freerunMotion) app.freerunMotion.handleMotion(evt);
+if (isFreerunLikeMode(app.state.activityMode) && app.freerunMotion) app.freerunMotion.handleMotion(evt);
 if (app.rawSensorBuf) app.captureRawStepMarker(); // [추가 2026-10-14] 걸음 확정 시점의 GCT/vert 마커(브라우저 경로와 동일 순서)
 // [신규] 화면 꺼짐 대응: setInterval 대신 여기서 정밀 로그 트리거
 // (가속도계는 보통 GPS보다 훨씬 자주 들어오므로 이쪽이 주 경로)
@@ -14068,7 +14078,7 @@ if (app.motion) app.motion.onNativeStep(ts);
 // 확정하지 못했다 → GCT/수직진동 원시값이 계산되지 않아 정밀 로그가 비어 있었음. 기존 app.motion 호출은
 // 그대로 두고, 프리런일 때만 freerunMotion에도 같은 이벤트를 추가 전달한다(화면/리스트에는 영향 없음:
 // freerunMotion의 콜백은 no-op).
-if (app.state.activityMode === 'freerun' && app.freerunMotion) app.freerunMotion.onNativeStep(ts);
+if (isFreerunLikeMode(app.state.activityMode) && app.freerunMotion) app.freerunMotion.onNativeStep(ts);
 }
 }
 } catch (e) { console.error('onNativeStepDetected error', e); }
@@ -15996,7 +16006,7 @@ const shareLeanAngle = opts.leanAngle !== false; // [신규] 린각도 공유 �
         activity_mode: record.activityMode || 'run',
         // [추가] 폰 휴대 위치(chest/waist/armband/hand). 프리런·걷기는 위치 개념이 없어 null.
         // ⚠️ Supabase 'records' 테이블에 device_pos(text, nullable) 컬럼이 필요. 없으면 아래에서 자동으로 빼고 재시도.
-        device_pos: (record.activityMode === 'freerun' || record.activityMode === 'walk') ? null : (record.devicePos || null),
+        device_pos: (record.activityMode === 'freerun' || record.activityMode === 'trail' || record.activityMode === 'walk') ? null : (record.devicePos || null),
         distance_km: parseFloat(record.dist) || 0,
         duration_sec: durationSec,
         pace_sec_per_km: paceSec,
@@ -18216,10 +18226,11 @@ const garmin = (function () {
         // 쓸 수 있게 한다 (예전엔 이 필드가 파싱조차 안 돼서 항상 비어있었음).
         const rowWithPos = log.find(r => r.devicePos);
         const importedDevicePos = rowWithPos ? rowWithPos.devicePos : null;
-        const importedIsFreerun = importedDevicePos === 'freerun'; // [추가] 프리런 로그는 isFreerun 플래그로 복원(devicePos는 null 유지)
+        const importedIsFreerun = importedDevicePos === 'freerun';
+        const importedIsTrail = importedDevicePos === 'trail'; // [추가] 프리런 로그는 isFreerun 플래그로 복원(devicePos는 null 유지)
         const rowWithMode = log.find(r => r.runMode);
         const importedProRun = rowWithMode ? (rowWithMode.runMode === 'pro' ? true : (rowWithMode.runMode === 'lite' ? false : null)) : null;
-        const entry = { id: 'pcmp_' + Date.now(), savedAt: new Date().toISOString(), log: log, imported: true, proRun: importedProRun, devicePos: importedIsFreerun ? null : importedDevicePos, isFreerun: importedIsFreerun, fileName: file.name || null };
+        const entry = { id: 'pcmp_' + Date.now(), savedAt: new Date().toISOString(), log: log, imported: true, proRun: importedProRun, devicePos: (importedIsFreerun || importedIsTrail) ? null : importedDevicePos, isFreerun: importedIsFreerun, isTrail: importedIsTrail, fileName: file.name || null };
         list.unshift(entry);
         savePrecLogImportsList(list.slice(0, MAX_PRECLOG_IMPORTS));
         if (selectedPrecLogIds.indexOf(entry.id) < 0) selectedPrecLogIds.push(entry.id); // [수정] 방금 불러온 로그를 다중선택 배열에 추가
@@ -18709,6 +18720,7 @@ const garmin = (function () {
   function logPosOf(p) {
     if (!p) return null;
     if (p.isFreerun || p.devicePos === 'freerun') return 'freerun';
+    if (p.isTrail || p.devicePos === 'trail') return 'trail';
     return p.devicePos || null;
   }
   function precLastDistKm(log) {
@@ -19799,7 +19811,7 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
     // [수정] 보정값 저장 슬롯이 위치별로 나뉘어서, 가슴/손 등 여러 위치에 동시에
     // 보정값이 적용돼 있을 수 있다. 각 위치마다 카드를 따로 그리고, RESET/스니펫/다운로드
     // 버튼도 그 위치(pos)를 명시해서 그 위치의 슬롯에만 영향을 준다.
-    const positions = ['chest', 'waist', 'armband', 'hand', 'freerun'];
+    const positions = ['chest', 'waist', 'armband', 'hand', 'freerun', 'trail'];
     const activePositions = positions.filter(p => overridesMap[p]);
 
     const undoOnlyPositions = positions.filter(p => hasUndoFor(p)); // [수정] 위치별로 남아있는 되돌리기 스냅샷 전부 표시
@@ -20055,7 +20067,7 @@ if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'A
       // 전부 모아서 patches 배열로 만들고, 한 번의 다운로드로 같은 파일에 함께 반영한다.
       // [수정 2026-09-20] 프리런(freerun)이 목록에서 빠져 있어서, 프리런 세션의 보정값은
       // 아무리 캘리브레이션을 맞춰도 DOWNLOAD PATCHED HTML에 절대 반영되지 않던 버그 수정.
-      const positions = ['chest', 'waist', 'armband', 'hand', 'freerun'];
+      const positions = ['chest', 'waist', 'armband', 'hand', 'freerun', 'trail'];
       const patches = [];
       const patchedPositions = [];
       positions.forEach(function (pos) {
