@@ -938,6 +938,14 @@ body.prem-lock-stats #stat-filter-monthly::after, body.prem-lock-stats #stat-fil
 .card-hr-row { grid-column: span 3; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
 .label { font-size:var(--fs-xxs); color: var(--text-dim); font-weight: 900; margin-bottom: 3px; text-transform: uppercase; }
 .value { font-size:var(--fs-lg); font-weight: 900; }
+/* [추가 2026-10-20] 트레일: GCT/FLIGHT 카드를 탭하면 ASCENT/GRADE로 전환 (러닝/걷기 모드에선 전부 숨김 상태) */
+.card .trail-alt, .card .trail-hint { display:none; }
+.card.trail-toggle { position:relative; cursor:pointer; }
+.card.trail-toggle > .trail-hint { display:block; position:absolute; top:4px; right:8px; font-size:9px; font-weight:800; color:#666; }
+.card.trail-alt-on > .trail-std { display:none; }
+.card.trail-alt-on > .trail-alt { display:block; }
+.card.trail-alt-on[data-ref]::before, .card.trail-alt-on.premium-locked::after { content:none; }
+.trail-alt-val { font-size:var(--fs-lg); font-weight:900; }
 /* [추가 2026-08-31] 코드 정리: 반복되던 인라인 style="..." 844개 중 자주 쓰이던 패턴을
    유틸리티 클래스로 추출. 기존 렌더링 결과와 완전히 동일하도록 값 그대로 옮김(시각적 변경 없음).
    id 선택자 CSS 규칙과의 충돌 여부는 사전에 전수 확인했음(충돌 없음). */
@@ -2089,6 +2097,10 @@ button[style*="--danger"]:active, button[style*="#e57373"]:active, .c33:active, 
 <button id="quick-metro" class="btn-quick-metro" style="position:absolute; bottom:10px; left:10px; right:auto;" onclick="metro.toggle()">METRO OFF</button>
 <div class="label u-color-primary" id="label-pace">PACE</div>
 <div id="curPace" class="value-large">--'--"</div>
+<div id="trail-gap-mini" style="display:none; position:absolute; top:8px; right:10px; text-align:right;">
+<div style="font-size:var(--fs-xxs); color:#888; font-weight:900;" id="label-gap-mini">GAP</div>
+<div style="font-size:var(--fs-md); color:#fff; font-weight:900;"><span id="trail-gap-val">--</span><span style="font-size:var(--fs-xxs); color:#888;" id="trail-gap-unit"> /KM</span></div>
+</div>
 <div style="position:absolute; bottom:8px; right:10px; text-align:right;">
 <div style="font-size:var(--fs-xxs); color:#888; font-weight:900;" id="label-speed-mini">SPEED</div>
 <div style="font-size:var(--fs-md); color:#fff; font-weight:900;"><span id="curSpeed">--</span><span style="font-size:var(--fs-xxs); color:#888;" id="unit-speed"> KM/H</span></div>
@@ -2098,8 +2110,8 @@ button[style*="--danger"]:active, button[style*="#e57373"]:active, .c33:active, 
 <div class="card u-height-63px"><div class="label" id="label-time">TIME</div><div id="time" class="value">00:00</div></div>
 <div class="card u-height-63px"><div class="label" id="label-avg">AVG</div><div id="avgPace" class="value">--'--"</div></div>
 <div id="card-cadence" class="card u-height-63px"><div class="label" id="label-cadence">CADENCE</div><div id="cadence" class="value">0</div></div>
-<div id="card-gct" class="card u-height-63px"><div class="label" id="label-gct">GCT</div><div class="value"><span id="gct">--</span><span class="u-font-size-fs-xxs" id="gct-unit"> MS</span></div></div>
-<div id="card-flight" class="card u-height-63px"><div class="label" id="label-flight">FLIGHT</div><div class="value"><span id="flight">--</span><span class="u-font-size-fs-xxs" id="flight-unit"> %</span></div></div>
+<div id="card-gct" class="card u-height-63px" onclick="ui.toggleTrailCards()"><div class="label trail-std" id="label-gct">GCT</div><div class="value trail-std"><span id="gct">--</span><span class="u-font-size-fs-xxs" id="gct-unit"> MS</span></div><div class="label trail-alt" id="label-trail-asc">ASCENT</div><div class="trail-alt trail-alt-val"><span id="trail-asc-val">0</span><span class="u-font-size-fs-xxs" id="trail-asc-unit"> M</span></div><span class="trail-hint">⇄</span></div>
+<div id="card-flight" class="card u-height-63px" onclick="ui.toggleTrailCards()"><div class="label trail-std" id="label-flight">FLIGHT</div><div class="value trail-std"><span id="flight">--</span><span class="u-font-size-fs-xxs" id="flight-unit"> %</span></div><div class="label trail-alt" id="label-trail-grade">GRADE</div><div class="trail-alt trail-alt-val"><span id="trail-grade-val">--</span><span class="u-font-size-fs-xxs"> %</span></div><span class="trail-hint">⇄</span></div>
 <div class="card-hr-row">
   <div id="card-hr" class="card c57" onclick="ui.openHrConnect()">
     <div class="label" id="label-hr">HEART RATE</div>
@@ -4505,7 +4517,7 @@ function buildPersonalFeedback(record, profile, gender, isKo) {
 const USE_MODE_CHIP = true;
 const translations = {
 en: {
-pace: "PACE", dist: "DIST", time: "TIME", avg: "AVG", speed: "SPEED", cadence: "CADENCE", gct: "GCT", flight: "FLIGHT", cal: "KCAL", start: "START", stop: "STOP", resume: "RESUME", reset: "RESET", finish: "FINISH", run: "RUN", history: "HISTORY", historyTab: "REC•SET", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", selLang: "SELECT LANGUAGE", unitLabel: "DISTANCE UNIT", genderLabel: "GENDER", genderMale: "MALE", genderFemale: "FEMALE", autoPauseLabel: "AUTO PAUSE", calibSoundLabel: "CALIBRATION ALERT SOUND", calibSoundOpeningBell: "Open Bell", calibSoundCamBell: "Cam Bell", calibSoundTimeBell: "Time Bell", calibVolumeLabel: "VOLUME", calibPreviewLabel: "Preview sound", metro: "RHYTHM ASSISTANT", clear: "CLEAR ALL HISTORY", confirmClear: "Are you sure?", alertCleared: "History cleared.", clearLogs: "CLEAR ALL LOGS", confirmClearLogs: "Delete all phone precision logs and imported Garmin FIT data? This cannot be undone.", alertLogsCleared: "Log records cleared.", route: "ROUTE", diag: "DIAG", close: "CLOSE", alt: "ALT", mapStart: "START", mapFinish: "FINISH", activityModeLabel: "ACTIVITY MODE", modeRunLabel: "RUN", modeWalkLabel: "WALK", modeTrailLabel: "TRAIL", modeFreerunLabel: "FREE RUN", modeAllLabel: "ALL RUN", stepsLabel: "STEPS", spmLabel: "SPM", walksCountLabel: "WALKS COUNT", totalStepsLabel: "TOTAL STEPS", quickModeTitle: "SWITCH MODE", confirmBtnLabel: "CONFIRM", cancelBtnLabel: "CANCEL", backBtnLabel: "BACK", onbSubtitle: "Set up your run before you start", onbGoSettings: "GO TO SETTINGS", onbLogRecordLabel: "LOG RECORDING", onbLeanAngleLabel: "LEAN ANGLE", resetConfirmMsg: "Discard this run and go back to start? This cannot be undone.", hSecRunData: "RUN DATA", hSecWalkData: "WALK DATA", hSecBalance: "BALANCE", hSecPacing: "PACING", paceStab: "PACE STABILITY", splitDiff: "SPLIT DIFF", cadDrift: "CADENCE DRIFT", hrDrift: "HR DRIFT", hSecEtc: "ETC",
+pace: "PACE", dist: "DIST", time: "TIME", avg: "AVG", speed: "SPEED", cadence: "CADENCE", gct: "GCT", flight: "FLIGHT", cal: "KCAL", start: "START", stop: "STOP", resume: "RESUME", reset: "RESET", finish: "FINISH", run: "RUN", history: "HISTORY", historyTab: "REC•SET", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", selLang: "SELECT LANGUAGE", unitLabel: "DISTANCE UNIT", genderLabel: "GENDER", genderMale: "MALE", genderFemale: "FEMALE", autoPauseLabel: "AUTO PAUSE", calibSoundLabel: "CALIBRATION ALERT SOUND", calibSoundOpeningBell: "Open Bell", calibSoundCamBell: "Cam Bell", calibSoundTimeBell: "Time Bell", calibVolumeLabel: "VOLUME", calibPreviewLabel: "Preview sound", metro: "RHYTHM ASSISTANT", clear: "CLEAR ALL HISTORY", confirmClear: "Are you sure?", alertCleared: "History cleared.", clearLogs: "CLEAR ALL LOGS", confirmClearLogs: "Delete all phone precision logs and imported Garmin FIT data? This cannot be undone.", alertLogsCleared: "Log records cleared.", route: "ROUTE", diag: "DIAG", close: "CLOSE", alt: "ALT", mapStart: "START", mapFinish: "FINISH", activityModeLabel: "ACTIVITY MODE", modeRunLabel: "RUN", modeWalkLabel: "WALK", ascentLabel: "ASCENT", descentLabel: "DESCENT", gradeLabel: "GRADE", gapLabel: "GAP", avgGapLabel: "Avg GAP Pace", avgGradeLabel: "Avg Grade", modeTrailLabel: "TRAIL", modeFreerunLabel: "FREE RUN", modeAllLabel: "ALL RUN", stepsLabel: "STEPS", spmLabel: "SPM", walksCountLabel: "WALKS COUNT", totalStepsLabel: "TOTAL STEPS", quickModeTitle: "SWITCH MODE", confirmBtnLabel: "CONFIRM", cancelBtnLabel: "CANCEL", backBtnLabel: "BACK", onbSubtitle: "Set up your run before you start", onbGoSettings: "GO TO SETTINGS", onbLogRecordLabel: "LOG RECORDING", onbLeanAngleLabel: "LEAN ANGLE", resetConfirmMsg: "Discard this run and go back to start? This cannot be undone.", hSecRunData: "RUN DATA", hSecWalkData: "WALK DATA", hSecBalance: "BALANCE", hSecPacing: "PACING", paceStab: "PACE STABILITY", splitDiff: "SPLIT DIFF", cadDrift: "CADENCE DRIFT", hrDrift: "HR DRIFT", hSecEtc: "ETC",
 powerLabel: "POWER", avgPowerLabel: "AVG POWER", infRunPower: "RUNNING POWER (WATTS)", infRunPowerD: "Estimated from weight, pace, and elevation (not sensor-measured). Watts per kg body weight\n(watts ÷ bodyweight kg = W/kg)\n・Z1 Recovery/Easy: under 12 W/kg\n・Z2 Moderate: 12-14 W/kg\n・Z3 Tempo/Threshold: 14-16 W/kg\n・Z4 Interval/Hard: 16-19 W/kg\n・Z5 Sprint: 19+ W/kg",
 settingsTabApp: "APP", settingsTabCrew: "CREW", settingsTabCalib: "CALIB", sectionGeneral: "GENERAL", sectionProfile: "MY INFO", sectionRunEnv: "RUN SETTINGS", sectionData: "DATA",
 metroTitle: "METRONOME", metroDesc: "Perfect your cadence.", metroAccent: "ACCENT FIRST BEAT", noRec: "NO RECORDS", totalStats: "LIFETIME STATS", runs: "RUNS", autoPaused: "AUTO PAUSED",
@@ -4619,7 +4631,7 @@ exitClosedTitle: "App Closed", exitClosedMsg: "Press the Home button<br>to retur
 },
 ko: {
 
-pace: "페이스", dist: "거리", time: "시간", avg: "평균", speed: "속도", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", cal: "칼로리", start: "시작", stop: "정지", resume: "재개", reset: "리셋", finish: "종료", run: "러닝", history: "기록", historyTab: "기록•설정", list: "목록", total: "통계", info: "정보", settings: "설정", selLang: "언어 설정", unitLabel: "거리 단위", genderLabel: "성별", genderMale: "남성", genderFemale: "여성", autoPauseLabel: "자동 멈춤", calibSoundLabel: "캘리브레이션 완료 알림음", calibSoundOpeningBell: "오픈벨", calibSoundCamBell: "캠벨", calibSoundTimeBell: "타임벨", calibVolumeLabel: "볼륨", calibPreviewLabel: "소리 미리듣기", metro: "리듬 어시스턴트", clear: "전체 기록 삭제", confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.", clearLogs: "전체 로그 삭제", confirmClearLogs: "폰에 저장된 정밀 로그와 가민 분석실에 가져온 FIT 기록을 모두 삭제할까요? 이 작업은 되돌릴 수 없습니다.", alertLogsCleared: "로그 기록이 삭제되었습니다.", route: "경로", diag: "진단", close: "닫기", alt: "고도", mapStart: "시작", mapFinish: "종료", activityModeLabel: "활동 모드", modeRunLabel: "러닝", modeWalkLabel: "걷기", modeTrailLabel: "트레일", modeFreerunLabel: "프리러닝", modeAllLabel: "전체 러닝", stepsLabel: "걸음수", spmLabel: "분당걸음", walksCountLabel: "걷기 횟수", totalStepsLabel: "총 걸음수", quickModeTitle: "모드 전환", confirmBtnLabel: "확인", cancelBtnLabel: "취소", backBtnLabel: "뒤로가기", onbSubtitle: "시작하기 전에 러닝 설정을 선택해주세요", onbGoSettings: "설정으로 바로가기", onbLogRecordLabel: "로그 기록", onbLeanAngleLabel: "린각도", resetConfirmMsg: "이번 러닝 기록을 버리고 처음 화면으로 돌아갈까요? 이 작업은 되돌릴 수 없습니다.", hSecRunData: "러닝 데이터", hSecWalkData: "걷기 데이터", hSecBalance: "밸런스", hSecPacing: "페이싱", paceStab: "페이스 안정성", splitDiff: "전/후반 차", cadDrift: "케이던스 유지", hrDrift: "심박 드리프트", hSecEtc: "기타",
+pace: "페이스", dist: "거리", time: "시간", avg: "평균", speed: "속도", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", cal: "칼로리", start: "시작", stop: "정지", resume: "재개", reset: "리셋", finish: "종료", run: "러닝", history: "기록", historyTab: "기록•설정", list: "목록", total: "통계", info: "정보", settings: "설정", selLang: "언어 설정", unitLabel: "거리 단위", genderLabel: "성별", genderMale: "남성", genderFemale: "여성", autoPauseLabel: "자동 멈춤", calibSoundLabel: "캘리브레이션 완료 알림음", calibSoundOpeningBell: "오픈벨", calibSoundCamBell: "캠벨", calibSoundTimeBell: "타임벨", calibVolumeLabel: "볼륨", calibPreviewLabel: "소리 미리듣기", metro: "리듬 어시스턴트", clear: "전체 기록 삭제", confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.", clearLogs: "전체 로그 삭제", confirmClearLogs: "폰에 저장된 정밀 로그와 가민 분석실에 가져온 FIT 기록을 모두 삭제할까요? 이 작업은 되돌릴 수 없습니다.", alertLogsCleared: "로그 기록이 삭제되었습니다.", route: "경로", diag: "진단", close: "닫기", alt: "고도", mapStart: "시작", mapFinish: "종료", activityModeLabel: "활동 모드", modeRunLabel: "러닝", modeWalkLabel: "걷기", ascentLabel: "상승", descentLabel: "하강", gradeLabel: "경사", gapLabel: "GAP", avgGapLabel: "평균 GAP 페이스", avgGradeLabel: "평균 경사", modeTrailLabel: "트레일", modeFreerunLabel: "프리러닝", modeAllLabel: "전체 러닝", stepsLabel: "걸음수", spmLabel: "분당걸음", walksCountLabel: "걷기 횟수", totalStepsLabel: "총 걸음수", quickModeTitle: "모드 전환", confirmBtnLabel: "확인", cancelBtnLabel: "취소", backBtnLabel: "뒤로가기", onbSubtitle: "시작하기 전에 러닝 설정을 선택해주세요", onbGoSettings: "설정으로 바로가기", onbLogRecordLabel: "로그 기록", onbLeanAngleLabel: "린각도", resetConfirmMsg: "이번 러닝 기록을 버리고 처음 화면으로 돌아갈까요? 이 작업은 되돌릴 수 없습니다.", hSecRunData: "러닝 데이터", hSecWalkData: "걷기 데이터", hSecBalance: "밸런스", hSecPacing: "페이싱", paceStab: "페이스 안정성", splitDiff: "전/후반 차", cadDrift: "케이던스 유지", hrDrift: "심박 드리프트", hSecEtc: "기타",
 powerLabel: "파워", avgPowerLabel: "평균 파워", infRunPower: "러닝 파워 (와트)", infRunPowerD: "체중・페이스・고도로 추정한 강도(센서 측정값 아님). 체중 1kg당 와트\n(와트 ÷ 체중kg = W/kg)\n・Z1 회복/이지: 12 W/kg 미만\n・Z2 보통: 12~14 W/kg\n・Z3 템포/역치: 14~16 W/kg\n・Z4 인터벌/하드: 16~19 W/kg\n・Z5 스프린트: 19 W/kg 이상",
 settingsTabApp: "앱설정", settingsTabCrew: "크루", settingsTabCalib: "보정", sectionGeneral: "일반", sectionProfile: "내 정보", sectionRunEnv: "러닝 환경", sectionData: "데이터",
 metroTitle: "메트로놈", metroDesc: "러닝 리듬을 일정하게 유지하세요.", metroAccent: "첫 박자 강조", noRec: "기록 없음", totalStats: "누적 통계", runs: "러닝 횟수", autoPaused: "자동 일시정지",
@@ -5732,6 +5744,7 @@ this.currentAutoPause = storage.getAutoPause();
 this.currentPrecisionLogEnabled = storage.getPrecisionLogEnabled();
 this.currentLeanAngleEnabled = storage.getLeanAngleEnabled(); // [신규] 가슴 착용 러닝 린각도 추출 스위치
 this.currentActivityMode = storage.getActivityMode();
+try { this.applyTrailCardMode(); } catch (e) { console.error('applyTrailCardMode init error', e); } // [추가 2026-10-20] 실패해도 앱 초기화는 계속
 // [추가] 최초 로드 시 걷기 모드/착용위치 조건에 맞지 않는 로그기록·린각도 저장값을 강제 OFF
 this.updatePrecisionLogAvailability();
 this.updateLeanAngleAvailability();
@@ -6282,6 +6295,7 @@ if (flightUnit) flightUnit.textContent = ' %';
 }
 // [신규] 하단 탭바의 RUN 탭 라벨도 선택된 모드에 맞춰 즉시 갱신
 this.updateTabRunLabel();
+try { this.applyTrailCardMode(); } catch (e) { console.error('applyTrailCardMode error', e); } // [추가 2026-10-20] 트레일 카드 전환/GAP 표시
 }
 // [추가] 최초 실행 온보딩 화면 - 활동모드 선택 (아직 확정 저장은 안 하고 화면 표시만 갱신)
 // [추가] 깜빡임 힌트 공통: 전부 끄기 / 박스를 직접 누르면 그 박스의 깜빡임만 끄는 캡처 리스너(1회 등록)
@@ -6744,6 +6758,42 @@ paintGctFlightCard(el, level) {
     const valEl = el.querySelector('.value');
     if (valEl) valEl.style.color = '#888';          // 값은 회색(updateCardColor의 'normal'은 #333이라 거의 안 보임)
   }
+}
+// [추가 2026-10-20] 트레일 전용 카드: GCT/FLIGHT 카드를 탭하면 ASCENT/GRADE로 전환, PACE 카드 우상단에 GAP 표시.
+// GCT/FLIGHT 값은 전환과 무관하게 계속 갱신된다(화면에서만 가려짐). 러닝/걷기 모드에선 아무 영향 없음.
+isTrailCardAltOn() { try { return localStorage.getItem('jrun_trail_card_alt') !== '0'; } catch (e) { return true; } }
+toggleTrailCards() {
+  if (this.currentActivityMode !== 'trail') return;
+  try { localStorage.setItem('jrun_trail_card_alt', this.isTrailCardAltOn() ? '0' : '1'); } catch (e) {}
+  this.applyTrailCardMode();
+}
+applyTrailCardMode() {
+  if (!this.dom || !this.dom.cardGct || !this.dom.cardFlight) return;
+  const isTrail = this.currentActivityMode === 'trail';
+  const alt = isTrail && this.isTrailCardAltOn();
+  [this.dom.cardGct, this.dom.cardFlight].forEach(c => { c.classList.toggle('trail-toggle', isTrail); c.classList.toggle('trail-alt-on', alt); });
+  const gapMini = document.getElementById('trail-gap-mini');
+  if (gapMini) gapMini.style.display = isTrail ? 'block' : 'none';
+  const t = translations[storage.getLang()] || translations['en'];
+  const la = document.getElementById('label-trail-asc'); if (la) la.textContent = t.ascentLabel;
+  const lg = document.getElementById('label-trail-grade'); if (lg) lg.textContent = t.gradeLabel;
+  const lp = document.getElementById('label-gap-mini'); if (lp) lp.textContent = t.gapLabel;
+  // UIManager 생성 시점엔 app(const)이 아직 초기화 전(TDZ)이라 typeof app도 예외를 던질 수 있어 보호
+  try { this.updateTrailCards(); } catch (e) {}
+}
+updateTrailCards() {
+  if (this.currentActivityMode !== 'trail') return;
+  const st = (typeof app !== 'undefined' && app && app.state) ? app.state : null;
+  if (!st) return;
+  const ascEl = document.getElementById('trail-asc-val');
+  if (ascEl) ascEl.textContent = Math.round(st.totalAscent || 0);
+  const grEl = document.getElementById('trail-grade-val');
+  if (grEl) grEl.textContent = (st.gradeSamples > 0) ? ((st.grade >= 0 ? '+' : '') + st.grade.toFixed(1)) : '--';
+  const unit = storage.getUnit();
+  const gapEl = document.getElementById('trail-gap-val');
+  if (gapEl) gapEl.textContent = (st.gapKmh > 0.5 && typeof app !== 'undefined') ? this.convertPaceToUnit(app.formatPace(st.gapKmh), unit) : '--';
+  const gapUnitEl = document.getElementById('trail-gap-unit');
+  if (gapUnitEl) gapUnitEl.textContent = (unit === 'mile') ? ' /MI' : ' /KM';
 }
 getCadenceLevel(val) { if (val >= 170) return 'good'; if (val >= 160) return 'warning'; return 'danger'; } // [수정] 일반 러너 기준으로 하향(기존 엘리트 기준 180/170 → 170/160)
 getGctLevel(val) { if (val <= 270) return 'good'; if (val <= 300) return 'warning'; return 'danger'; } // [수정] 일반 러너 기준으로 상향(기존 엘리트 기준 240/270 → 270/300)
@@ -7486,6 +7536,7 @@ const btnFeedMapFullClose = document.getElementById('btn-feed-map-fullscreen-clo
 if(btnFeedMapFullClose) btnFeedMapFullClose.textContent = t.close;
 const labelSpeedMini = document.getElementById('label-speed-mini');
 if(labelSpeedMini) labelSpeedMini.textContent = t.speed;
+try { if (typeof ui !== 'undefined' && ui.applyTrailCardMode) ui.applyTrailCardMode(); } catch (e) {} // [추가 2026-10-20] 언어 변경 시 트레일 카드 라벨 갱신
 const btnHrConnectEl = document.getElementById('btn-hr-connect');
 if(btnHrConnectEl && !btnHrConnectEl.disabled && (typeof hrManager === 'undefined' || !hrManager.device || !hrManager.device.gatt || !hrManager.device.gatt.connected)) btnHrConnectEl.textContent = isKo ? '연결하기' : 'CONNECT';
 // GPS 초기 상태바 (러닝 중이 아닐 때만)
@@ -9337,6 +9388,12 @@ let dynamicsHtml = '<div class="detail-log-box u-margin-top-12px"><div class="de
 LeanAngleUI.routeDetailRowHtml(record, lang)
 )) +
 '<div class="detail-log-item"><span>ALT</span><span>' + (record.alt || '0') + ' m.</span></div>' +
+(record.activityMode === 'trail' ? (
+'<div class="detail-log-item"><span>' + (t.ascentLabel || "Ascent") + '</span><span>' + (record.totalAscent != null ? record.totalAscent : '--') + ' m.</span></div>' +
+'<div class="detail-log-item"><span>' + (t.descentLabel || "Descent") + '</span><span>' + (record.totalDescent != null ? record.totalDescent : '--') + ' m.</span></div>' +
+'<div class="detail-log-item"><span>' + (t.avgGapLabel || "Avg GAP Pace") + '</span><span>' + (record.avgGapPace ? (this.convertPaceToUnit(record.avgGapPace, this.currentUnit) + (this.currentUnit === 'mile' ? ' /mi' : ' /km')) : '--') + '</span></div>' +
+'<div class="detail-log-item"><span>' + (t.avgGradeLabel || "Avg Grade") + '</span><span>' + (record.avgAbsGrade != null ? record.avgAbsGrade + ' %' : '--') + '</span></div>'
+) : '') +
 '</div>';
 let buttonRowHtml = '<div class="detail-btn-row"><button class="btn-detail-act btn-detail-save" onclick="ui.saveDetailAction(' + record.id + ')">' + (t.saveBtn || "SAVE") + '</button><button class="btn-detail-act btn-detail-share" onclick="ui.shareDetailAction(' + record.id + ')">' + (t.shareBtn || "SHARE") + '</button></div>' +
 '<div class="detail-btn-row detail-btn-row-secondary"><button class="btn-detail-act btn-detail-save-map" onclick="ui.shareDetailRouteAction(' + record.id + ')">' + (t.shareMapBtn || (lang === 'ko' ? "경로맵 스타일로 공유" : "Share as route card")) + '</button></div>';
@@ -12028,6 +12085,11 @@ splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
 diagSplits: [], lastDiagCheckpoint: 0, lastDiagSeconds: 0, lastDiagAlt: null, diagCadenceSamples: [], diagHrSamples: [],
 // [추가] 실시간 상승고도 누적 상태 (트레일 모드 실시간 칼로리의 경사 보너스 계산용)
 totalAscent: 0, lastAscentAlt: null,
+// [추가 2026-10-20] 트레일 지형 상태: 하강 누적 / 기압계 / 평활 고도 / 경사도 / GAP
+totalDescent: 0, baroHPa: null, baroTs: 0, baroAltRaw: null, baroOffset: 0, baroOffsetReady: false, baroLastCalTs: 0,
+trailAltBuf: [], trailAltFilt: null, trailAltRef: null, trailAltSource: 'gps',
+grade: 0, gradeRefAlt: null, gradeRefDist: 0, gapRatio: 1, gapKmh: 0, gapEquivDistKm: 0, gradeSamples: 0, gradeSum: 0,
+lastKmAscent: 0, lastKmDescent: 0,
 lastPosTimestamp: Date.now(),
 speedBuffer: [], lastValidSpeed: 0, emaSpeedKmh: 0, metricSpeedBuffer: [], lastValidMetricSpeed: 0, metricSpeedKmh: 0, cadenceSamples: [], cadValHistory: [],
 isCalibrationRun: false, calibrationKnownDistanceM: 0,
@@ -12373,6 +12435,92 @@ this.state.elevOffsetReady = true;
 .finally(() => { this.state.elevFetchInFlight = false; });
 }
 
+// [신규 2026-10-20] 트레일 고도 파이프라인
+// 1) 소스 선택: 기압계(최근 5초 내 수신) > GPS(+지형API offset)
+// 2) 기압 절대고도의 기준선(offset)은 지형API/GPS 고도로 2분마다 25%씩만 천천히 보정(날씨에 의한 기압 드리프트 흡수)
+// 3) 최근 7샘플 중앙값으로 스파이크 제거
+// 4) 히스테리시스(기압 2m / GPS 4m) 이상 변할 때만 상승·하강 누적 → GPS 노이즈가 누적치에 쌓이지 않음
+updateTrailAltitude(rawAlt, accuracy) {
+  const st = this.state;
+  const now = Date.now();
+  const baroFresh = st.baroAltRaw != null && (now - st.baroTs) < 5000;
+  let alt, source;
+  if (baroFresh) {
+    // GPS/지형 기준 고도(참조값)
+    let ref = null;
+    if (st.elevOffsetReady) ref = rawAlt + st.elevOffset;
+    else if (accuracy <= 20 && rawAlt) ref = rawAlt;
+    if (ref != null) {
+      const target = ref - st.baroAltRaw;
+      if (!st.baroOffsetReady) { st.baroOffset = target; st.baroOffsetReady = true; st.baroLastCalTs = now; }
+      else if ((now - st.baroLastCalTs) > 120000) {
+        // [수정] offset 보정이 고도 계단(가짜 상승/하강)이 되지 않도록 기준점·버퍼도 같은 양만큼 평행이동
+        const dOff = 0.25 * (target - st.baroOffset);
+        st.baroOffset += dOff; st.baroLastCalTs = now;
+        if (st.trailAltRef != null) st.trailAltRef += dOff;
+        if (st.gradeRefAlt != null) st.gradeRefAlt += dOff;
+        st.trailAltBuf = st.trailAltBuf.map(function (v) { return v + dOff; });
+      }
+    }
+    if (st.baroOffsetReady) { alt = st.baroAltRaw + st.baroOffset; source = 'baro'; }
+  }
+  if (alt == null) { alt = st.currentAlt; source = 'gps'; }
+  st.trailAltSource = source;
+
+  // 중앙값 평활 (소스가 바뀌면 버퍼 리셋)
+  if (st._trailAltSrcPrev !== source) {
+    // [수정] 기압↔GPS 소스가 바뀌면 두 고도의 차이가 상승/하강·경사로 잡히지 않도록 기준점도 리셋
+    st.trailAltBuf = []; st.trailAltRef = null; st.gradeRefAlt = null;
+    st._trailAltSrcPrev = source;
+  }
+  st.trailAltBuf.push(alt);
+  if (st.trailAltBuf.length > 7) st.trailAltBuf.shift();
+  const sorted = st.trailAltBuf.slice().sort(function (a, b) { return a - b; });
+  const med = sorted[Math.floor(sorted.length / 2)];
+  st.trailAltFilt = med;
+  st.currentAlt = Math.round(med);   // 화면/스플릿/기록에 쓰이는 고도도 평활값으로 통일
+  if (st.currentAlt < -50) st.currentAlt = 0;
+
+  // 상승/하강 누적 (러닝 중일 때만)
+  if (st.isRunning && !st.isPaused && !st.isAutoPaused) {
+    const TH = (source === 'baro') ? 2 : 4;
+    if (st.trailAltRef == null) st.trailAltRef = med;
+    const diff = med - st.trailAltRef;
+    if (diff >= TH) { st.totalAscent = (st.totalAscent || 0) + diff; st.trailAltRef = med; }
+    else if (diff <= -TH) { st.totalDescent = (st.totalDescent || 0) + (-diff); st.trailAltRef = med; }
+  } else {
+    st.trailAltRef = med; // 일시정지 중 고도 변화는 누적하지 않고 기준만 따라감
+  }
+}
+
+// [신규 2026-10-20] 경사도(%) + GAP(경사 보정 페이스) 갱신. 이동 거리가 인정된 시점(d 반영 직후)에 호출.
+// 경사: 기압 50m / GPS 100m 수평거리 창의 평활 고도차 ÷ 수평거리, EMA(0.4), ±35% 클램프.
+// GAP: Minetti(2002) 러닝 에너지 비용 다항식 비율을 산악용으로 0.85배 완화, 경사 ±30% / 비율 0.6~3.0 클램프.
+updateTrailGrade(deltaKm) {
+  const st = this.state;
+  // [수정] 평탄 환산 거리 누적은 early return보다 먼저 (첫 호출/고도 미준비 구간의 거리 누락 방지)
+  if (deltaKm > 0) st.gapEquivDistKm += deltaKm * (st.gapRatio || 1);
+  if (st.trailAltFilt == null) return;
+  if (st.gradeRefAlt == null) { st.gradeRefAlt = st.trailAltFilt; st.gradeRefDist = st.totalDist; return; }
+  const win = (st.trailAltSource === 'baro') ? 0.05 : 0.10;
+  const horizKm = st.totalDist - st.gradeRefDist;
+  if (horizKm >= win) {
+    let g = ((st.trailAltFilt - st.gradeRefAlt) / (horizKm * 1000)) * 100;
+    g = Math.max(-35, Math.min(35, g));
+    st.grade = (st.gradeSamples === 0) ? g : (0.6 * st.grade + 0.4 * g);
+    st.gradeRefAlt = st.trailAltFilt;
+    st.gradeRefDist = st.totalDist;
+    st.gradeSamples++;
+    st.gradeSum += Math.abs(st.grade);
+    // GAP 비율
+    const i = Math.max(-0.30, Math.min(0.30, st.grade / 100));
+    const C = 155.4 * Math.pow(i, 5) - 30.4 * Math.pow(i, 4) - 43.3 * Math.pow(i, 3) + 46.3 * i * i + 19.5 * i + 3.6;
+    let ratio = C / 3.6;
+    ratio = 1 + 0.85 * (ratio - 1);
+    st.gapRatio = Math.max(0.6, Math.min(3.0, ratio));
+  }
+}
+
 updatePosition(p) {
 if(!this.map) return;
 const rawLat = p.coords.latitude;
@@ -12387,6 +12535,8 @@ this.state.currentAlt = this.state.elevOffsetReady ? Math.round(rawAlt + this.st
 if (this.state.currentAlt < -50) this.state.currentAlt = 0;
 // [추가] 30초 또는 50m 이동마다 지형고도 API를 호출해 offset 갱신 (너무 잦은 호출 방지)
 this.maybeFetchElevationOffset(rawLat, rawLng, rawAlt);
+// [추가 2026-10-20] 트레일 전용: 기압계(우선)/GPS 고도를 중앙값 평활 + 히스테리시스로 상승·하강 누적
+if (ui.currentActivityMode === 'trail') this.updateTrailAltitude(rawAlt, accuracy);
 
 // ── 1. 칼만 필터로 GPS 좌표 스무딩 ──────────────────────
 // 정확도가 낮을수록(숫자 클수록) 측정 노이즈가 크므로 Q/R 비율 조정
@@ -12416,7 +12566,9 @@ K.pLng = (1 - kGainLng) * K.pLng;
 const pos = [K.lat, K.lng]; // 스무딩된 좌표 사용
 // ─────────────────────────────────────────────────────────
 
-if(ui.dom.status) ui.dom.status.textContent = 'GPS: ±' + accuracy + 'm | ALT: ' + this.state.currentAlt + 'm';
+if(ui.dom.status) ui.dom.status.textContent = 'GPS: ±' + accuracy + 'm | ALT: ' + this.state.currentAlt + 'm' +
+  (ui.currentActivityMode === 'trail' ? (' | ' + (this.state.trailAltSource === 'baro' ? 'BARO' : 'GPS-ALT') + ' | GRADE: ' + this.state.grade.toFixed(1) + '%' + (this.state.gapKmh > 0.5 ? (' | GAP: ' + this.formatPace(this.state.gapKmh)) : '')) : '');
+if (ui.currentActivityMode === 'trail') ui.updateTrailCards(); // [추가 2026-10-20] ASCENT/GRADE/GAP 카드 갱신
 if (this.marker) { this.marker.setLatLng(pos); this.map.panTo(pos); }
 if (_mainMapFull && _mainMapFullLocMarker) { _mainMapFullLocMarker.setLatLng(pos); }
 
@@ -12466,11 +12618,15 @@ if(ui.dom.pauseStatus) ui.dom.pauseStatus.classList.remove('is-open');
 const isTrailMode = ui.currentActivityMode === 'trail';
 const isWalkMode = ui.currentActivityMode === 'walk';
 const rawSpeedKmhForPause = (p.coords.speed || 0) * 3.6;
-const stepHaltThresholdMs = isWalkMode ? 3000 : 1800;
+const stepHaltThresholdMs = isWalkMode ? 3000 : (isTrailMode ? 2500 : 1800); // [수정 2026-10-20] 트레일: 오르막 파워하이킹은 걸음 간격이 길어 여유
 const stepsHaltedRecently = this.motion && this.motion.lastStepTime > 0 &&
   (Date.now() - this.motion.lastStepTime) > stepHaltThresholdMs;
-const lowSpeedThresholdKmh = isWalkMode ? 1.0 : 2.2;
-const looksStoppedNow = (rawSpeedKmhForPause < lowSpeedThresholdKmh) || stepsHaltedRecently;
+const lowSpeedThresholdKmh = isWalkMode ? 1.0 : (isTrailMode ? 1.0 : 2.2); // [수정 2026-10-20] 트레일 가파른 오르막 하이킹(2~3km/h)이 정지로 오판되지 않도록 걷기 수준으로
+// [추가 2026-10-20] 트레일: 걸음 센서가 최근 2.5초 내 살아있으면 GPS 속도가 낮아도 정지로 보지 않음
+const trailStepsAlive = isTrailMode && this.motion && this.motion.lastStepTime > 0 && (Date.now() - this.motion.lastStepTime) < 2500;
+const looksStoppedNow = isTrailMode
+  ? (((rawSpeedKmhForPause < lowSpeedThresholdKmh) && !trailStepsAlive) || stepsHaltedRecently)
+  : ((rawSpeedKmhForPause < lowSpeedThresholdKmh) || stepsHaltedRecently);
 const autoPauseDelayMs = isTrailMode ? 5000 : (isWalkMode ? 4000 : 2000);
 if (looksStoppedNow) {
 if (!this.state.lowSpeedStartTime) this.state.lowSpeedStartTime = Date.now();
@@ -12522,7 +12678,7 @@ const minJump = Math.max(0.001, Math.min(0.008, accuracy * 0.00015));
 // 걸러지지 않는 경우가 있어, 속도 기준을 추가로 둠. timeDelta<=0(중복/역행 타임스탬프)
 // 이거나 매우 짧으면(0.2초 미만) 나눗셈이 불안정해지므로 이 필터는 건너뜀.
 const impliedSpeedKmh = (timeDelta > 0.2) ? (d / (timeDelta / 3600)) : 0;
-const maxPlausibleSpeedKmh = (ui.currentActivityMode === 'trail') ? 40 : 45;
+const maxPlausibleSpeedKmh = (ui.currentActivityMode === 'trail') ? 28 : 45; // [수정 2026-10-20] 트레일 내리막 질주도 28km/h면 충분 — 40은 숲/계곡 GPS 튐을 못 거름
 const speedImplausible = impliedSpeedKmh > maxPlausibleSpeedKmh;
 if (d > minJump && d < maxJump && !speedImplausible) {
 // [추가] 속도 블렌딩용: 이번 GPS 갱신에서의 이동거리/경과시간을 저장
@@ -12533,9 +12689,14 @@ this.state.totalDist += d;
 // [추가] 실시간 상승고도 누적 (기존엔 totalAscent가 어디서도 갱신되지 않아
 // 실시간 칼로리 계산의 경사 보너스가 항상 0으로 처리되던 버그를 함께 수정.
 // 1m 미만 변화는 GPS 고도 노이즈로 간주해 무시)
+if (ui.currentActivityMode === 'trail') {
+// [수정 2026-10-20] 트레일은 updateTrailAltitude()가 히스테리시스 기반으로 상승/하강을 누적하므로 기존 1m 단순 누적은 건너뜀
+this.updateTrailGrade(d);
+} else {
 if (typeof this.state.lastAscentAlt === 'number') {
 const altDelta = this.state.currentAlt - this.state.lastAscentAlt;
 if (altDelta > 1) this.state.totalAscent = (this.state.totalAscent || 0) + altDelta;
+}
 }
 this.state.lastAscentAlt = this.state.currentAlt;
 this.state.pathCoords.push(pos);
@@ -12551,7 +12712,10 @@ let splitDuration = this.state.seconds - this.state.lastKmSeconds;
 let min = Math.floor(splitDuration / 60);
 let sec = splitDuration % 60;
 let paceStr = min + "'" + String(sec).padStart(2,'0') + '"';
-this.state.splits.push({ km: currentTargetKm, pace: paceStr, altFrom: this.state.lastKmAlt, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastKmAlt, coord: pos });
+this.state.splits.push({ km: currentTargetKm, pace: paceStr, altFrom: this.state.lastKmAlt, altTo: this.state.currentAlt, altDiff: this.state.currentAlt - this.state.lastKmAlt, coord: pos,
+  gain: Math.round((this.state.totalAscent || 0) - (this.state.lastKmAscent || 0)), loss: Math.round((this.state.totalDescent || 0) - (this.state.lastKmDescent || 0)), grade: Math.round((this.state.grade || 0) * 10) / 10 });
+this.state.lastKmAscent = this.state.totalAscent || 0;
+this.state.lastKmDescent = this.state.totalDescent || 0;
 this.state.lastKmCheckpoint = currentTargetKm;
 this.state.lastKmSeconds = this.state.seconds;
 this.state.lastKmAlt = this.state.currentAlt;
@@ -12674,6 +12838,9 @@ const backupKmh = this.state.totalDist / (this.state.seconds / 3600);
 if (backupKmh > 0.5) smoothedKmh = backupKmh;
 }
 // ─────────────────────────────────────────────────────────
+
+// [추가 2026-10-20] 트레일 GAP 속도: 화면 표시용 smoothedKmh는 건드리지 않고 별도 값으로만 보관
+if (ui.currentActivityMode === 'trail') { this.state.gapKmh = smoothedKmh * (this.state.gapRatio || 1); }
 
 // ── 3-B. [추가 2026-07] 지표계산용 속도: 화면 표시용(smoothedKmh)과 완전히 분리 ──
 // 목적: 가민 대조 캘리브레이션(보폭/케이던스 로그 등)에 쓰는 속도값과, 화면에
@@ -13305,6 +13472,12 @@ this.state.lastKmAlt = this.state.currentAlt;
 // [추가] 새 러닝 시작 시 실시간 상승고도 누적값 초기화 (이전 러닝의 값이 이어지지 않도록)
 this.state.totalAscent = 0;
 this.state.lastAscentAlt = this.state.currentAlt;
+// [추가 2026-10-20] 트레일 지형 상태 초기화. [수정] 장소/날씨가 바뀌었을 수 있으므로 baroOffset은 새 세션 첫 GPS 기준으로 다시 맞춤
+this.state.baroOffsetReady = false;
+this.state.totalDescent = 0; this.state.trailAltBuf = []; this.state.trailAltFilt = null; this.state.trailAltRef = null; this.state._trailAltSrcPrev = null;
+this.state.grade = 0; this.state.gradeRefAlt = null; this.state.gradeRefDist = 0; this.state.gapRatio = 1; this.state.gapKmh = 0; this.state.gapEquivDistKm = 0;
+this.state.gradeSamples = 0; this.state.gradeSum = 0; this.state.lastKmAscent = 0; this.state.lastKmDescent = 0;
+try { ui.applyTrailCardMode(); } catch (e) {} // [추가 2026-10-20] 새 러닝 시작: 트레일 카드 값 0으로 초기화
 this.state.lowSpeedStartTime = null;
 this.state.lastPosTimestamp = Date.now();
 this.state.speedBuffer = [];
@@ -13583,6 +13756,8 @@ let totalAltGain = 0;
 if (this.state.splits && this.state.splits.length > 0) {
 totalAltGain = this.state.splits.reduce((sum, split) => sum + Math.max(0, split.altDiff || 0), 0);
 }
+// [수정 2026-10-20] 트레일은 1km 스플릿 고도차 합(오르내림이 상쇄/누락됨) 대신 히스테리시스 누적 상승고도를 사용
+if (this.state.activityMode === 'trail' && (this.state.totalAscent || 0) > 0) totalAltGain = this.state.totalAscent;
 // [수정] 예전엔 ui.dom.avgPace.textContent(마지막 GPS 콜백 때 찍힌 값)를 그대로 읽어와서
 // FINISH를 누른 시점의 최종 totalDist/seconds보다 살짝 stale한 값이 기록/칼로리 계산에
 // 쓰이는 문제가 있었음(정밀 로그의 distKm/time 재계산값과 페이스가 어긋나는 원인).
@@ -13721,6 +13896,12 @@ leanCalibQuality: (this.leanTracker && this.leanTracker.getSessionAvg() != null)
 nativeStepRescueCount: this.motion.nativeRescueCount, // [추가] 네이티브 걸음센서가 자이로 노이즈 필터의 오판을 구제해준 횟수(개발자 전용, UI 비노출)
 weightKgSnapshot: weightKg,        // [추가] 당시 체중(kg) 스냅샷 저장
 alt: this.state.currentAlt,
+// [추가 2026-10-20] 트레일 지형 요약 (트레일 외 모드는 null)
+totalAscent: this.state.activityMode === 'trail' ? Math.round(this.state.totalAscent || 0) : null,
+totalDescent: this.state.activityMode === 'trail' ? Math.round(this.state.totalDescent || 0) : null,
+avgGapPace: (this.state.activityMode === 'trail' && this.state.gapEquivDistKm > 0.05 && this.state.seconds > 0) ? this.formatPace(this.state.gapEquivDistKm / (this.state.seconds / 3600)) : null,
+avgAbsGrade: (this.state.activityMode === 'trail' && this.state.gradeSamples > 0) ? Math.round((this.state.gradeSum / this.state.gradeSamples) * 10) / 10 : null,
+altSource: this.state.activityMode === 'trail' ? (this.state.trailAltSource || 'gps') : null,
 path: this.state.pathCoords,
 splits: this.state.splits,
 diagSplits: this.state.diagSplits,
@@ -14037,6 +14218,20 @@ app.maybeLogPrecisionSample();
 // matrixArr: 디바이스→월드(동/북/위) 변환 3x3 회전행렬(행 우선, 9개 float).
 // 러닝 중 계속 호출되지만, 실제로 값이 쓰이는 건 leanTracker 내부에서 러닝 시작 후 첫 10m
 // 구간으로 제한되어 있음(그 이후엔 leanTracker가 알아서 무시함 — 여기서는 그냥 최신값만 전달).
+// [신규 2026-10-20] 네이티브 기압계(TYPE_PRESSURE) 브릿지 수신부.
+// LocationForegroundService.kt가 약 1Hz로 hPa 값을 MainActivity 경유로 이 함수에 전달한다.
+// 기압계 미탑재 기기는 호출되지 않으며, 그 경우 트레일 고도는 GPS(+지형API offset) 폴백으로 동작.
+// 표준대기 공식으로 절대 기압고도를 만들고, 기준선(offset)은 updateTrailAltitude()가 GPS/지형고도로 천천히 보정한다.
+window.onNativeBaroUpdate = function (hPa, timestamp) {
+  try {
+    if (typeof app === 'undefined' || !app || !app.state) return;
+    if (!(typeof hPa === 'number') || !(hPa > 300 && hPa < 1100)) return;
+    app.state.baroHPa = hPa;
+    app.state.baroTs = Date.now();
+    app.state.baroAltRaw = 44330 * (1 - Math.pow(hPa / 1013.25, 1 / 5.255));
+  } catch (e) { console.error('onNativeBaroUpdate error', e); }
+};
+
 window.onNativeOrientationUpdate = function (matrixArr, timestamp) {
 try {
 // [수정] 위 onNativeMotionUpdate와 동일한 이유로 isAutoPaused 조건을 제거.
