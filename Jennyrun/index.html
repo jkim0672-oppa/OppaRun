@@ -4267,6 +4267,14 @@ const JITTER_PRONE_POS = ['hand', 'armband', 'freerun'];
 function isJitterPronePos(pos) { return JITTER_PRONE_POS.indexOf(pos) >= 0; }
 // [수정 2026-10-20] 암밴드·손도 가슴/허리처럼 독립 보정슬롯을 쓴다. 프리런만 자기 슬롯('freerun')을 쓴다.
 function motionCalibKey(pos) { return (isJitterPronePos(pos) && pos !== 'armband' && pos !== 'hand') ? 'freerun' : pos; }
+// [수정 2026-10-23] 수직진동 계산 방식 g2: 기기 z축 가속도 진폭 → 중력 방향으로 투영한 수직가속도의 걸음당 진폭(max-min).
+// 중력 방향은 저역통과(시정수 VERT_G_TAU_MS)로 추정하므로 폰 장착 방향/기울기와 무관하다.
+// vertScale은 이 새 진폭(m/s^2)을 cm로 바꾸는 값이라 이전(z축) 기준 vertScale과 호환되지 않는다 → VERT_BASIS를 로그에 기록해 구분.
+const VERT_G_TAU_MS = 250;
+const VERT_G_WARMUP_MS = 1000;
+const VERT_BASIS = 'g2';
+// [수정 2026-10-23] 아래 두 표의 vertScale은 수직진동 g2(중력 투영) 기준 값이다. 2026-10-22 가민 대조 5런(가슴2/손/프리런/트레일)으로 산출:
+// 가슴 0.165(2런 평균), 손 0.134, 프리런 0.151, 트레일 0.133. 허리=가슴값, 암밴드=손값은 실측 없는 시드(검증 전).
 const FACTORY_MOTION_PROFILES = {
   // [수정] 가슴 0.151 / 손 0.193은 폰 1대 실측 기반이던 예전 값 — 사용자 확인 결과
   // 진짜 팩토리 기본값은 4개 위치 전부 0.40(Malisoux 2019 인구평균 듀티팩터)으로
@@ -4277,17 +4285,17 @@ const FACTORY_MOTION_PROFILES = {
   // 대비 +22~24%로 거의 동일한 비율로 과대측정되는 걸 확인 — 착용위치와 무관한 필터
   // 자체의 구조적 지연이라 4개 위치 전부 같은 값(55ms)으로 시작. 대응하는 연구값은 없고
   // 순수 실측 기반이라 groundThreshold/impactThreshold와 같은 성격의 경험적 튜닝값.
-  chest:   { groundThreshold: 10.05, impactThreshold: 11.6, gctFallbackRatio: 0.71, vertScale: 0.491, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 },
-  waist:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.347, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 },
-  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.5, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] hand/freerun과 동일하게 vertEnabled:false로 통일 — 3개 위치 모두 "위치 전용 실측 검증 전까진 꺼두고 데이터만 쌓는다" 원칙으로 맞춤
-  hand:    { groundThreshold: 11.75, impactThreshold: 9.87, gctFallbackRatio: 0.73, vertScale: 0.39, minStepInterval: 250, vertEnabled: true, rotRejectThreshold: 600, nativeRescueEnabled: true, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-13] nativeRescueEnabled 원래 의도(손 위치에서만 true)대로 복원 — 아래 DEVICE_MOTION_PROFILES와 동일하게 수정
+  chest:   { groundThreshold: 10.05, impactThreshold: 11.6, gctFallbackRatio: 0.71, vertScale: 0.165, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 },
+  waist:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.165, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 },
+  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.134, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] hand/freerun과 동일하게 vertEnabled:false로 통일 — 3개 위치 모두 "위치 전용 실측 검증 전까진 꺼두고 데이터만 쌓는다" 원칙으로 맞춤
+  hand:    { groundThreshold: 11.75, impactThreshold: 9.87, gctFallbackRatio: 0.73, vertScale: 0.134, minStepInterval: 250, vertEnabled: true, rotRejectThreshold: 600, nativeRescueEnabled: true, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-13] nativeRescueEnabled 원래 의도(손 위치에서만 true)대로 복원 — 아래 DEVICE_MOTION_PROFILES와 동일하게 수정
   // [추가 2026-09-20] 5번째 슬롯(프리런) — 프리런 세션 전용 내부 모션 인스턴스(app.freerunMotion)가 쓰는 값.
   // 화면/리스트엔 GCT·수직진동을 노출하지 않고 정밀 로그에만 기록하며, 가민 분석실에서 다른 4개 위치와
   // 똑같이 비교/보정할 수 있다. 보정값은 motionCalibOverrides 의 프리런 전용 키에만 저장되므로
   // [추가 2026-09-20] chest/waist/armband/hand 에는 절대 영향이 없다. vertScale은 hand/armband와
   // 동일하게 0으로 리셋(이전엔 허리 커밋값 0.511을 시드로 빌려왔었음) — 프리런 전용 실측이 쌓이면 켠다.
-  freerun: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.408, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] hand/armband과 동일하게 vertEnabled:false·vertScale:0으로 리셋 — 프리런 전용 실측 검증 전까진 꺼두고 원시 진폭만 쌓는다
-  trail: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.408, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [추가 2026-10-20] 트레일 전용 슬롯(프리런 구조, 위치 무관) — 프리런 값을 시작값으로 복사
+  freerun: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.151, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] hand/armband과 동일하게 vertEnabled:false·vertScale:0으로 리셋 — 프리런 전용 실측 검증 전까진 꺼두고 원시 진폭만 쌓는다
+  trail: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.133, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [추가 2026-10-20] 트레일 전용 슬롯(프리런 구조, 위치 무관) — 프리런 값을 시작값으로 복사
 };
 // [리팩토링 2026-08-21] 위치별 모션 프로파일(gctFallbackRatio 등)이 이 파일 3곳
 // (여기 / applyDevicePos()의 profiles / DEVICE_PROFILE_DEFAULTS)에 각각 하드코딩
@@ -4301,14 +4309,14 @@ const FACTORY_MOTION_PROFILES = {
 // FACTORY_MOTION_PROFILES, "SHOW CURRENT DATA"의 회색(커밋값) 칼럼은 이 DEVICE_MOTION_PROFILES.
 // [CALIB_ANCHOR:DEVICE_PROFILES] 캘리브레이션 스니펫(코드 반영용)을 여기 표에 붙여넣으세요.
 const DEVICE_MOTION_PROFILES = {
-  chest:   { groundThreshold: 10.05, impactThreshold: 11.6, gctFallbackRatio: 0.71, vertScale: 0.492, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-08-29] SETTINGS > SHOW CURRENT DATA에서 확인한 이번 캘리브레이션 최종 적용값(노란색)을 코드 기본값으로 커밋: groundThreshold 11→10.05, impactThreshold 10.5→11.6, gctFallbackRatio 0.40→0.36, vertScale 0.511→0.492. rotRejectThreshold는 이번 캘리브레이션에서 변경 없음(220 유지).
-  waist:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.511, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-08-21] 허리 위치의 신호 패턴이 가슴과 크게 다르지 않다는 판단 하에, 팩토리 기본값을 가슴과 완전히 통일
+  chest:   { groundThreshold: 10.05, impactThreshold: 11.6, gctFallbackRatio: 0.71, vertScale: 0.165, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-08-29] SETTINGS > SHOW CURRENT DATA에서 확인한 이번 캘리브레이션 최종 적용값(노란색)을 코드 기본값으로 커밋: groundThreshold 11→10.05, impactThreshold 10.5→11.6, gctFallbackRatio 0.40→0.36, vertScale 0.511→0.492. rotRejectThreshold는 이번 캘리브레이션에서 변경 없음(220 유지).
+  waist:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.165, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-08-21] 허리 위치의 신호 패턴이 가슴과 크게 다르지 않다는 판단 하에, 팩토리 기본값을 가슴과 완전히 통일
   // [수정 2026-09-21] 가민 분석실 비교표/그래프가 vertScale===0인 위치에서 "폰 VERT" 값을
   // 계속 '--'로 표시하는 문제(9/21 원시진폭 폴백 로직이 curVertScale>0 조건에서만 동작) 때문에,
   // 최초 비교값이 뜰 수 있도록 vertScale에 가슴 커밋값(0.492)을 시드로 넣음. vertEnabled는
   // 그대로 false라 메인 화면·기록에는 이전과 동일하게 절대 노출되지 않음 — 가민 분석실
   // 표시 전용 시작점이며, 실측이 쌓이면 제안식이 알아서 가민 쪽으로 수렴시킨다.
-  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.492, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] 8/21에 가슴 값(0.511)을 그대로 빌려와 vertEnabled:true로 켜뒀던 걸 되돌림 — hand/freerun과 동일하게 vertEnabled:false·vertScale:0으로 리셋하고, 암밴드 전용 가민 대조 데이터가 충분히 쌓이면 그때 다시 켠다. gctFallbackRatio/ground/impact 등 GCT 쪽 보정값은 이 변경과 무관하게 그대로 유지.
+  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.134, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] 8/21에 가슴 값(0.511)을 그대로 빌려와 vertEnabled:true로 켜뒀던 걸 되돌림 — hand/freerun과 동일하게 vertEnabled:false·vertScale:0으로 리셋하고, 암밴드 전용 가민 대조 데이터가 충분히 쌓이면 그때 다시 켠다. gctFallbackRatio/ground/impact 등 GCT 쪽 보정값은 이 변경과 무관하게 그대로 유지.
   // [수정] 손에 들고 뛸 때는 자체 가속도/자이로 임계값 알고리즘으로 걸음을 "직접 판정"하지 않고
   // 안드로이드 표준 방식(TYPE_STEP_DETECTOR)을 걸음 판정의 주(主) 신호로 쓴다. groundThreshold/
   // impactThreshold/rotRejectThreshold는 이제 걸음을 세는 데 쓰이지 않고 GCT 추정 등 보조 계산에만
@@ -4324,12 +4332,12 @@ const DEVICE_MOTION_PROFILES = {
   // gctFilterDelayMs 보정과는 독립적인 별개 수정(폴백 경로는 필터를 거치지 않음).
   // [수정 2026-09-21] armband와 동일한 이유로 vertScale 시드 적용(0 → 가슴 커밋값 0.492).
   // vertEnabled는 false 그대로 유지 — 가민 분석실 비교표 표시 전용, 메인 화면·기록엔 영향 없음.
-  hand:    { groundThreshold: 11.75, impactThreshold: 9.87, gctFallbackRatio: 0.73, vertScale: 0.492, minStepInterval: 250, vertEnabled: true, rotRejectThreshold: 600, nativeRescueEnabled: true, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-08-29] SETTINGS > SHOW CURRENT DATA에서 확인한 이번 캘리브레이션 최종 적용값(노란색)을 코드 기본값으로 커밋: groundThreshold 13.5→11.75, impactThreshold 14→9.87, gctFallbackRatio 0.51(2026-08-26 필터지연 수정 시점 잠정치)→0.43(실제 캘리브레이션 랩 결과로 대체). vertScale/rotRejectThreshold는 변경 없음.
+  hand:    { groundThreshold: 11.75, impactThreshold: 9.87, gctFallbackRatio: 0.73, vertScale: 0.134, minStepInterval: 250, vertEnabled: true, rotRejectThreshold: 600, nativeRescueEnabled: true, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-08-29] SETTINGS > SHOW CURRENT DATA에서 확인한 이번 캘리브레이션 최종 적용값(노란색)을 코드 기본값으로 커밋: groundThreshold 13.5→11.75, impactThreshold 14→9.87, gctFallbackRatio 0.51(2026-08-26 필터지연 수정 시점 잠정치)→0.43(실제 캘리브레이션 랩 결과로 대체). vertScale/rotRejectThreshold는 변경 없음.
   // [추가 2026-09-20] 프리런 전용 슬롯 (위 FACTORY 표 주석 참고). 허리 커밋값으로 시드, 이후 독립적으로 보정됨.
   // [수정 2026-09-21] armband/hand와 동일한 이유로 vertScale 시드 적용(0 → 가슴 커밋값 0.492).
   // vertEnabled는 false 그대로 유지 — 가민 분석실 비교표 표시 전용, 메인 화면·기록엔 영향 없음.
-  freerun: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.492, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] 허리 커밋값(0.511)을 시드로 빌려와 vertEnabled:true였던 걸 되돌림 — hand/armband과 동일하게 꺼두고 프리런 전용 데이터로 새로 검증한다. GCT 쪽(gctFallbackRatio 등)은 그대로.
-  trail: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.492, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [추가 2026-10-20] 트레일 전용 슬롯(프리런 구조, 위치 무관) — 프리런 값을 시작값으로 복사
+  freerun: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.151, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] 허리 커밋값(0.511)을 시드로 빌려와 vertEnabled:true였던 걸 되돌림 — hand/armband과 동일하게 꺼두고 프리런 전용 데이터로 새로 검증한다. GCT 쪽(gctFallbackRatio 등)은 그대로.
+  trail: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.133, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [추가 2026-10-20] 트레일 전용 슬롯(프리런 구조, 위치 무관) — 프리런 값을 시작값으로 복사
 };
 // [삭제 2026-08-22] 예전엔 APP_DEFAULT_MOTION_PROFILES(=DEVICE_MOTION_PROFILES 별칭)라는
 // 이름으로 "앱 기본값 보기" 화면과 "SHOW CURRENT DATA"의 커밋값 칼럼이 같은 걸 참조했는데,
@@ -5401,10 +5409,10 @@ buildPrecisionCsv(log, devicePos, proRun) {
 // 자체 알고리즘 케이던스와 나란히 비교할 수 있게 남겨둔다 (가민 비교 화면 교차검증용).
 // [추가] alt_m 컬럼: GPS 기반 현재 고도(this.state.currentAlt, m 단위). 기존엔 정밀 로그에
 // 고도가 전혀 기록되지 않아 DIAG 화면의 고도 그래프를 이 로그만으로는 재구성할 수 없었음.
-const headers = ['t_sec','timestamp','lat','lng','gps_accuracy_m','dist_km','speed_kmh','cadence_spm','gct_ms','flight_pct','step_length_m','step_length_window_m','step_length_instant_m','vert_osc_mm','alt_m','hr_bpm','hr_zone','rot_peak_dps','gyro_alpha_dps','gyro_beta_dps','gyro_gamma_dps','device_pos','step_detector_cnt','step_counter_steps','gct_measured_cnt','gct_fallback_cnt','gct_clamped_cnt','lean_angle_deg','lean_forward_deg','lean_lateral_deg','vert_osc_raw','run_mode','alt_gps_raw_m','alt_baro_raw_m','alt_src','grade_pct','ascent_m','descent_m']; // [수정 2026-10-13] run_mode(lite/pro) 열을 맨 끝에 추가 — 기존 열 순서는 그대로
+const headers = ['t_sec','timestamp','lat','lng','gps_accuracy_m','dist_km','speed_kmh','cadence_spm','gct_ms','flight_pct','step_length_m','step_length_window_m','step_length_instant_m','vert_osc_mm','alt_m','hr_bpm','hr_zone','rot_peak_dps','gyro_alpha_dps','gyro_beta_dps','gyro_gamma_dps','device_pos','step_detector_cnt','step_counter_steps','gct_measured_cnt','gct_fallback_cnt','gct_clamped_cnt','lean_angle_deg','lean_forward_deg','lean_lateral_deg','vert_osc_raw','run_mode','alt_gps_raw_m','alt_baro_raw_m','alt_src','grade_pct','ascent_m','descent_m','vert_basis']; // [수정 2026-10-13] run_mode(lite/pro) 열을 맨 끝에 추가 — 기존 열 순서는 그대로
 const _runModeStr = proRun === true ? 'pro' : (proRun === false ? 'lite' : '');
 // (이전 주석) [수정 2026-09-21] vert_osc_raw(vertScale 미적용 원시 진폭) 열을 맨 끝에 추가 — 기존 열 순서는 그대로
-const rows = log.map(r => [r.t, r.timestamp || '', r.lat || '', r.lng || '', r.gpsAcc != null ? r.gpsAcc : '', r.distKm, r.speedKmh, r.cadence, r.gctMs, r.flightPct, r.stepLengthM != null ? r.stepLengthM : '', r.stepLengthWindowM != null ? r.stepLengthWindowM : '', r.stepLengthInstantM != null ? r.stepLengthInstantM : '', r.vertOscMm != null ? r.vertOscMm : '', r.altM != null ? r.altM : '', r.hrBpm, r.hrZone, r.rotPeakDps != null ? r.rotPeakDps : '', r.gyroAlpha != null ? r.gyroAlpha : '', r.gyroBeta != null ? r.gyroBeta : '', r.gyroGamma != null ? r.gyroGamma : '', devicePos || '', r.stepDetectorCnt != null ? r.stepDetectorCnt : '', r.stepCounterSteps != null ? r.stepCounterSteps : '', r.gctMeasuredCnt != null ? r.gctMeasuredCnt : '', r.gctFallbackCnt != null ? r.gctFallbackCnt : '', r.gctClampedCnt != null ? r.gctClampedCnt : '', r.leanAngleDeg != null ? r.leanAngleDeg : '', r.leanForwardDeg != null ? r.leanForwardDeg : '', r.leanLateralDeg != null ? r.leanLateralDeg : '', r.vertOscRaw != null ? r.vertOscRaw : '', _runModeStr, r.altGpsRawM != null ? r.altGpsRawM : '', r.altBaroRawM != null ? r.altBaroRawM : '', r.altSrc != null ? r.altSrc : '', r.gradePct != null ? r.gradePct : '', r.ascentM != null ? r.ascentM : '', r.descentM != null ? r.descentM : ''].join(','));
+const rows = log.map(r => [r.t, r.timestamp || '', r.lat || '', r.lng || '', r.gpsAcc != null ? r.gpsAcc : '', r.distKm, r.speedKmh, r.cadence, r.gctMs, r.flightPct, r.stepLengthM != null ? r.stepLengthM : '', r.stepLengthWindowM != null ? r.stepLengthWindowM : '', r.stepLengthInstantM != null ? r.stepLengthInstantM : '', r.vertOscMm != null ? r.vertOscMm : '', r.altM != null ? r.altM : '', r.hrBpm, r.hrZone, r.rotPeakDps != null ? r.rotPeakDps : '', r.gyroAlpha != null ? r.gyroAlpha : '', r.gyroBeta != null ? r.gyroBeta : '', r.gyroGamma != null ? r.gyroGamma : '', devicePos || '', r.stepDetectorCnt != null ? r.stepDetectorCnt : '', r.stepCounterSteps != null ? r.stepCounterSteps : '', r.gctMeasuredCnt != null ? r.gctMeasuredCnt : '', r.gctFallbackCnt != null ? r.gctFallbackCnt : '', r.gctClampedCnt != null ? r.gctClampedCnt : '', r.leanAngleDeg != null ? r.leanAngleDeg : '', r.leanForwardDeg != null ? r.leanForwardDeg : '', r.leanLateralDeg != null ? r.leanLateralDeg : '', r.vertOscRaw != null ? r.vertOscRaw : '', _runModeStr, r.altGpsRawM != null ? r.altGpsRawM : '', r.altBaroRawM != null ? r.altBaroRawM : '', r.altSrc != null ? r.altSrc : '', r.gradePct != null ? r.gradePct : '', r.ascentM != null ? r.ascentM : '', r.descentM != null ? r.descentM : '', r.vertBasis || ''].join(','));
 return headers.join(',') + '\n' + rows.join('\n');
 }
 downloadCsvFile(csvStr, fileName) {
@@ -5476,6 +5484,7 @@ devicePos: cols[idx['device_pos']] || '', // [추가] 내보내기(device_pos �
 leanAngleDeg: num(cols[idx['lean_angle_deg']]),
 leanForwardDeg: num(cols[idx['lean_forward_deg']]),
 leanLateralDeg: num(cols[idx['lean_lateral_deg']]),
+vertBasis: cols[idx['vert_basis']] || '',
 vertOscRaw: num(cols[idx['vert_osc_raw']]), // [수정 2026-09-21] 예전 CSV(열 없음)는 idx가 undefined → null로 안전하게 처리됨
 gctCorrMs: num(cols[idx['gct_corr_ms']]),
 vertOscCorrMm: num(cols[idx['vert_osc_corr_mm']]),
@@ -5523,6 +5532,7 @@ devicePos: r.devicePos || r.device_pos || '', // [추가] CSV와 동일하게 �
 leanAngleDeg: num(pick(r, 'leanAngleDeg', 'lean_angle_deg')),
 leanForwardDeg: num(pick(r, 'leanForwardDeg', 'lean_forward_deg')),
 leanLateralDeg: num(pick(r, 'leanLateralDeg', 'lean_lateral_deg')),
+vertBasis: r.vertBasis || r.vert_basis || '',
 vertOscRaw: num(pick(r, 'vertOscRaw', 'vert_osc_raw')), // [수정 2026-09-21]
 gctCorrMs: num(pick(r, 'gctCorrMs', 'gct_corr_ms')),
 vertOscCorrMm: num(pick(r, 'vertOscCorrMm', 'vert_osc_corr_mm')),
@@ -9860,6 +9870,7 @@ this.vertAmplitudeAccumulator = 0;
 this.vertAmplitudeCount = 0;
 this.vertCmAccumulator = 0; // [단순화 2026-10-10] 속도 보정까지 반영된 걸음별 수직진동(cm) 누적 → VERT RATIO 평균에 사용
 this.vertCmCount = 0;
+this._vgLp = null; this._vgLpT = 0; this._vgWarmAt = 0; // [추가 2026-10-23] g2: 중력 방향 저역통과 상태
 // [추가] 정밀 로그(초당) 비교용: 가장 최근 걸음 1회의 순간 수직진동(cm). 러닝 누적 평균과 별개로,
 // 가민 FIT의 초당 vertical_oscillation 값과 같은 시간 해상도로 비교할 수 있도록 스텝마다 갱신됨.
 this.lastStepVertOscCm = null;
@@ -10047,6 +10058,27 @@ try {
     });
   } catch (_e) { try { jrLogErr('slotSplit', _e); } catch (_e2) {} }
 
+  // [추가 2026-10-23] 수직진동 계산이 z축 → 중력 투영(g2)으로 바뀌면서, 이전 기준으로 저장된 vertScale/속도보정(vertSpeedSlope, vertRefSpeed)/
+  // 가민 비교 저장 결과의 vertScale을 1회만 폐기한다(새 기본값 표의 vertScale을 쓰게 됨). GCT 등 다른 보정값은 건드리지 않는다.
+  try {
+    if (!_prof.vertG2MigrationDone) {
+      const _ovsV = _prof.motionCalibOverrides || {};
+      Object.keys(_ovsV).forEach(function(_kv) {
+        const _o = _ovsV[_kv];
+        if (_o && typeof _o === 'object') { delete _o.vertScale; delete _o.vertSpeedSlope; delete _o.vertRefSpeed; }
+      });
+      try {
+        const _pend = JSON.parse(localStorage.getItem(CALIB_AVG3_PENDING_KEY) || '[]');
+        if (Array.isArray(_pend)) {
+          _pend.forEach(function(_it) { if (_it && typeof _it === 'object') delete _it.vertScale; });
+          localStorage.setItem(CALIB_AVG3_PENDING_KEY, JSON.stringify(_pend));
+        }
+      } catch (_e3) {}
+      _prof.vertG2MigrationDone = true;
+      _migrated = true;
+    }
+  } catch (_e) { try { jrLogErr('vertG2Migration', _e); } catch (_e2) {} }
+
   const _calibOv = _prof.motionCalibOverrides[motionCalibKey(pos)]; // [수정 2026-10-16] 손/암밴드는 프리런 보정 슬롯을 읽는다
   if (_calibOv) {
     if (typeof _calibOv.gctFallbackRatio === 'number') this.gctFallbackRatio = _calibOv.gctFallbackRatio;
@@ -10145,6 +10177,7 @@ this.vertAmplitudeAccumulator = 0;
 this.vertAmplitudeCount = 0;
 this.vertCmAccumulator = 0; // [단순화 2026-10-10] 속도 보정까지 반영된 걸음별 수직진동(cm) 누적 → VERT RATIO 평균에 사용
 this.vertCmCount = 0;
+this._vgLp = null; this._vgLpT = 0; this._vgWarmAt = 0; // [추가 2026-10-23] g2: 새 러닝마다 중력 추정 초기화
 this.lastStepVertOscCm = null; // [추가] 정밀 로그용 순간 수직진동값도 매 러닝 시작 시 초기화
 this.recentVertCm = []; this.lastStepVertMedianCm = null; // [추가 2026-10-14] 중앙값 버퍼도 매 러닝 시작 시 초기화(이전 러닝 값이 섞이지 않게)
 this.recentCycleTimes = [];
@@ -10288,8 +10321,26 @@ if (now - this.calibStartTime >= 6000) this.finishCalibration();
 
 // [추가] 수직(z축) 가속도 진폭 추적: 한 걸음(스텝) 사이클 동안의
 // z축 가속도 최대/최소값을 기록해 두었다가, 스텝이 끊길 때 진폭(max-min)을 누적
-if (acc.z < this.vertMin) this.vertMin = acc.z;
-if (acc.z > this.vertMax) this.vertMax = acc.z;
+// [수정 2026-10-23] g2: acc.z(화면 법선 축, 수직이 아님) 대신 중력 방향으로 투영한 수직가속도로 진폭을 추적한다.
+{
+  const _gx = acc.x || 0, _gy = acc.y || 0, _gz = acc.z;
+  if (this._vgLp === null || (now - this._vgLpT) > 1000) {
+    this._vgLp = [_gx, _gy, _gz]; this._vgLpT = now; this._vgWarmAt = now; // 첫 샘플/공백 후엔 중력 추정을 새로 시작
+  } else {
+    const _dtv = Math.max(1, Math.min(100, now - this._vgLpT));
+    const _alv = _dtv / (VERT_G_TAU_MS + _dtv);
+    this._vgLp[0] += _alv * (_gx - this._vgLp[0]);
+    this._vgLp[1] += _alv * (_gy - this._vgLp[1]);
+    this._vgLp[2] += _alv * (_gz - this._vgLp[2]);
+    this._vgLpT = now;
+  }
+  const _gn = Math.sqrt(this._vgLp[0] * this._vgLp[0] + this._vgLp[1] * this._vgLp[1] + this._vgLp[2] * this._vgLp[2]);
+  if (_gn > 1 && (now - this._vgWarmAt) >= VERT_G_WARMUP_MS) { // 워밍업(1초) 동안은 진폭 추적 안 함
+    const _vv = (_gx * this._vgLp[0] + _gy * this._vgLp[1] + _gz * this._vgLp[2]) / _gn - _gn; // 수직 성분 − 중력 크기
+    if (_vv < this.vertMin) this.vertMin = _vv;
+    if (_vv > this.vertMax) this.vertMax = _vv;
+  }
+}
 
 // [추가] 자이로스코프 기반 노이즈 추적: 폰이 주머니/암밴드 안에서 회전하며
 // 덜렁거리는 움직임은 회전각속도가 크게 튀는 경향이 있음. 브라우저
@@ -11896,7 +11947,7 @@ function speedCalibExtractApp(precItem, curVertScale) {
   // (원시 진폭은 속도 보정과 무관하므로, 속도 보정이 켜진 상태로 기록된 로그에서도 기울기를 다시 맞출 수 있다.)
   const vert = log.map(r => {
     const raw = _pcNum(r.vertOscRaw);
-    if (raw != null && raw > 0 && curVertScale > 0) return raw * curVertScale * 10;
+    if (raw != null && raw > 0 && curVertScale > 0 && r.vertBasis === VERT_BASIS) return raw * curVertScale * 10; // [수정 2026-10-23] 예전(z축 기준) 원시 진폭은 새 vertScale과 호환 안 됨
     return _pcNum(r.vertOscMm);
   });
   const gct = log.map(r => { const g = _pcNum(r.gctMs); return (g != null && g > 0) ? g : null; });
@@ -13318,6 +13369,7 @@ vertOscMm: _vertShownLog, // [수정 2026-10-10] 카드와 같은 값(보정 ON�
 // [추가] 손모드 등에서 표시/분석용 vertOscMm이 null로 비어도, 원시 진폭은 항상 남겨둔다
 // (리스트/메인 화면에는 절대 출력 안 함 — 가민 대조 정밀 로그 내부 필드 전용).
 vertOscRaw: (_fm && _fm.lastStepVertAmplitudeRaw != null) ? _fm.lastStepVertAmplitudeRaw : '',
+vertBasis: VERT_BASIS, // [추가 2026-10-23] 원시 진폭 계산 방식 표식(g2=중력 투영). 이 표식이 없는 예전 로그의 vert_osc_raw는 z축 기준이라 vertScale 재계산에 쓰면 안 된다
 altM: (typeof this.state.currentAlt === 'number') ? this.state.currentAlt : '', // [추가] GPS 기반 현재 고도(m) 스냅샷
 // [추가 2026-10-21] 가민 고도 비교용 컬럼(원본 보존): GPS 원본 / 기압계 원본(최근 5초 내 수신 시) / 사용 소스 / 경사% / 누적 상승·하강
 altGpsRawM: (typeof this.state.altRawGps === 'number') ? this.state.altRawGps : '',
@@ -19278,6 +19330,8 @@ let phoneAvgVertMm = avgArr(precItems.map(p => avgFromPrecLogRunning(precLogRawR
     // 전용이며, hand의 vertEnabled는 그대로 false로 둬서 실제 화면/기록에는 절대 노출되지 않는다.
     // [수정 2026-10-06] 원본: const phoneAvgVertAmplitudeRaw = avgArr(precItems.map(p => avgFromPrecLog(p.log, 'vertOscRaw')));
 const phoneAvgVertAmplitudeRaw = avgArr(precItems.map(p => avgFromPrecLogRunning(p.log, 'vertOscRaw')));
+    // [추가 2026-10-23] 선택된 로그가 모두 g2 기준(vert_basis=g2)으로 기록됐을 때만 원시 진폭 × vertScale 재계산/vertScale 제안을 허용한다.
+    const vertBasisOk = precItems.length > 0 && precItems.every(function(p) { return precLogRawRows(p.log || []).some(function(r) { return r && r.vertBasis === VERT_BASIS; }); });
 
     // [추가] 페이스 비교. 정밀 로그엔 순간속도(speedKmh)만 있으므로 평균속도로 변환한 뒤
     // 가민의 avgPaceSecPerKm(전체 평균 페이스, sec/km)과 같은 단위로 맞춰 비교한다.
@@ -19332,7 +19386,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       curImpact = (_posOv && typeof _posOv.impactThreshold === 'number') ? _posOv.impactThreshold : _baseProfile.impactThreshold;
       curGct = (_posOv && typeof _posOv.gctFallbackRatio === 'number') ? _posOv.gctFallbackRatio : _baseProfile.gctFallbackRatio;
       curRot = (_posOv && typeof _posOv.rotRejectThreshold === 'number') ? _posOv.rotRejectThreshold : _baseProfile.rotRejectThreshold;
-      curVertScale = (_posOv && typeof _posOv.vertScale === 'number') ? _posOv.vertScale : _baseProfile.vertScale;
+      curVertScale = (_posOv && _ovProfile.vertG2MigrationDone && typeof _posOv.vertScale === 'number') ? _posOv.vertScale : _baseProfile.vertScale; // [수정 2026-10-23] 마이그레이션 전 저장값(z축 기준)은 무시
     } catch (e) {}
     // [수정 2026-09-21] vertEnabled:false 위치(손/암밴드/프리런)는 vertOscMm이 항상 비어서, 첫 vertScale을 한 번
     // 적용해 curVertScale > 0이 된 뒤에는 (1) 표의 VERT OSC 폰 값이 계속 '--'이고 (2) 재보정 제안식(아래
@@ -19341,7 +19395,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // 때의 폰 수직진동(mm)" = 원시진폭 × vertScale × 10 으로 채워 비교/재보정이 이어지게 한다.
     // 분석실 표·제안 계산에만 쓰이며 vertEnabled는 그대로라 앱 화면/기록에는 노출되지 않는다.
     // vertOscMm이 이미 있는 위치(가슴/허리)와 curVertScale === 0인 경우(기존 원시진폭 직접 제안식)는 그대로.
-    if (phoneAvgVertMm == null && phoneAvgVertAmplitudeRaw && curVertScale != null && curVertScale > 0) {
+    if (vertBasisOk && phoneAvgVertMm == null && phoneAvgVertAmplitudeRaw && curVertScale != null && curVertScale > 0) {
       phoneAvgVertMm = phoneAvgVertAmplitudeRaw * curVertScale * 10;
       vertDiffPct = (phoneAvgVertMm && garminAvgVertMm) ? ((phoneAvgVertMm - garminAvgVertMm) / garminAvgVertMm * 100) : null;
     }
@@ -19413,7 +19467,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       ? Math.round(curImpact * stepRatio(phoneAvgGct / garminAvgGct, GCT_VERT_STEP_FRACTION / 2) * 100) / 100 : null; // [수정 2026-10-10] 위와 동일 사유
     // [추가] 수직진동(vertScale)과 보폭(strideCorrectionFactor) 제안값. VERT는 GCT와 동일하게
     // GCT_VERT_STEP_FRACTION(50%)을, 보폭은 기존 일반 비율(20%)을 유지.
-    const suggestedVertScale = (curVertScale != null && curVertScale > 0 && phoneAvgVertMm && garminAvgVertMm && vertDiffPct != null)
+    const _suggestedVertScaleRaw = (curVertScale != null && curVertScale > 0 && phoneAvgVertMm && garminAvgVertMm && vertDiffPct != null)
       ? Math.round(curVertScale * stepRatio(garminAvgVertMm / phoneAvgVertMm, GCT_VERT_STEP_FRACTION) * 1000) / 1000
       // [추가 2026-09-20] curVertScale이 0(손/hand — 아직 한 번도 보정된 적 없는 상태)이면 위
       // 비율 방식은 "0 × 오차비율"이라 항상 0만 나와서 못 쓴다. 대신 vertScale 미적용 원시
@@ -19422,6 +19476,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       : ((curVertScale === 0 && phoneAvgVertAmplitudeRaw && garminAvgVertMm)
           ? Math.round((garminAvgVertMm / (phoneAvgVertAmplitudeRaw * 10)) * 1000) / 1000
           : null);
+    const suggestedVertScale = vertBasisOk ? _suggestedVertScaleRaw : null; // [추가 2026-10-23] 예전(z축 기준) 로그로는 vertScale 제안을 만들지 않는다
     const suggestedStrideFactor = (!isFreerunPos && phoneAvgStepMm && garminAvgStepMm && stepDiffPct != null)
       ? Math.round(curStrideFactor * stepRatio(garminAvgStepMm / phoneAvgStepMm, GENERAL_STEP_FRACTION) * 1000) / 1000 : null;
     // [추가] GPS 거리 보정계수 제안값. 화면에 찍히는 실제 거리·페이스에 직접 반영되는
