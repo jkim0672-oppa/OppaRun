@@ -4287,7 +4287,7 @@ const FACTORY_MOTION_PROFILES = {
   // 순수 실측 기반이라 groundThreshold/impactThreshold와 같은 성격의 경험적 튜닝값.
   chest:   { groundThreshold: 10.05, impactThreshold: 11.6, gctFallbackRatio: 0.71, vertScale: 0.165, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 },
   waist:   { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.165, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 },
-  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.134, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] hand/freerun과 동일하게 vertEnabled:false로 통일 — 3개 위치 모두 "위치 전용 실측 검증 전까진 꺼두고 데이터만 쌓는다" 원칙으로 맞춤
+  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.134, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'peak', gctFilterDelayMs: 55 }, // [수정 2026-09-20] hand/freerun과 동일하게 vertEnabled:false로 통일 — 3개 위치 모두 "위치 전용 실측 검증 전까진 꺼두고 데이터만 쌓는다" 원칙으로 맞춤
   hand:    { groundThreshold: 11.75, impactThreshold: 9.87, gctFallbackRatio: 0.73, vertScale: 0.134, minStepInterval: 250, vertEnabled: true, rotRejectThreshold: 600, nativeRescueEnabled: true, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-13] nativeRescueEnabled 원래 의도(손 위치에서만 true)대로 복원 — 아래 DEVICE_MOTION_PROFILES와 동일하게 수정
   // [추가 2026-09-20] 5번째 슬롯(프리런) — 프리런 세션 전용 내부 모션 인스턴스(app.freerunMotion)가 쓰는 값.
   // 화면/리스트엔 GCT·수직진동을 노출하지 않고 정밀 로그에만 기록하며, 가민 분석실에서 다른 4개 위치와
@@ -4316,7 +4316,7 @@ const DEVICE_MOTION_PROFILES = {
   // 최초 비교값이 뜰 수 있도록 vertScale에 가슴 커밋값(0.492)을 시드로 넣음. vertEnabled는
   // 그대로 false라 메인 화면·기록에는 이전과 동일하게 절대 노출되지 않음 — 가민 분석실
   // 표시 전용 시작점이며, 실측이 쌓이면 제안식이 알아서 가민 쪽으로 수렴시킨다.
-  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.134, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] 8/21에 가슴 값(0.511)을 그대로 빌려와 vertEnabled:true로 켜뒀던 걸 되돌림 — hand/freerun과 동일하게 vertEnabled:false·vertScale:0으로 리셋하고, 암밴드 전용 가민 대조 데이터가 충분히 쌓이면 그때 다시 켠다. gctFallbackRatio/ground/impact 등 GCT 쪽 보정값은 이 변경과 무관하게 그대로 유지.
+  armband: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.134, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'peak', gctFilterDelayMs: 55 }, // [수정 2026-09-20] 8/21에 가슴 값(0.511)을 그대로 빌려와 vertEnabled:true로 켜뒀던 걸 되돌림 — hand/freerun과 동일하게 vertEnabled:false·vertScale:0으로 리셋하고, 암밴드 전용 가민 대조 데이터가 충분히 쌓이면 그때 다시 켠다. gctFallbackRatio/ground/impact 등 GCT 쪽 보정값은 이 변경과 무관하게 그대로 유지.
   // [수정] 손에 들고 뛸 때는 자체 가속도/자이로 임계값 알고리즘으로 걸음을 "직접 판정"하지 않고
   // 안드로이드 표준 방식(TYPE_STEP_DETECTOR)을 걸음 판정의 주(主) 신호로 쓴다. groundThreshold/
   // impactThreshold/rotRejectThreshold는 이제 걸음을 세는 데 쓰이지 않고 GCT 추정 등 보조 계산에만
@@ -9816,6 +9816,77 @@ updateDisplay() { const bpmInput = document.getElementById('metro-bpm'); const b
 const GCT_DUTY_BY_POS = { chest: 0.71, waist: 0.73, armband: 0.73, hand: 0.73, freerun: 0.73, trail: 0.73 };
 const GCT_DUTY_MIN = 0.66, GCT_DUTY_MAX = 0.78; // 이 범위를 벗어난 저장값(예전 0.31~0.49 override 등)은 무시하고 위치 기본값 사용
 const GCT_PERIOD_WINDOW = 16; // 기준 걸음 주기 계산에 쓰는 최근 걸음 수(약 5초)
+// [추가 2026-10-24] 가속도 충격 피크 기반 걸음 감지기 (착용위치 stepTrigger:'peak' 용).
+// Accelerometer impact-peak step detector.
+// Sensor samples (any rate >= ~40 Hz, jittery timestamps) are first binned onto a fixed 50 Hz grid, then:
+// band-pass 1-12 Hz (HP + LP biquads) -> adaptive threshold (k * running RMS, "rise" above the preceding trough)
+// -> local maximum within +/-winMs -> refractory.  Causal; a peak is reported ~winMs after it happened.
+class AccelPeakStepDetector {
+  constructor(opts) {
+    const o = opts || {};
+    this.binMs = 20;                       // fixed 50 Hz internal grid
+    this.k = o.k || 0.8; this.winMs = o.winMs || 40;
+    // [수정 2026-10-24] 절대 최소 돌출폭(m/s²): 임계값이 RMS 비례(k×RMS)뿐이라 정지 상태(RMS→센서 노이즈)에선 임계값도 0에 수렴해 노이즈를 걸음으로 셌다
+    // (합성 정지 테스트 40초: 노이즈 σ0.05→27회, σ0.15→48회 거짓 걸음; 실제 러닝 걸음 돌출폭은 하위 1%도 7.6 이상). 바닥값 1.5면 러닝 케이던스 오차 변화 0, 정지 거짓 걸음 0.
+    this.absMin = (o.absMin != null) ? o.absMin : 1.5; this.riseMs = o.riseMs || 160;
+    this.refractoryMs = o.refractoryMs || 220; this.rmsTauMs = o.rmsTauMs || 3000;
+    this.hp = this._mk('hp', o.hpHz || 1.0); this.lp = this._mk('lp', o.lpHz || 12.0);
+    this.reset();
+  }
+  _mk(type, fc) {
+    const fs = 1000 / this.binMs, w = 2 * Math.PI * fc / fs, cs = Math.cos(w), sn = Math.sin(w), Q = Math.SQRT1_2, al = sn / (2 * Q);
+    const b0 = type === 'hp' ? (1 + cs) / 2 : (1 - cs) / 2, b1 = type === 'hp' ? -(1 + cs) : 1 - cs, a0 = 1 + al;
+    return { b0: b0 / a0, b1: b1 / a0, b2: b0 / a0, a1: (-2 * cs) / a0, a2: (1 - al) / a0 };
+  }
+  reset() {
+    this.binIdx = null; this.binSum = 0; this.binN = 0; this.held = 0;
+    this.sHp = [0, 0, 0, 0]; this.sLp = [0, 0, 0, 0]; this.ring = []; this.var = 0; this.n = 0;
+    this.warmMs = 0; this.lastPeakT = -1e9; this.lastCandT = 0; this.lastRawT = 0;
+  }
+  _bq(c, st, x) { const y = c.b0 * x + c.b1 * st[0] + c.b2 * st[1] - c.a1 * st[2] - c.a2 * st[3]; st[1] = st[0]; st[0] = x; st[3] = st[2]; st[2] = y; return y; }
+  // feed one raw sample; returns an array of confirmed peak timestamps (usually empty, rarely one)
+  push(tMs, force) {
+    if (tMs < this.lastRawT) tMs = this.lastRawT;       // out-of-order / batched timestamps: keep time monotonic (ties land in the same bin)
+    if (this.lastRawT && tMs - this.lastRawT > 500) this.reset();
+    this.lastRawT = tMs;
+    const idx = Math.floor(tMs / this.binMs);
+    if (this.binIdx === null) { this.binIdx = idx; this.held = force; }
+    let out = null;
+    while (idx > this.binIdx) {                       // close finished bin(s) (hold last value across empty bins)
+      const v = this.binN ? this.binSum / this.binN : this.held;
+      this.held = v; this.binSum = 0; this.binN = 0;
+      const p = this._step((this.binIdx + 0.5) * this.binMs, v);
+      if (p !== null) out = p;
+      this.binIdx++;
+    }
+    this.binSum += force; this.binN++;
+    return out;
+  }
+  _step(t, x) {
+    const y = this._bq(this.lp, this.sLp, this._bq(this.hp, this.sHp, x));
+    this.n++; this.warmMs += this.binMs;
+    const a = Math.max(this.binMs / this.rmsTauMs, 1 / this.n);
+    this.var += a * (y * y - this.var);
+    this.ring.push({ t: t, y: y, th: Math.max(this.k * Math.sqrt(this.var), this.absMin) });
+    const keep = this.riseMs + this.winMs + this.binMs;
+    while (this.ring.length > 2 && this.ring[1].t < t - keep) this.ring.shift();
+    if (this.warmMs < 1500) return null;
+    const r = this.ring, W = this.winMs; let ci = -1;
+    for (let i = r.length - 1; i >= 0; i--) { if (r[i].t <= t - W) { ci = i; break; } }
+    if (ci < 0) return null;
+    const c = r[ci];
+    if (c.t <= this.lastCandT) return null;
+    this.lastCandT = c.t;
+    if ((c.t - this.lastPeakT) <= this.refractoryMs) return null;
+    let lo = c.y;
+    for (let i = 0; i < r.length; i++) {
+      if (Math.abs(r[i].t - c.t) <= W && r[i].y > c.y) return null;             // not the local maximum
+      if (r[i].t >= c.t - this.riseMs && r[i].t <= c.t && r[i].y < lo) lo = r[i].y;
+    }
+    if ((c.y - lo) <= c.th) return null;                                           // not prominent enough
+    this.lastPeakT = c.t; return c.t;
+  }
+}
 class MotionManager {
 constructor(onStepCallback) {
 this.onStep = onStepCallback;
@@ -9901,6 +9972,10 @@ this.nativeBridgeLastSeenAt = 0;
 // [추가 2026-07-30] 네이티브 타임스탬프만으로 독립 산출하는 케이던스(spm). onNativeStep()에서
 // 갱신되며, commitStep 쪽 부가지표 파이프라인과 분리되어 있다. 값이 아직 없으면 null.
 this.nativeCadenceSpm = null;
+// [추가 2026-10-24] stepTrigger:'peak' 위치(암밴드)용 가속도 피크 걸음 감지기 + 로그 케이던스용 확정 걸음 시각 링(최근 8초)
+this.usePeakStepTrigger = false;
+this.peakDetector = new AccelPeakStepDetector();
+this.commitTs = [];
 // [추가] 정밀 로그/진단용: 이번 러닝 동안 네이티브 센서가 "걸음"이라고 확정해줬는데
 // 자체 알고리즘은 자이로 노이즈로 오판해 버릴 뻔한 걸음을 몇 번 구제했는지 카운트.
 this.nativeRescueCount = 0;
@@ -9992,6 +10067,8 @@ this.nativeRescueEnabled = !!p.nativeRescueEnabled; // [추가] 네이티브 걸
 // onNativeStep()이 실제 걸음 확정을 담당하며(주 신호), 가속도/자이로는 GCT·수직진동·좌우밸런스
 // 등 보조 지표 계산에만 쓰인다(보조 신호). 기본은 false(기존 방식: 자체 알고리즘이 주 신호).
 this.useNativeStepTrigger = (p.stepTrigger === 'native');
+// [추가 2026-10-24] 'peak': OS 걸음센서 대신 가속도 충격 피크로 걸음을 확정(암밴드는 OS 센서가 팔 스윙으로 걸음을 중복/지연 보고함)
+this.usePeakStepTrigger = (p.stepTrigger === 'peak');
 // [수정] 보정값 저장 슬롯을 "1개"가 아니라 "착용위치별로 각각"으로 바꿈.
 // 기존엔 가슴에서 캘리브레이션한 뒤 손에서 또 캘리브레이션해서 적용하면 같은 슬롯을
 // 덮어써서 가슴 보정값이 사라지는 문제가 있었음 — 이제 devicePos를 키로 하는 맵에
@@ -10189,6 +10266,8 @@ this.rotPeakSinceLastStep = 0;
 this.nativeStepTimestamps = [];
 this.nativeBridgeLastSeenAt = 0;
 this.nativeCadenceSpm = null; // [추가 2026-07-30]
+if (this.peakDetector) this.peakDetector.reset(); // [추가 2026-10-24]
+this.commitTs = [];
 this.nativeRescueCount = 0;
 this.nativeStepDetectorTotalCount = 0;
 this.stepCounterBaselineCum = null;
@@ -10273,6 +10352,34 @@ missedStepsToResync = probableSteps - 1;
 }
 this.commitStep(now, cycleTime, missedStepsToResync);
 }
+}
+// [추가 2026-10-24] 피크 감지기가 확정한 걸음 1회 처리. onNativeStep()의 네이티브 경로와 같은 방식(중복 게이트 + 놓친 걸음 추정)이며,
+// 걸음 시각은 OS 전달 지연/배치 없이 실제 충격 시각(peakT)이다.
+_onPeakStep(peakT) {
+const PEAK_STEP_MIN_GAP_MS = 80;
+if (this.lastStepTime !== 0 && (peakT - this.lastStepTime) < PEAK_STEP_MIN_GAP_MS) return;
+const cycleTime = peakT - this.lastStepTime;
+let missedStepsToResync = 0;
+if (this.lastStepTime !== 0 && this.recentCycleTimes.length >= 3) {
+const rollingAvg = this.recentCycleTimes.reduce((a, b) => a + b, 0) / this.recentCycleTimes.length;
+if (cycleTime > rollingAvg * 1.6) missedStepsToResync = Math.max(1, Math.round(cycleTime / rollingAvg)) - 1;
+}
+this.commitStep(peakT, cycleTime, missedStepsToResync);
+}
+// [추가 2026-10-24] 정밀 로그의 cadence 컬럼용. 걸음 수 증가분/정수 초(8초 창 → 7.5spm 단위로 양자화)가 아니라 확정 걸음 시각의
+// (N-1)/경과시간으로 계산해 연속값을 만든다. 최근 걸음이 2.5초 넘게 없거나 표본이 부족하면 null → 호출부가 기존 계산으로 폴백.
+getLogCadenceSpm() {
+const ts = this.commitTs;
+if (!ts || ts.length < 4) return null;
+const now = Date.now();
+if (now - ts[ts.length - 1] > 2500) return null;
+let i = ts.length - 1;
+while (i > 0 && now - ts[i - 1] <= 8000) i--;
+const n = ts.length - i;
+if (n < 4) return null;
+const span = (ts[ts.length - 1] - ts[i]) / 1000;
+if (span < 3) return null;
+return ((n - 1) / span) * 60;
 }
 // [추가] 네이티브 걸음수 센서(TYPE_STEP_COUNTER, 부팅 이후 누적값) 수신용.
 // window.onNativeStepCountUpdate(전역 브릿지 함수)에서 호출된다.
@@ -10391,6 +10498,13 @@ this.belowThresholdSince = 0;
 // onNativeStep() → commitStep()에서 GCT/수직진동/좌우밸런스 등 보조 지표 계산에 재사용된다.
 if (this.useNativeStepTrigger) return;
 
+// [추가 2026-10-24] 피크 트리거 위치: 위에서 누적한 vertMin/vertMax·belowThresholdSince 등은 그대로 두고, 걸음 확정만 피크 감지기가 맡는다.
+if (this.usePeakStepTrigger) {
+  const _pk = this.peakDetector.push(now, force);
+  if (_pk !== null) this._onPeakStep(_pk);
+  return;
+}
+
 // [수정] 걸음 이중 감지(더블 카운트) 방지:
 // 착지 충격 직후의 잔진동이 minStepInterval(예:230ms)보다 늦게 한 번 더
 // impactThreshold를 넘으면, 그동안은 그냥 새 걸음으로 잘못 세고 있었음.
@@ -10482,10 +10596,13 @@ _smoothedGctPeriod(c, missed) {
   }
   const n = buf.length;
   if (n === 0) return c;
-  const longP = this._trimMean(buf);
+  // [수정 2026-10-24] 절사평균 → 단순평균: 간격이 번갈아 길고 짧은 위치에선 양 끝을 버리면 구성이 한쪽으로 치우쳐 평균이 출렁였다.
+  // 연속 간격의 단순평균 = (마지막 걸음 시각 − 첫 걸음 시각)/걸음 수 이므로 좌우 지터가 상쇄된다. 놓친 걸음은 위에서 이미 분할해 넣는다.
+  const _mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+  const longP = _mean(buf);
   if (n >= 12) {
-    const shortP = this._trimMean(buf.slice(-10));
-    if (Math.abs(shortP - longP) / longP > 0.08) return shortP;
+    const shortP = _mean(buf.slice(-8));
+    if (Math.abs(shortP - longP) / longP > 0.10) return shortP;
   }
   return longP;
 }
@@ -10527,16 +10644,19 @@ _isCycleArtifact = false;
 }
 const gctCycleTime = _isCycleArtifact ? priorRollingAvg : cycleTime;
 
-if (this.lastStepTime !== 0 && gctCycleTime <= 2000) {
-// [수정] 배치 아티팩트로 판정된 경우(gctCycleTime !== cycleTime) 원본 cycleTime을
-// 그대로 쌓으면 rollingAvg 자체가 아티팩트로 오염되어, 이후 아티팩트 판정 기준
-// (rollingAvg*0.55)과 걸음누락 판정 기준(rollingAvg*1.6)이 함께 흔들린다.
-// 보정된 gctCycleTime을 누적해 오염을 차단한다.
-this.recentCycleTimes.push(gctCycleTime);
+// [수정 2026-10-24] 락인 버그 수정: 예전엔 아티팩트로 판정된 짧은 간격을 "직전 평균"으로 바꿔 쌓았는데, 손/암밴드처럼 OS 걸음 시각이
+// 번갈아 흔들리는 위치(예: 480/200ms)에선 정상 간격(약 190~210ms)이 0.55×평균 근처라 한 번 바꿔 쌓을 때마다 평균이 올라가고,
+// 그러면 다음 정상 간격도 아티팩트로 판정되는 되먹임이 생겨 평균이 실제 걸음 주기(340ms)에서 긴 간격(470ms)까지 치솟았다
+// (손 로그 49~71초 구간: GCT 250→343ms로 고착, 가민 대비 +55ms). 실제 간격(cycleTime)을 그대로 쌓으면 걸음 시각이 흔들려도
+// 합(=경과시간)이 보존되어 평균이 안정적이다. gctCycleTime(대체값)은 아래 걸음별 원시 GCT 클램프에만 계속 쓴다.
+if (this.lastStepTime !== 0 && cycleTime <= 2000) {
+this.recentCycleTimes.push(cycleTime);
 if (this.recentCycleTimes.length > 8) this.recentCycleTimes.shift();
 }
 
 this.lastStepTime = now;
+this.commitTs.push(now); // [추가 2026-10-24] 로그 케이던스용 확정 걸음 시각(최근 8초만 유지)
+while (this.commitTs.length && now - this.commitTs[0] > 8000) this.commitTs.shift();
 this.quietPhaseSinceLastStep = false; // 다음 걸음 판정을 위해 리셋
 let result = { cycleTime, gct: 0, flight: 0, side: this.stepSide };
 
@@ -10652,7 +10772,7 @@ let currentGCT = Math.round(measuredGCT);
 // 화면/로그/요약에 나가는 GCT·FLIGHT는 기준 걸음 주기 × 듀티비로 안정화한다. (위의 실측/폴백 값은 진단 카운트와 밸런스에만 쓰임)
 const rawStepGCT = currentGCT;
 this.lastStepGctRawMs = rawStepGCT; // [추가 2026-10-16] 안정화 전 걸음별 원시 GCT — 원시 센서 로그에 기록(듀티비 검증용)
-const _gp = this._smoothedGctPeriod(gctCycleTime, missedStepsToResync);
+const _gp = this._smoothedGctPeriod(cycleTime, missedStepsToResync); // [수정 2026-10-24] 대체값(gctCycleTime)이 아니라 실제 간격을 사용
 currentGCT = Math.round(Math.max(50, Math.min(_gp * this._gctDuty(), _gp * 0.9, GCT_ABS_MAX_MS)));
 
 // [수정] result.gct는 이번 스텝의 순간 측정값을 그대로 사용한다.
@@ -13339,7 +13459,9 @@ const _gctInternalLog = isFreerunLikeMode(this.state.activityMode)
   || ((this.state.runDevicePos === 'hand' || this.state.runDevicePos === 'armband') && this.state.activityMode !== 'walk');
 // [추가 2026-09-25] 로그 cadence 컬럼용 stepDetectorCnt 기반 재계산(위 computeRecentLogCadence 참고).
 // 화면 실시간 표시는 그대로 getTxt('cadence')를 쓰되, 로그에는 이 값을 우선 저장.
-const _logCadence = computeRecentLogCadence(this.state.precisionLog, stepDetectorCnt, this.state.seconds, 8);
+// [수정 2026-10-24] 걸음 수 증가분 기반(8초 창 = 7.5spm 단위 양자화)보다 확정 걸음 시각 기반 연속값을 우선 사용. 없으면 기존 방식으로 폴백.
+const _tsLogCad = (_fm && typeof _fm.getLogCadenceSpm === 'function') ? _fm.getLogCadenceSpm() : null;
+const _logCadence = (_tsLogCad != null) ? _tsLogCad : computeRecentLogCadence(this.state.precisionLog, stepDetectorCnt, this.state.seconds, 8);
 // [단순화 2026-10-10] 보정은 모션 엔진(값을 만드는 곳)에서 한 번만 적용되므로 카드·요약·로그가 모두 같은 값이다.
 const _gctShownLog = !_hasNewStepThisSample ? '--' : (_gctInternalLog ? ((_fm && _fm.lastStepGctMs != null) ? _fm.lastStepGctMs : '--') : getTxt('gct'));
 const _flShownLog = _gctInternalLog ? ((_fm && _fm.lastStepFlightPct != null) ? _fm.lastStepFlightPct : '') : getTxt('flight');
