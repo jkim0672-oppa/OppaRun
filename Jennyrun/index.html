@@ -939,7 +939,7 @@ body.prem-lock-garmin #garmin-calib-status:not(:empty)::before { content: var(--
 #garmin-sample-box { display:none; }
 body.prem-lock-garmin #garmin-sample-box { display:block; }
 /* [추가 2026-10-10] 앱 코드/기본값을 바꾸는 도구는 관리자 전용: 패치 HTML 다운로드, 앱 코드로 저장, 앱 현재값으로 확정 */
-body.not-admin #btn-download-stride-calib, body.not-admin #btn-errlog-copy, body.not-admin #btn-errlog-clear, body.not-admin #btn-calib-avg3-commit, body.not-admin button[onclick*="downloadPatchedHtml"] { display:none !important; }
+body.not-admin #btn-download-stride-calib, body.not-admin #btn-errlog-copy, body.not-admin #btn-errlog-clear, body.not-admin #btn-errlog-save, body.not-admin #btn-calib-avg3-commit, body.not-admin button[onclick*="downloadPatchedHtml"] { display:none !important; }
 /* [추가 2026-10-14] 원시 센서 기록(분석용)도 관리자 전용: 토글/내보내기 박스 전체 숨김 */
 body.not-admin #raw-capture-box { display:none !important; }
 .gs-row { margin:8px 0; font-size:var(--fs-xs); color:#ccc; font-weight:700; }
@@ -1205,9 +1205,6 @@ body.prem-lock-stats #stat-filter-monthly::after, body.prem-lock-stats #stat-fil
 .btn-errlog-clear:active { border-color:#ff9a9a; transform:scale(0.97); }
 @keyframes jrErrPulse { 0%,100% { box-shadow:0 0 4px 1px rgba(255,77,77,.55); opacity:.8; } 50% { box-shadow:0 0 12px 5px rgba(255,77,77,.95); opacity:1; } }
 body:not(.not-admin) .btn-errlog.has-err::before { content:''; display:inline-block; width:10px; height:10px; border-radius:50%; background:#ff4d4d; margin-right:9px; vertical-align:middle; animation:jrErrPulse 1.4s ease-in-out infinite; }
-body:not(.not-admin) .tab-bar .tab-btn.has-err, body:not(.not-admin) .sub-btn.has-err { position:relative; }
-body:not(.not-admin) .tab-bar .tab-btn.has-err::after { content:''; position:absolute; top:12px; left:calc(50% + 42px); width:9px; height:9px; border-radius:50%; background:#ff4d4d; animation:jrErrPulse 1.4s ease-in-out infinite; }
-body:not(.not-admin) .sub-btn.has-err::after { content:''; position:absolute; top:5px; right:7px; width:8px; height:8px; border-radius:50%; background:#ff4d4d; animation:jrErrPulse 1.4s ease-in-out infinite; }
 /* [수정 2026-10-18] 앱 공통 기능색: 파랑=데이터 가져오기/내보내기·Garmin·RAW, 초록=보정 실행·조회, 노랑=복구·진단, 빨강=삭제·초기화(기존 --danger) */
 .tone-blue  { background:#16202b; color:#78c0ff; border:1.5px solid #2f4a63; }
 .tone-green { background:#14261a; color:var(--primary); border:1.5px solid #2d5a3f; }
@@ -2520,6 +2517,7 @@ alt="runner"/>
 <div id="raw-capture-desc" class="c35 info-collapsed" style="margin-top:8px;"></div>
 <button id="btn-raw-export" class="btn-raw" style="width:100%; margin-top:10px;" onclick="ui.exportRawSensorCsv()"><span id="btn-raw-export-label">EXPORT LAST RAW SENSOR CSV</span></button>
 <button id="btn-errlog-copy" class="btn-errlog" style="width:100%; margin-top:10px;" onclick="ui.copyErrorLog()"><span id="btn-errlog-copy-label">COPY ERROR LOG</span></button>
+<button id="btn-errlog-save" class="btn-errlog" style="width:100%; margin-top:10px;" onclick="ui.saveErrorLog()"><span id="btn-errlog-save-label">SAVE ERROR LOG (TXT)</span></button>
 <button id="btn-errlog-clear" class="btn-errlog btn-errlog-clear" style="width:100%; margin-top:10px;" onclick="ui.clearErrorLog()"><span id="btn-errlog-clear-label">CLEAR ERROR LOG</span></button>
 </div>
 <!-- [수정 2026-10-12] 캘리브레이션 관리 접이식 그룹: 앱 기본값/현재 데이터/되돌리기/초기화 -->
@@ -3294,16 +3292,16 @@ function jrErrUnread() {
     return window.__jrErrLog.filter(function (x) { return (x.ts || Date.parse(x.t) || 0) > seen; }).length;
   } catch (_) { return 0; }
 }
-// 새 오류 점(하단 '기록·설정' 탭, '설정' 서브탭, '오류 기록 복사' 버튼)과 버튼 글자를 현재 상태에 맞춘다.
+// 새 오류 점('오류 기록 복사' 버튼 안에만 표시)과 버튼 글자를 현재 상태에 맞춘다.
 function jrErrUiRefresh() {
   try {
     const n = jrErrUnread(), total = window.__jrErrLog.length;
     let isKo = false; try { isKo = storage.getLang() === 'ko'; } catch (_) {}
-    ['btn-errlog-copy', 'tab-history', 'sub-tab-settings'].forEach(function (id) {
-      const el = document.getElementById(id); if (el) el.classList.toggle('has-err', n > 0);
-    });
+    const cb = document.getElementById('btn-errlog-copy'); if (cb) cb.classList.toggle('has-err', n > 0);
     const cl = document.getElementById('btn-errlog-copy-label');
     if (cl) cl.textContent = (isKo ? '오류 기록 복사' : 'COPY ERROR LOG') + (n > 0 ? (isKo ? (' · 새 ' + n + '건') : (' · ' + n + ' new')) : '');
+    const sl = document.getElementById('btn-errlog-save-label');
+    if (sl) sl.textContent = isKo ? '오류 기록 저장 (텍스트 파일)' : 'SAVE ERROR LOG (TXT)';
     const xl = document.getElementById('btn-errlog-clear-label');
     if (xl) xl.textContent = (isKo ? '오류 기록 지우기' : 'CLEAR ERROR LOG') + (total ? (' (' + total + ')') : '');
   } catch (_) {}
@@ -7892,6 +7890,18 @@ async copyErrorLog() {
   if (!list.length) { alert(isKo ? '기록된 오류가 없어요.' : 'No errors logged.'); return; }
   const copied = await this._copyOrSaveText(this._buildErrReportText(list), isKo);
   if (copied) alert(isKo ? ('오류 기록 ' + list.length + '건을 복사했어요.') : ('Copied ' + list.length + ' error log entries.'));
+}
+// [추가 2026-10-25] 관리자 전용: 오류 기록을 텍스트 파일로 저장 — 다른 로그 저장과 같은 saveTextFileNative를 쓰므로
+// 앱에서는 저장 폴더를 직접 고르는 창(AndroidDownload.saveFileAs)이 뜬다.
+async saveErrorLog() {
+  if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'Admin-only feature.'); return; }
+  const isKo = storage.getLang() === 'ko';
+  const list = this._loadErrList();
+  jrErrMarkSeen(); // 확인했으니 새 오류 점을 끈다
+  if (!list.length) { alert(isKo ? '저장할 오류 기록이 없어요.' : 'No errors to save.'); return; }
+  const d = new Date(), p2 = function (n) { return String(n).padStart(2, '0'); };
+  const stamp = d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + '_' + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds());
+  saveTextFileNative(this._buildErrReportText(list), 'jr_errlog_' + stamp + '.txt', 'text/plain;charset=utf-8', isKo);
 }
 // [추가 2026-10-25] 관리자 전용: 오류 기록 전부 지우기(확인 후 메모리 + localStorage 삭제)
 async clearErrorLog() {
