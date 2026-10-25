@@ -939,7 +939,7 @@ body.prem-lock-garmin #garmin-calib-status:not(:empty)::before { content: var(--
 #garmin-sample-box { display:none; }
 body.prem-lock-garmin #garmin-sample-box { display:block; }
 /* [추가 2026-10-10] 앱 코드/기본값을 바꾸는 도구는 관리자 전용: 패치 HTML 다운로드, 앱 코드로 저장, 앱 현재값으로 확정 */
-body.not-admin #btn-download-stride-calib, body.not-admin #btn-errlog-copy, body.not-admin #btn-calib-avg3-commit, body.not-admin button[onclick*="downloadPatchedHtml"] { display:none !important; }
+body.not-admin #btn-download-stride-calib, body.not-admin #btn-errlog-copy, body.not-admin #btn-errlog-clear, body.not-admin #btn-calib-avg3-commit, body.not-admin button[onclick*="downloadPatchedHtml"] { display:none !important; }
 /* [추가 2026-10-14] 원시 센서 기록(분석용)도 관리자 전용: 토글/내보내기 박스 전체 숨김 */
 body.not-admin #raw-capture-box { display:none !important; }
 .gs-row { margin:8px 0; font-size:var(--fs-xs); color:#ccc; font-weight:700; }
@@ -1200,6 +1200,14 @@ body.prem-lock-stats #stat-filter-monthly::after, body.prem-lock-stats #stat-fil
 .btn-raw:active { border-color:#78c0ff; transform:scale(0.97); }
 .btn-errlog { background:#2a2417; color:#ffcc66; border-color:#6b5a2a; }
 .btn-errlog:active { border-color:#ffcc66; transform:scale(0.97); }
+/* [추가 2026-10-25] 오류 기록 지우기 버튼 + 새 오류 알림 점(불 켜짐). 점은 관리자에게만 보인다. */
+.btn-errlog-clear { background:#2a1717; color:#ff9a9a; border-color:#6b2a2a; }
+.btn-errlog-clear:active { border-color:#ff9a9a; transform:scale(0.97); }
+@keyframes jrErrPulse { 0%,100% { box-shadow:0 0 4px 1px rgba(255,77,77,.55); opacity:.8; } 50% { box-shadow:0 0 12px 5px rgba(255,77,77,.95); opacity:1; } }
+body:not(.not-admin) .btn-errlog.has-err::before { content:''; display:inline-block; width:10px; height:10px; border-radius:50%; background:#ff4d4d; margin-right:9px; vertical-align:middle; animation:jrErrPulse 1.4s ease-in-out infinite; }
+body:not(.not-admin) .tab-bar .tab-btn.has-err, body:not(.not-admin) .sub-btn.has-err { position:relative; }
+body:not(.not-admin) .tab-bar .tab-btn.has-err::after { content:''; position:absolute; top:12px; left:calc(50% + 42px); width:9px; height:9px; border-radius:50%; background:#ff4d4d; animation:jrErrPulse 1.4s ease-in-out infinite; }
+body:not(.not-admin) .sub-btn.has-err::after { content:''; position:absolute; top:5px; right:7px; width:8px; height:8px; border-radius:50%; background:#ff4d4d; animation:jrErrPulse 1.4s ease-in-out infinite; }
 /* [수정 2026-10-18] 앱 공통 기능색: 파랑=데이터 가져오기/내보내기·Garmin·RAW, 초록=보정 실행·조회, 노랑=복구·진단, 빨강=삭제·초기화(기존 --danger) */
 .tone-blue  { background:#16202b; color:#78c0ff; border:1.5px solid #2f4a63; }
 .tone-green { background:#14261a; color:var(--primary); border:1.5px solid #2d5a3f; }
@@ -2512,6 +2520,7 @@ alt="runner"/>
 <div id="raw-capture-desc" class="c35 info-collapsed" style="margin-top:8px;"></div>
 <button id="btn-raw-export" class="btn-raw" style="width:100%; margin-top:10px;" onclick="ui.exportRawSensorCsv()"><span id="btn-raw-export-label">EXPORT LAST RAW SENSOR CSV</span></button>
 <button id="btn-errlog-copy" class="btn-errlog" style="width:100%; margin-top:10px;" onclick="ui.copyErrorLog()"><span id="btn-errlog-copy-label">COPY ERROR LOG</span></button>
+<button id="btn-errlog-clear" class="btn-errlog btn-errlog-clear" style="width:100%; margin-top:10px;" onclick="ui.clearErrorLog()"><span id="btn-errlog-clear-label">CLEAR ERROR LOG</span></button>
 </div>
 <!-- [수정 2026-10-12] 캘리브레이션 관리 접이식 그룹: 앱 기본값/현재 데이터/되돌리기/초기화 -->
 <details id="calib-manage-details" class="calib-manage">
@@ -3263,8 +3272,47 @@ async function shareCanvasImage(canvas, isKo, shareText) {
 // [추가] 조용히 삼키던 중요 오류(저장·센서 설정·기록 저장·화면 켜짐 등)를 남기는 로거.
 // 같은 태그는 10초에 1번만 기록(반복 오류 폭주 방지). 최근 50건을 메모리와 localStorage('jr_errlog')에 보관하고 console.warn으로도 출력한다.
 // 이 함수 자체의 오류는 다시 던지지 않는다(앱 동작에 영향 없음).
+// [수정 2026-10-25] 앱을 껐다 켜도 이전 기록 뒤에 이어서 쌓이도록, 시작할 때 localStorage에서 먼저 불러온다.
+// (예전엔 빈 배열로 시작해서 새 오류가 하나 생기면 저장돼 있던 옛 기록을 통째로 덮어썼다.)
+// 각 기록에 ts(밀리초)를 같이 남기고, 사용자가 아직 확인하지 않은 새 오류가 있으면 화면에 불 켜진 점(.has-err)을 띄운다.
+const JR_ERRLOG_KEY = 'jr_errlog';
+const JR_ERRLOG_SEEN_KEY = 'jr_errlog_seen';
+window.__jrErrLog = (function () {
+  try { const a = JSON.parse(localStorage.getItem(JR_ERRLOG_KEY) || '[]'); return Array.isArray(a) ? a.slice(-50) : []; } catch (_) { return []; }
+})();
+// 폰에 표시되는 시각 그대로 "2026-10-24 13:37:50" 형태로 표시
+function jrFmtLocal(ms) {
+  try {
+    const d = new Date(ms); if (isNaN(d.getTime())) return String(ms);
+    const p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  } catch (_) { return String(ms); }
+}
+function jrErrUnread() {
+  try {
+    const seen = parseInt(localStorage.getItem(JR_ERRLOG_SEEN_KEY) || '0', 10) || 0;
+    return window.__jrErrLog.filter(function (x) { return (x.ts || Date.parse(x.t) || 0) > seen; }).length;
+  } catch (_) { return 0; }
+}
+// 새 오류 점(하단 '기록·설정' 탭, '설정' 서브탭, '오류 기록 복사' 버튼)과 버튼 글자를 현재 상태에 맞춘다.
+function jrErrUiRefresh() {
+  try {
+    const n = jrErrUnread(), total = window.__jrErrLog.length;
+    let isKo = false; try { isKo = storage.getLang() === 'ko'; } catch (_) {}
+    ['btn-errlog-copy', 'tab-history', 'sub-tab-settings'].forEach(function (id) {
+      const el = document.getElementById(id); if (el) el.classList.toggle('has-err', n > 0);
+    });
+    const cl = document.getElementById('btn-errlog-copy-label');
+    if (cl) cl.textContent = (isKo ? '오류 기록 복사' : 'COPY ERROR LOG') + (n > 0 ? (isKo ? (' · 새 ' + n + '건') : (' · ' + n + ' new')) : '');
+    const xl = document.getElementById('btn-errlog-clear-label');
+    if (xl) xl.textContent = (isKo ? '오류 기록 지우기' : 'CLEAR ERROR LOG') + (total ? (' (' + total + ')') : '');
+  } catch (_) {}
+}
+function jrErrMarkSeen() {
+  try { localStorage.setItem(JR_ERRLOG_SEEN_KEY, String(Date.now())); } catch (_) {}
+  jrErrUiRefresh();
+}
 const JR_SUPPORT_EMAIL = 'jkim0672@gmail.com'; // [추가] 문제 신고 수신 주소
-window.__jrErrLog = [];
 function jrLogErr(tag, e) {
   try {
     const now = Date.now();
@@ -3272,14 +3320,17 @@ function jrLogErr(tag, e) {
     if (last[tag] && now - last[tag] < 10000) return;
     last[tag] = now;
     const msg = (e && e.message) ? e.message : String(e);
-    window.__jrErrLog.push({ t: new Date(now).toISOString(), tag: tag, msg: String(msg).slice(0, 200) });
+    window.__jrErrLog.push({ t: new Date(now).toISOString(), ts: now, tag: tag, msg: String(msg).slice(0, 200) });
     if (window.__jrErrLog.length > 50) window.__jrErrLog.shift();
     console.warn('[JR]', tag, msg);
-    try { localStorage.setItem('jr_errlog', JSON.stringify(window.__jrErrLog)); } catch (_) {}
+    try { localStorage.setItem(JR_ERRLOG_KEY, JSON.stringify(window.__jrErrLog)); } catch (_) {}
+    jrErrUiRefresh();
   } catch (_) {}
 }
 window.addEventListener('error', function (ev) { jrLogErr('window.error', ev && (ev.error || ev.message)); });
 window.addEventListener('unhandledrejection', function (ev) { jrLogErr('promise', ev && ev.reason); });
+jrErrUiRefresh();
+document.addEventListener('DOMContentLoaded', jrErrUiRefresh);
 
 function appAlert(msg) {
   return new Promise((resolve) => {
@@ -7770,6 +7821,7 @@ refreshRawCaptureSwitch() {
   if (exl) exl.textContent = isKo ? '마지막 러닝 원시 센서 CSV 내보내기' : 'EXPORT LAST RAW SENSOR CSV';
   const errLbl = document.getElementById('btn-errlog-copy-label');
   if (errLbl) errLbl.textContent = isKo ? '오류 기록 복사' : 'COPY ERROR LOG';
+  if (typeof jrErrUiRefresh === 'function') jrErrUiRefresh(); // [추가 2026-10-25] 새 오류 건수/지우기 버튼 글자 갱신
   if (btn) btn.classList.toggle('is-on', on);
   if (desc) {
     let n = 0; try { n = (typeof app !== 'undefined' && app && app.rawSensorBuf) ? app.rawSensorBuf.length : 0; } catch (e) {}
@@ -7811,8 +7863,8 @@ _loadErrList() {
 }
 _buildErrReportText(list) {
   let ver = ''; try { ver = window.AndroidAppInfo.getContentVersion(); } catch (e) {}
-  const lines = ['JennyRun problem report', 'generated: ' + new Date().toISOString(), 'content: ' + ver, 'lang: ' + storage.getLang(), 'ua: ' + navigator.userAgent, ''];
-  if (list.length) list.forEach(x => lines.push(x.t + ' [' + x.tag + '] ' + x.msg)); else lines.push('(no errors logged)');
+  const lines = ['JennyRun problem report', 'generated: ' + jrFmtLocal(Date.now()), 'content: ' + ver, 'lang: ' + storage.getLang(), 'ua: ' + navigator.userAgent, ''];
+  if (list.length) list.forEach(x => lines.push(jrFmtLocal(x.ts || Date.parse(x.t)) + ' [' + x.tag + '] ' + x.msg)); else lines.push('(no errors logged)');
   return lines.join('\n');
 }
 // 클립보드 복사 → 안 되면 숨은 입력칸 복사 → 그것도 안 되면 Downloads에 txt 저장. true면 클립보드에 복사됨.
@@ -7836,9 +7888,22 @@ async copyErrorLog() {
   if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'Admin-only feature.'); return; }
   const isKo = storage.getLang() === 'ko';
   const list = this._loadErrList();
+  jrErrMarkSeen(); // [추가 2026-10-25] 확인했으니 새 오류 점을 끈다
   if (!list.length) { alert(isKo ? '기록된 오류가 없어요.' : 'No errors logged.'); return; }
   const copied = await this._copyOrSaveText(this._buildErrReportText(list), isKo);
   if (copied) alert(isKo ? ('오류 기록 ' + list.length + '건을 복사했어요.') : ('Copied ' + list.length + ' error log entries.'));
+}
+// [추가 2026-10-25] 관리자 전용: 오류 기록 전부 지우기(확인 후 메모리 + localStorage 삭제)
+async clearErrorLog() {
+  if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'Admin-only feature.'); return; }
+  const isKo = storage.getLang() === 'ko';
+  const n = (window.__jrErrLog || []).length;
+  if (!n) { alert(isKo ? '지울 오류 기록이 없어요.' : 'No errors to clear.'); return; }
+  if (!(await appConfirm(isKo ? ('오류 기록 ' + n + '건을 모두 지울까요?') : ('Delete all ' + n + ' error log entries?')))) return;
+  window.__jrErrLog.length = 0;
+  try { localStorage.removeItem(JR_ERRLOG_KEY); } catch (e) {}
+  jrErrMarkSeen();
+  alert(isKo ? '오류 기록을 지웠어요.' : 'Error log cleared.');
 }
 // [추가] 모든 사용자: 설정 하단 "문제 신고" — 기기 정보와 최근 오류 기록을 복사하고 보낼 주소를 안내한다.
 // (메일 앱 자동 실행은 WebView에서 mailto 처리가 보장되지 않아 쓰지 않는다. 위치·러닝 기록 등 개인 데이터는 포함하지 않음.)
@@ -14513,7 +14578,43 @@ app.motion.onNativeStepCounterUpdate(count);
 
 const SUPABASE_URL = 'https://ujodpspxsisoycniswwl.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVqb2Rwc3B4c2lzb3ljbmlzd3dsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0NDg4OTUsImV4cCI6MjA5NzAyNDg5NX0.KWyli79Llmr5VA027BfF9d76-05IFkjylII3Wj_F7Vc';
-const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+// [수정 2026-10-25] supabase.js 로딩에 실패해도(ReferenceError: supabase is not defined) 이 줄에서 스크립트가 중단되어
+// 아래 7천 줄이 통째로 실행되지 않는 일이 없도록 보호한다. 실패하면 오류 기록에 남기고, 모든 서버 호출이 '오류 결과'를
+// 돌려주는 가짜 클라이언트로 대체한다(크루/로그인은 안 되지만 러닝·기록·설정은 정상 동작).
+const _sb = (function () {
+  try {
+    if (typeof supabase !== 'undefined' && supabase && typeof supabase.createClient === 'function') {
+      return supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    }
+  } catch (e) { jrLogErr('supabaseInit', e); }
+  jrLogErr('supabaseInit', 'supabase.js 로드 실패 → 크루/로그인 기능 없이 시작');
+  window.__jrSbOffline = true;
+  const err = { message: 'supabase unavailable', name: 'SupabaseUnavailable' };
+  const fail = function () { return Promise.resolve({ data: null, error: err, count: null, status: 0 }); };
+  const authFail = function () { return Promise.resolve({ data: { session: null, user: null }, error: err }); };
+  const builder = function () {
+    return new Proxy(function () {}, {
+      get: function (_, p) {
+        if (p === 'then') return function (ok, ng) { return fail().then(ok, ng); };
+        if (typeof p === 'symbol') return undefined;
+        return builder();
+      },
+      apply: function () { return builder(); }
+    });
+  };
+  return {
+    from: builder, rpc: builder,
+    auth: new Proxy({}, { get: function (_, p) {
+      if (p === 'onAuthStateChange') return function () { return { data: { subscription: { unsubscribe: function () {} } } }; };
+      if (typeof p === 'symbol' || p === 'then') return undefined;
+      return authFail;
+    } }),
+    storage: { from: function () { return { upload: fail, download: fail, remove: fail, list: fail, createSignedUrl: fail, getPublicUrl: function () { return { data: { publicUrl: '' } }; } }; } },
+    functions: { invoke: fail },
+    channel: function () { const c = { on: function () { return c; }, subscribe: function () { return c; }, unsubscribe: function () {} }; return c; },
+    removeChannel: function () { return Promise.resolve('ok'); }
+  };
+})();
 
 // [추가 2026-10-03] 프리미엄 잠금(GCT/FLIGHT 라이브 카드) + 관리자 패널
 // - 해제 여부는 로그인한 계정으로 결정(서버 entitlements 테이블). 관리자는 항상 해제.
