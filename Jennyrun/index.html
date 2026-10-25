@@ -9891,6 +9891,11 @@ updateDisplay() { const bpmInput = document.getElementById('metro-bpm'); const b
 const GCT_DUTY_BY_POS = { chest: 0.71, waist: 0.73, armband: 0.73, hand: 0.73, freerun: 0.73, trail: 0.73 };
 const GCT_DUTY_MIN = 0.66, GCT_DUTY_MAX = 0.78; // 이 범위를 벗어난 저장값(예전 0.31~0.49 override 등)은 무시하고 위치 기본값 사용
 const GCT_PERIOD_WINDOW = 16; // 기준 걸음 주기 계산에 쓰는 최근 걸음 수(약 5초)
+// [추가 2026-10-25] 위치별 방침: 가슴/허리 = 정확도 우선(위 값 그대로, 변화에 빠르게 반응), 그 외(손/암밴드/프리런/트레일) = 안정감 우선.
+// 몸통에 붙지 않은 센서는 잡음이 커서 보정으로 정확도를 올리기 어렵기 때문에, 더 길게 평균내서 값이 덜 출렁이게 한다.
+const GCT_PRECISE_POS = ['chest', 'waist'];
+const GCT_PERIOD_WINDOW_STABLE = 32;  // 안정감 위치: 기준 걸음 주기 평균 구간(약 10초)
+const GCT_DISPLAY_MEDIAN_STABLE = 9;  // 안정감 위치: 화면 표시용 중앙값 걸음 수(정확도 위치는 5)
 // [추가 2026-10-24] 가속도 충격 피크 기반 걸음 감지기 (착용위치 stepTrigger:'peak' 용).
 // Accelerometer impact-peak step detector.
 // Sensor samples (any rate >= ~40 Hz, jittery timestamps) are first binned onto a fixed 50 Hz grid, then:
@@ -10667,7 +10672,8 @@ _smoothedGctPeriod(c, missed) {
     const m = Math.max(0, Math.min(missed || 0, 3));
     if (m > 0) { for (let k = 0; k <= m; k++) buf.push(c / (m + 1)); }
     else buf.push(c);
-    while (buf.length > GCT_PERIOD_WINDOW) buf.shift();
+    const _win = this._gctPrecise() ? GCT_PERIOD_WINDOW : GCT_PERIOD_WINDOW_STABLE; // [수정 2026-10-25] 위치별 평균 구간
+    while (buf.length > _win) buf.shift();
   }
   const n = buf.length;
   if (n === 0) return c;
@@ -10675,14 +10681,22 @@ _smoothedGctPeriod(c, missed) {
   // 연속 간격의 단순평균 = (마지막 걸음 시각 − 첫 걸음 시각)/걸음 수 이므로 좌우 지터가 상쇄된다. 놓친 걸음은 위에서 이미 분할해 넣는다.
   const _mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
   const longP = _mean(buf);
-  if (n >= 12) {
-    const shortP = _mean(buf.slice(-8));
-    if (Math.abs(shortP - longP) / longP > 0.10) return shortP;
+  if (this._gctPrecise()) {
+    if (n >= 12) {
+      const shortP = _mean(buf.slice(-8));
+      if (Math.abs(shortP - longP) / longP > 0.10) return shortP;
+    }
+  } else if (n >= 16) {
+    // [추가 2026-10-25] 안정감 위치: 큰 변화(20% 이상, 예: 달리다 멈춤)에서만 짧은 평균(최근 12걸음)으로 전환
+    const shortP = _mean(buf.slice(-12));
+    if (Math.abs(shortP - longP) / longP > 0.20) return shortP;
   }
   return longP;
 }
 // [추가 2026-10-16] GCT/걸음주기 비율. gctFallbackRatio(가민 분석실·3개 평균 보정이 쓰는 값)를 그대로 쓰되,
 // 허용 범위 밖이면 위치별 기본값으로 대체한다.
+// [추가 2026-10-25] 가슴/허리면 true(정확도 우선), 그 외 위치면 false(안정감 우선)
+_gctPrecise() { return GCT_PRECISE_POS.indexOf(this.gctPosKey) >= 0; }
 _gctDuty() {
   const def = GCT_DUTY_BY_POS[this.gctPosKey] || 0.72;
   const r = this.gctFallbackRatio;
@@ -10873,7 +10887,7 @@ this.gctCount++;
 // 동일한 방식(중앙값)으로, 극단치 하나가 표시값을 끌고 가지 않게 함.
 // 러닝 전체 누적평균과 달리 최근 걸음에만 반응하므로 페이스 변화에 훨씬 민감하다.
 this.recentGctValues.push(currentGCT);
-if (this.recentGctValues.length > 5) this.recentGctValues.shift();
+if (this.recentGctValues.length > (this._gctPrecise() ? 5 : GCT_DISPLAY_MEDIAN_STABLE)) this.recentGctValues.shift(); // [수정 2026-10-25] 안정감 위치는 9걸음 중앙값
 result.gctDisplay = this.recentGctValues.length >= 3
 ? [...this.recentGctValues].sort((a, b) => a - b)[Math.floor(this.recentGctValues.length / 2)]
 : currentGCT;
