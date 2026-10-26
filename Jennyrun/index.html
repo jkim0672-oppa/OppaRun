@@ -10881,18 +10881,32 @@ this.lastStepGctMs = currentGCT; // [추가] UI(getTxt) 의존 없이 값을 읽
 // [수정 2026-10-25] FLIGHT는 GCT(=주기×duty)에서 역산하면 (1-duty)로 고정되므로, 실측 접지에 성공한 걸음의 GCT 평균으로 계산한다.
 // 실측 표본이 부족하면 예전 방식(듀티비 기반 추정)으로 폴백하고 flightMeasured=false로 표시한다.
 if (_gctRawMeasured >= 100) {
-  this.gctMeasBuf.push(rawStepGCT);
+  this.gctMeasBuf.push([Date.now(), rawStepGCT]); // [수정 2026-10-25b] [시각, GCT]로 저장 — 오래된 표본(실측이 끊긴 구간)을 걸러내기 위함
   const _mw = this._gctPrecise() ? GCT_PERIOD_WINDOW : GCT_PERIOD_WINDOW_STABLE;
   while (this.gctMeasBuf.length > _mw) this.gctMeasBuf.shift();
 }
 let _flightCalc = Math.round(((_gp - currentGCT) / _gp) * 100);
 result.flightMeasured = false;
-if (this.gctMeasBuf.length >= 8) {
-  const _measMean = this.gctMeasBuf.reduce((a, b) => a + b, 0) / this.gctMeasBuf.length;
-  _flightCalc = Math.round(((_gp - _measMean) / _gp) * 100);
-  result.flightMeasured = true;
+{
+  // [수정 2026-10-25b] 가민 FIT 대조 결과: 손/프리런은 실측 중 걸음주기 이상으로 길게 잡힌 값(스윙 오검출)이 섞여 평균이 걸음주기에 붙어 FLIGHT가 0이 됨.
+  // → 최근 25초 이내 표본만, 걸음주기의 90% 이하인 값만 사용하고, 가슴은 평균, 그 외 위치는 중앙값을 쓴다.
+  const _now = Date.now();
+  const _vals = this.gctMeasBuf.filter(e => _now - e[0] <= 25000 && e[1] <= _gp * 0.9).map(e => e[1]);
+  if (_vals.length >= 8) {
+    let _central;
+    if (this.gctPosKey === 'chest') {
+      _central = _vals.reduce((a, b) => a + b, 0) / _vals.length;
+    } else {
+      const _sorted = _vals.slice().sort((a, b) => a - b);
+      const _h = _sorted.length >> 1;
+      _central = (_sorted.length % 2) ? _sorted[_h] : (_sorted[_h - 1] + _sorted[_h]) / 2;
+    }
+    _flightCalc = Math.round(((_gp - _central) / _gp) * 100);
+    result.flightMeasured = true;
+  }
 }
-result.flight = Math.max(0, Math.min(60, _flightCalc));
+// [수정 2026-10-25b] 하·상한: GCT 비율 허용 범위(0.5~0.85)에 맞춰 15~50%
+result.flight = Math.max(15, Math.min(50, _flightCalc));
 this.lastStepFlightPct = result.flight; // [추가] freerunMotion 등 UI 미노출 인스턴스용
 
 // 러닝 시작부터의 누적 평균은 계속 별도로 유지(다른 곳에서 필요할 수 있어 보관만 함).
