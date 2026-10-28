@@ -2688,7 +2688,8 @@ window.onAndroidSaveResult = function(success, fileName) {
 const METRIC_VISIBILITY = {
   gctFlight: { positions: ['chest', 'waist'], modes: ['run'] }, // GCT / FLIGHT / VERT / 효율점수 (러닝 모드만: 걷기·트레일은 지형/보행이라 신뢰 낮음) [수정 2026-10-15]
   balance:   { positions: ['chest', 'waist'], modes: ['run'] }, // 좌우 밸런스 (러닝 모드만) [수정 2026-10-15]
-  lean:      { positions: ['chest'], modes: ['run'] }      // 린각도 (러닝 + 가슴만)
+  lean:      { positions: ['chest'], modes: ['run'] },     // 린각도 (러닝 + 가슴만)
+  flight:    { positions: ['chest'], modes: ['run'] }      // [추가 2026-10-28] FLIGHT는 가슴(러닝)만 실측. 그 외 위치는 GPS 속도 기반 추정값(EST)이라 점수·평균·공유에서 제외
 };
 function isMetricVisible(record, metric) {
   const rule = METRIC_VISIBILITY[metric];
@@ -2701,6 +2702,9 @@ function isMetricVisible(record, metric) {
 // 기존 호출부(공유카드/공유모달/크루 업로드/UIManager 등)가 쓰던 이름은 그대로 유지하되 위 표에 위임한다.
 function isGctVertUnreliable(record) { return !isMetricVisible(record, 'gctFlight'); }
 function isBalanceUnreliable(record) { return !isMetricVisible(record, 'balance'); }
+// [추가 2026-10-28] FLIGHT가 실측이 아니라 속도 기반 추정값인 기록(가슴(러닝) 외 전부).
+function isFlightEstimated(record) { return !isMetricVisible(record, 'flight'); }
+function flightEstTagHtml(lang) { return ' <span class="ref-tag">' + (lang === 'ko' ? '추정' : 'EST') + '</span>'; }
 // [추가] 목록·상세·위치별 통계는 isGctVertUnreliable()인 기록(러닝의 암밴드·손, 트레일, 프리런)의 GCT/FLIGHT/VERT도 보여주되
 // 이 '참고용' 표시를 붙인다(걷기는 별도 분기라 해당 없음). 통계 SUMMARY 평균·공유카드·크루 업로드는 같은 함수로 계속 제외/숨김.
 function gctRefTagHtml(lang) { return ' <span class="ref-tag">' + (lang === 'ko' ? '참고용' : 'ref only') + '</span>'; }
@@ -3014,7 +3018,7 @@ function generateRouteCardCanvas(record, isKo, displaySplits, t) {
     // [리팩토링] 신뢰 조건은 전역 isGctVertUnreliable()로 통합 — 여기서 직접 조건을 베끼지 않는다.
     const _routeGctUntrusted = isGctVertUnreliable(record);
     dynRows.push([t.avgGct || 'Average GCT', (!_routeGctUntrusted && record.gct || '--') + ' ms.']);
-    dynRows.push([t.avgFlight || 'Average Flight', (!_routeGctUntrusted && record.flight || '--') + ' %.']);
+    dynRows.push([t.avgFlight || 'Average Flight', (!_routeGctUntrusted && !isFlightEstimated(record) && record.flight || '--') + ' %.']);
     dynRows.push([t.avgCadence || 'Average Cadence', (record.cadence || 0) + ' SPM.']);
     let strideVal = '--';
     if (record.cadence && kmh) strideVal = ((kmh/3.6)/(record.cadence/60)).toFixed(2) + ' m';
@@ -3620,7 +3624,8 @@ function calcEffScore(record) {
   const cadence = parseInt(record.cadence);
   const gct     = parseInt(record.gct);
   const flight  = parseInt(record.flight);
-  if (!cadence || !gct || isNaN(flight)) return null;
+  const _flEst = isFlightEstimated(record); // [추가 2026-10-28] 추정 FLIGHT는 점수에서 제외(나머지 항목 가중치를 재정규화)
+  if (!cadence || !gct || (!_flEst && isNaN(flight))) return null;
 
   // 1) 케이던스: 170~185 최적
   const cadScore = _effCadScore(cadence);
@@ -3674,15 +3679,10 @@ function calcEffScore(record) {
     return (z === 2 || z === 3) ? 3 : z === 1 ? 1 : 0;
   })();
 
-  return Math.min(100, Math.max(0, Math.round(
-    cadScore    * 0.28 +
-    gctScore    * 0.25 +
-    flightScore * 0.18 +
-    vertScore   * 0.14 +
-    strideScore * 0.15 -
-    balPenalty  +
-    hrBonus
-  )));
+  const _base = _flEst
+    ? (cadScore * 0.28 + gctScore * 0.25 + vertScore * 0.14 + strideScore * 0.15) / 0.82
+    : (cadScore * 0.28 + gctScore * 0.25 + flightScore * 0.18 + vertScore * 0.14 + strideScore * 0.15);
+  return Math.min(100, Math.max(0, Math.round(_base - balPenalty + hrBonus)));
 }
 // [추가] 케이던스 안정화용 트림 평균(trimmed mean) 계산
 // 러닝 중 수집된 10초 윈도우 케이던스 샘플들에서 상/하위 10%씩(과도한 노이즈/스파이크)
@@ -6837,7 +6837,8 @@ paintGctFlightCard(el, level, forceRef) { // [수정 2026-10-25] forceRef: 신�
     el.removeAttribute('data-ref');
     this.updateCardColor(el, level);
   } else {
-    el.setAttribute('data-ref', storage.getLang() === 'ko' ? '참고' : 'REF');
+    const _isFlightCard = (this.dom && el === this.dom.cardFlight); // [추가 2026-10-28] FLIGHT 카드는 추정값이므로 EST로 표시
+    el.setAttribute('data-ref', _isFlightCard ? (storage.getLang() === 'ko' ? '추정' : 'EST') : (storage.getLang() === 'ko' ? '참고' : 'REF'));
     el.style.borderColor = '#333';                  // 중립 테두리
     const valEl = el.querySelector('.value');
     if (valEl) valEl.style.color = '#888';          // 값은 회색(updateCardColor의 'normal'은 #333이라 거의 안 보임)
@@ -8342,7 +8343,7 @@ setOptionalRow(cadenceCheckbox, !!record.cadence);
 // [리팩토링] 방어용 폴백(삼항연산자 속 조건 복붙) 제거 — 전역 isGctVertUnreliable() 하나만 참조.
 const _shareModalGctUntrusted = isGctVertUnreliable(record);
 setOptionalRow(gctCheckbox, !_shareModalGctUntrusted && !!record.gct && record.gct !== '--');
-setOptionalRow(flightCheckbox, !_shareModalGctUntrusted && record.flight != null && record.flight !== '--');
+setOptionalRow(flightCheckbox, !_shareModalGctUntrusted && !isFlightEstimated(record) && record.flight != null && record.flight !== '--');
 setOptionalRow(strideCheckbox, !!record.stride);
 setOptionalRow(kcalCheckbox, !!record.kcal);
 setOptionalRow(stepsCheckbox, !!(record.steps || record.walkSpm));
@@ -8557,7 +8558,7 @@ this.buildHrBoxHtml(r, t) +
 const _ref = this.isGctVertUnreliable(r);
 const _tag = _ref ? gctRefTagHtml(lang) : '';
 return '<div class="h-det-box lk-dyn"><div class="h-det-label">' + t.gct + _tag + '</div><div class="h-det-val" style="color:' + (_ref ? '#888' : this.getGctColor(r.gct)) + '">' + (r.gct || '--') + ' <span class="u-font-size-fs-xxs">MS</span></div></div>' +
-'<div class="h-det-box lk-dyn"><div class="h-det-label">' + t.flight + _tag + '</div><div class="h-det-val" style="color:' + (_ref ? '#888' : this.getFlightColor(r.flight)) + '">' + (r.flight || '--') + ' <span class="u-font-size-fs-xxs">%</span></div></div>';
+'<div class="h-det-box lk-dyn"><div class="h-det-label">' + t.flight + (isFlightEstimated(r) ? flightEstTagHtml(lang) : '') + '</div><div class="h-det-val" style="color:' + (isFlightEstimated(r) ? '#888' : this.getFlightColor(r.flight)) + '">' + (r.flight || '--') + ' <span class="u-font-size-fs-xxs">%</span></div></div>';
 })() +
 ((() => {
 let strideVal = '--';
@@ -9117,7 +9118,7 @@ const fl = avgOf(rs.map(r => num(r.flight)), 0, 100, 0);
 const vert = avgOf(rs.map(r => num(r.vertRatio)), 0.1, 50, 1);
 boxes = box(t.dist || 'DIST', distVal, distUnit, tagSum) + box(t.posCount || 'COUNT', n > 0 ? n : null) + box(t.pace || 'PACE', paceStr, null, tagAvg) +
 box(t.cal || 'KCAL', n > 0 ? kcal : null, 'kcal', tagSum) + box(t.cadence || 'CADENCE', cad, 'SPM', tagAvg) + box(t.powerLabel || 'POWER', pw, 'W', tagAvg) +
-lkBox(box(t.gct || 'GCT', gct, 'ms', tagAvg + _refTag)) + lkBox(box(t.flight || 'FLIGHT', fl, '%', tagAvg + _refTag)) + lkBox(box(t.statVert || 'VERT', vert, '%', tagAvg + _refTag));
+lkBox(box(t.gct || 'GCT', gct, 'ms', tagAvg + _refTag)) + lkBox(box(t.flight || 'FLIGHT', fl, '%', tagAvg + (isFlightEstimated({ activityMode: statType, devicePos: g.key }) ? flightEstTagHtml(lang) : ''))) + lkBox(box(t.statVert || 'VERT', vert, '%', tagAvg + _refTag));
 }
 const isOpen = n > 0 && !!(this._posOpen && this._posOpen[g.key]);
 const detailHtml = isOpen ? rs.map(r => this.buildHistoryItemHtml(r, t, lang)).join('') : '';
@@ -9328,7 +9329,7 @@ if(r.cadence && typeof r.cadence === 'number' && !isNaN(r.cadence)) { sumCadence
 const _statsGctUntrusted = this.isGctVertUnreliable(r);
 const _statsDynUntrusted = this.isGyroAccelUnreliable(r);
 if(!_statsGctUntrusted && r.gct && r.gct !== '--') { const gctVal = parseInt(r.gct,10); if(!isNaN(gctVal) && gctVal >= 100 && gctVal <= 400) { sumGct += gctVal; countGct++; } }
-if(!_statsGctUntrusted && r.flight && r.flight !== '--') { const flightVal = parseInt(r.flight,10); if(!isNaN(flightVal) && flightVal >= 0 && flightVal <= 100) { sumFlight += flightVal; countFlight++; } }
+if(!_statsGctUntrusted && !isFlightEstimated(r) && r.flight && r.flight !== '--') { const flightVal = parseInt(r.flight,10); if(!isNaN(flightVal) && flightVal >= 0 && flightVal <= 100) { sumFlight += flightVal; countFlight++; } }
 if(r.alt !== undefined && typeof r.alt === 'number' && !isNaN(r.alt)) { sumAlt += r.alt; countAlt++; }
 if(r.power != null && typeof r.power === 'number' && !isNaN(r.power)) { sumPower += r.power; countPower++; } // [신규]
 // [추가] GCT 밸런스 평균 (좌측 % 기준)
@@ -9491,7 +9492,7 @@ let dynamicsHtml = '<div class="detail-log-box u-margin-top-12px"><div class="de
 ) : (
 // [수정] 가슴·허리(러닝)가 아닌 기록은 경로 상세 요약 박스에서도 값에 '참고용' 표시를 붙인다
 '<div class="detail-log-item"><span>' + (t.avgGct || "Average GCT") + '</span><span>' + (record.gct || '--') + ' ms.' + (this.isGctVertUnreliable(record) ? gctRefTagHtml(storage.getLang()) : '') + '</span></div>' +
-'<div class="detail-log-item"><span>' + (t.avgFlight || "Average Flight") + '</span><span>' + (record.flight || '--') + ' %.' + (this.isGctVertUnreliable(record) ? gctRefTagHtml(storage.getLang()) : '') + '</span></div>' +
+'<div class="detail-log-item"><span>' + (t.avgFlight || "Average Flight") + '</span><span>' + (record.flight || '--') + ' %.' + (isFlightEstimated(record) ? flightEstTagHtml(storage.getLang()) : '') + '</span></div>' +
 '<div class="detail-log-item"><span>' + (t.avgCadence || "Average Cadence") + '</span><span>' + (record.cadence || 0) + ' SPM.</span></div>' +
 '<div class="detail-log-item"><span>' + (t.avgPowerLabel || "Average Power") + '</span><span>' + (record.power != null ? record.power : '--') + ' W.</span></div>' +
 '<div class="detail-log-item"><span>' + (t.stride || "Stride") + '</span><span>' + (() => { const c=record.cadence; const p=record.avgPace||record.pace; if(c&&p&&p.includes("'")){const parts=p.replace('"','').split("'");const min=parseInt(parts[0])||5;const sec=parseInt(parts[1])||0;const kmh=60/(min+sec/60);return ((kmh/3.6)/(c/60)).toFixed(2)+' m';} return '--'; })() + '</span></div>' +
@@ -9592,7 +9593,7 @@ shareRunCardImage({
   dist: displayDist.toFixed(2), distUnit: unitText, time: record.time, pace: displayPace,
   cadence: record.cadence,
   gct: (_shareGctUntrusted || premium.shareLocked()) ? '--' : record.gct,
-  flight: (_shareGctUntrusted || premium.shareLocked()) ? '--' : record.flight,
+  flight: (_shareGctUntrusted || isFlightEstimated(record) || premium.shareLocked()) ? '--' : record.flight,
   vertRatio: vertRatioVal,
   gctBal: (_shareGctUntrusted || premium.shareLocked()) ? '--' : record.gctBal, effScore, effSimple: _shareEffSimple, dateStr,
   // [추가] 활동모드에 따라 카드 레이아웃(걷기용 STEPS/SPM 등)이 분기되도록 전달
@@ -9661,8 +9662,9 @@ const _gctFlightHidden = this.isGyroAccelUnreliable(r);
 // 체공시간
 const flightVal = (!_gctUntrusted && r.flight && r.flight !== '--') ? r.flight : '--'; // [수정] FLIGHT는 GCT에서 파생 → GCT와 같은 기준으로 숨김
 const flightNum = parseInt(flightVal);
+const _flEst = isFlightEstimated(r); // [추가 2026-10-28] 추정값이면 색 평가·코멘트 없이 회색 + EST
 let flightComment = '';
-if (!isNaN(flightNum)) {
+if (!isNaN(flightNum) && !_flEst) {
 flightComment = flightNum < 30 ? t.diagFlightShort
 : flightNum < 45 ? t.diagFlightGood
 : t.diagFlightLong;
@@ -9822,7 +9824,7 @@ contentArea.innerHTML =
 '<div class="diag-card"><div class="diag-label">' + (t.diagStrideLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + this.getStrideColor(strideNumForFeedback, diagProfile, r.cadence) + '">' + strideVal + '</div><div class="diag-ref">Ref: ' + strideRefTxt + '</div></div><div class="diag-tip">' + strideComment + '</div></div>' +
 '<div class="diag-card lk-dyn"><div class="diag-label">' + (t.diagGctLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (!_gctUntrusted && r.gct && r.gct !== '--' ? this.getGctColor(r.gct) : '#aaa') + '">GCT: ' + (_gctUntrusted ? '--' : r.gct) + ' ms</div><div class="diag-ref">Ref: ≤240ms</div></div><div class="diag-tip">' + gctComment + '</div></div>' +
 '<div class="diag-card lk-dyn"><div class="diag-label">' + (t.diagBalanceLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (_gctFlightHidden ? '#aaa' : this.getBalanceColor(r.gctBal)) + '">GCT ' + (_gctFlightHidden ? '--' : (r.gctBal || '--')) + ' <span style="font-size:var(--fs-xs);color:#aaa">L:R</span></div><div class="diag-ref">GYRO ' + (_gctFlightHidden ? '--' : (r.gyroBal || '--')) + '</div></div><div class="diag-tip">' + diagFeedback.balance + '</div><div style="font-size:var(--fs-xs);color:#888;font-weight:600;line-height:1.5;margin-top:8px;padding-top:8px;border-top:1px solid #222;">' + (t.diagBalanceExplain || '') + '</div></div>' +
-'<div class="diag-card lk-dyn"><div class="diag-label">' + (t.diagFlightLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + (isNaN(flightNum)?'#aaa':this.getFlightColor(flightNum)) + '">' + flightVal + (flightVal!=='--'?' %':'') + '</div><div class="diag-ref">Ref: 30~45%</div></div><div class="diag-tip">' + flightComment + '</div></div>' +
+'<div class="diag-card lk-dyn"><div class="diag-label">' + (t.diagFlightLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + ((isNaN(flightNum) || _flEst)?'#aaa':this.getFlightColor(flightNum)) + '">' + flightVal + (flightVal!=='--'?' %':'') + (_flEst && flightVal!=='--' ? flightEstTagHtml(storage.getLang()) : '') + '</div><div class="diag-ref">Ref: 30~45%</div></div><div class="diag-tip">' + flightComment + '</div></div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagHrLabel) + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:' + hrColor + '">' + hrMainVal + '</div><div class="diag-ref">' + t.hrZoneLabel + ': ' + hrZoneDisplay + '</div></div><div class="diag-tip">' + hrComment + '</div>' + _wrapGraph('hr', hrSparkSvg, diagAxisLabelsHtml + hrNoteHtml) + '</div>' +
 '<div class="diag-card"><div class="diag-label">' + (t.diagAltLabel || "GPS ALTITUDE") + '</div><div class="diag-val-group"><div class="diag-main-val">' + (altSparkSvg ? _altMainHtml : '--') + '</div>' + _altRefHtml + '</div>' + (altSparkSvg ? _wrapGraph('alt', altSparkSvg, diagAxisLabelsHtml) : '<div class="diag-tip">' + (t.diagAltNoData || '') + '</div>') + '</div>' +
 // [추가] 린각도: 해당 기록에 데이터가 있을 때만 카드+다이어그램 노출 (LeanAngleUI.has()로 게이팅, 계산/판정 로직은 모듈만 사용)
@@ -10910,7 +10912,13 @@ result.flightMeasured = false;
 // 추정값이므로 flightMeasured=false → 카드에 REF 표시. 속도가 정상 범위(6~18km/h)를 벗어나면 기존 폴백값 유지. 범위 밖 외삽 방지로 24~30%로 제한.
 if (this.gctPosKey !== 'chest') {
   let _spdB = NaN;
-  try { _spdB = (typeof app !== 'undefined' && app && app.state) ? parseFloat(app.state.metricSpeedKmh) : NaN; } catch (e) {}
+  try {
+    if (typeof app !== 'undefined' && app && app.state) {
+      const _fb = app.state.flightSpdBuf; // [B2] 로그 속도(구간 거리 기반)의 최근 20초 중앙값
+      if (_fb && _fb.length >= 5) { const _ss = _fb.slice().sort((a, b) => a - b); _spdB = _ss[_ss.length >> 1]; }
+      else _spdB = parseFloat(app.state.metricSpeedKmh);
+    }
+  } catch (e) {}
   if (!isNaN(_spdB) && _spdB > 6 && _spdB < 18) {
     _flightCalc = Math.round(Math.max(24, Math.min(30, 6.734 * (_spdB / 3.6) + 6.086)));
   }
@@ -13575,6 +13583,8 @@ const _winElapsedSec = this.state.seconds - _swOldest.t;
 const logSpeedKmh = (_windowDistM > 0 && _winElapsedSec > 0)
   ? ((_windowDistM / 1000) / (_winElapsedSec / 3600)).toFixed(1)
   : getTxt('curSpeed');
+// [추가 B2 2026-10-28] FLIGHT 속도 추정용: 로그 speed_kmh와 같은 구간(4초) 거리 기반 속도를 최근 20초 버퍼로 보관 (metricSpeedKmh는 도플러 기반이라 더 낮게 나옴)
+try { const _ls = parseFloat(logSpeedKmh); if (!isNaN(_ls) && _ls > 0) { if (!this.state.flightSpdBuf) this.state.flightSpdBuf = []; this.state.flightSpdBuf.push(_ls); while (this.state.flightSpdBuf.length > 20) this.state.flightSpdBuf.shift(); } } catch (e) {}
 // [수정 2026-09-01] 이번 로그 초 동안 새로 커밋된 스텝이 있었는지 확인.
 // gctCount는 commitStep()에서 GCT가 실제로 계산될 때만(즉 새 스텝이 확정될 때만)
 // 증가하므로, 직전 로그 시점 값과 같다면 이번 초엔 새 스텝이 없었다는 뜻이다.
@@ -13834,6 +13844,7 @@ this.state.pendingSpeedVal = null; // [추가] 페이스 이상치 확인 대기
 this.state.metricSpeedBuffer = [];
 this.state.lastValidMetricSpeed = 0;
 this.state.metricSpeedKmh = 0;
+this.state.flightSpdBuf = [];
 this.state.pendingMetricSpeedVal = null; // [추가]
 this._lastDeltaDist = null;
 this._lastDeltaTime = null;
@@ -16591,7 +16602,7 @@ const shareLeanAngle = opts.leanAngle !== false; // [신규] 린각도 공유 �
         // [수정] 공유 모달 드롭다운의 각 체크박스를 끄면 해당 필드는 null로 업로드(비공개)
         cadence: shareCadence ? (record.cadence || null) : null,
         gct_ms: (shareGct && !dynamicsUntrusted) ? (record.gct || null) : null,
-        flight_pct: (shareFlight && !dynamicsUntrusted && record.flight) ? parseInt(record.flight) : null,
+        flight_pct: (shareFlight && !dynamicsUntrusted && !isFlightEstimated(record) && record.flight) ? parseInt(record.flight) : null,
         stride_m: shareStride ? (record.stride || null) : null,
         // [수정] 효율점수는 케이던스/GCT/체공비율로부터 계산되는 파생값이라, 그중 하나라도 비공개 처리되면 함께 숨김
         eff_score: dynamicsUntrusted
