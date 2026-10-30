@@ -2550,10 +2550,8 @@ alt="runner"/>
 <button type="button" id="btn-quick-reset" style="width:100%; margin-top:8px; padding:12px; border-radius:12px; border:1px solid #444; background:#2a2a2a; color:#ddd; font-weight:800; font-size:var(--fs-sm);" onclick="garmin.quickReset()"><span id="btn-quick-reset-label">RESET SELECTION &amp; RESULT</span></button>
 <div id="garmin-quick-status" style="margin-top:10px;"></div>
 </div>
-<div id="garmin-calib-result" class="u-margin-top-12px"></div>
-<div id="garmin-calib-pending" class="u-margin-top-12px"></div>
-<div id="garmin-calib-status" class="u-margin-top-10px"></div>
-<details id="garmin-adv-details" class="calib-manage">
+<!-- [수정 2026-10-30] ADVANCED를 QUICK COMPARE 카드 바로 아래로 이동: 아래 결과/대기/적용 영역(garmin-calib-result·pending·status)은 퀵·어드밴스 공용이므로, 두 방식 모두 결과가 자기 아래에 나오도록 순서를 [퀵 카드 → ADVANCED → 공용 결과] 로 정리 -->
+<details id="garmin-adv-details" class="calib-manage" style="margin-top:0;">
 <summary id="garmin-adv-summary"><span id="garmin-adv-summary-text">ADVANCED (manual select / manage)</span><span class="cm-arrow">▾</span></summary>
 <div class="calib-manage-body">
 <div class="diag-card u-margin-0-0-10px-0">
@@ -2652,6 +2650,9 @@ alt="runner"/>
 </div>
 </div>
 </details>
+<div id="garmin-calib-result" class="u-margin-top-12px"></div>
+<div id="garmin-calib-pending" class="u-margin-top-12px"></div>
+<div id="garmin-calib-status" class="u-margin-top-10px"></div>
 <!-- [/추가] 캘리브레이션 비교 -->
 </div>
 </div>
@@ -3360,7 +3361,7 @@ function appAlert(msg) {
     okBtn.addEventListener('click', onOk);
   });
 }
-function appConfirm(msg) {
+function appConfirm(msg, opts) { // [수정 2026-10-30] opts(선택): { ok, cancel, multiline } — 버튼 문구 지정/줄바꿈 표시. 기존 호출은 그대로(예/아니오)
   return new Promise((resolve) => {
     const modal = document.getElementById('confirm-modal');
     const msgEl = document.getElementById('confirm-modal-msg');
@@ -3373,13 +3374,15 @@ function appConfirm(msg) {
     const origDelete = deleteBtn ? deleteBtn.textContent : 'DELETE';
     const _lang = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang() : 'en';
     const _t = translations[_lang] || translations['en'];
-    if (cancelBtn) cancelBtn.textContent = _t.noBtn;
-    if (deleteBtn) { deleteBtn.textContent = _t.yesBtn; deleteBtn.style.background = 'var(--primary)'; deleteBtn.style.color = '#000'; }
+    if (cancelBtn) cancelBtn.textContent = (opts && opts.cancel) || _t.noBtn;
+    if (deleteBtn) { deleteBtn.textContent = (opts && opts.ok) || _t.yesBtn; deleteBtn.style.background = 'var(--primary)'; deleteBtn.style.color = '#000'; }
+    if (opts && opts.multiline) msgEl.style.whiteSpace = 'pre-line';
     modal.classList.add('is-open');
     // 기존 closeConfirmModal을 잠시 대체
     const origClose = ui ? ui.closeConfirmModal : null;
     const cleanup = (result) => {
       modal.classList.remove('is-open');
+      msgEl.style.whiteSpace = '';
       if (cancelBtn) cancelBtn.textContent = origCancel;
       if (deleteBtn) { deleteBtn.textContent = origDelete; deleteBtn.style.background = ''; deleteBtn.style.color = ''; }
       if (ui && origClose) ui.closeConfirmModal = origClose;
@@ -21058,11 +21061,34 @@ if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'A
   // 기존 유저가 "커밋된 새 기본값(DEFAULT_PROFILE_FACTORS_BY_POS[pos])으로 갈아타고 싶다"는
   // 경우를 위한 버튼. resetCalibration(FACTORY_DEFAULT_FACTORS, 항상 1.0)과 달리 이 함수는
   // "커밋된 기본값" 쪽을 참조한다 — 즉 최신 커밋값으로 스냅(snap)시키는 동작.
-  function applyCommittedDefault(pos) {
+  async function applyCommittedDefault(pos) { // [수정 2026-10-30] 실행 전 "현재값 → 커밋값"을 보여주고 확인/취소를 묻는다(모든 착용 위치 공통)
     const isKo = isKoLang();
     try {
       if (isMotionOnlyPos(pos)) return; // [추가] 프리런은 보정계수 슬롯이 없어 갈아탈 대상이 없다
-      const prof = storage.loadProfile();
+      {
+        const p0 = storage.loadProfile();
+        const d0 = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || FACTORY_DEFAULT_FACTORS;
+        ensureCalibFactorMaps(p0);
+        const cur0 = (map, d) => (typeof map[pos] === 'number' && map[pos] > 0) ? map[pos] : d;
+        const rows = [
+          ['stride', cur0(p0.strideCorrectionFactorByPos, d0.stride), d0.stride],
+          ['gps', cur0(p0.gpsDistCorrectionFactorByPos, d0.gps), d0.gps],
+          ['cad', cur0(p0.cadCorrectionFactorByPos, d0.cad), d0.cad],
+          ['pace', cur0(p0.paceCorrectionFactorByPos, d0.pace), d0.pace]
+        ];
+        const posLabel0 = getPosLabel(pos, isKo);
+        if (rows.every(r => Math.abs(r[1] - r[2]) < 1e-9)) {
+          alert(isKo ? '[' + posLabel0 + '] 이미 최신 커밋된 기본값과 같아요. 바꿀 값이 없습니다.' : '[' + posLabel0 + '] Already equal to the latest committed default. Nothing to change.');
+          return;
+        }
+        const lines = rows.map(r => r[0] + '  ' + r[1].toFixed(3) + ' → ' + r[2].toFixed(3) + (Math.abs(r[1] - r[2]) < 1e-9 ? '' : '  ●')).join('\n');
+        const msg = isKo
+          ? '[' + posLabel0 + '] 보정계수를 최신 커밋된 기본값으로 바꿀까요?\n\n' + lines + '\n\n● = 바뀌는 값 · 모션 보정(GCT 등)은 그대로예요.\n바꾼 뒤에는 이전 값으로 되돌리는 기능이 없어요.'
+          : 'Switch [' + posLabel0 + '] correction factors to the latest committed default?\n\n' + lines + '\n\n● = will change · Motion calibration (GCT etc.) is kept.\nThis cannot be undone afterwards.';
+        const ok = await appConfirm(msg, { ok: isKo ? '확인' : 'OK', cancel: isKo ? '취소' : 'CANCEL', multiline: true });
+        if (!ok) return;
+      }
+      const prof = storage.loadProfile(); // 확인창이 떠 있는 동안 바뀌었을 수 있으니 다시 읽는다
       const defFactors = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || FACTORY_DEFAULT_FACTORS;
       ensureCalibFactorMaps(prof);
       prof.strideCorrectionFactorByPos[pos] = defFactors.stride;
