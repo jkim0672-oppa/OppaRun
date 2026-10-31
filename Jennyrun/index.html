@@ -8086,6 +8086,10 @@ order.forEach(function(pos) {
   // [추가 2026-10-30] 위치별 수동 입력/수정 버튼 — 누르면 아래에 입력 폼이 펼쳐진다
   html += '<button type="button" id="calib-edit-btn-' + pos + '" onclick="ui.openCalibManualEdit(\'' + pos + '\')" style="background:#1b2230; color:#7fb4ff; border:1.5px solid #2a3b55; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); margin-top:8px; cursor:pointer;">' + (isKo ? '직접 수정' : 'EDIT MANUALLY') + '</button>';
   html += '<div id="calib-edit-' + pos + '" style="display:none;"></div>';
+  // [추가 2026-10-30] 위치별 UNDO — 가민 카드의 UNDO LAST APPLY와 같은 되돌리기(위치별 스냅샷)를 그대로 호출. 되돌릴 기록이 있는 위치에만 표시.
+  if (prof.motionCalibUndos && prof.motionCalibUndos[pos]) {
+    html += '<button type="button" onclick="ui.undoCalibFromPanel(\'' + pos + '\')" style="background:transparent; color:var(--primary); border:1.5px solid #2a3a2f; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); margin-top:8px; cursor:pointer;">' + (isKo ? '직전 적용 이전으로 되돌리기' : 'UNDO LAST APPLY') + '</button>';
+  }
   html += '</div>';
 });
 
@@ -8098,10 +8102,16 @@ box.innerHTML = html;
 box.classList.add('is-open');
 if (btnLabel) btnLabel.textContent = (isKo ? '현재 데이터 숨기기' : 'HIDE CURRENT DATA');
 }
+// [추가 2026-10-30] 현재 데이터 패널의 위치별 UNDO — 기존 garmin.undoLastCalibration(pos)를 실행한 뒤 화면 갱신
+undoCalibFromPanel(pos) {
+  try { garmin.undoLastCalibration(pos); } catch (e) { jrLogErr('calibUndoPanel', e); }
+}
 // [추가 2026-10-30] SHOW CURRENT DATA 위치별 "직접 수정" — 입력 폼 열기/닫기
-openCalibManualEdit(pos) {
-  const box = document.getElementById('calib-edit-' + pos);
-  const btn = document.getElementById('calib-edit-btn-' + pos);
+openCalibManualEdit(pos, ctx) {
+  const sfx = (ctx === 'gm') ? 'gm-' : '';
+  const ctxArg = (ctx === 'gm') ? ', \'gm\'' : '';
+  const box = document.getElementById('calib-edit-' + sfx + pos);
+  const btn = document.getElementById('calib-edit-btn-' + sfx + pos);
   if (!box) return;
   const isKo = storage.getLang() === 'ko';
   if (box.style.display !== 'none') { // 이미 열려 있으면 닫기
@@ -8123,8 +8133,8 @@ openCalibManualEdit(pos) {
     const v = snap[f.key];
     const val = (typeof v === 'number') ? String(Number(v.toFixed(4))) : '';
     h += '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px;">' +
-      '<label for="cme-' + pos + '-' + f.key + '" style="font-size:var(--fs-xxs); color:#aaa;">' + (isKo ? f.ko : f.en) + '</label>' +
-      '<input id="cme-' + pos + '-' + f.key + '" type="number" inputmode="decimal" step="any" value="' + val + '" style="' + inpStyle + '">' +
+      '<label for="cme-' + sfx + pos + '-' + f.key + '" style="font-size:var(--fs-xxs); color:#aaa;">' + (isKo ? f.ko : f.en) + '</label>' +
+      '<input id="cme-' + sfx + pos + '-' + f.key + '" type="number" inputmode="decimal" step="any" value="' + val + '" style="' + inpStyle + '">' +
       '</div>';
   });
   if (!motionOnly && !calibFactorsFlag(prof)) {
@@ -8133,15 +8143,16 @@ openCalibManualEdit(pos) {
       '</div>';
   }
   h += '<div style="display:flex; gap:8px; margin-top:8px;">' +
-    '<button type="button" onclick="ui.openCalibManualEdit(\'' + pos + '\')" style="flex:1; background:#222; color:#ccc; border:1.5px solid #444; padding:11px; border-radius:10px; font-weight:800; font-size:var(--fs-xs); cursor:pointer;">' + (isKo ? '취소' : 'CANCEL') + '</button>' +
-    '<button type="button" onclick="ui.saveCalibManualEdit(\'' + pos + '\')" style="flex:2; background:#14261a; color:#5fd18a; border:1.5px solid #2d5a3f; padding:11px; border-radius:10px; font-weight:900; font-size:var(--fs-xs); cursor:pointer;">' + (isKo ? '저장 및 적용' : 'SAVE & APPLY') + '</button>' +
+    '<button type="button" onclick="ui.openCalibManualEdit(\'' + pos + '\'' + ctxArg + ')" style="flex:1; background:#222; color:#ccc; border:1.5px solid #444; padding:11px; border-radius:10px; font-weight:800; font-size:var(--fs-xs); cursor:pointer;">' + (isKo ? '취소' : 'CANCEL') + '</button>' +
+    '<button type="button" onclick="ui.saveCalibManualEdit(\'' + pos + '\'' + ctxArg + ')" style="flex:2; background:#14261a; color:#5fd18a; border:1.5px solid #2d5a3f; padding:11px; border-radius:10px; font-weight:900; font-size:var(--fs-xs); cursor:pointer;">' + (isKo ? '저장 및 적용' : 'SAVE & APPLY') + '</button>' +
     '</div></div>';
   box.innerHTML = h;
   box.style.display = 'block';
   if (btn) btn.textContent = (isKo ? '수정 닫기' : 'CLOSE EDITOR');
 }
 // [추가 2026-10-30] 입력값 검증 → 기존 적용 경로(applyMotionCalibSuggestion: UNDO 스냅샷 + 최근3회 이력 포함)로 저장 → 라이브 반영
-async saveCalibManualEdit(pos) {
+async saveCalibManualEdit(pos, ctx) {
+  const sfx = (ctx === 'gm') ? 'gm-' : '';
   const isKo = storage.getLang() === 'ko';
   const prof = storage.loadProfile();
   const snap = calibEffectiveSnapshot(prof, pos);
@@ -8156,7 +8167,7 @@ async saveCalibManualEdit(pos) {
   const bad = [];
   CALIB_HISTORY_FIELDS.forEach(function(f) {
     if (motionOnly && f.factor) return;
-    const el = document.getElementById('cme-' + pos + '-' + f.key);
+    const el = document.getElementById('cme-' + sfx + pos + '-' + f.key);
     if (!el) return;
     const raw = String(el.value).trim();
     if (raw === '') return; // 비워두면 변경 없음
@@ -8215,8 +8226,10 @@ async saveCalibManualEdit(pos) {
       if (wasOn && changed.pace != null) app.motion.paceCorrectionFactor = changed.pace;
     }
     // 패널 새로고침(닫았다가 다시 열어서 최신 값/이력/CHANGED 표시 반영)
-    this.toggleCurrentData();
-    this.toggleCurrentData();
+    if (ctx === 'gm') { try { garmin.refreshCalibStatus(); } catch (_e) {} }
+    else { this.toggleCurrentData(); this.toggleCurrentData(); }
+    // 다른 화면(현재 데이터 패널)이 열려 있었다면 그쪽도 최신값으로 갱신
+    if (ctx === 'gm') { try { const cd = document.getElementById('current-data-result'); if (cd && cd.classList.contains('is-open')) { this.toggleCurrentData(); this.toggleCurrentData(); } } catch (_e) {} }
     await appAlert('[' + getPosLabel(pos, isKo) + '] ' + (isKo ? '수동 입력값이 저장·적용되었어요.' : 'Manual values saved and applied.'));
   } catch (e) {
     jrLogErr('calibManualEdit', e);
@@ -20838,6 +20851,9 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
         + '<div class="calib-acc-body">'
         + buildCalibHistoryRows(curProf, pos, isKo)
         + (dateTxt ? '<div style="font-size:var(--fs-xxs); color:#666; margin-top:6px;">' + (isKo ? '적용일: ' : 'Applied: ') + dateTxt + '</div>' : '')
+        // [추가 2026-10-30] 위치별 수동 입력/수정 (SHOW CURRENT DATA 패널과 같은 폼, ID만 gm- 접두로 분리)
+        + '<button type="button" id="calib-edit-btn-gm-' + pos + '" onclick="ui.openCalibManualEdit(\'' + pos + '\', \'gm\')" style="background:#1b2230; color:#7fb4ff; border:1.5px solid #2a3b55; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); margin-top:10px; cursor:pointer;">' + (isKo ? '직접 수정' : 'EDIT MANUALLY') + '</button>'
+        + '<div id="calib-edit-gm-' + pos + '" style="display:none;"></div>'
         + '<div style="font-size:var(--fs-xxs); color:#888; font-weight:800; margin-top:12px; margin-bottom:4px;">' + (isKo ? '코드 반영용 스니펫 (applyDevicePos / defaultProfile)' : 'CODE SNIPPET (applyDevicePos / defaultProfile)') + '</div>'
         + '<pre style="background:#000; border:1px solid #2a2a2a; border-radius:8px; padding:10px; font-size:var(--fs-xxs); color:#0f0; white-space:pre-wrap; word-break:break-all; margin:0;">' + snippet.replace(/</g,'&lt;') + '</pre>'
         + '<button style="margin-top:8px; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.copySnippet(\'' + escapedSnippet + '\')">' + (isKo ? '스니펫 복사' : 'COPY SNIPPET') + '</button>'
@@ -21117,6 +21133,7 @@ if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'A
 
       renderCalibStatus(isKo);
       renderPendingCalibList(isKo);
+      try { const _cd = document.getElementById('current-data-result'); if (_cd && _cd.classList.contains('is-open')) { ui.toggleCurrentData(); ui.toggleCurrentData(); } } catch (_e) {} // [추가 2026-10-30] 현재 데이터 패널이 열려 있으면 같이 갱신
       const undoPosLabel = getPosLabel(pos, isKo);
       alert(isKo ? '[' + undoPosLabel + '] 위치를 직전 적용 이전 상태로 되돌렸습니다.' : '[' + undoPosLabel + '] reverted to the state before the last apply.');
     } catch (err) {
@@ -21250,6 +21267,7 @@ if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'A
         app.motion.applyDevicePos(prof.devicePos || 'chest');
       }
       renderCalibStatus(isKo);
+      try { const _cd = document.getElementById('current-data-result'); if (_cd && _cd.classList.contains('is-open')) { ui.toggleCurrentData(); ui.toggleCurrentData(); } } catch (_e) {} // [추가 2026-10-30] 현재 데이터 패널이 열려 있으면 같이 갱신
       alert((isKo ? '[' + getPosLabel(pos, isKo) + '] 갈아타기 이전 값으로 되돌렸습니다.\n' : '[' + getPosLabel(pos, isKo) + '] Reverted to the values before the switch.\n') + restored);
     } catch (err) {
       alert((isKo ? '되돌리기 중 오류: ' : 'Undo error: ') + err.message);
@@ -21667,7 +21685,7 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
     saveTextFileNative(reportStr, fileName, 'text/plain;charset=utf-8', isKo);
   }
 
-  return { clearAllSelections, hideAutoLog, clearHiddenList, toggleRestorePanel, toggleRestoreSel, restoreSelectedAutoLogs, importFitFile, deleteImport, quickCompareFit, quickRunGroup, quickTogglePair, quickReset, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, toggleGarminDetail, openInfo, closeInfo, togglePrecLogSelect, togglePrecLogSelectAutoMatch, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, undoCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
+  return { refreshCalibStatus: function () { renderCalibStatus(isKoLang()); }, clearAllSelections, hideAutoLog, clearHiddenList, toggleRestorePanel, toggleRestoreSel, restoreSelectedAutoLogs, importFitFile, deleteImport, quickCompareFit, quickRunGroup, quickTogglePair, quickReset, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, toggleGarminDetail, openInfo, closeInfo, togglePrecLogSelect, togglePrecLogSelectAutoMatch, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, undoCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
