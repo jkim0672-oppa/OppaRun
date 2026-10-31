@@ -3868,9 +3868,32 @@ let edgeSet = (!bucketed && opts && opts.edge && opts.edge.size) ? opts.edge : n
 const isEdge = (p) => !!(edgeSet && edgeSet.has(p.i));
 if (edgeSet && pts.filter(p => !isEdge(p)).length < 3) edgeSet = null; // 남는 포인트가 너무 적으면 그냥 전부 사용
 const scalePts = edgeSet ? pts.filter(p => !isEdge(p)) : pts;
+// 핵심(core) 구간 = edge가 아닌 연속 구간 (edge는 양 끝에만 존재)
+const firstCore = edgeSet ? pts.findIndex(p => !isEdge(p)) : 0;
+let lastCore = pts.length - 1;
+if (edgeSet) { while (lastCore > 0 && isEdge(pts[lastCore])) lastCore--; }
+// [추가 2026-10-31] 표시용 값(dispV): 핵심 구간 점들을 1-2-1 가중평균으로 이웃과 섞어 출렁임을 줄인다.
+// 핵심 구간의 양 끝 점은 바깥쪽 이웃이 없으므로(edge 점은 출발 가속/자투리라 섞지 않음) 자기 값으로 채워 계산해,
+// 끝 점만 유독 뾰족하게 남는 일이 없게 한다. edge 점은 원래 값 그대로이고, 흐린 점선은 평활화된 첫/끝 핵심 점에 이어 붙는다.
+// 평균선·전/후반 흰 선·최고 표시 위치와 통계 숫자는 원본 값 기준 그대로다(세로 범위만 아래에서 이 dispV 기준으로 잡는다).
+const _smoothPasses = (opts && typeof opts.smoothPasses === 'number') ? opts.smoothPasses : DIAG_GRAPH_SMOOTH_PASSES;
+const _subdiv = (opts && typeof opts.subdiv === 'number') ? Math.max(1, Math.round(opts.subdiv)) : DIAG_GRAPH_SUBDIV;
+const dispV = pts.map(p => p.v);
+for (let pass = 0; pass < _smoothPasses; pass++) {
+  const prevV = dispV.slice();
+  for (let k = firstCore; k <= lastCore; k++) {
+    const a = (k > firstCore) ? prevV[k - 1] : prevV[k];
+    const b = (k < lastCore) ? prevV[k + 1] : prevV[k];
+    dispV[k] = (a + 2 * prevV[k] + b) / 4;
+  }
+}
 const W = 100, H = 32, PAD = 2; // [수정] 기준선이 덜 답답해 보이도록 높이 26→32
-let min = Math.min(...scalePts.map(p => p.v));
-let max = Math.max(...scalePts.map(p => p.v));
+// [수정 2026-10-31] 세로 범위는 "화면에 그려지는 값(dispV, 평활화 후)" 기준으로 잡는다. 원본 최고/최저로 잡으면
+// 평활화로 낮아진 봉우리가 그래프 높이의 일부만 써서 작은 카드가 납작해 보였다. 평균선/전·후반 흰 선/최고 표시는
+// 원본 값 그대로 이 범위 위에 그려지고(범위 밖이면 yFor가 안쪽 끝에 붙임), 통계 숫자도 원본 기준 그대로다.
+const _scaleVals = dispV.slice(firstCore, lastCore + 1);
+let min = Math.min(..._scaleVals);
+let max = Math.max(..._scaleVals);
 // [추가 2026-09-25] 최소 스케일 폭: 지금까지는 이번 러닝의 실제 최저~최고값을 무조건 그래프 세로
 // 폭 꽉 채워서 그렸다. 그래서 케이던스가 17 SPM 차이 나든, 페이스가 겨우 10초/km 차이 나든 그래프
 // 에서는 똑같이 끝에서 끝까지 요동치는 것처럼 보여 작은 변화가 실제보다 과장돼 보이는 문제가 있었다.
@@ -3899,25 +3922,6 @@ const yFor = (v) => {
 };
 const xStep = (W - PAD * 2) / (values.length - 1 || 1);
 const xFor = (idx) => Math.min(W - PAD, Math.max(PAD, PAD + idx * xStep));
-// 핵심(core) 구간 = edge가 아닌 연속 구간 (edge는 양 끝에만 존재)
-const firstCore = edgeSet ? pts.findIndex(p => !isEdge(p)) : 0;
-let lastCore = pts.length - 1;
-if (edgeSet) { while (lastCore > 0 && isEdge(pts[lastCore])) lastCore--; }
-// [추가 2026-10-31] 표시용 값(dispV): 핵심 구간 점들을 1-2-1 가중평균으로 이웃과 섞어 출렁임을 줄인다.
-// 핵심 구간의 양 끝 점은 바깥쪽 이웃이 없으므로(edge 점은 출발 가속/자투리라 섞지 않음) 자기 값으로 채워 계산해,
-// 끝 점만 유독 뾰족하게 남는 일이 없게 한다. edge 점은 원래 값 그대로이고, 흐린 점선은 평활화된 첫/끝 핵심 점에 이어 붙는다.
-// 평활화는 항상 원래 값 범위 안이라 세로 눈금(min/max)·평균선·전/후반 흰 선은 원본 값 기준 그대로 둔다. 통계 숫자도 원본 기준이다.
-const _smoothPasses = (opts && typeof opts.smoothPasses === 'number') ? opts.smoothPasses : DIAG_GRAPH_SMOOTH_PASSES;
-const _subdiv = (opts && typeof opts.subdiv === 'number') ? Math.max(1, Math.round(opts.subdiv)) : DIAG_GRAPH_SUBDIV;
-const dispV = pts.map(p => p.v);
-for (let pass = 0; pass < _smoothPasses; pass++) {
-  const prevV = dispV.slice();
-  for (let k = firstCore; k <= lastCore; k++) {
-    const a = (k > firstCore) ? prevV[k - 1] : prevV[k];
-    const b = (k < lastCore) ? prevV[k + 1] : prevV[k];
-    dispV[k] = (a + 2 * prevV[k] + b) / 4;
-  }
-}
 const cx = pts.map(p => PAD + p.i * xStep);
 const cy = pts.map((p, k) => yFor(dispV[k]));
 const coords = cx.map((x, k) => x.toFixed(1) + ',' + cy[k].toFixed(1));
