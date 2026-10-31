@@ -3474,6 +3474,13 @@ const GRAPH_LEAD_SEC = { pace: 30, cad: 30, hr: 60 };
 // 전달되어, 실제 변화폭이 이 비율보다 작으면 그래프가 세로로 꽉 차 보이지 않게 완충한다. 페이스가
 // 케이던스처럼 "비슷한 %는 비슷하게" 보이도록 세 지표를 같은 비율로 맞췄다.
 const GRAPH_MIN_RANGE_PCT = { pace: 0.08, cad: 0.08, hr: 0.08 };
+// [추가 2026-10-31] 진단 그래프 "촘촘 + 완만" 표시 설정. 표시 전용이라 저장된 diagSplits와 AVG/BEST/안정성 등
+// 통계 숫자는 전혀 바뀌지 않는다(그래프 선 모양만 달라짐).
+//  - DIAG_GRAPH_SUBDIV: 구간 하나(100m)를 몇 등분해서 선을 그릴지. 10 → 10m 간격 점. 1이면 예전처럼 구간 점만 직선 연결.
+//  - DIAG_GRAPH_SMOOTH_PASSES: 이웃 구간 값을 섞는 횟수(1-2-1 가중평균). 0 = 값은 그대로 두고 곡선만 둥글게,
+//    1 = 기본, 2 = 더 완만(대신 뾰족한 최고/최저가 더 눌려 보임).
+const DIAG_GRAPH_SUBDIV = 10;
+const DIAG_GRAPH_SMOOTH_PASSES = 1;
 function getLeadExcludeCount(splits, minSec) {
   if (!splits || !splits.length) return 1;
   let prevKm = 0, prevT = 0, cnt = 0;
@@ -3784,6 +3791,37 @@ const sec = parseInt(parts[1]) || 0;
 const total = min * 60 + sec;
 return total > 0 ? total : null;
 }
+// [추가 2026-10-31] 점들을 지나는 부드러운 곡선을 sub등분해서 'x,y' 문자열 배열로 돌려준다.
+// Fritsch–Butland 단조 3차 보간이라 곡선이 점들의 최소/최대 밖으로 넘치지 않는다(원래 점은 그대로 지나감).
+// xs는 오름차순. 점이 3개 미만이거나 sub<2면 점만 그대로 직선 연결(예전 모양).
+function monotoneCurvePoints(xs, ys, sub) {
+  const n = xs.length;
+  const fmt2 = (x, y) => x.toFixed(2) + ',' + y.toFixed(2);
+  if (n < 3 || !(sub >= 2)) return xs.map((x, k) => fmt2(x, ys[k]));
+  const h = [], m = [];
+  for (let k = 0; k < n - 1; k++) {
+    h[k] = xs[k + 1] - xs[k];
+    m[k] = h[k] > 0 ? (ys[k + 1] - ys[k]) / h[k] : 0;
+  }
+  const t = new Array(n);
+  t[0] = m[0];
+  t[n - 1] = m[n - 2];
+  for (let k = 1; k < n - 1; k++) {
+    if (m[k - 1] * m[k] <= 0) { t[k] = 0; continue; } // 방향이 바뀌는 점(꼭대기/바닥)은 평평하게 → 넘치지 않음
+    const w1 = 2 * h[k] + h[k - 1], w2 = h[k] + 2 * h[k - 1];
+    t[k] = (w1 + w2) / (w1 / m[k - 1] + w2 / m[k]);
+  }
+  const out = [];
+  for (let k = 0; k < n - 1; k++) {
+    for (let j = (k === 0 ? 0 : 1); j <= sub; j++) {
+      const u = j / sub, u2 = u * u, u3 = u2 * u;
+      const y = (2 * u3 - 3 * u2 + 1) * ys[k] + (u3 - 2 * u2 + u) * h[k] * t[k]
+              + (-2 * u3 + 3 * u2) * ys[k + 1] + (u3 - u2) * h[k] * t[k + 1];
+      out.push(fmt2(xs[k] + u * h[k], y));
+    }
+  }
+  return out;
+}
 // [추가] 진단 화면 박스 안에 들어가는 작고 심플한 구간별(km 스플릿 기준) 변화 그래프.
 // values: 숫자 배열(null/NaN 섞여도 됨, 유효값만 사용). invert=true면 값이 작을수록 위로
 // 올라가게 그림(페이스처럼 "작을수록 좋음"인 지표에 사용). 유효 포인트가 2개 미만이면 빈 문자열 반환.
@@ -3861,19 +3899,34 @@ const yFor = (v) => {
 };
 const xStep = (W - PAD * 2) / (values.length - 1 || 1);
 const xFor = (idx) => Math.min(W - PAD, Math.max(PAD, PAD + idx * xStep));
-const coords = pts.map(p => {
-  const x = PAD + p.i * xStep;
-  const y = yFor(p.v);
-  return x.toFixed(1) + ',' + y.toFixed(1);
-});
 // 핵심(core) 구간 = edge가 아닌 연속 구간 (edge는 양 끝에만 존재)
 const firstCore = edgeSet ? pts.findIndex(p => !isEdge(p)) : 0;
 let lastCore = pts.length - 1;
 if (edgeSet) { while (lastCore > 0 && isEdge(pts[lastCore])) lastCore--; }
+// [추가 2026-10-31] 표시용 값(dispV): 핵심 구간 점들을 1-2-1 가중평균으로 이웃과 섞어 출렁임을 줄인다.
+// 핵심 구간의 양 끝 점은 바깥쪽 이웃이 없으므로(edge 점은 출발 가속/자투리라 섞지 않음) 자기 값으로 채워 계산해,
+// 끝 점만 유독 뾰족하게 남는 일이 없게 한다. edge 점은 원래 값 그대로이고, 흐린 점선은 평활화된 첫/끝 핵심 점에 이어 붙는다.
+// 평활화는 항상 원래 값 범위 안이라 세로 눈금(min/max)·평균선·전/후반 흰 선은 원본 값 기준 그대로 둔다. 통계 숫자도 원본 기준이다.
+const _smoothPasses = (opts && typeof opts.smoothPasses === 'number') ? opts.smoothPasses : DIAG_GRAPH_SMOOTH_PASSES;
+const _subdiv = (opts && typeof opts.subdiv === 'number') ? Math.max(1, Math.round(opts.subdiv)) : DIAG_GRAPH_SUBDIV;
+const dispV = pts.map(p => p.v);
+for (let pass = 0; pass < _smoothPasses; pass++) {
+  const prevV = dispV.slice();
+  for (let k = firstCore; k <= lastCore; k++) {
+    const a = (k > firstCore) ? prevV[k - 1] : prevV[k];
+    const b = (k < lastCore) ? prevV[k + 1] : prevV[k];
+    dispV[k] = (a + 2 * prevV[k] + b) / 4;
+  }
+}
+const cx = pts.map(p => PAD + p.i * xStep);
+const cy = pts.map((p, k) => yFor(dispV[k]));
+const coords = cx.map((x, k) => x.toFixed(1) + ',' + cy[k].toFixed(1));
 const coreCoords = coords.slice(firstCore, lastCore + 1);
+// [추가 2026-10-31] 선/면은 핵심 점들을 지나는 부드러운 곡선을 _subdiv등분(100m 구간이면 10m 간격)한 촘촘한 점으로 그린다.
+const curveCoords = monotoneCurvePoints(cx.slice(firstCore, lastCore + 1), cy.slice(firstCore, lastCore + 1), _subdiv);
 const first = coreCoords[0].split(',');
 const last = coreCoords[coreCoords.length - 1].split(',');
-const areaPts = first[0] + ',' + (H - PAD) + ' ' + coreCoords.join(' ') + ' ' + last[0] + ',' + (H - PAD);
+const areaPts = first[0] + ',' + (H - PAD) + ' ' + curveCoords.join(' ') + ' ' + last[0] + ',' + (H - PAD);
 // [추가] 평균 기준선(회색 점선). yFor가 invert를 이미 반영하므로 그대로 사용.
 // [수정] "avg" 텍스트 라벨은 카드 안에서 위치를 잡기 애매하고 데이터 선과 겹쳐 보기 불편하다는
 // 피드백으로 제거 — 점선만 남긴다.
@@ -3966,7 +4019,7 @@ return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style=
   + bestLineSvg
   + halfSvg
   + edgeSvg
-  + '<polyline points="' + coreCoords.join(' ') + '" fill="none" stroke="' + colorHex + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>'
+  + '<polyline points="' + curveCoords.join(' ') + '" fill="none" stroke="' + colorHex + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>'
   + '</svg>';
 }
 // [추가 2026-09-19] 그래프 세로 눈금/최고값 계산에서 제외할 경계 구간(양 끝에만 존재):
