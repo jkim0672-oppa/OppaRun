@@ -3841,6 +3841,12 @@ function buildSparklineSVG(values, colorHex, invert, showAvgLine, highlightBest,
 if (showAvgLine === undefined) showAvgLine = true;
 if (highlightBest === undefined) highlightBest = true;
 if (!values || !values.length) return '';
+// [추가 2026-10-31] opts.dropLast: 끝의 70m 미만 자투리 구간 한 칸을 그래프에서 뺀다(호출부가 hasShortTailSplit으로 판정).
+// 점선으로 그리지 않을 뿐 아니라 x축 한 칸도 차지하지 않아 그래프가 오른쪽 끝까지 이어진다. 값/통계는 건드리지 않는다.
+if (opts && opts.dropLast && values.length > 2) {
+  values = values.slice(0, -1);
+  if (times) times = times.slice(0, -1);
+}
 let pts = values.map((v, i) => ({ i, v })).filter(p => typeof p.v === 'number' && isFinite(p.v));
 if (pts.length < 2) return '';
 // [추가] 100m 단위 스플릿이라 긴 러닝(예: 하프/풀코스)은 포인트가 수십~백여 개가 될 수 있음.
@@ -4036,6 +4042,15 @@ return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style=
 // [수정 2026-09-19] leadCount 파라미터 추가: calcPacingMetrics의 전/후반 평균 계산(pick, i>=2)과
 // 케이던스·심박 그래프의 흐린 edge 표시 범위를 맞추기 위해, 해당 그래프는 leadCount=2로 호출한다
 // (평균 계산에 안 쓰인 초반 구간은 그래프에서도 흐리게 보이도록 일관성을 맞춤).
+// [추가 2026-10-31] 마지막 구간이 70m 미만 자투리(getGraphEdgeSet이 edge로 빼는 그 경우)인지 판정.
+// 자투리는 10m가 몇 초 걸린 값이라 페이스가 극단적으로 튀고, 구간 번호 순서로 x축을 잡는 그래프에서는
+// 100m 구간과 같은 폭을 차지해 오른쪽 끝에 가파른 점선이 생긴다. 그래서 진단 그래프/축 라벨에서는 이 자투리를 그리지 않는다
+// (통계·SPLITS 수·저장 데이터는 그대로). 판정 기준은 getGraphEdgeSet의 첫 분기와 반드시 같게 유지할 것.
+function hasShortTailSplit(splits) {
+  if (!splits || splits.length < 5) return false;
+  const kl = parseFloat(splits[splits.length - 1].km), kp = parseFloat(splits[splits.length - 2].km);
+  return isFinite(kl) && isFinite(kp) && (kl - kp) < 0.07;
+}
 function getGraphEdgeSet(splits, vals, leadCount) {
   const set = new Set();
   if (!splits || splits.length < 5) return set;
@@ -4118,6 +4133,7 @@ function fmtDiagAxisTime(sec) {
 }
 function buildDiagAxisLabelsHtml(splits) {
   if (!splits || splits.length < 2) return '';
+  if (hasShortTailSplit(splits)) splits = splits.slice(0, -1); // [추가 2026-10-31] 그래프가 자투리를 안 그리므로 마지막 라벨도 마지막 100m 구간 기준
   const totalKm = typeof splits[splits.length - 1].km === 'number' ? splits[splits.length - 1].km : parseFloat(splits[splits.length - 1].km);
   const n = getDiagAxisLabelCount(totalKm);
   const idxSet = new Set();
@@ -9967,6 +9983,7 @@ hrComment = zoneInfo.z <= 2 ? t.diagHrZoneLow
 // [추가] 박스 아래 작은 구간별(km 스플릿 기준) 변화 그래프 — 케이던스/페이스/심박/GPS고도
 // 한눈에 오르내림을 볼 수 있도록. 스플릿이 2개 미만이면(짧은 러닝 등) 해당 그래프는 표시 안 함.
 const _splitsForGraph = r.diagSplits || [];
+const _dropTail = hasShortTailSplit(_splitsForGraph); // [추가 2026-10-31] 끝 자투리(70m 미만)는 그래프에서 뺌
 const _diagSplitTimes = _splitsForGraph.map(s => (typeof s.t_sec === 'number' ? s.t_sec : null));
 // [추가 2026-09-19] 출발 첫 구간/끝 자투리는 그래프 눈금·최고값에서 제외, 전/후반 평균선 추가
 const _paceVals = _splitsForGraph.map(s => paceStrToSeconds(s.pace));
@@ -9981,12 +9998,12 @@ const _edgeCad = getGraphEdgeSet(_splitsForGraph, _cadVals, getLeadExcludeCount(
 const _edgeHr = getGraphEdgeSet(_splitsForGraph, _hrVals, getLeadExcludeCount(_splitsForGraph, GRAPH_LEAD_SEC.hr));
 const _edgePow = getGraphEdgeSet(_splitsForGraph, _powVals);
 const _pm = calcPacingMetrics(r);
-const paceSparkSvg = buildSparklineSVG(_paceVals, '#00ff88', true, undefined, undefined, _diagSplitTimes, { edge: _edgePace, half: _pm.paceHalf, minRangePct: GRAPH_MIN_RANGE_PCT.pace });
-const cadSparkSvg = buildSparklineSVG(_cadVals, '#4fc3f7', false, undefined, undefined, _diagSplitTimes, { edge: _edgeCad, half: _pm.cadHalf, minRangePct: GRAPH_MIN_RANGE_PCT.cad });
-const hrSparkSvg = buildSparklineSVG(_hrVals, '#e53935', false, undefined, undefined, _diagSplitTimes, { edge: _edgeHr, half: _pm.hrHalf, minRangePct: GRAPH_MIN_RANGE_PCT.hr });
-const altSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.altTo === 'number' ? s.altTo : null)), '#90a4ae', false, undefined, undefined, _diagSplitTimes, { minRange: 10 }); // [수정 2026-10-21] 최소 세로 폭 10m: 평지 런의 1~2m 잔떨림이 큰 오르내림처럼 보이지 않게
+const paceSparkSvg = buildSparklineSVG(_paceVals, '#00ff88', true, undefined, undefined, _diagSplitTimes, { edge: _edgePace, half: _pm.paceHalf, minRangePct: GRAPH_MIN_RANGE_PCT.pace, dropLast: _dropTail });
+const cadSparkSvg = buildSparklineSVG(_cadVals, '#4fc3f7', false, undefined, undefined, _diagSplitTimes, { edge: _edgeCad, half: _pm.cadHalf, minRangePct: GRAPH_MIN_RANGE_PCT.cad, dropLast: _dropTail });
+const hrSparkSvg = buildSparklineSVG(_hrVals, '#e53935', false, undefined, undefined, _diagSplitTimes, { edge: _edgeHr, half: _pm.hrHalf, minRangePct: GRAPH_MIN_RANGE_PCT.hr, dropLast: _dropTail });
+const altSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.altTo === 'number' ? s.altTo : null)), '#90a4ae', false, undefined, undefined, _diagSplitTimes, { minRange: 10, dropLast: _dropTail }); // [수정 2026-10-21] 최소 세로 폭 10m: 평지 런의 1~2m 잔떨림이 큰 오르내림처럼 보이지 않게
 // [신규] 구간별 러닝 파워(와트) 그래프. 값이 없는(옛 기록) 구간은 null로 필터링됨.
-const powerSparkSvg = buildSparklineSVG(_powVals, '#ffb74d', false, undefined, undefined, _diagSplitTimes, { edge: _edgePow });
+const powerSparkSvg = buildSparklineSVG(_powVals, '#ffb74d', false, undefined, undefined, _diagSplitTimes, { edge: _edgePow, dropLast: _dropTail });
 // [추가] 그래프 아래 거리/시간 축 라벨 (기준선과 함께, v2 스타일)
 const diagAxisLabelsHtml = buildDiagAxisLabelsHtml(_splitsForGraph);
 // [추가 2026-09-19] 그래프 아래 전/후반 안내 한 줄 (흰 선 = 전반/후반 평균)
@@ -22184,7 +22201,7 @@ if (metricKey === 'pace') {
   noteHtml = (typeof r.totalAscent === 'number') ? ((koLang ? '고도 소스: ' : 'Source: ') + (r.altSource === 'baro' ? (koLang ? '기압계' : 'Barometer') : 'GPS')) : '';
 } else { return; }
 let lay = null;
-const svg = buildSparklineSVG(vals, color, invert, true, true, times, { edge: edge, half: half, minRangePct: minRangePct, minRange: (metricKey === 'alt' ? 10 : 0), heightPx: DIAG_GRAPH_FS_HEIGHT_PX, onLayout: (L) => { lay = L; } });
+const svg = buildSparklineSVG(vals, color, invert, true, true, times, { edge: edge, half: half, minRangePct: minRangePct, minRange: (metricKey === 'alt' ? 10 : 0), heightPx: DIAG_GRAPH_FS_HEIGHT_PX, dropLast: hasShortTailSplit(splits), onLayout: (L) => { lay = L; } });
 if (!svg) return;
 const axisHtml = buildDiagAxisLabelsHtml(splits);
 // 세부 지표: 작은 카드엔 없던 평균/최고/최저/구간 수/총 소요시간을 계산해 보여준다.
