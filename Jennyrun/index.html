@@ -859,6 +859,18 @@ overscroll-behavior-y: contain;
 .diag-graph-fs-stat { flex: 1 1 28%; min-width: 90px; background: #161616; border: 1px solid #2c2c2c; border-radius: 10px; padding: 10px 8px; text-align: center; }
 .diag-graph-fs-stat-label { font-size: var(--fs-xxs); color: #888; font-weight: 900; letter-spacing: 0.3px; text-transform: uppercase; margin-bottom: 4px; }
 .diag-graph-fs-stat-val { font-size: var(--fs-md); color: #fff; font-weight: 900; }
+/* [추가 2026-10-31] 구간별 목록(#, 거리, 값) */
+.diag-graph-fs-list { margin-top: 14px; background: #111; border: 1px solid #262626; border-radius: 12px; overflow: hidden; }
+.diag-graph-fs-row { display: flex; align-items: center; padding: 8px 14px; border-top: 1px solid #1e1e1e; font-size: var(--fs-sm); font-weight: 800; color: #fff; }
+.diag-graph-fs-row:first-child { border-top: none; }
+.diag-graph-fs-row span:nth-child(1) { width: 40px; color: #aaa; }
+.diag-graph-fs-row span:nth-child(2) { flex: 1; }
+.diag-graph-fs-row span:nth-child(3) { flex: 1; text-align: right; }
+.diag-graph-fs-row.head { background: #161616; color: #888; font-size: var(--fs-xxs); letter-spacing: 0.3px; text-transform: uppercase; }
+.diag-graph-fs-row.head span:nth-child(1) { color: #888; }
+.diag-graph-fs-row.dim { opacity: 0.45; }
+.diag-graph-fs-row.best span:nth-child(3) { color: #FFD60A; }
+.diag-graph-fs-list-note { padding: 8px 14px; font-size: var(--fs-xxs); color: #777; font-weight: 700; border-top: 1px solid #1e1e1e; }
 /* 진단 카드 안의 작은 그래프 클릭 영역: 탭 가능함을 알려주는 커서+우측 하단 확대 힌트 */
 .diag-graph-wrap { cursor: pointer; position: relative; }
 .diag-graph-expand-hint { font-size: var(--fs-xxs); color: #666; font-weight: 800; text-align: right; margin-top: 3px; letter-spacing: 0.3px; }
@@ -1998,6 +2010,7 @@ button[style*="--danger"]:active, button[style*="#e57373"]:active, .c33:active, 
 <div id="diag-graph-fs-axis"></div>
 <div id="diag-graph-fs-note" class="diag-graph-fs-note"></div>
 <div id="diag-graph-fs-stats" class="diag-graph-fs-stats"></div>
+<div id="diag-graph-fs-list" class="diag-graph-fs-list" style="display:none;"></div>
 </div>
 <button id="btn-diag-graph-fullscreen-close" class="map-fs-close-btn" onclick="history.back()">CLOSE</button>
 </div>
@@ -3867,10 +3880,10 @@ const coords = pts.map(p => {
   return x.toFixed(1) + ',' + y.toFixed(1);
 });
 // [추가 2026-10-31] 선 보간 자동 전환:
-//  - 포인트가 SMOOTH_MIN_POINTS(10)개 미만(짧은 러닝/스플릿 적음): 직선 + 실제 데이터 점(dot) — 점 사이를 곡선이 임의로 채워 피크가 깎이는 왜곡 방지
+//  - 포인트가 10개 이하(짧은 러닝/스플릿 적음, 또는 groupDiagSplits로 묶인 긴 러닝): 직선 + 실제 데이터 점(dot) — 점 사이를 곡선이 임의로 채워 피크가 깎이는 왜곡 방지
 //  - 10개 이상: monotone cubic(Fritsch-Carlson) 곡선 — 부드럽지만 데이터 점을 넘어 튀거나 피크를 깎지 않음(점은 항상 곡선 위를 지남)
 //  - opts.smooth(true/false)로 강제 지정 가능.
-const SMOOTH_MIN_POINTS = 10;
+const SMOOTH_MIN_POINTS = 11; // 10개까지는 직선+점(+번호). 긴 러닝은 아래 groupDiagSplits가 미리 10개 이하로 묶어 넘겨준다
 const smoothOn = (opts && typeof opts.smooth === 'boolean') ? opts.smooth : (pts.length >= SMOOTH_MIN_POINTS);
 const _xy = coords.map(c => { const a = c.split(','); return [parseFloat(a[0]), parseFloat(a[1])]; });
 const _f1 = (v) => v.toFixed(1);
@@ -4000,7 +4013,9 @@ if (edgeSet) {
 const svgHeightPx = (opts && opts.heightPx) || 32;
 // [추가 2026-09-19] opts.onLayout: 확대 화면에서 HTML 라벨을 얹을 수 있도록 "이미 계산된" 좌표(viewBox W×H 기준)만 넘겨준다.
 // 콜백을 넘기지 않으면(작은 카드 등 기존 호출) 아무 일도 하지 않는다.
-if (opts && typeof opts.onLayout === 'function') opts.onLayout({ W: W, H: H, avgY: _lay.avgY, best: _lay.best, half: _lay.half });
+if (opts && typeof opts.onLayout === 'function') opts.onLayout({ W: W, H: H, avgY: _lay.avgY, best: _lay.best, half: _lay.half,
+    // [추가 2026-10-31] 데이터 점 좌표(원본 구간 인덱스 i) — 점 번호 라벨용. dots=직선+점 모드일 때만 true(긴 러닝 곡선/묶음 모드에선 번호 안 붙임)
+    dots: (!smoothOn && !bucketed), pts: pts.map((p, k) => ({ i: p.i, x: _xy[k][0], y: _xy[k][1], edge: isEdge(p) })) });
 return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%;height:' + svgHeightPx + 'px;display:block;margin-top:6px;">'
   + '<path d="' + areaD + '" fill="' + colorHex + '" opacity="0.12" stroke="none"></path>'
   + avgDashSvg
@@ -4010,6 +4025,70 @@ return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style=
   + '<path d="' + _lineD(firstCore, lastCore) + '" fill="none" stroke="' + colorHex + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>'
   + dotsSvg
   + '</svg>';
+}
+// [추가 2026-10-31] 긴 러닝 구간 묶기: 어떤 거리든 그래프 점/목록이 최대 10개 안팎이 되도록
+// 100m 스플릿을 "보기 좋은 거리 단위"(0.2/0.5/1/2/2.5/5/10km...)로 묶는다. 10개 이하면 원본 그대로 반환(기존 동작 유지).
+//  - 묶음의 페이스 = 묶음 거리 ÷ 묶음 시간(시간가중, 단순평균 아님), 케이던스/심박/파워 = 구간 소요시간 가중평균, 고도 = 묶음 끝 고도.
+//  - 반환: { grouped, step(km), splits(묶인 의사 스플릿: km/t_sec 누적, pace 문자열 등 원본과 같은 필드), remapHalf(h) }
+//    remapHalf: calcPacingMetrics가 "원본 구간 인덱스" 기준으로 준 전/후반 범위(r1/r2/mid)를 묶인 점 인덱스로 옮긴다.
+//  - 원본 기록(record.diagSplits)은 건드리지 않고 화면 표시용으로만 쓴다. 묶인 상태에선 출발 흐린 구간(edge)을 따로 두지 않는다.
+const DIAG_MAX_POINTS = 10;
+const DIAG_GROUP_STEPS_KM = [0.2, 0.5, 1, 2, 2.5, 5, 10, 20, 50];
+function groupDiagSplits(splits) {
+  const ident = { grouped: false, step: 0.1, splits: splits || [], remapHalf: function (h) { return h; } };
+  if (!splits || splits.length <= DIAG_MAX_POINTS) return ident;
+  const kmOf = (sp) => (typeof sp.km === 'number' ? sp.km : parseFloat(sp.km));
+  const totalKm = kmOf(splits[splits.length - 1]);
+  if (!isFinite(totalKm) || totalKm <= 0) return ident;
+  let step = DIAG_GROUP_STEPS_KM[DIAG_GROUP_STEPS_KM.length - 1];
+  for (let q = 0; q < DIAG_GROUP_STEPS_KM.length; q++) {
+    if (Math.ceil(totalKm / DIAG_GROUP_STEPS_KM[q] - 1e-6) <= DIAG_MAX_POINTS) { step = DIAG_GROUP_STEPS_KM[q]; break; }
+  }
+  const groups = []; let lastKey = null;
+  splits.forEach((sp, i) => {
+    const km = kmOf(sp);
+    const key = isFinite(km) ? Math.max(0, Math.ceil(km / step - 1e-6) - 1) : lastKey;
+    if (groups.length && key === lastKey) groups[groups.length - 1].e = i;
+    else { groups.push({ s: i, e: i }); lastKey = key; }
+  });
+  const tOf = (i) => (i >= 0 && typeof splits[i].t_sec === 'number') ? splits[i].t_sec : null;
+  const out = []; let prevT = 0, prevKm = 0;
+  groups.forEach((g) => {
+    const seg = splits.slice(g.s, g.e + 1);
+    const last = seg[seg.length - 1];
+    const tEnd = tOf(g.e), kmEnd = kmOf(last);
+    const durs = seg.map((sp, k) => { const i = g.s + k; const t1 = tOf(i), t0 = i > 0 ? tOf(i - 1) : 0; const d = (t1 != null && t0 != null) ? (t1 - t0) : 0; return d > 0 ? d : 1; });
+    const wavg = (getter) => { let a = 0, w = 0; seg.forEach((sp, k) => { const v = getter(sp); if (typeof v === 'number' && isFinite(v)) { a += v * durs[k]; w += durs[k]; } }); return w > 0 ? a / w : null; };
+    const dt = (tEnd != null) ? (tEnd - prevT) : null, dkm = kmEnd - prevKm;
+    let pace;
+    if (dt != null && dt > 0 && dkm > 0) { const t = Math.round(dt / dkm); pace = Math.floor(t / 60) + "'" + String(t % 60).padStart(2, '0') + '"'; }
+    out.push({
+      km: kmEnd, t_sec: tEnd, pace: pace,
+      avgCadence: wavg(sp => (typeof sp.avgCadence === 'number' && (sp.cadN == null || sp.cadN >= 3)) ? sp.avgCadence : null),
+      avgHr: wavg(sp => sp.avgHr),
+      power: wavg(sp => sp.power),
+      altTo: last.altTo,
+      altDiff: seg.reduce((a, sp) => a + (typeof sp.altDiff === 'number' ? sp.altDiff : 0), 0)
+    });
+    if (tEnd != null) prevT = tEnd;
+    prevKm = kmEnd;
+  });
+  const centers = groups.map(g => (g.s + g.e) / 2);
+  const mapIdx = (x) => {
+    if (x == null) return x;
+    const n = centers.length;
+    if (x <= centers[0]) return 0;
+    if (x >= centers[n - 1]) return n - 1;
+    for (let j = 0; j < n - 1; j++) if (x <= centers[j + 1]) return j + (x - centers[j]) / (centers[j + 1] - centers[j]);
+    return n - 1;
+  };
+  return {
+    grouped: true, step: step, splits: out,
+    remapHalf: function (h) {
+      if (!h) return h;
+      return { v1: h.v1, v2: h.v2, r1: [mapIdx(h.r1[0]), mapIdx(h.r1[1])], r2: [mapIdx(h.r2[0]), mapIdx(h.r2[1])], mid: (h.mid == null ? null : mapIdx(h.mid)) };
+    }
+  };
 }
 // [추가 2026-09-19] 그래프 세로 눈금/최고값 계산에서 제외할 경계 구간(양 끝에만 존재):
 //  - 첫 구간(들): 출발 직후 가속/케이던스 상승 중이라 항상 제외. leadCount로 개수 조절(기본 1).
@@ -4081,6 +4160,24 @@ function buildDiagGraphFsPlotHtml(svg, lay, o) {
       const side = bx > W * 0.6 ? ('right:' + pctX(W - bx) + ';margin-right:4px;') : ('left:max(calc(' + pctX(bx) + ' + 4px), 58px);');
       tags += '<div style="' + tag + side + 'bottom:3px;color:#FFD60A;">' + (ko ? '최고 ' : 'Best ') + fmt(o.bestVal) + '</div>';
     }
+  }
+  // [추가 2026-10-31] 데이터 점마다 구간 번호(1,2,3...) — 아래 구간 목록의 # 와 같은 번호.
+  // 기본은 점 위, 골짜기(화면상 아래로 볼록한 점)나 내리막 끝점은 점 아래에 두어 선과 안 겹치게 하고, 아래쪽이 그래프 밖으로 나가면 위로 뒤집는다.
+  // 맨 앞 흐린(edge) 구간 점은 아래쪽 'Slow/Low' 힌트와 겹치지 않게 점 왼쪽에 둔다.
+  if (lay.dots && lay.pts && lay.pts.length) {
+    const P = lay.pts;
+    const nTag = 'position:absolute;font-size:11px;font-weight:900;line-height:1;padding:2px 4px;border-radius:8px;background:rgba(17,17,17,0.78);color:#e6e6e6;';
+    P.forEach((p, k) => {
+      const prev = P[k - 1], next = P[k + 1];
+      let below = (prev && next) ? (p.y > prev.y && p.y > next.y) : (prev ? p.y > prev.y : (next ? p.y > next.y : false));
+      const fy = p.y / H;
+      if (below && fy > ((prev && next) ? 0.8 : 0.92)) below = false; // 아래가 그래프 밖으로 나가면 위로
+      const base = nTag + 'left:' + pctX(p.x) + ';top:' + pctY(p.y) + ';';
+      let pos;
+      if (k === 0 && p.edge) pos = base + 'transform:translate(-100%,-50%);margin-left:-5px;opacity:0.6;';
+      else pos = base + (below ? 'transform:translate(-50%,0);margin-top:6px;' : 'transform:translate(-50%,-100%);margin-top:-6px;') + (p.edge ? 'opacity:0.6;' : '');
+      tags += '<div style="' + pos + '">' + (p.i + 1) + '</div>';
+    });
   }
   // svg는 margin-top:6px 로 그려지므로(flow-root로 감쌈) 라벨 레이어도 top:6px, 높이는 그래프 렌더 높이와 동일
   return '<div>' + head + '<div style="position:relative;display:flow-root;">' + svg
@@ -9963,14 +10060,24 @@ const _edgeCad = getGraphEdgeSet(_splitsForGraph, _cadVals, getLeadExcludeCount(
 const _edgeHr = getGraphEdgeSet(_splitsForGraph, _hrVals, getLeadExcludeCount(_splitsForGraph, GRAPH_LEAD_SEC.hr));
 const _edgePow = getGraphEdgeSet(_splitsForGraph, _powVals);
 const _pm = calcPacingMetrics(r);
-const paceSparkSvg = buildSparklineSVG(_paceVals, '#00ff88', true, undefined, undefined, _diagSplitTimes, { edge: _edgePace, half: _pm.paceHalf, minRangePct: GRAPH_MIN_RANGE_PCT.pace });
-const cadSparkSvg = buildSparklineSVG(_cadVals, '#4fc3f7', false, undefined, undefined, _diagSplitTimes, { edge: _edgeCad, half: _pm.cadHalf, minRangePct: GRAPH_MIN_RANGE_PCT.cad });
-const hrSparkSvg = buildSparklineSVG(_hrVals, '#e53935', false, undefined, undefined, _diagSplitTimes, { edge: _edgeHr, half: _pm.hrHalf, minRangePct: GRAPH_MIN_RANGE_PCT.hr });
-const altSparkSvg = buildSparklineSVG(_splitsForGraph.map(s => (typeof s.altTo === 'number' ? s.altTo : null)), '#90a4ae', false, undefined, undefined, _diagSplitTimes, { minRange: 10 }); // [수정 2026-10-21] 최소 세로 폭 10m: 평지 런의 1~2m 잔떨림이 큰 오르내림처럼 보이지 않게
+// [추가 2026-10-31] 그래프/축 라벨 전용으로만 구간을 묶는다(10개 초과 시). 최고값 표시·고도 합계 등 다른 계산은 원본 100m 구간(_splitsForGraph)을 그대로 쓴다.
+const _G = groupDiagSplits(_splitsForGraph);
+const _gS = _G.splits;
+const _gTimes = _G.grouped ? _gS.map(s => (typeof s.t_sec === 'number' ? s.t_sec : null)) : _diagSplitTimes;
+const _gPace = _G.grouped ? _gS.map(s => paceStrToSeconds(s.pace)) : _paceVals;
+const _gCad = _G.grouped ? _gS.map(s => (typeof s.avgCadence === 'number' ? s.avgCadence : null)) : _cadVals;
+const _gHr = _G.grouped ? _gS.map(s => (typeof s.avgHr === 'number' ? s.avgHr : null)) : _hrVals;
+const _gPow = _G.grouped ? _gS.map(s => (typeof s.power === 'number' ? s.power : null)) : _powVals;
+const _gNoEdge = new Set();
+const _gEdgePace = _G.grouped ? _gNoEdge : _edgePace, _gEdgeCad = _G.grouped ? _gNoEdge : _edgeCad, _gEdgeHr = _G.grouped ? _gNoEdge : _edgeHr, _gEdgePow = _G.grouped ? _gNoEdge : _edgePow;
+const paceSparkSvg = buildSparklineSVG(_gPace, '#00ff88', true, undefined, undefined, _gTimes, { edge: _gEdgePace, half: _G.remapHalf(_pm.paceHalf), minRangePct: GRAPH_MIN_RANGE_PCT.pace });
+const cadSparkSvg = buildSparklineSVG(_gCad, '#4fc3f7', false, undefined, undefined, _gTimes, { edge: _gEdgeCad, half: _G.remapHalf(_pm.cadHalf), minRangePct: GRAPH_MIN_RANGE_PCT.cad });
+const hrSparkSvg = buildSparklineSVG(_gHr, '#e53935', false, undefined, undefined, _gTimes, { edge: _gEdgeHr, half: _G.remapHalf(_pm.hrHalf), minRangePct: GRAPH_MIN_RANGE_PCT.hr });
+const altSparkSvg = buildSparklineSVG(_gS.map(s => (typeof s.altTo === 'number' ? s.altTo : null)), '#90a4ae', false, undefined, undefined, _gTimes, { minRange: 10 }); // [수정 2026-10-21] 최소 세로 폭 10m: 평지 런의 1~2m 잔떨림이 큰 오르내림처럼 보이지 않게
 // [신규] 구간별 러닝 파워(와트) 그래프. 값이 없는(옛 기록) 구간은 null로 필터링됨.
-const powerSparkSvg = buildSparklineSVG(_powVals, '#ffb74d', false, undefined, undefined, _diagSplitTimes, { edge: _edgePow });
+const powerSparkSvg = buildSparklineSVG(_gPow, '#ffb74d', false, undefined, undefined, _gTimes, { edge: _gEdgePow });
 // [추가] 그래프 아래 거리/시간 축 라벨 (기준선과 함께, v2 스타일)
-const diagAxisLabelsHtml = buildDiagAxisLabelsHtml(_splitsForGraph);
+const diagAxisLabelsHtml = buildDiagAxisLabelsHtml(_gS);
 // [추가 2026-09-19] 그래프 아래 전/후반 안내 한 줄 (흰 선 = 전반/후반 평균)
 const _koN = storage.getLang() === 'ko';
 const _fmtPaceN = (sec) => { const tt = Math.round(sec); return Math.floor(tt / 60) + "'" + String(tt % 60).padStart(2, '0') + '"'; };
@@ -22108,8 +22215,11 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
 UIManager.prototype.openDiagGraphFullscreen = function(metricKey, id) {
 const h = storage.loadHistory();
 const r = h.find(rec => rec.id === id);
-const splits = (r && r.diagSplits) || [];
-if (!r || splits.length < 2) return;
+const rawSplits = (r && r.diagSplits) || [];
+if (!r || rawSplits.length < 2) return;
+// [추가 2026-10-31] 10개 초과 구간은 5km 등 보기 좋은 단위로 묶어서 점/번호/목록을 최대 10개 안팎으로 표시(작은 카드와 동일 규칙)
+const G = groupDiagSplits(rawSplits);
+const splits = G.splits;
 const lang = storage.getLang();
 const t = translations[lang];
 const koLang = lang === 'ko';
@@ -22165,6 +22275,7 @@ if (metricKey === 'pace') {
   // [수정 2026-10-21] 원본: noteHtml = ''  → 고도 소스(기압계/GPS) 표시
   noteHtml = (typeof r.totalAscent === 'number') ? ((koLang ? '고도 소스: ' : 'Source: ') + (r.altSource === 'baro' ? (koLang ? '기압계' : 'Barometer') : 'GPS')) : '';
 } else { return; }
+if (G.grouped) { edge = new Set(); half = G.remapHalf(half); } // 묶인 상태: 흐린 출발 구간 없음, 전/후반 범위는 묶인 점 기준으로 변환
 let lay = null;
 const svg = buildSparklineSVG(vals, color, invert, true, true, times, { edge: edge, half: half, minRangePct: minRangePct, minRange: (metricKey === 'alt' ? 10 : 0), heightPx: 150, onLayout: (L) => { lay = L; } });
 if (!svg) return;
@@ -22209,6 +22320,30 @@ if (validVals.length) {
       + (totalT != null ? stat(koLang ? '총 시간' : 'TOTAL TIME', fmtDiagAxisTime(totalT)) : '');
   }
 }
+// [추가 2026-10-31] 구간별 목록: 그래프의 점 번호(#)와 같은 순서로 거리(구간 끝 누적)·값을 보여준다.
+// 구간이 너무 많은(긴 러닝) 경우는 생략. 흐린 행 = 그래프의 흐린 점선(평균/최고 계산에서 제외된 구간).
+let listHtml = '';
+if (splits.length <= 30) {
+  let bestI = -1;
+  vals.forEach((v, i) => { if (typeof v === 'number' && isFinite(v) && !edge.has(i)) { if (bestI < 0 || (invert ? v < vals[bestI] : v > vals[bestI])) bestI = i; } });
+  let hasEdge = false;
+  const row = (cls, a, b, c) => '<div class="diag-graph-fs-row' + (cls ? ' ' + cls : '') + '"><span>' + a + '</span><span>' + b + '</span><span>' + c + '</span></div>';
+  listHtml = row('head', '#', koLang ? '거리' : 'DIST', label);
+  splits.forEach((sp, i) => {
+    const kmN = parseFloat(sp.km);
+    let dist = '--';
+    const _dv = (km) => parseFloat((this.currentUnit === 'mile' ? km * 0.621371 : km).toFixed(2)).toString();
+    const _du = this.currentUnit === 'mile' ? ' mi' : ' km';
+    if (isFinite(kmN)) {
+      if (G.grouped) { const pk = i > 0 ? parseFloat(splits[i - 1].km) : 0; dist = _dv(isFinite(pk) ? pk : 0) + '\u2013' + _dv(kmN) + _du; } // 묶음: 구간 범위(예: 5–10 km)
+      else dist = _dv(kmN) + _du; // 100m 구간: 끝 누적 거리
+    }
+    const isE = edge.has(i); if (isE) hasEdge = true;
+    listHtml += row((isE ? 'dim' : '') + (i === bestI ? ' best' : ''), String(i + 1), dist, fmt(vals[i]));
+  });
+  if (G.grouped) listHtml += '<div class="diag-graph-fs-list-note">' + (koLang ? ('약 ' + (this.currentUnit === 'mile' ? parseFloat((G.step * 0.621371).toFixed(2)) + ' mi' : G.step + ' km') + ' 단위로 묶은 값이에요') : ('Grouped by ~' + (this.currentUnit === 'mile' ? parseFloat((G.step * 0.621371).toFixed(2)) + ' mi' : G.step + ' km'))) + '</div>';
+  if (hasEdge) listHtml += '<div class="diag-graph-fs-list-note">' + (koLang ? '흐린 행은 평균·최고 계산에서 제외된 구간이에요' : 'Dimmed rows are excluded from AVG/BEST') + '</div>';
+}
 const titleEl = document.getElementById('diag-graph-fs-title');
 const subEl = document.getElementById('diag-graph-fs-sub');
 const svgWrapEl = document.getElementById('diag-graph-fs-svgwrap');
@@ -22225,6 +22360,8 @@ if (svgWrapEl) svgWrapEl.innerHTML = buildDiagGraphFsPlotHtml(svg, lay, { ko: ko
 if (axisEl) axisEl.innerHTML = axisHtml;
 if (noteEl) noteEl.innerHTML = noteHtml;
 if (statsEl) statsEl.innerHTML = statsHtml;
+const listEl = document.getElementById('diag-graph-fs-list');
+if (listEl) { listEl.innerHTML = listHtml; listEl.style.display = listHtml ? '' : 'none'; }
 const overlay = document.getElementById('diag-graph-fullscreen-overlay');
 if (overlay) overlay.classList.add('active');
 try { history.pushState({ jrPage: 'diagGraphFull' }, ''); } catch (e) {}
