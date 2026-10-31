@@ -8083,6 +8083,9 @@ order.forEach(function(pos) {
   if (isMotionOnlyPos(pos)) {
     html += '<div style="font-size:var(--fs-xxs); color:#666;">' + (isKo ? '보정계수 없음 (케이던스·거리·페이스는 네이티브/GPS 그대로)' : 'No correction factors (cadence, distance and pace stay native/GPS)') + '</div>';
   }
+  // [추가 2026-10-30] 위치별 수동 입력/수정 버튼 — 누르면 아래에 입력 폼이 펼쳐진다
+  html += '<button type="button" id="calib-edit-btn-' + pos + '" onclick="ui.openCalibManualEdit(\'' + pos + '\')" style="background:#1b2230; color:#7fb4ff; border:1.5px solid #2a3b55; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); margin-top:8px; cursor:pointer;">' + (isKo ? '직접 수정' : 'EDIT MANUALLY') + '</button>';
+  html += '<div id="calib-edit-' + pos + '" style="display:none;"></div>';
   html += '</div>';
 });
 
@@ -8094,6 +8097,131 @@ html += '</div>';
 box.innerHTML = html;
 box.classList.add('is-open');
 if (btnLabel) btnLabel.textContent = (isKo ? '현재 데이터 숨기기' : 'HIDE CURRENT DATA');
+}
+// [추가 2026-10-30] SHOW CURRENT DATA 위치별 "직접 수정" — 입력 폼 열기/닫기
+openCalibManualEdit(pos) {
+  const box = document.getElementById('calib-edit-' + pos);
+  const btn = document.getElementById('calib-edit-btn-' + pos);
+  if (!box) return;
+  const isKo = storage.getLang() === 'ko';
+  if (box.style.display !== 'none') { // 이미 열려 있으면 닫기
+    box.style.display = 'none';
+    box.innerHTML = '';
+    if (btn) btn.textContent = (isKo ? '직접 수정' : 'EDIT MANUALLY');
+    return;
+  }
+  const prof = storage.loadProfile();
+  const snap = calibEffectiveSnapshot(prof, pos);
+  const motionOnly = isMotionOnlyPos(pos);
+  const inpStyle = 'width:110px; background:#0f0f0f; color:#ffcc44; border:1.5px solid #444; border-radius:8px; padding:8px; font-size:var(--fs-sm); font-weight:800; text-align:right;';
+  let h = '<div style="margin-top:8px; padding:12px; border:1.5px solid #2a3b55; border-radius:12px; background:#0f1722;">';
+  h += '<div style="font-size:var(--fs-xxs); color:#9ab; line-height:1.5; margin-bottom:8px;">' +
+    (isKo ? '값을 직접 입력하면 이 위치의 보정값으로 바로 저장·적용돼요. 바꾼 항목만 반영되고, 이력(최근 3회)에도 기록돼요.' : 'Enter values directly; they are saved and applied to this position right away. Only changed items are applied and recorded in the history (last 3).') +
+    '</div>';
+  CALIB_HISTORY_FIELDS.forEach(function(f) {
+    if (motionOnly && f.factor) return;
+    const v = snap[f.key];
+    const val = (typeof v === 'number') ? String(Number(v.toFixed(4))) : '';
+    h += '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px;">' +
+      '<label for="cme-' + pos + '-' + f.key + '" style="font-size:var(--fs-xxs); color:#aaa;">' + (isKo ? f.ko : f.en) + '</label>' +
+      '<input id="cme-' + pos + '-' + f.key + '" type="number" inputmode="decimal" step="any" value="' + val + '" style="' + inpStyle + '">' +
+      '</div>';
+  });
+  if (!motionOnly && !calibFactorsFlag(prof)) {
+    h += '<div style="font-size:var(--fs-xxs); color:var(--warning); line-height:1.5; margin:6px 0;">' +
+      (isKo ? '※ 지금 RUN MODE가 LITE RUN이라 보정계수(stride/gps/cad/pace)는 러닝에 적용되지 않아요. 값은 저장되고, SETTINGS 상단의 RUN MODE 버튼을 PRO RUN으로 바꾸면 적용돼요.' : '※ RUN MODE is LITE RUN, so correction factors (stride/gps/cad/pace) are not used in runs. Values are saved; switch the RUN MODE button in SETTINGS to PRO RUN to apply them.') +
+      '</div>';
+  }
+  h += '<div style="display:flex; gap:8px; margin-top:8px;">' +
+    '<button type="button" onclick="ui.openCalibManualEdit(\'' + pos + '\')" style="flex:1; background:#222; color:#ccc; border:1.5px solid #444; padding:11px; border-radius:10px; font-weight:800; font-size:var(--fs-xs); cursor:pointer;">' + (isKo ? '취소' : 'CANCEL') + '</button>' +
+    '<button type="button" onclick="ui.saveCalibManualEdit(\'' + pos + '\')" style="flex:2; background:#14261a; color:#5fd18a; border:1.5px solid #2d5a3f; padding:11px; border-radius:10px; font-weight:900; font-size:var(--fs-xs); cursor:pointer;">' + (isKo ? '저장 및 적용' : 'SAVE & APPLY') + '</button>' +
+    '</div></div>';
+  box.innerHTML = h;
+  box.style.display = 'block';
+  if (btn) btn.textContent = (isKo ? '수정 닫기' : 'CLOSE EDITOR');
+}
+// [추가 2026-10-30] 입력값 검증 → 기존 적용 경로(applyMotionCalibSuggestion: UNDO 스냅샷 + 최근3회 이력 포함)로 저장 → 라이브 반영
+async saveCalibManualEdit(pos) {
+  const isKo = storage.getLang() === 'ko';
+  const prof = storage.loadProfile();
+  const snap = calibEffectiveSnapshot(prof, pos);
+  const motionOnly = isMotionOnlyPos(pos);
+  // 항목별 허용 범위(오타 방지용 느슨한 안전 범위)
+  const RANGE = {
+    gctFallbackRatio: [0.1, 1.5], vertScale: [0.001, 5], rotRejectThreshold: [1, 5000],
+    groundThreshold: [0.1, 50], impactThreshold: [0.1, 50],
+    stride: [0.5, 1.5], gps: [0.5, 1.5], cad: [0.5, 1.5], pace: [0.5, 1.5]
+  };
+  const changed = {};
+  const bad = [];
+  CALIB_HISTORY_FIELDS.forEach(function(f) {
+    if (motionOnly && f.factor) return;
+    const el = document.getElementById('cme-' + pos + '-' + f.key);
+    if (!el) return;
+    const raw = String(el.value).trim();
+    if (raw === '') return; // 비워두면 변경 없음
+    const n = Number(raw);
+    const r = RANGE[f.key];
+    if (!isFinite(n) || n < r[0] || n > r[1]) { bad.push(f.en + ' (' + r[0] + '~' + r[1] + ')'); return; }
+    const cur = snap[f.key];
+    if (typeof cur !== 'number' || Math.abs(n - cur) > 1e-6) changed[f.key] = n;
+  });
+  if (bad.length) {
+    await appAlert((isKo ? '허용 범위를 벗어난 값이 있어요:\n' : 'Out-of-range value(s):\n') + bad.join('\n'));
+    return;
+  }
+  const keys = Object.keys(changed);
+  if (!keys.length) {
+    await appAlert(isKo ? '바뀐 값이 없어요.' : 'No values were changed.');
+    return;
+  }
+  const ok = await appConfirm(
+    '[' + getPosLabel(pos, isKo) + '] ' + (isKo ? '위치에 아래 값을 적용할까요?' : 'Apply these values?') + '\n\n' +
+    keys.map(function(k) { const cur = snap[k]; return k + ': ' + (typeof cur === 'number' ? cur : '-') + ' → ' + changed[k]; }).join('\n'),
+    { ok: isKo ? '적용' : 'APPLY', cancel: isKo ? '취소' : 'CANCEL', multiline: true }
+  );
+  if (!ok) return;
+  try {
+    const sugg = {};
+    if (changed.gctFallbackRatio != null) sugg.gct = changed.gctFallbackRatio;
+    if (changed.rotRejectThreshold != null) sugg.rot = changed.rotRejectThreshold;
+    if (changed.vertScale != null) sugg.vertScale = changed.vertScale;
+    if (changed.groundThreshold != null) sugg.ground = changed.groundThreshold;
+    if (changed.impactThreshold != null) sugg.impact = changed.impactThreshold;
+    if (changed.stride != null) sugg.strideFactor = changed.stride;
+    if (changed.gps != null) sugg.gpsDistFactor = changed.gps;
+    if (changed.cad != null) sugg.cadFactor = changed.cad;
+    if (changed.pace != null) sugg.paceFactor = changed.pace;
+    // 보정계수 스위치가 꺼져 있어도 수동 입력값은 저장되도록 잠깐 켜서 적용 → 원래 상태로 복원(스위치/플랫 필드는 건드리지 않음)
+    const origFlag = prof.calibFactorsEnabled;
+    const flat = { s: prof.strideCorrectionFactor, g: prof.gpsDistCorrectionFactor, c: prof.cadCorrectionFactor, p: prof.paceCorrectionFactor };
+    const wasOn = calibFactorsFlag(prof);
+    prof.calibFactorsEnabled = true;
+    const override = applyMotionCalibSuggestion(prof, pos, sugg);
+    if (origFlag === undefined) delete prof.calibFactorsEnabled; else prof.calibFactorsEnabled = origFlag;
+    if (!wasOn) {
+      prof.strideCorrectionFactor = flat.s; prof.gpsDistCorrectionFactor = flat.g;
+      prof.cadCorrectionFactor = flat.c; prof.paceCorrectionFactor = flat.p;
+    }
+    storage.saveProfile(prof);
+    // 지금 착용 중인 위치면 라이브 모션 엔진에도 즉시 반영
+    if (typeof app !== 'undefined' && app && app.motion && prof.devicePos === pos) {
+      if (override.gctFallbackRatio != null) app.motion.gctFallbackRatio = override.gctFallbackRatio;
+      if (override.rotRejectThreshold != null) app.motion.rotRejectThreshold = override.rotRejectThreshold;
+      if (override.vertScale != null) app.motion.vertScale = override.vertScale;
+      if (override.groundThreshold != null) app.motion.groundThreshold = override.groundThreshold;
+      if (override.impactThreshold != null) app.motion.impactThreshold = override.impactThreshold;
+      if (wasOn && changed.cad != null) app.motion.cadCorrectionFactor = changed.cad;
+      if (wasOn && changed.pace != null) app.motion.paceCorrectionFactor = changed.pace;
+    }
+    // 패널 새로고침(닫았다가 다시 열어서 최신 값/이력/CHANGED 표시 반영)
+    this.toggleCurrentData();
+    this.toggleCurrentData();
+    await appAlert('[' + getPosLabel(pos, isKo) + '] ' + (isKo ? '수동 입력값이 저장·적용되었어요.' : 'Manual values saved and applied.'));
+  } catch (e) {
+    jrLogErr('calibManualEdit', e);
+    await appAlert(isKo ? '저장 중 오류가 발생했어요.' : 'Failed to save.');
+  }
 }
 async startCalibrationRun() {
 const lang = storage.getLang();
