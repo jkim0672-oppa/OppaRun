@@ -2420,6 +2420,7 @@ alt="runner"/>
 </div>
 <div style="margin-top: 10px; text-align: center;">
 <span id="app-version-label" style="color: #999; font-size:var(--fs-xs);"></span><span id="app-update-time-label" style="color: #999; font-size:var(--fs-xs);"></span>
+<a id="app-update-apply-btn" href="javascript:void(0)" onclick="jrApplyNativeUpdate()" style="display:none; margin-left:10px; color:var(--primary); font-size:var(--fs-xs); font-weight:700; text-decoration:none; border:1px solid var(--primary); border-radius:8px; padding:3px 9px;">UPDATE NOW</a>
 </div>
 </div>
 </div>
@@ -22995,5 +22996,69 @@ UIManager.prototype.stopRoutePlayback = function() {
 </div>
 </div>
 </div>
+<!-- [신규 2026-11-01] 콘텐츠 업데이트 준비 표시: 코틀린이 다운로드를 끝내면 window.onNativeUpdateReady(version)로 알려준다.
+     설정 화면 버전 정보 옆의 UPDATE 버튼이 나타나 불이 켜진다(깜빡이는 초록 테두리). 러닝 중에는 숨기고, 누르면 교체 후 새로고침. -->
+<style>
+@keyframes jrUpdGlow {
+  0%, 100% { box-shadow: 0 0 2px rgba(0,255,136,0.35); background: rgba(0,255,136,0.04); }
+  50%      { box-shadow: 0 0 10px 2px rgba(0,255,136,0.85); background: rgba(0,255,136,0.18); }
+}
+#app-update-apply-btn.is-ready { animation: jrUpdGlow 1.4s ease-in-out infinite; }
+@keyframes jrDotGlow {
+  0%, 100% { box-shadow: 0 0 2px rgba(0,255,136,0.5); opacity: 0.75; }
+  50%      { box-shadow: 0 0 8px 2px rgba(0,255,136,0.95); opacity: 1; }
+}
+/* 새 버전 준비됨 표시 점: REC•SET 탭과 SETTINGS 서브탭 글자 옆, 버튼과 같은 초록(--primary) */
+.has-update-dot::after { content: ''; display: inline-block; flex: 0 0 auto; align-self: flex-start; width: 7px; height: 7px; margin-left: 5px; margin-top: 3px; border-radius: 50%; background: var(--primary); animation: jrDotGlow 1.4s ease-in-out infinite; }
+</style>
+<script id="update-ready-js">
+(function () {
+  var pendingVer = null;   // 받아둔 새 버전(교체 대기)
+
+  function isKo() { try { return storage.getLang() === 'ko'; } catch (e) { return true; } }
+  function runActive() {
+    try { return !!(typeof app !== 'undefined' && app && app.state && app.state.isRunning); } catch (e) { return false; }
+  }
+  function refresh() {
+    var btn = document.getElementById('app-update-apply-btn');
+    var canApply = !!pendingVer && !runActive();
+    if (!btn) return;
+    btn.style.display = canApply ? 'inline-block' : 'none';
+    btn.classList.toggle('is-ready', canApply);
+    ['tab-history', 'sub-tab-settings'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.classList.toggle('has-update-dot', canApply);
+    });
+    btn.textContent = isKo() ? '지금 업데이트' : 'UPDATE NOW';
+  }
+
+  // 코틀린 → JS: 다운로드 완료 알림
+  window.onNativeUpdateReady = function (version) {
+    pendingVer = String(version || '1');
+    refresh();
+  };
+  // 버튼 → 코틀린: 교체 후 새로고침 (러닝 중이면 무시)
+  window.jrApplyNativeUpdate = function () {
+    if (runActive()) return;
+    try {
+      if (window.AndroidAppInfo && typeof window.AndroidAppInfo.applyUpdateNow === 'function') {
+        window.AndroidAppInfo.applyUpdateNow();
+      }
+    } catch (e) {}
+  };
+
+  // 페이지가 늦게 떠서 알림을 놓친 경우 대비: 시작할 때 한 번 직접 물어본다.
+  try {
+    if (window.AndroidAppInfo && typeof window.AndroidAppInfo.getPendingUpdateVersion === 'function') {
+      var v = window.AndroidAppInfo.getPendingUpdateVersion();
+      if (v) pendingVer = String(v);
+    }
+  } catch (e) {}
+
+  // 러닝이 끝나면 다시 보이도록 주기적으로 상태 반영
+  setInterval(refresh, 3000);
+  refresh();
+})();
+</script>
 </body>
   </html>
