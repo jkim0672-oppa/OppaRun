@@ -863,13 +863,23 @@ overscroll-behavior-y: contain;
 .diag-graph-fs-list { margin-top: 14px; background: #111; border: 1px solid #262626; border-radius: 12px; overflow: hidden; }
 .diag-graph-fs-row { display: flex; align-items: center; padding: 8px 14px; border-top: 1px solid #1e1e1e; font-size: var(--fs-sm); font-weight: 800; color: #fff; }
 .diag-graph-fs-row:first-child { border-top: none; }
-.diag-graph-fs-row span:nth-child(1) { width: 40px; color: #aaa; }
-.diag-graph-fs-row span:nth-child(2) { flex: 1; }
-.diag-graph-fs-row span:nth-child(3) { flex: 1; text-align: right; }
+.diag-graph-fs-row { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.diag-graph-fs-row span:nth-child(1) { width: 32px; color: #aaa; }
+.diag-graph-fs-row span:nth-child(2) { flex: 1.25; }
+.diag-graph-fs-row span:nth-child(3) { flex: 0.9; text-align: right; color: #ccc; }
+.diag-graph-fs-row span:nth-child(4) { flex: 0.9; text-align: right; }
+.diag-graph-fs-row.head { cursor: default; }
+.diag-graph-fs-row.sel { background: rgba(255, 214, 10, 0.13); }
+/* 그래프 점 터치 선택(고리/가이드선/말풍선): 평소 숨김, diagGraphSelect가 .on 으로 켠다 */
+.dgfs-sel, .dgfs-tip { display: none; }
+.dgfs-sel.on, .dgfs-tip.on { display: block; }
+.dgfs-tip { z-index: 1; }
+/* 스크롤 시 제목/그래프가 상태바·CLOSE 버튼 밑으로 겹쳐 보이지 않도록 상단을 검정 띠로 덮는다 */
+#diag-graph-fullscreen-overlay::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: calc(var(--top-inset) + 54px); background: #000; z-index: 2; pointer-events: none; }
 .diag-graph-fs-row.head { background: #161616; color: #888; font-size: var(--fs-xxs); letter-spacing: 0.3px; text-transform: uppercase; }
 .diag-graph-fs-row.head span:nth-child(1) { color: #888; }
 .diag-graph-fs-row.dim { opacity: 0.45; }
-.diag-graph-fs-row.best span:nth-child(3) { color: #FFD60A; }
+.diag-graph-fs-row.best span:nth-child(4) { color: #FFD60A; }
 .diag-graph-fs-list-note { padding: 8px 14px; font-size: var(--fs-xxs); color: #777; font-weight: 700; border-top: 1px solid #1e1e1e; }
 /* 진단 카드 안의 작은 그래프 클릭 영역: 탭 가능함을 알려주는 커서+우측 하단 확대 힌트 */
 .diag-graph-wrap { cursor: pointer; position: relative; }
@@ -4090,6 +4100,16 @@ function groupDiagSplits(splits) {
     }
   };
 }
+// [추가 2026-10-31] 확대 그래프에서 점/구간 목록 행을 터치하면 같은 구간을 선택(그래프 고리+말풍선, 목록 행 강조). 같은 구간을 다시 누르면 해제.
+function diagGraphSelect(i) {
+  const was = document.querySelector('.dgfs-sel.on');
+  const same = was && String(was.getAttribute('data-i')) === String(i);
+  document.querySelectorAll('.dgfs-sel.on,.dgfs-tip.on,.diag-graph-fs-row.sel').forEach(function (el) { el.classList.remove('on'); el.classList.remove('sel'); });
+  if (same) return;
+  document.querySelectorAll('.dgfs-sel[data-i="' + i + '"],.dgfs-tip[data-i="' + i + '"]').forEach(function (el) { el.classList.add('on'); });
+  const row = document.querySelector('.diag-graph-fs-row[data-i="' + i + '"]');
+  if (row) row.classList.add('sel');
+}
 // [추가 2026-09-19] 그래프 세로 눈금/최고값 계산에서 제외할 경계 구간(양 끝에만 존재):
 //  - 첫 구간(들): 출발 직후 가속/케이던스 상승 중이라 항상 제외. leadCount로 개수 조절(기본 1).
 //  - 마지막 구간: 70m 미만 자투리이거나, 가운데 구간 중앙값에서 8% 넘게 벗어난 경우(정지 직전 감속 등)
@@ -4161,27 +4181,36 @@ function buildDiagGraphFsPlotHtml(svg, lay, o) {
       tags += '<div style="' + tag + side + 'bottom:3px;color:#FFD60A;">' + (ko ? '최고 ' : 'Best ') + fmt(o.bestVal) + '</div>';
     }
   }
-  // [추가 2026-10-31] 데이터 점마다 구간 번호(1,2,3...) — 아래 구간 목록의 # 와 같은 번호.
-  // 기본은 점 위, 골짜기(화면상 아래로 볼록한 점)나 내리막 끝점은 점 아래에 두어 선과 안 겹치게 하고, 아래쪽이 그래프 밖으로 나가면 위로 뒤집는다.
-  // 맨 앞 흐린(edge) 구간 점은 아래쪽 'Slow/Low' 힌트와 겹치지 않게 점 왼쪽에 둔다.
-  if (lay.dots && lay.pts && lay.pts.length) {
+  // [수정 2026-10-31] 점 옆 숫자 라벨 대신 "터치하면 그 구간 값이 뜨는" 방식.
+  // 점 하나당 그래프 세로 전체를 덮는 투명 터치 영역(이웃 점과 가운데에서 맞닿음 → 어디를 눌러도 가장 가까운 점이 선택됨)을 두고,
+  // 선택되면 점 위에 노란 고리 + 세로 가이드선 + 말풍선(번호·거리·시간·값)이 켜지고 아래 목록의 같은 행도 강조된다(diagGraphSelect).
+  // 평소엔 그래프에 점만 있어 깔끔하다. 요소는 평소 숨김(.dgfs-sel/.dgfs-tip, 켜면 .on).
+  let hitHtml = '', selHtml = '';
+  if (lay.dots && lay.pts && lay.pts.length && o.info) {
     const P = lay.pts;
-    const nTag = 'position:absolute;font-size:11px;font-weight:900;line-height:1;padding:2px 4px;border-radius:8px;background:rgba(17,17,17,0.78);color:#e6e6e6;';
     P.forEach((p, k) => {
       const prev = P[k - 1], next = P[k + 1];
-      let below = (prev && next) ? (p.y > prev.y && p.y > next.y) : (prev ? p.y > prev.y : (next ? p.y > next.y : false));
-      const fy = p.y / H;
-      if (below && fy > ((prev && next) ? 0.8 : 0.92)) below = false; // 아래가 그래프 밖으로 나가면 위로
-      const base = nTag + 'left:' + pctX(p.x) + ';top:' + pctY(p.y) + ';';
-      let pos;
-      if (k === 0 && p.edge) pos = base + 'transform:translate(-100%,-50%);margin-left:-5px;opacity:0.6;';
-      else pos = base + (below ? 'transform:translate(-50%,0);margin-top:6px;' : 'transform:translate(-50%,-100%);margin-top:-6px;') + (p.edge ? 'opacity:0.6;' : '');
-      tags += '<div style="' + pos + '">' + (p.i + 1) + '</div>';
+      const l = prev ? (prev.x + p.x) / 2 : Math.max(0, p.x - (next ? (next.x - p.x) / 2 : 10));
+      const r = next ? (p.x + next.x) / 2 : Math.min(W, p.x + (prev ? (p.x - prev.x) / 2 : 10));
+      hitHtml += '<div style="position:absolute;top:-6px;bottom:-6px;left:' + pctX(l) + ';width:' + ((r - l) / W * 100).toFixed(2) + '%;pointer-events:auto;cursor:pointer;-webkit-tap-highlight-color:transparent;" onclick="diagGraphSelect(' + p.i + ')"></div>';
+      selHtml += '<div class="dgfs-sel" data-i="' + p.i + '" style="position:absolute;left:' + pctX(p.x) + ';top:0;height:100%;width:0;">'
+        + '<i style="position:absolute;top:0;bottom:0;left:0;border-left:1px dashed rgba(255,214,10,0.55);"></i>'
+        + '<i style="position:absolute;left:-8px;top:' + pctY(p.y) + ';margin-top:-8px;width:16px;height:16px;box-sizing:border-box;border:2px solid #FFD60A;border-radius:50%;"></i></div>';
+      // 말풍선: 점이 위쪽이면 아래에, 아니면 위에. 좌우 끝이면 안쪽으로 정렬해 화면 밖으로 안 나가게.
+      const fy = p.y / H, xp = p.x / W;
+      const vert = fy < 0.3 ? 'margin-top:14px;' : 'margin-top:-14px;';
+      const ty = fy < 0.3 ? '' : 'translateY(-100%)';
+      let horiz, tx;
+      if (xp < 0.3) { horiz = 'left:' + pctX(p.x) + ';margin-left:-8px;'; tx = ''; }
+      else if (xp > 0.7) { horiz = 'right:' + pctX(W - p.x) + ';margin-right:-8px;'; tx = ''; }
+      else { horiz = 'left:' + pctX(p.x) + ';'; tx = 'translateX(-50%)'; }
+      const tf = (tx || ty) ? ('transform:' + (tx + ' ' + ty).trim() + ';') : '';
+      selHtml += '<div class="dgfs-tip" data-i="' + p.i + '" style="position:absolute;top:' + pctY(p.y) + ';' + horiz + vert + tf + 'white-space:nowrap;font-size:var(--fs-xs);font-weight:900;line-height:1.2;padding:3px 8px;border-radius:6px;background:rgba(17,17,17,0.94);border:1px solid #FFD60A;color:#fff;">' + o.info[p.i] + '</div>';
     });
   }
   // svg는 margin-top:6px 로 그려지므로(flow-root로 감쌈) 라벨 레이어도 top:6px, 높이는 그래프 렌더 높이와 동일
   return '<div>' + head + '<div style="position:relative;display:flow-root;">' + svg
-    + '<div style="position:absolute;left:0;right:0;top:6px;height:' + o.heightPx + 'px;pointer-events:none;">' + tags + '</div></div></div>';
+    + '<div style="position:absolute;left:0;right:0;top:6px;height:' + o.heightPx + 'px;pointer-events:none;">' + hitHtml + tags + selHtml + '</div></div></div>';
 }
 // [추가] DIAG 미니 그래프 아래에 표시할 거리/시간 라벨 HTML.
 // 전체 거리에 따라 라벨 개수를 3→4→5개로 늘려서, 짧은 러닝에서는 카드 안에서
@@ -22320,28 +22349,39 @@ if (validVals.length) {
       + (totalT != null ? stat(koLang ? '총 시간' : 'TOTAL TIME', fmtDiagAxisTime(totalT)) : '');
   }
 }
-// [추가 2026-10-31] 구간별 목록: 그래프의 점 번호(#)와 같은 순서로 거리(구간 끝 누적)·값을 보여준다.
-// 구간이 너무 많은(긴 러닝) 경우는 생략. 흐린 행 = 그래프의 흐린 점선(평균/최고 계산에서 제외된 구간).
+// [수정 2026-10-31] 구간별 정보(거리·경과 시간·값): 아래 목록과 그래프 점 터치 말풍선이 같은 값을 쓴다.
+//  - 거리: 100m 구간은 구간 끝 누적 거리, 묶인 구간(G.grouped)은 범위(예: 5–10 km)
+//  - 시간: 구간 끝까지의 경과 시간(그래프 아래 축 라벨과 같은 기준)
+const _isMile = this.currentUnit === 'mile';
+const _dv = (km) => parseFloat((_isMile ? km * 0.621371 : km).toFixed(2)).toString();
+const _du = _isMile ? ' mi' : ' km';
+const _fmtT = (sec) => {
+  if (typeof sec !== 'number' || !isFinite(sec)) return '--';
+  const t = Math.round(sec), h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), ss = t % 60;
+  return h > 0 ? (h + ':' + String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0')) : (m + ':' + String(ss).padStart(2, '0'));
+};
+const rowInfo = splits.map((sp, i) => {
+  const kmN = parseFloat(sp.km);
+  let dist = '--';
+  if (isFinite(kmN)) {
+    if (G.grouped) { const pk = i > 0 ? parseFloat(splits[i - 1].km) : 0; dist = _dv(isFinite(pk) ? pk : 0) + '\u2013' + _dv(kmN) + _du; }
+    else dist = _dv(kmN) + _du;
+  }
+  return { dist: dist, time: _fmtT(sp.t_sec), val: fmt(vals[i]) };
+});
+// 구간이 너무 많은(30개 초과) 경우 목록은 생략. 흐린 행 = 그래프의 흐린 점선(평균/최고 계산에서 제외된 구간).
 let listHtml = '';
 if (splits.length <= 30) {
   let bestI = -1;
   vals.forEach((v, i) => { if (typeof v === 'number' && isFinite(v) && !edge.has(i)) { if (bestI < 0 || (invert ? v < vals[bestI] : v > vals[bestI])) bestI = i; } });
   let hasEdge = false;
-  const row = (cls, a, b, c) => '<div class="diag-graph-fs-row' + (cls ? ' ' + cls : '') + '"><span>' + a + '</span><span>' + b + '</span><span>' + c + '</span></div>';
-  listHtml = row('head', '#', koLang ? '거리' : 'DIST', label);
+  const row = (cls, i, a, b, c, d) => '<div class="diag-graph-fs-row' + (cls ? ' ' + cls : '') + '"' + (i != null ? ' data-i="' + i + '" onclick="diagGraphSelect(' + i + ')"' : '') + '><span>' + a + '</span><span>' + b + '</span><span>' + c + '</span><span>' + d + '</span></div>';
+  listHtml = row('head', null, '#', koLang ? '거리' : 'DIST', koLang ? '시간' : 'TIME', label);
   splits.forEach((sp, i) => {
-    const kmN = parseFloat(sp.km);
-    let dist = '--';
-    const _dv = (km) => parseFloat((this.currentUnit === 'mile' ? km * 0.621371 : km).toFixed(2)).toString();
-    const _du = this.currentUnit === 'mile' ? ' mi' : ' km';
-    if (isFinite(kmN)) {
-      if (G.grouped) { const pk = i > 0 ? parseFloat(splits[i - 1].km) : 0; dist = _dv(isFinite(pk) ? pk : 0) + '\u2013' + _dv(kmN) + _du; } // 묶음: 구간 범위(예: 5–10 km)
-      else dist = _dv(kmN) + _du; // 100m 구간: 끝 누적 거리
-    }
     const isE = edge.has(i); if (isE) hasEdge = true;
-    listHtml += row((isE ? 'dim' : '') + (i === bestI ? ' best' : ''), String(i + 1), dist, fmt(vals[i]));
+    listHtml += row((isE ? 'dim' : '') + (i === bestI ? ' best' : ''), i, String(i + 1), rowInfo[i].dist, rowInfo[i].time, rowInfo[i].val);
   });
-  if (G.grouped) listHtml += '<div class="diag-graph-fs-list-note">' + (koLang ? ('약 ' + (this.currentUnit === 'mile' ? parseFloat((G.step * 0.621371).toFixed(2)) + ' mi' : G.step + ' km') + ' 단위로 묶은 값이에요') : ('Grouped by ~' + (this.currentUnit === 'mile' ? parseFloat((G.step * 0.621371).toFixed(2)) + ' mi' : G.step + ' km'))) + '</div>';
+  if (G.grouped) listHtml += '<div class="diag-graph-fs-list-note">' + (koLang ? ('약 ' + (_isMile ? parseFloat((G.step * 0.621371).toFixed(2)) + ' mi' : G.step + ' km') + ' 단위로 묶은 값이에요') : ('Grouped by ~' + (_isMile ? parseFloat((G.step * 0.621371).toFixed(2)) + ' mi' : G.step + ' km'))) + '</div>';
   if (hasEdge) listHtml += '<div class="diag-graph-fs-list-note">' + (koLang ? '흐린 행은 평균·최고 계산에서 제외된 구간이에요' : 'Dimmed rows are excluded from AVG/BEST') + '</div>';
 }
 const titleEl = document.getElementById('diag-graph-fs-title');
@@ -22356,7 +22396,7 @@ if (subEl) subEl.textContent = this.formatRecordDateTimeLocalized(r.date) + (r.d
 // [수정 2026-09-25] 위 AVG와 동일한 이유로 공식 값을 우선 사용해 스탯카드/그래프 라벨이 서로도 어긋나지 않게 함.
 const _lblAvg = _hasOfficialAvg ? _officialAvg : (validVals.length ? validVals.reduce((a, b) => a + b, 0) / validVals.length : null);
 const _lblBest = validVals.length ? (invert ? Math.min(...validVals) : Math.max(...validVals)) : null;
-if (svgWrapEl) svgWrapEl.innerHTML = buildDiagGraphFsPlotHtml(svg, lay, { ko: koLang, fmt: fmt, invert: invert, heightPx: 150, avgVal: _lblAvg, bestVal: _lblBest });
+if (svgWrapEl) svgWrapEl.innerHTML = buildDiagGraphFsPlotHtml(svg, lay, { ko: koLang, fmt: fmt, invert: invert, heightPx: 150, avgVal: _lblAvg, bestVal: _lblBest, info: rowInfo.map((x, i) => (i + 1) + ' \u00b7 ' + x.dist + ' \u00b7 ' + x.time + ' \u00b7 ' + x.val) });
 if (axisEl) axisEl.innerHTML = axisHtml;
 if (noteEl) noteEl.innerHTML = noteHtml;
 if (statsEl) statsEl.innerHTML = statsHtml;
