@@ -870,9 +870,9 @@ overscroll-behavior-y: contain;
 .diag-graph-fs-row span:nth-child(4) { flex: 0.9; text-align: right; }
 .diag-graph-fs-row.head { cursor: default; }
 .diag-graph-fs-row.sel { background: rgba(255, 214, 10, 0.13); }
-/* 그래프 점 터치 선택(고리/가이드선/말풍선): 평소 숨김, diagGraphSelect가 .on 으로 켠다 */
-.dgfs-sel, .dgfs-tip { display: none; }
-.dgfs-sel.on, .dgfs-tip.on { display: block; }
+/* 그래프 점 터치 선택(말풍선): 평소 숨김, diagGraphSelect가 .on 으로 켠다 */
+.dgfs-tip { display: none; }
+.dgfs-tip.on { display: block; }
 .dgfs-tip { z-index: 1; }
 /* 스크롤 시 제목/그래프가 상태바·CLOSE 버튼 밑으로 겹쳐 보이지 않도록 상단을 검정 띠로 덮는다 */
 #diag-graph-fullscreen-overlay::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: calc(var(--top-inset) + 54px); background: #000; z-index: 2; pointer-events: none; }
@@ -4100,13 +4100,13 @@ function groupDiagSplits(splits) {
     }
   };
 }
-// [추가 2026-10-31] 확대 그래프에서 점/구간 목록 행을 터치하면 같은 구간을 선택(그래프 고리+말풍선, 목록 행 강조). 같은 구간을 다시 누르면 해제.
+// [추가 2026-10-31] 확대 그래프에서 점/구간 목록 행을 터치하면 같은 구간을 선택(그래프 말풍선, 목록 행 강조). 같은 구간을 다시 누르면 해제.
 function diagGraphSelect(i) {
-  const was = document.querySelector('.dgfs-sel.on');
+  const was = document.querySelector('.dgfs-tip.on');
   const same = was && String(was.getAttribute('data-i')) === String(i);
-  document.querySelectorAll('.dgfs-sel.on,.dgfs-tip.on,.diag-graph-fs-row.sel').forEach(function (el) { el.classList.remove('on'); el.classList.remove('sel'); });
+  document.querySelectorAll('.dgfs-tip.on,.diag-graph-fs-row.sel').forEach(function (el) { el.classList.remove('on'); el.classList.remove('sel'); });
   if (same) return;
-  document.querySelectorAll('.dgfs-sel[data-i="' + i + '"],.dgfs-tip[data-i="' + i + '"]').forEach(function (el) { el.classList.add('on'); });
+  document.querySelectorAll('.dgfs-tip[data-i="' + i + '"]').forEach(function (el) { el.classList.add('on'); });
   const row = document.querySelector('.diag-graph-fs-row[data-i="' + i + '"]');
   if (row) row.classList.add('sel');
 }
@@ -4183,8 +4183,8 @@ function buildDiagGraphFsPlotHtml(svg, lay, o) {
   }
   // [수정 2026-10-31] 점 옆 숫자 라벨 대신 "터치하면 그 구간 값이 뜨는" 방식.
   // 점 하나당 그래프 세로 전체를 덮는 투명 터치 영역(이웃 점과 가운데에서 맞닿음 → 어디를 눌러도 가장 가까운 점이 선택됨)을 두고,
-  // 선택되면 점 위에 노란 고리 + 세로 가이드선 + 말풍선(번호·거리·시간·값)이 켜지고 아래 목록의 같은 행도 강조된다(diagGraphSelect).
-  // 평소엔 그래프에 점만 있어 깔끔하다. 요소는 평소 숨김(.dgfs-sel/.dgfs-tip, 켜면 .on).
+  // 선택되면 점 옆에 말풍선(번호·거리·시간·값)만 켜지고(고리/세로선 없음) 아래 목록의 같은 행도 강조된다(diagGraphSelect).
+  // 평소엔 그래프에 점만 있어 깔끔하다. 말풍선은 평소 숨김(.dgfs-tip, 켜면 .on).
   let hitHtml = '', selHtml = '';
   if (lay.dots && lay.pts && lay.pts.length && o.info) {
     const P = lay.pts;
@@ -4193,12 +4193,9 @@ function buildDiagGraphFsPlotHtml(svg, lay, o) {
       const l = prev ? (prev.x + p.x) / 2 : Math.max(0, p.x - (next ? (next.x - p.x) / 2 : 10));
       const r = next ? (p.x + next.x) / 2 : Math.min(W, p.x + (prev ? (p.x - prev.x) / 2 : 10));
       hitHtml += '<div style="position:absolute;top:-6px;bottom:-6px;left:' + pctX(l) + ';width:' + ((r - l) / W * 100).toFixed(2) + '%;pointer-events:auto;cursor:pointer;-webkit-tap-highlight-color:transparent;" onclick="diagGraphSelect(' + p.i + ')"></div>';
-      selHtml += '<div class="dgfs-sel" data-i="' + p.i + '" style="position:absolute;left:' + pctX(p.x) + ';top:0;height:100%;width:0;">'
-        + '<i style="position:absolute;top:0;bottom:0;left:0;border-left:1px dashed rgba(255,214,10,0.55);"></i>'
-        + '<i style="position:absolute;left:-8px;top:' + pctY(p.y) + ';margin-top:-8px;width:16px;height:16px;box-sizing:border-box;border:2px solid #FFD60A;border-radius:50%;"></i></div>';
       // 말풍선: 점이 위쪽이면 아래에, 아니면 위에. 좌우 끝이면 안쪽으로 정렬해 화면 밖으로 안 나가게.
       const fy = p.y / H, xp = p.x / W;
-      const vert = fy < 0.3 ? 'margin-top:14px;' : 'margin-top:-14px;';
+      const vert = fy < 0.3 ? 'margin-top:10px;' : 'margin-top:-10px;';
       const ty = fy < 0.3 ? '' : 'translateY(-100%)';
       let horiz, tx;
       if (xp < 0.3) { horiz = 'left:' + pctX(p.x) + ';margin-left:-8px;'; tx = ''; }
