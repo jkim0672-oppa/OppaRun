@@ -894,6 +894,8 @@ overscroll-behavior-y: contain;
 .diag-graph-fs-row.head span:nth-child(1) { color: #888; }
 .diag-graph-fs-row.dim { opacity: 0.45; }
 .diag-graph-fs-row.best span:nth-child(4) { color: #FFD60A; }
+/* [추가 2026-11-01] 리스트 최저(WORST) 행: 페이스 숫자만 빨강. 고도 탭은 제외 */
+.diag-graph-fs-row.worst span:nth-child(4) { color: #ff4d4d; }
 .diag-graph-fs-list-note { padding: 8px 14px; font-size: var(--fs-xxs); color: #777; font-weight: 700; border-top: 1px solid #1e1e1e; }
 /* 진단 카드 안의 작은 그래프 클릭 영역: 탭 가능함을 알려주는 커서+우측 하단 확대 힌트 */
 .diag-graph-wrap { cursor: pointer; position: relative; }
@@ -22388,12 +22390,18 @@ let listHtml = '';
 if (splits.length <= 30) {
   let bestI = -1;
   vals.forEach((v, i) => { if (typeof v === 'number' && isFinite(v) && !edge.has(i)) { if (bestI < 0 || (invert ? v < vals[bestI] : v > vals[bestI])) bestI = i; } });
+  // [추가 2026-11-01] 최저(WORST): 최고와 같은 기준(흐린 행 제외)으로 반대 방향. 고도 탭은 제외, 최고와 같은 행이면 표시 안 함
+  let worstI = -1;
+  if (metricKey !== 'alt') {
+    vals.forEach((v, i) => { if (typeof v === 'number' && isFinite(v) && !edge.has(i)) { if (worstI < 0 || (invert ? v > vals[worstI] : v < vals[worstI])) worstI = i; } });
+    if (worstI === bestI) worstI = -1;
+  }
   let hasEdge = false;
   const row = (cls, i, a, b, c, d) => '<div class="diag-graph-fs-row' + (cls ? ' ' + cls : '') + '"' + (i != null ? ' data-i="' + i + '" onclick="diagGraphSelect(' + i + ')"' : '') + '><span>' + a + '</span><span>' + b + '</span><span>' + c + '</span><span>' + d + '</span></div>';
   listHtml = row('head', null, '#', koLang ? '거리' : 'DIST', koLang ? '시간' : 'TIME', label);
   splits.forEach((sp, i) => {
     const isE = edge.has(i); if (isE) hasEdge = true;
-    listHtml += row((isE ? 'dim' : '') + (i === bestI ? ' best' : ''), i, String(i + 1), rowInfo[i].dist, rowInfo[i].time, rowInfo[i].val);
+    listHtml += row((isE ? 'dim' : '') + (i === bestI ? ' best' : '') + (i === worstI ? ' worst' : ''), i, String(i + 1), rowInfo[i].dist, rowInfo[i].time, rowInfo[i].val);
   });
   if (G.grouped) listHtml += '<div class="diag-graph-fs-list-note">' + (koLang ? ('약 ' + (_isMile ? parseFloat((G.step * 0.621371).toFixed(2)) + ' mi' : G.step + ' km') + ' 단위로 묶은 값이에요') : ('Grouped by ~' + (_isMile ? parseFloat((G.step * 0.621371).toFixed(2)) + ' mi' : G.step + ' km'))) + '</div>';
   if (hasEdge) listHtml += '<div class="diag-graph-fs-list-note">' + (koLang ? '흐린 행은 평균·최고 계산에서 제외된 구간이에요' : 'Dimmed rows are excluded from AVG/BEST') + '</div>';
