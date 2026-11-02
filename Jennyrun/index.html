@@ -1659,6 +1659,9 @@ flex-wrap: wrap; justify-content: center; white-space: nowrap;
 .exit-screen.is-open { display:flex; }
 .btn-download-stride-calib { background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:13px; border-radius:12px; width:100%; font-weight:800; font-size:var(--fs-base); margin-top:10px; cursor:pointer; }
 .share-crew-saved-badge { flex:0 0 auto; display:inline-flex; align-self:flex-start; align-items:center; gap:6px; color:var(--primary); font-weight:900; font-size:var(--fs-xs); background:#132b1f; border:1px solid #1f4a34; border-radius:8px; padding:6px 10px; margin-bottom:12px; }
+/* [추가 2026-11-01] 저장 완료 배지 강조: 폭 꽉 채움 + 형광 초록 배경 + 한 번 톡 튀는 효과 (위 원본 규칙을 덮어씀) */
+@keyframes jrSavedPop { 0% { transform: scale(0.85); opacity: 0; } 60% { transform: scale(1.06); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+.share-crew-saved-badge { align-self:stretch; justify-content:center; font-size:var(--fs-sm); padding:12px 10px; background:var(--primary); color:#000; border-color:var(--primary); border-radius:12px; box-shadow:0 0 14px rgba(0,255,136,0.45); animation:jrSavedPop 0.45s ease-out 1; }
 .user-action-unfollow-btn { background:#2a2a2a; color:#ccc; border:1.5px solid #444; padding:14px; border-radius:12px; font-weight:800; font-size:var(--fs-md); cursor:pointer; }
 .user-action-unfollow-btn.is-open { display:block; }
 .custom-confirm-box { background: #1a1a1a; border: 2px solid #333; border-radius: 16px; width: 100%; max-width: 320px; padding: 22px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
@@ -2194,7 +2197,9 @@ button[style*="--danger"]:active, button[style*="#e57373"]:active, .c33:active, 
 <div id="after-stop" class="after-stop">
 <button id="btn-resume" class="btn-act" style="flex:1.3; background:var(--primary); color:#000;" onclick="app.onResume()">RESUME</button>
 <button id="btn-reset" class="btn-act" style="flex:0.7; height:44px; align-self:center; background:#333; color:#999; font-size:var(--fs-base); font-weight:700; box-shadow:none;" onclick="app.onReset()">RESET</button>
-<button id="btn-finish" class="btn-act" style="flex:1.3; background:var(--danger); color:#fff;" onclick="app.onFinish()">FINISH</button>
+<!-- [원본 보존 2026-11-01] <button id="btn-finish" class="btn-act" style="flex:1.3; background:var(--danger); color:#fff;" onclick="app.onFinish()">FINISH</button> -->
+<!-- [수정 2026-11-01] 눌린 순간 SAVING…을 먼저 보여주려고 onFinishWithSaving()을 거쳐 onFinish() 호출 -->
+<button id="btn-finish" class="btn-act" style="flex:1.3; background:var(--danger); color:#fff;" onclick="app.onFinishWithSaving()">FINISH</button>
 </div>
 </div>
 </div>
@@ -14448,7 +14453,30 @@ stride = parseFloat(calcStride(spd, cadenceForFallback, hcm, prof.strideCorrecti
 }
 return { stride, sensorFlag };
 }
+// [추가 2026-11-01] FINISH 버튼 진입점. 눌린 즉시 버튼 글자를 SAVING…으로 바꾸고, 화면이 한 번 그려진 뒤(60ms)
+// 원래 onFinish()를 호출한다(onFinish는 동기 처리라 같은 순간에 글자를 바꾸면 화면에 안 그려지기 때문).
+// 처리 중 다시 눌린 탭은 무시. onFinish가 끝나면(공유 화면이 위에 뜬 뒤) 글자는 원래대로 복구.
+onFinishWithSaving() {
+if (this._finishPending) return;
+this._finishPending = true;
+const btn = document.getElementById('btn-finish');
+let ko = false;
+try { ko = storage.getLang() === 'ko'; } catch (e) {}
+if (btn) btn.textContent = ko ? '저장 중…' : 'SAVING…';
+setTimeout(() => {
+try {
+this.onFinish();
+} finally {
+this._finishPending = false;
+try {
+const t = translations[storage.getLang()] || translations['en'];
+if (btn && t && t.finish) btn.textContent = t.finish;
+} catch (e) {}
+}
+}, 60);
+}
 onFinish() {
+if (!this.state.isRunning) return; // [추가 2026-11-01] 이미 종료 처리된 러닝이면 무시 → 같은 러닝이 두 번 저장되는 것 방지
 this.persistRawSensor(); // [추가 2026-10-15] 종료 직후 새로고침 전에 원시 센서 기록을 영구 저장
 if(this.timer) clearInterval(this.timer);
 this.stopSilentKeepAlive();
