@@ -14220,6 +14220,7 @@ if (!this.state.isAutoPaused && typeof this.maybeLogPrecisionSample === 'functio
 }
 // ── 러닝 시작 / 정지 / 재개 / 종료 흐름 ──
 onStart() {
+try { hrManager.checkOnStart(); } catch (e) {} // [신규 2026-11-02] 심박이 끊긴 채로 시작하면 알림
 if(this.timer) clearInterval(this.timer);
 this.state.isRunning = true;
 this.state.isPaused = false;
@@ -18274,6 +18275,8 @@ const hrManager = {
   },
   updateDisplay(hr) {
     this._hr = hr;
+    // [신규 2026-11-02] 심박 데이터가 들어오는 시각 기록 + 끊김 상태였다면 복구 처리
+    if (hr && hr > 0) { this._lastHrAt = Date.now(); if (this._lost) { this._lost = false; this._connected = true; this.hideLostBanner(); } }
     // [추가] 러닝 중이면 심박 샘플 누적 (평균/최고 심박 계산용)
     if (hr && hr > 0 && typeof app !== 'undefined' && app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
       this._samples.push(hr);
@@ -18309,6 +18312,58 @@ const hrManager = {
       if(zoneCard) { zoneCard.style.borderColor='#333'; }
     }
   },
+  // ── [신규 2026-11-02] 심박 연결 끊김 알림 ──
+  // 워치에서 운동을 저장하면 심박 송출이 멈추는 경우 등, 사용자가 해제하지 않았는데 연결이 끊기면 바로 알린다.
+  // 1) 연결 해제 이벤트  2) 연결은 돼 있는데 15초 넘게 데이터가 없을 때  3) START 누를 때 끊겨 있으면 다시 알림
+  _isWanted() { try { return localStorage.getItem('jrHrWanted') === '1'; } catch (e) { return false; } },
+  _markConnected() {
+    this._connected = true; this._userDisc = false; this._lost = false; this._sessionUsed = true; this._lastHrAt = Date.now();
+    try { localStorage.setItem('jrHrWanted', '1'); } catch (e) {}
+    this.hideLostBanner();
+  },
+  onLinkLost() {
+    this._connected = false;
+    const byUser = this._userDisc; this._userDisc = false;
+    if (byUser) return; // 사용자가 직접 해제한 경우는 알리지 않음
+    this.notifyLost();
+  },
+  notifyLost(force) {
+    if (!this._isWanted()) return;
+    if (this._lost && !force) return;
+    this._lost = true;
+    this.showLostBanner();
+    try { if (navigator.vibrate) navigator.vibrate([300, 120, 300]); } catch (e) {}
+  },
+  checkOnStart() {
+    if (!this._isWanted() || !this._sessionUsed) return;
+    const stale = this._connected && this._lastHrAt && (Date.now() - this._lastHrAt > 15000);
+    if (!this._connected || stale) this.notifyLost(true);
+  },
+  _watch() {
+    if (this._connected && !this._lost && this._lastHrAt && (Date.now() - this._lastHrAt > 15000)) this.notifyLost();
+  },
+  showLostBanner() {
+    this.hideLostBanner();
+    const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang() === 'ko' : false;
+    const bar = document.createElement('div');
+    bar.id = 'hr-lost-banner';
+    bar.style.cssText = 'position:fixed; left:12px; right:12px; top:calc(env(safe-area-inset-top, 0px) + 10px); z-index:99999; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; background:#2a1212; border:1.5px solid var(--danger); border-radius:14px; color:#fff; font-weight:700; box-shadow:0 4px 16px rgba(0,0,0,0.6);';
+    const msg = document.createElement('span');
+    msg.textContent = isKo ? '심박 연결이 끊겼어요' : 'Heart rate disconnected';
+    const btn = document.createElement('button');
+    btn.textContent = isKo ? '다시 연결' : 'RECONNECT';
+    btn.style.cssText = 'background:var(--danger); color:#fff; border:none; border-radius:10px; padding:8px 12px; font-weight:800; font-size:inherit;';
+    btn.onclick = () => { this.hideLostBanner(); try { ui.openHrConnect(); } catch (e) {} };
+    bar.appendChild(msg); bar.appendChild(btn);
+    bar.onclick = (e) => { if (e.target === bar || e.target === msg) this.hideLostBanner(); };
+    document.body.appendChild(bar);
+    this._bannerTimer = setTimeout(() => this.hideLostBanner(), 10000);
+  },
+  hideLostBanner() {
+    if (this._bannerTimer) { clearTimeout(this._bannerTimer); this._bannerTimer = null; }
+    const el = document.getElementById('hr-lost-banner');
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  },
   async connect() {
     const btn = document.getElementById('btn-hr-connect');
     const status = document.getElementById('hr-modal-status');
@@ -18339,10 +18394,12 @@ const hrManager = {
       });
       this.device.addEventListener('gattserverdisconnected', () => {
         this.updateDisplay(0);
+        this.onLinkLost();
         if(status) status.textContent=L.disconnected;
         if(btn){btn.disabled=false;btn.textContent=L.connect;btn.onclick=()=>hrManager.connect();}
       });
       if(status) status.textContent=L.connected(this.device.name);
+      this._markConnected();
       if(btn){btn.disabled=false;btn.textContent=L.disconnect;btn.onclick=()=>hrManager.disconnect();}
     } catch(e) {
       if(status) status.textContent=e.name==='NotFoundError'?L.noDevice:L.error(e.message);
@@ -18350,6 +18407,9 @@ const hrManager = {
     }
   },
   disconnect() {
+    // [신규] 사용자가 직접 해제한 것이므로 끊김 알림을 띄우지 않고, 다음부터도 묻지 않도록 기록 제거
+    this._userDisc = true; this._lost = false; this.hideLostBanner();
+    try { localStorage.removeItem('jrHrWanted'); } catch (e) {}
     if (window.AndroidHrBridge) {
       window.AndroidHrBridge.disconnect();
       return;
@@ -18372,6 +18432,7 @@ const hrManager = {
     const btn = document.getElementById('btn-hr-connect');
     const status = document.getElementById('hr-modal-status');
     const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang()==='ko' : false;
+    this._markConnected();
     if(status) status.textContent= isKo ? '연결됨' : 'Connected';
     if(btn){btn.disabled=false;btn.textContent= isKo ? '연결 해제' : 'DISCONNECT';btn.onclick=()=>hrManager.disconnect();}
   },
@@ -18383,6 +18444,7 @@ const hrManager = {
     const status = document.getElementById('hr-modal-status');
     const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang()==='ko' : false;
     this.updateDisplay(0);
+    this.onLinkLost();
     if(status) status.textContent= isKo ? '연결이 해제되었습니다.' : 'Disconnected.';
     if(btn){btn.disabled=false;btn.textContent= isKo ? '연결하기' : 'CONNECT';btn.onclick=()=>hrManager.connect();}
   },
@@ -18401,6 +18463,9 @@ const hrManager = {
     if(btn){btn.disabled=false;btn.textContent= isKo ? '연결하기' : 'CONNECT';btn.onclick=()=>hrManager.connect();}
   }
 };
+
+// [신규 2026-11-02] 심박 끊김 감시(5초마다 점검)
+setInterval(() => { try { hrManager._watch(); } catch (e) {} }, 5000);
 
 // ===============================================================
 // [GARMIN IMPORT] 독립 모듈 시작
