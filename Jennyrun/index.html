@@ -2428,7 +2428,7 @@ alt="runner"/>
 </div>
 <div style="margin-top: 10px; text-align: center;">
 <span id="app-version-label" style="color: #999; font-size:var(--fs-xs);"></span><span id="app-update-time-label" style="color: #999; font-size:var(--fs-xs);"></span>
-<a id="app-update-apply-btn" href="javascript:void(0)" onclick="jrApplyNativeUpdate()" style="display:none; margin-left:10px; color:var(--primary); font-size:var(--fs-xs); font-weight:700; text-decoration:none; border:none; background:rgba(0,255,136,0.20); border-radius:8px; padding:3px 9px;">UPDATE NOW</a>
+<a id="app-update-apply-btn" href="javascript:void(0)" onclick="jrApplyNativeUpdate()" style="display:none; margin-left:10px; color:#f5b400; font-size:var(--fs-xs); font-weight:700; text-decoration:none; border:none; background:rgba(245,180,0,0.20); border-radius:8px; padding:3px 9px;">UPDATE NOW</a>
 </div>
 </div>
 </div>
@@ -23228,16 +23228,31 @@ UIManager.prototype.stopRoutePlayback = function() {
 <style>
 /* [수정 2026-11-02] 원본: 초록 테두리+배경이 같이 깜빡임. → 테두리(노랑)와 배경은 고정, 글자(초록)만 반짝이게 변경 */
 @keyframes jrUpdGlow {
-  0%, 100% { color: rgba(0,255,136,0.55); text-shadow: none; }
-  50%      { color: #00ff88; text-shadow: 0 0 8px rgba(0,255,136,0.9); }
+  0%, 100% { color: rgba(245,180,0,0.6); text-shadow: none; }
+  50%      { color: #f5b400; text-shadow: 0 0 8px rgba(245,180,0,0.9); }
 }
 #app-update-apply-btn.is-ready { animation: jrUpdGlow 1.4s ease-in-out infinite; }
 @keyframes jrDotGlow {
-  0%, 100% { box-shadow: 0 0 2px rgba(0,255,136,0.5); opacity: 0.75; }
-  50%      { box-shadow: 0 0 8px 2px rgba(0,255,136,0.95); opacity: 1; }
+  0%, 100% { box-shadow: 0 0 2px rgba(245,180,0,0.5); opacity: 0.75; }
+  50%      { box-shadow: 0 0 8px 2px rgba(245,180,0,0.95); opacity: 1; }
 }
 /* 새 버전 준비됨 표시 점: REC•SET 탭과 SETTINGS 서브탭 글자 옆, 버튼과 같은 초록(--primary) */
-.has-update-dot::after { content: ''; display: inline-block; flex: 0 0 auto; align-self: flex-start; width: 7px; height: 7px; margin-left: 5px; margin-top: 3px; border-radius: 50%; background: var(--primary); animation: jrDotGlow 1.4s ease-in-out infinite; }
+.has-update-dot::after { content: ''; display: inline-block; flex: 0 0 auto; align-self: flex-start; width: 7px; height: 7px; margin-left: 5px; margin-top: 3px; border-radius: 50%; background: #f5b400; animation: jrDotGlow 1.4s ease-in-out infinite; }
+</style>
+<!-- [신규 2026-11-03] 새 버전 안내 창: 버전마다 한 번, 러닝 중엔 안 띄움. 업데이트 / 닫기 (닫아도 점과 설정의 UPDATE NOW 버튼은 남음) -->
+<div id="update-ready-modal" class="custom-confirm-overlay">
+<div class="custom-confirm-box" style="border-color:#f5b400;">
+<div class="custom-confirm-msg" id="update-ready-msg" style="margin-bottom:8px;"></div>
+<div id="update-ready-sub" style="font-size:var(--fs-xs); color:#999; margin-bottom:20px; line-height:1.5; word-break:keep-all;"></div>
+<div class="custom-confirm-actions">
+<button id="update-ready-close" class="btn-confirm-act btn-confirm-cancel" onclick="jrUpdateModalClose()"></button>
+<button id="update-ready-ok" class="btn-confirm-act" onclick="jrUpdateModalApply()" style="background:#f5b400; color:#111;"></button>
+</div>
+</div>
+</div>
+<style>
+/* [신규 2026-11-03] 업데이트 창은 러닝 화면 위로도 확실히 보이도록 최상단 */
+#update-ready-modal { z-index: 1000000; }
 </style>
 <script id="update-ready-js">
 (function () {
@@ -23257,12 +23272,40 @@ UIManager.prototype.stopRoutePlayback = function() {
     // [수정 2026-11-01] SETTINGS 서브탭 옆 점을 그 아래 APP 서브탭 옆으로 이동 (REC•SET 점은 그대로)
     // [원본 보존 2026-11-02] ['tab-history', 'settings-sub-tab-app'].forEach(function (id) {
     // [수정 2026-11-02] APP 서브탭 옆 점 제거 (REC•SET 탭 점과 설정 버전 옆 UPDATE 버튼만 남김)
+    // [수정 2026-11-03] 창을 닫은 뒤에도 업데이트 대기 중임을 알 수 있도록 REC•SET 탭 점(진노랑) 유지
     ['tab-history'].forEach(function (id) {
       var el = document.getElementById(id);
       if (el) el.classList.toggle('has-update-dot', canApply);
     });
     btn.textContent = isKo() ? '지금 업데이트' : 'UPDATE NOW';
+    maybePrompt(canApply);
   }
+
+  // [신규 2026-11-03] 새 버전 안내 창 — 버전마다 한 번만, 러닝 중엔 안 띄움
+  var PROMPT_KEY = 'jr_update_prompted_ver';
+  function getPrompted() { try { return localStorage.getItem(PROMPT_KEY); } catch (e) { return null; } }
+  function setPrompted(v) { try { localStorage.setItem(PROMPT_KEY, v); } catch (e) {} }
+  function modalEl() { return document.getElementById('update-ready-modal'); }
+  function maybePrompt(canApply) {
+    var m = modalEl();
+    if (!m || !canApply || !pendingVer) return;
+    if (m.classList.contains('is-open')) return;
+    if (getPrompted() === pendingVer) return;
+    var ko = isKo();
+    document.getElementById('update-ready-msg').textContent = ko ? '새 버전이 있어요' : 'A new version is ready';
+    document.getElementById('update-ready-sub').textContent = ko ? '지금 업데이트하면 앱이 새로고침돼요. 나중에 해도 다음 실행 때 반영돼요.' : 'The app will reload after updating. If you skip, it applies on next launch.';
+    document.getElementById('update-ready-ok').textContent = ko ? '업데이트' : 'UPDATE';
+    document.getElementById('update-ready-close').textContent = ko ? '닫기' : 'CLOSE';
+    setPrompted(pendingVer);
+    m.classList.add('is-open');
+  }
+  window.jrUpdateModalClose = function () {
+    var m = modalEl(); if (m) m.classList.remove('is-open');
+  };
+  window.jrUpdateModalApply = function () {
+    window.jrUpdateModalClose();
+    window.jrApplyNativeUpdate();
+  };
 
   // 코틀린 → JS: 다운로드 완료 알림
   window.onNativeUpdateReady = function (version) {
