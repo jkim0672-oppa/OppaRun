@@ -1906,6 +1906,18 @@ button[style*="--danger"]:active, button[style*="#e57373"]:active, .c33:active, 
 </div>
 </div>
 
+<!-- [신규 2026-11-04] 심박 연결 끊김 경고창: 다른 확인 모달과 같은 custom-confirm 스타일 사용 -->
+<div id="hr-lost-modal" class="custom-confirm-overlay">
+<div class="custom-confirm-box">
+<div id="hr-lost-title" class="custom-confirm-msg" style="margin-bottom:6px;">Heart rate disconnected</div>
+<div id="hr-lost-desc" style="font-size:var(--fs-sm);color:#888;margin-bottom:20px;line-height:1.5;"></div>
+<div class="custom-confirm-actions">
+<button id="btn-hr-lost-close" class="btn-confirm-act btn-confirm-cancel" onclick="hrManager.hideLostBanner()">CLOSE</button>
+<button id="btn-hr-lost-reconnect" class="btn-confirm-act btn-confirm-save" onclick="hrManager.hideLostBanner(); try { ui.openHrConnect(); } catch (e) {}">RECONNECT</button>
+</div>
+</div>
+</div>
+
 <!-- ===== [신규] 시작 화면 퀵 모드 전환 팝업 (온보딩 전체를 거치지 않고 RUN/WALK/TRAIL만 바로 전환) ===== -->
 <!-- [수정] 빈 배경(백드롭) 탭으로 팝업이 닫히면서 그 사이 이미 적용된 선택이 그대로
      반영되어 화면이 바뀌는 문제가 있었음. 이제 배경 탭은 아무 반응도 하지 않고,
@@ -18288,7 +18300,7 @@ const hrManager = {
   updateDisplay(hr) {
     this._hr = hr;
     // [신규 2026-11-02] 심박 데이터가 들어오는 시각 기록 + 끊김 상태였다면 복구 처리
-    if (hr && hr > 0) { this._lastHrAt = Date.now(); if (this._lost) { this._lost = false; this._connected = true; this.hideLostBanner(); } }
+    if (hr && hr > 0) { this._lastHrAt = Date.now(); if (this._lost) { this._lost = false; this._connected = true; this.hideLostBanner(); this._setNoSignalUi(false); } }
     // [추가] 러닝 중이면 심박 샘플 누적 (평균/최고 심박 계산용)
     if (hr && hr > 0 && typeof app !== 'undefined' && app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
       this._samples.push(hr);
@@ -18343,8 +18355,25 @@ const hrManager = {
     if (!this._isWanted()) return;
     if (this._lost && !force) return;
     this._lost = true;
+    this._setNoSignalUi(true); // [신규 2026-11-04] 연결은 남아 있는데 데이터만 끊긴 경우, 마지막 심박값/'Connected'가 그대로 남지 않게 함
     this.showLostBanner();
     try { if (navigator.vibrate) navigator.vibrate([300, 120, 300]); } catch (e) {}
+  },
+  // [신규 2026-11-04] 연결은 유지된 채 심박 데이터가 끊긴 경우(워치에서 운동 저장 등) 화면 표시를 실제 상태에 맞춘다.
+  // on=true: 심박 카드를 '--'로 비우고 연결 창 문구를 '심박 신호 없음'으로. on=false(데이터 복구): 문구를 '연결됨'으로 되돌린다.
+  // 연결 자체가 끊긴 경우(_connected=false)는 기존 onNativeDisconnect 등이 문구를 처리하므로 건드리지 않는다.
+  _setNoSignalUi(on) {
+    try {
+      const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang() === 'ko' : false;
+      const status = document.getElementById('hr-modal-status');
+      if (on) {
+        if (!this._connected) return;
+        this.updateDisplay(0);
+        if (status) status.textContent = isKo ? '심박 신호가 없어요' : 'No heart rate signal';
+      } else if (status && this._connected) {
+        status.textContent = isKo ? '연결됨' : 'Connected';
+      }
+    } catch (e) {}
   },
   checkOnStart() {
     if (!this._isWanted() || !this._sessionUsed) return;
@@ -18356,25 +18385,22 @@ const hrManager = {
   },
   showLostBanner() {
     this.hideLostBanner();
+    const modal = document.getElementById('hr-lost-modal');
+    if (!modal) return;
     const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang() === 'ko' : false;
-    const bar = document.createElement('div');
-    bar.id = 'hr-lost-banner';
-    bar.style.cssText = 'position:fixed; left:12px; right:12px; top:calc(env(safe-area-inset-top, 0px) + 10px); z-index:99999; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; background:#2a1212; border:1.5px solid var(--danger); border-radius:14px; color:#fff; font-weight:700; box-shadow:0 4px 16px rgba(0,0,0,0.6);';
-    const msg = document.createElement('span');
-    msg.textContent = isKo ? '심박 연결이 끊겼어요' : 'Heart rate disconnected';
-    const btn = document.createElement('button');
-    btn.textContent = isKo ? '다시 연결' : 'RECONNECT';
-    btn.style.cssText = 'background:var(--danger); color:#fff; border:none; border-radius:10px; padding:8px 12px; font-weight:800; font-size:inherit;';
-    btn.onclick = () => { this.hideLostBanner(); try { ui.openHrConnect(); } catch (e) {} };
-    bar.appendChild(msg); bar.appendChild(btn);
-    bar.onclick = (e) => { if (e.target === bar || e.target === msg) this.hideLostBanner(); };
-    document.body.appendChild(bar);
+    const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+    set('hr-lost-title', isKo ? '심박 연결이 끊겼어요' : 'Heart rate disconnected');
+    set('hr-lost-desc', isKo ? '심박계와의 연결이 끊어졌어요.\n다시 연결할까요?' : 'The heart rate monitor lost connection.\nReconnect now?');
+    const desc = document.getElementById('hr-lost-desc'); if (desc) desc.style.whiteSpace = 'pre-line';
+    set('btn-hr-lost-close', isKo ? '닫기' : 'CLOSE');
+    set('btn-hr-lost-reconnect', isKo ? '다시 연결' : 'RECONNECT');
+    openModal(modal);
     this._bannerTimer = setTimeout(() => this.hideLostBanner(), 10000);
   },
   hideLostBanner() {
     if (this._bannerTimer) { clearTimeout(this._bannerTimer); this._bannerTimer = null; }
-    const el = document.getElementById('hr-lost-banner');
-    if (el && el.parentNode) el.parentNode.removeChild(el);
+    const modal = document.getElementById('hr-lost-modal');
+    if (modal) closeModal(modal);
   },
   async connect() {
     const btn = document.getElementById('btn-hr-connect');
@@ -23074,6 +23100,11 @@ UIManager.prototype.stopRoutePlayback = function() {
     const avatarEditorModal = document.getElementById('avatar-editor-modal');
     if (avatarEditorModal && avatarEditorModal.classList.contains('is-open')) {
       if (typeof community !== 'undefined') community.cancelAvatarEditor(); // [수정 2026-10-25] cancelAvatarEditor는 ui가 아니라 community 메서드 — 뒤로가기 시 'ui.cancelAvatarEditor is not a function' 오류 수정
+      return;
+    }
+    const hrLostModal = document.getElementById('hr-lost-modal');
+    if (hrLostModal && hrLostModal.classList.contains('is-open')) {
+      if (typeof hrManager !== 'undefined') hrManager.hideLostBanner();
       return;
     }
     const hrModal = document.getElementById('hr-modal');
