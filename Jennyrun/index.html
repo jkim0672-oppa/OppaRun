@@ -2944,7 +2944,8 @@ function generateRunCardCanvas(data, isKo) {
       statTile(PAD+sw*2+20, row2y, sw, sh, effIsSimple ? (isKo?'효율(간이)':'EFF (SIMPLE)') : (isKo?'효율점수':'EFFICIENCY'),  effScore,           '/ 100');
       statTile(PAD,         row3y, sw, sh, 'ALT',                         (data.alt != null ? data.alt : '--'), 'm');
       statTile(PAD+sw+10,   row3y, sw, sh, isKo?'체공시간':'FLIGHT',      data.flight||'--',  '%');
-      statTile(PAD+sw*2+20, row3y, sw, sh, isKo?'GCT 밸런스':'GCT BAL',   data.gctBal||'--', ''); // [수정] 케이던스 밸런스 제거 → GCT 밸런스
+      // [수정 2026-11-03] 원본: GCT BAL 칸 → VO2MAX(추정)로 교체
+      statTile(PAD+sw*2+20, row3y, sw, sh, 'VO2MAX', (data.vo2max != null ? Number(data.vo2max).toFixed(1) : '--'), 'ml/kg/min');
     }
 
     // ── 효율 점수 바 (걷기 모드는 의미가 없으므로 응원 문구 바로 대체) ──
@@ -9005,6 +9006,8 @@ return '<div class="h-det-box"><div class="h-det-label">' + t.stride + '</div><d
 // [수정] 순서: ... GCT, FLIGHT, STRIDE, POWER, ALT(맨 끝)
 '<div class="h-det-box"><div class="h-det-label">' + t.powerLabel + '</div><div class="h-det-val" style="color:' + this.getPowerColor(r.powerWkg) + '">' + (r.power != null ? r.power : '--') + ' <span class="u-font-size-fs-xxs">W</span></div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + (t.alt || 'ALT') + '</div><div class="h-det-val u-color-dddddd">' + (r.alt || '0') + ' <span class="u-font-size-fs-xxs">M</span></div></div>' +
+// [신규 2026-11-03] ALT CHANGE (ETC에서 이동) — ALT 옆 빈 칸
+'<div class="h-det-box"><div class="h-det-label">' + t.altChange + '</div><div class="h-det-val u-color-dddddd">' + ((r.splits && r.splits.length > 0) ? r.splits.reduce((sum,s)=>sum+Math.max(0,s.altDiff||0),0) : 0) + ' <span class="u-font-size-fs-xxs">M</span></div></div>' +
 '</div></div>' +
 // [추가] GCT 밸런스 / 자이로 밸런스 표시 (좌:우 실측값, 새 데이터 행) — 케이던스 밸런스는 제거
 (this.isGyroAccelUnreliable(r) ? '' : (
@@ -9018,7 +9021,8 @@ LeanAngleUI.listDetBoxHtml(r, lang) +
 // [추가] PACING 그룹: 위치와 무관하게 신뢰할 수 있는 지표(페이스 안정성/전후반 차/케이던스 유지/심박 드리프트)
 this.buildPacingGroupHtml(r, t) +
 '<div class="h-group"><div class="h-group-title">' + t.hSecEtc + '</div><div class="h-group-grid">' +
-'<div class="h-det-box"><div class="h-det-label">' + t.altChange + '</div><div class="h-det-val u-color-dddddd">' + ((r.splits && r.splits.length > 0) ? r.splits.reduce((sum,s)=>sum+Math.max(0,s.altDiff||0),0) : 0) + ' <span class="u-font-size-fs-xxs">M</span></div></div>' +
+// [수정 2026-11-03] ALT CHANGE는 RUN DATA의 ALT 옆으로 올리고, ETC 첫 칸에는 VO2MAX(추정) 표시
+(function(){ const _v = ui.estimateVo2max(r); return '<div class="h-det-box"><div class="h-det-label">' + (t.vo2Label || 'VO2MAX') + '</div><div class="h-det-val" style="color:' + (_v != null ? ui.getVo2Color(ui.getVo2Level(_v)) : '#888') + '">' + (_v != null ? _v.toFixed(1) : '--') + '</div></div>'; })() +
 // [추가] 심박수 평균/최고 + 심박 존 (가민 연동 데이터, 기존 6개 데이터 밑에 추가)
 this.buildHrBoxHtml(r, t) +
 '</div></div>'
@@ -10032,7 +10036,8 @@ shareRunCardImage({
   // [추가] 활동모드에 따라 카드 레이아웃(걷기용 STEPS/SPM 등)이 분기되도록 전달
   activityMode: record.activityMode || 'run',
   steps: record.steps, walkSpm: record.walkSpm, stride: record.stride,
-  kcal: record.kcal, alt: record.alt, avgHr: record.avgHr, nickname: null
+  kcal: record.kcal, alt: record.alt, avgHr: record.avgHr, nickname: null,
+  vo2max: (function(){ try { return ui.estimateVo2max(record); } catch (e) { return null; } })()
 }, isKo, null);
 }
 // [추가] 경로맵 상세 페이지 스타일(지도 대신 경로 라인만 그린 것 + SPLIT ANALYTICS +
@@ -17141,10 +17146,13 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
         // [수정] 공유 모달의 HR 체크박스를 끄면 null로 업로드(비공개)
         avg_hr: shareHr ? (record.avgHr || null) : null,
         max_hr: shareHr ? (record.maxHr || null) : null,
-        hr_zone: shareHr ? (record.hrZone || null) : null
+        hr_zone: shareHr ? (record.hrZone || null) : null,
+        // [신규 2026-11-03] VO2max 추정값(심박 기반이라 HR 공개 체크와 함께). Supabase 'records'에 vo2max(numeric, nullable) 컬럼 필요(없으면 빼고 업로드)
+        vo2max: shareHr ? (function(){ try { const v = ui.estimateVo2max(record); return v != null ? v : null; } catch (e) { return null; } })() : null
       };
       let { error } = await _sb.from('records').insert(payload);
       if (error && /device_pos/i.test(error.message || '')) { delete payload.device_pos; ({ error } = await _sb.from('records').insert(payload)); } // 컬럼 미생성 시 위치만 빼고 업로드
+      if (error && /vo2max/i.test(error.message || '')) { delete payload.vo2max; ({ error } = await _sb.from('records').insert(payload)); } // vo2max 컬럼 미생성 시 그 값만 빼고 업로드
       if (error) {
         console.warn('Upload error:', error.message);
         let isKo = true;
@@ -17162,9 +17170,11 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
       const _feedCols = 'id, nickname, avatar_url, location_name, title, activity_mode, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, splits, photo_url, message, avg_hr, max_hr, hr_zone, steps, walk_spm, stride_m, kcal, power_w, power_wkg, avg_lean_angle_deg, avg_lean_forward_deg, avg_lean_lateral_deg';
       // [수정] 전체화면 확장맵에 km 스플릿 페이스 마커를 표시하려면 splits(좌표+구간페이스)가 필요해서 추가.
       // device_pos 컬럼이 아직 없으면(미생성) 그 컬럼만 빼고 다시 조회해 피드가 깨지지 않게 한다.
-      const _feedQ = (withPos) => _sb.from('records').select(_feedCols + (withPos ? ', device_pos' : '')).order('created_at', { ascending: false }).limit(50);
-      let { data, error } = await _feedQ(true);
-      if (error && /device_pos/i.test(error.message || '')) ({ data, error } = await _feedQ(false));
+      const _feedQ = (withPos, withVo2) => _sb.from('records').select(_feedCols + (withVo2 ? ', vo2max' : '') + (withPos ? ', device_pos' : '')).order('created_at', { ascending: false }).limit(50);
+      let { data, error } = await _feedQ(true, true);
+      // [수정 2026-11-03] vo2max 컬럼이 아직 없으면 그 컬럼만 빼고 다시 조회(피드가 깨지지 않게)
+      if (error && /vo2max/i.test(error.message || '')) ({ data, error } = await _feedQ(true, false));
+      if (error && /device_pos/i.test(error.message || '')) ({ data, error } = await _feedQ(false, false));
       if (error) throw error;
       return data || [];
     } catch(e) { console.warn('Feed load failed', e); return []; }
@@ -17225,7 +17235,7 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
         dist: distText, distUnit: 'km',
         time: durText, pace: paceText,
         cadence: r.cadence, gct: r.gct_ms, flight: r.flight_pct, effScore, effSimple: effIsSimpleCrew,
-        avgHr: r.avg_hr || null, hrZone: r.hr_zone || null,
+        avgHr: r.avg_hr || null, hrZone: r.hr_zone || null, vo2max: r.vo2max != null ? r.vo2max : null,
         // [추가] 활동모드에 따라 카드 레이아웃이 분기되도록 전달
         activityMode: activityMode,
         steps: r.steps, walkSpm: r.walk_spm, stride: r.stride_m,
@@ -17540,6 +17550,8 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
         }
         _statCells.push(_sc(t.cal||'KCAL', _nn(r.kcal) ? r.kcal : '--', 'kcal'));
         if (_nn(r.power_w)) _statCells.push(_sc(t.powerLabel||'POWER', r.power_w, 'W', (typeof ui !== 'undefined') ? ui.getPowerColor(r.power_wkg) : '#111'));
+        // [신규 2026-11-03] VO2MAX(추정) — 업로드 시 계산해 둔 값이 있는 기록만 표시
+        if (_nn(r.vo2max)) _statCells.push(_sc(t.vo2Label||'VO2MAX', Number(r.vo2max).toFixed(1), '', (typeof ui !== 'undefined' && ui.getVo2Level(Number(r.vo2max)) >= 3) ? CrewStatColor.GOOD : '#111'));
         if (r.hr_zone) _statCells.push(_sc(t.hrZoneLabel||'HR ZONE', r.hr_zone, '', CrewStatColor.hrZoneColor(r.hr_zone)));
         if (hasEffCard) _statCells.push(_sc(effLabelCard, r.eff_score, '/100', effValColorCard));
         _statCells.push(_hrCell);
