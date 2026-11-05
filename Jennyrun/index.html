@@ -1530,28 +1530,6 @@ flex-wrap: wrap; justify-content: center; white-space: nowrap;
 .mode-split-row .ms-val { color: var(--primary); font-size: var(--fs-base); font-weight: 900; text-align: right; }
 .mode-split-row .ms-cnt { color: var(--text-main); font-size: var(--fs-base); font-weight: 800; text-align: right; }
 .mode-split-note { color: var(--text-dim); font-size: var(--fs-xs); font-weight: 700; text-align: center; margin: 8px 0 0; }
-/* [신규 2026-11-04] BY ACTIVITY 행 탭 → 상세 패널(거리/횟수/케이던스/페이스/칼로리) */
-.mode-split-row.tap { grid-template-columns: 1fr auto 52px 14px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
-.mode-split-row .ms-arrow { color: var(--text-dim); font-weight: 900; text-align: right; }
-.md-overlay { position: fixed; inset: 0; z-index: 1000002; background: var(--bg); display: flex; flex-direction: column; overflow-y: auto; box-sizing: border-box; padding: calc(env(safe-area-inset-top, 0px) + 12px) 14px calc(env(safe-area-inset-bottom, 0px) + 16px); }
-.md-head { display: flex; align-items: center; justify-content: space-between; }
-.md-title { color: var(--primary); font-size: var(--fs-lg); font-weight: 900; letter-spacing: .5px; }
-.md-period { color: var(--text-dim); font-size: var(--fs-xs); font-weight: 800; margin-left: 8px; }
-.md-close { background: none; border: none; color: var(--primary); font-size: var(--fs-lg); font-weight: 900; padding: 8px 0 8px 12px; cursor: pointer; }
-.md-tabs { display: flex; margin: 14px 0 12px; border-bottom: 1px solid #333; }
-.md-tab { flex: 1; text-align: center; padding: 11px 0; color: var(--text-dim); font-size: var(--fs-sm, 13px); font-weight: 900; border-bottom: 3px solid transparent; margin-bottom: -1px; cursor: pointer; white-space: nowrap; }
-.md-tab.on { color: var(--text-main); border-bottom-color: var(--primary); }
-.md-chart { height: 220px; background: var(--card-bg); border-radius: 12px; padding: 18px 8px 10px; display: flex; align-items: flex-end; gap: 3px; }
-.md-chart .bar { background: #2a2a2a; }
-.md-chart .bar.on { background: rgba(0,255,136,0.38); }
-.md-chart .bar.hl { background: var(--primary); }
-.md-chart .bar-col { overflow: visible; }
-.md-sum { display: flex; gap: 12px; margin-top: 14px; }
-.md-box { flex: 1; background: var(--card-bg); border-radius: 12px; padding: 14px; }
-.md-num { color: var(--text-main); font-size: var(--fs-xl); font-weight: 900; }
-.md-num small { color: var(--text-dim); font-size: var(--fs-xs); font-weight: 800; }
-.md-cap { color: var(--text-dim); font-size: var(--fs-xs); font-weight: 800; margin-top: 4px; }
-.md-hint { color: var(--text-dim); font-size: var(--fs-xs); font-weight: 700; text-align: center; margin-top: 12px; }
 .bar-chart { background: var(--card-bg); border-radius: 12px; padding: 16px 8px 10px; display: flex; align-items: flex-end; gap: 4px; height: 130px; }
 .bar-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
 .bar-val { font-size:var(--fs-xxs); color: var(--text-dim); font-weight: 800; margin-bottom: 4px; white-space: nowrap; height: 11px; }
@@ -9501,101 +9479,6 @@ _detBox(isKo ? '심박' : 'HR', hrDisplay) +
 '</div></div></div>' +
 '</div>';
 }
-// [신규 2026-11-04] BY ACTIVITY 행 탭 → 상세 패널. 현재 기간 필터(주간 7일/월간 30일/연간 12개월)를 따라가며
-// 거리·횟수·케이던스·페이스·칼로리를 막대그래프로 보여준다. 케이던스/페이스는 시간(거리) 가중 평균(TOTAL 카드와 같은 방식).
-openModeDetail(mode) { this._mdMode = mode; this._mdMetric = 'dist'; this._mdSel = null; this.renderModeDetail(); }
-closeModeDetail() { const el = document.getElementById('mode-detail-overlay'); if (el) el.remove(); }
-mdMetric(k) { this._mdMetric = k; this._mdSel = null; this.renderModeDetail(); }
-mdSelect(i) { this._mdSel = (this._mdSel === i) ? null : i; this.renderModeDetail(); }
-buildModeDetailBuckets(mode) {
-const filter = this.currentStatFilter;
-const today = new Date(); today.setHours(0,0,0,0);
-const DAY = 86400000;
-let n, labelOf, idxOf;
-if (filter === 'yearly') {
-n = 12; const nowIdx = today.getFullYear() * 12 + today.getMonth();
-idxOf = d => n - 1 - (nowIdx - (d.getFullYear() * 12 + d.getMonth()));
-labelOf = i => String(new Date(today.getFullYear(), today.getMonth() - (n - 1 - i), 1).getMonth() + 1);
-} else {
-n = (filter === 'monthly') ? 30 : 7;
-idxOf = d => n - 1 - Math.round((today - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / DAY);
-labelOf = i => { const d = new Date(today); d.setDate(d.getDate() - (n - 1 - i)); return (d.getMonth() + 1) + '/' + d.getDate(); };
-}
-const b = Array.from({ length: n }, (_, i) => ({ label: labelOf(i), cnt: 0, dist: 0, sec: 0, kcal: 0, cadW: 0, cadT: 0 }));
-storage.loadHistory().forEach(r => {
-if ((r.activityMode || 'run') !== mode) return;
-const d = this.parseRecordDate(r.date); if (isNaN(d.getTime())) return;
-const i = idxOf(d); if (i < 0 || i >= n) return;
-let sec = 0;
-if (r.time && typeof r.time === 'string') { const p = r.time.split(':').map(x => parseInt(x, 10) || 0); sec = p.length === 2 ? p[0] * 60 + p[1] : (p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : 0); }
-const x = b[i];
-x.cnt++; x.dist += parseFloat(r.dist) || 0; x.sec += sec; x.kcal += parseInt(r.kcal) || 0;
-const cv = (typeof r.cadence === 'number') ? r.cadence : parseFloat(r.cadence);
-if (cv > 0) { const w = sec > 0 ? sec : 1; x.cadW += cv * w; x.cadT += w; }
-});
-return b;
-}
-renderModeDetail() {
-const mode = this._mdMode; if (!mode) return;
-const isKo = (storage.getLang() === 'ko');
-const t = translations[storage.getLang()] || translations['en'];
-const filter = this.currentStatFilter;
-const b = this.buildModeDetailBuckets(mode);
-const n = b.length;
-const toU = v => this.currentUnit === 'km' ? v : v * 0.621371;
-const uL = this.currentUnit === 'km' ? 'km' : 'mi';
-const fmtPace = s => { if (!(s > 0)) return '--'; const T = Math.round(s); return Math.floor(T / 60) + "'" + String(T % 60).padStart(2, '0') + '"'; };
-const M = {
-dist: { name: isKo ? '거리' : 'DIST', unit: uL, kind: 'sum', val: x => toU(x.dist), fmt: v => v.toFixed(1) },
-cnt: { name: isKo ? '횟수' : 'COUNT', unit: isKo ? '회' : '×', kind: 'sum', val: x => x.cnt, fmt: v => String(Math.round(v)) },
-cad: { name: isKo ? '케이던스' : 'CADENCE', unit: 'spm', kind: 'avg', best: 'max', val: x => x.cadT > 0 ? x.cadW / x.cadT : 0, fmt: v => v > 0 ? String(Math.round(v)) : '--' },
-pace: { name: isKo ? '페이스' : 'PACE', unit: '/' + uL, kind: 'avg', best: 'min', val: x => { const d = toU(x.dist); return (d > 0.01 && x.sec > 0) ? x.sec / d : 0; }, bar: v => v > 0 ? 1 / v : 0, fmt: fmtPace },
-kcal: { name: isKo ? '칼로리' : 'KCAL', unit: 'kcal', kind: 'sum', val: x => x.kcal, fmt: v => String(Math.round(v)) }
-};
-if (!M[this._mdMetric]) this._mdMetric = 'dist';
-const k = this._mdMetric, m = M[k];
-const all = b.reduce((a, x) => ({ cnt: a.cnt + x.cnt, dist: a.dist + x.dist, sec: a.sec + x.sec, kcal: a.kcal + x.kcal, cadW: a.cadW + x.cadW, cadT: a.cadT + x.cadT }), { cnt: 0, dist: 0, sec: 0, kcal: 0, cadW: 0, cadT: 0 });
-const vals = b.map(x => m.val(x));
-const bars = vals.map(v => m.bar ? m.bar(v) : v);
-const maxBar = Math.max.apply(null, bars.concat([0.0001]));
-const showVal = n <= 12;
-const barsHtml = b.map((x, i) => {
-const v = vals[i], has = v > 0;
-const hPct = has ? Math.max(4, Math.round(bars[i] / maxBar * 100)) : 2;
-const showLabel = (n <= 12) || ((n - 1 - i) % 5 === 0);
-return '<div class="bar-col' + (has ? ' tap' : '') + (this._mdSel === i ? ' sel' : '') + '"' + (has ? ' onclick="ui.mdSelect(' + i + ')"' : '') + '>' +
-'<div class="bar-val">' + ((showVal && has) ? m.fmt(v) : '') + '</div>' +
-'<div class="bar ' + (i === n - 1 ? 'hl' : (has ? 'on' : '')) + '" style="height:' + hPct + '%;"></div>' +
-'<div class="bar-label ' + (i === n - 1 ? 'hl' : '') + '">' + (showLabel ? x.label : '') + '</div></div>';
-}).join('');
-const periodName = filter === 'yearly' ? (isKo ? '최근 12개월' : 'LAST 12 MONTHS') : filter === 'monthly' ? (isKo ? '최근 30일' : 'LAST 30 DAYS') : (isKo ? '최근 7일' : 'LAST 7 DAYS');
-const unitName = filter === 'yearly' ? (isKo ? '월' : 'month') : (isKo ? '일' : 'day');
-const totalV = m.val(all);
-const box = (num, unit, cap) => '<div class="md-box"><div class="md-num">' + num + (unit ? '<small> ' + unit + '</small>' : '') + '</div><div class="md-cap">' + cap + '</div></div>';
-let left, right;
-if (this._mdSel != null && vals[this._mdSel] > 0) {
-left = box(m.fmt(vals[this._mdSel]), m.unit, b[this._mdSel].label + (filter === 'yearly' ? (isKo ? '월' : '') : ''));
-right = box(m.fmt(totalV), m.unit, m.kind === 'sum' ? (isKo ? '기간 합계' : 'PERIOD TOTAL') : (isKo ? '기간 평균' : 'PERIOD AVG'));
-} else if (m.kind === 'sum') {
-left = box(m.fmt(totalV), m.unit, isKo ? '합계' : 'TOTAL');
-right = box(m.fmt(totalV / n), m.unit, unitName + (isKo ? ' 평균' : ' avg'));
-} else {
-const pos = vals.filter(v => v > 0);
-const best = pos.length ? (m.best === 'max' ? Math.max.apply(null, pos) : Math.min.apply(null, pos)) : 0;
-left = box(m.fmt(totalV), m.unit, isKo ? '평균' : 'AVG');
-right = box(m.fmt(best), m.unit, (isKo ? '최고 (' : 'BEST (') + unitName + (isKo ? '별)' : ')'));
-}
-const modeName = ({ run: t.modeRunLabel || 'RUN', trail: t.modeTrailLabel || 'TRAIL', freerun: t.modeFreerunLabel || 'FREE RUN' })[mode] || mode.toUpperCase();
-const tabs = Object.keys(M).map(key => '<div class="md-tab' + (key === k ? ' on' : '') + '" onclick="ui.mdMetric(\'' + key + '\')">' + M[key].name + '</div>').join('');
-let el = document.getElementById('mode-detail-overlay');
-if (!el) { el = document.createElement('div'); el.id = 'mode-detail-overlay'; el.className = 'md-overlay'; document.body.appendChild(el); }
-el.innerHTML = '<div class="md-head"><div><span class="md-title">' + modeName + '</span><span class="md-period">' + periodName + '</span></div>' +
-'<button class="md-close" onclick="ui.closeModeDetail()">' + (t.backBtnLabel || 'BACK') + '</button></div>' +
-'<div class="md-tabs">' + tabs + '</div>' +
-'<div class="md-chart">' + barsHtml + '</div>' +
-'<div class="md-sum">' + left + right + '</div>' +
-'<div class="md-hint">' + (isKo ? '막대를 누르면 그 날의 값이 표시돼요' : 'Tap a bar to see its value') + '</div>';
-}
 // [신규] ALL 탭 전용 "활동별" 한 줄 합계: RUN / TRAIL / FREE RUN 각각의 거리와 횟수. (걷기는 제외)
 buildModeSplitHtml(records, t) {
 const isKo = (storage.getLang() === 'ko');
@@ -9605,8 +9488,7 @@ const rows = modes.map(m => {
 const rs = records.filter(r => (r.activityMode || 'run') === m[0]);
 let d = 0; rs.forEach(r => { d += parseFloat(r.dist) || 0; });
 const dv = this.currentUnit === 'km' ? d : d * 0.621371;
-const tapOn = rs.length > 0;
-return '<div class="mode-split-row' + (tapOn ? ' tap' : '') + '"' + (tapOn ? ' onclick="ui.openModeDetail(\'' + m[0] + '\')"' : '') + '><span class="ms-name">' + m[1] + '</span><span class="ms-val">' + (rs.length > 0 ? dv.toFixed(2) + ' ' + unitL : '--') + '</span><span class="ms-cnt">' + rs.length + (isKo ? '회' : '×') + '</span>' + (tapOn ? '<span class="ms-arrow">›</span>' : '') + '</div>';
+return '<div class="mode-split-row"><span class="ms-name">' + m[1] + '</span><span class="ms-val">' + (rs.length > 0 ? dv.toFixed(2) + ' ' + unitL : '--') + '</span><span class="ms-cnt">' + rs.length + (isKo ? '회' : '×') + '</span></div>';
 }).join('');
 return '<div class="stats-section-title">' + (t.modeSplitTitle || 'BY ACTIVITY') + '</div>' + rows + '<div class="mode-split-note">' + (t.allExcludesWalk || '') + '</div>';
 }
