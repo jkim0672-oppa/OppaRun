@@ -1530,6 +1530,21 @@ flex-wrap: wrap; justify-content: center; white-space: nowrap;
 .mode-split-row .ms-val { color: var(--primary); font-size: var(--fs-base); font-weight: 900; text-align: right; }
 .mode-split-row .ms-cnt { color: var(--text-main); font-size: var(--fs-base); font-weight: 800; text-align: right; }
 .mode-split-note { color: var(--text-dim); font-size: var(--fs-xs); font-weight: 700; text-align: center; margin: 8px 0 0; }
+/* [신규] ALL 탭 BY ACTIVITY 줄을 탭하면 그 자리에서 펼쳐지는 활동별 상세 (페이스 추이 / 거리별 / 시간대별) */
+.mode-split-row.tap { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.mode-split-row.tap:active { filter: brightness(1.25); }
+.mode-split-row .ms-chev { display: inline-block; margin-left: 8px; color: #666; font-weight: 900; transition: transform 0.2s ease; }
+.mode-split-row.open .ms-chev { transform: rotate(90deg); color: var(--primary); }
+.ms-detail:empty { display: none; }
+.ms-detail { background: #161616; border: 1px solid #2a2a2a; border-radius: 12px; padding: 2px 12px 12px; margin: -2px 0 8px; }
+.ms-sub { font-size: var(--fs-xxs); font-weight: 900; color: #aaa; letter-spacing: 0.5px; margin: 14px 0 6px; text-transform: uppercase; }
+.ms-trend-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; font-size: var(--fs-sm); color: #ccc; }
+.ms-trend-dates { display: flex; justify-content: space-between; font-size: var(--fs-xxs); color: #777; font-weight: 800; margin-top: 2px; }
+.ms-dist-row { display: grid; grid-template-columns: 84px 1fr 26px; align-items: center; gap: 8px; margin-bottom: 5px; }
+.ms-dist-l { font-size: var(--fs-xxs); color: var(--text-dim); font-weight: 800; white-space: nowrap; }
+.ms-dist-track { height: 10px; background: #262626; border-radius: 5px; overflow: hidden; }
+.ms-dist-fill { height: 100%; background: var(--primary); border-radius: 5px; }
+.ms-dist-n { font-size: var(--fs-xs); color: var(--text-main); font-weight: 800; text-align: right; }
 .bar-chart { background: var(--card-bg); border-radius: 12px; padding: 16px 8px 10px; display: flex; align-items: flex-end; gap: 4px; height: 130px; }
 .bar-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
 .bar-val { font-size:var(--fs-xxs); color: var(--text-dim); font-weight: 800; margin-bottom: 4px; white-space: nowrap; height: 11px; }
@@ -9484,13 +9499,99 @@ buildModeSplitHtml(records, t) {
 const isKo = (storage.getLang() === 'ko');
 const unitL = this.currentUnit === 'km' ? 'km' : 'mi';
 const modes = [['run', t.modeRunLabel || 'RUN'], ['trail', t.modeTrailLabel || 'TRAIL'], ['freerun', t.modeFreerunLabel || 'FREE RUN']];
+this._msRecs = records; // [신규] 활동별 상세 펼침용 — 현재 기간으로 이미 걸러진 기록을 보관
+if (this._msSel && !records.some(r => (r.activityMode || 'run') === this._msSel)) this._msSel = null;
 const rows = modes.map(m => {
 const rs = records.filter(r => (r.activityMode || 'run') === m[0]);
 let d = 0; rs.forEach(r => { d += parseFloat(r.dist) || 0; });
 const dv = this.currentUnit === 'km' ? d : d * 0.621371;
-return '<div class="mode-split-row"><span class="ms-name">' + m[1] + '</span><span class="ms-val">' + (rs.length > 0 ? dv.toFixed(2) + ' ' + unitL : '--') + '</span><span class="ms-cnt">' + rs.length + (isKo ? '회' : '×') + '</span></div>';
+const tap = rs.length > 0;
+const open = tap && this._msSel === m[0];
+return '<div class="mode-split-row' + (tap ? ' tap' : '') + (open ? ' open' : '') + '"' + (tap ? ' onclick="ui.toggleModeDetail(\'' + m[0] + '\')"' : '') + '><span class="ms-name">' + m[1] + (tap ? '<span class="ms-chev">\u203a</span>' : '') + '</span><span class="ms-val">' + (rs.length > 0 ? dv.toFixed(2) + ' ' + unitL : '--') + '</span><span class="ms-cnt">' + rs.length + (isKo ? '회' : '×') + '</span></div>' +
+'<div class="ms-detail" id="ms-detail-' + m[0] + '">' + (open ? this.buildModeDetailInner(m[0], rs) : '') + '</div>';
 }).join('');
 return '<div class="stats-section-title">' + (t.modeSplitTitle || 'BY ACTIVITY') + '</div>' + rows + '<div class="mode-split-note">' + (t.allExcludesWalk || '') + '</div>';
+}
+// [신규] BY ACTIVITY 줄 탭: 그 활동의 상세(요약 3칸 + 페이스 추이 + 거리별/시간대별 횟수)를 줄 바로 아래에 펼친다.
+// 다시 누르면 접힘. 다른 줄을 누르면 그 줄로 옮겨감. 그래프만 갱신(통계 페이지 전체를 다시 그리지 않음).
+// 거리 막대 / VO2MAX 추이 / 활동 잔디와 겹치지 않도록 "페이스 · 거리 분포 · 시간대" 정보만 보여준다.
+toggleModeDetail(key) {
+this._msSel = (this._msSel === key) ? null : key;
+['run', 'trail', 'freerun'].forEach(k => {
+const box = document.getElementById('ms-detail-' + k);
+if (!box) return;
+const open = (this._msSel === k);
+const row = box.previousElementSibling;
+if (row) row.classList.toggle('open', open);
+box.innerHTML = open ? this.buildModeDetailInner(k, (this._msRecs || []).filter(r => (r.activityMode || 'run') === k)) : '';
+});
+if (this._msSel) {
+const b = document.getElementById('ms-detail-' + this._msSel);
+if (b && b.scrollIntoView) setTimeout(() => { try { b.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {} }, 30);
+}
+}
+buildModeDetailInner(key, rs) {
+if (!rs || rs.length === 0) return '';
+const isKo = (storage.getLang() === 'ko');
+const mi = this.currentUnit !== 'km';
+const unitL = mi ? 'mi' : 'km';
+const toU = v => mi ? v * 0.621371 : v;
+const secOf = r => { const p = String(r.time || '').split(':').map(x => parseInt(x, 10)); if (!p.length || p.some(isNaN)) return 0; return p.length === 2 ? p[0] * 60 + p[1] : p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : 0; };
+const fmtPace = sec => { const s = Math.round(sec); return Math.floor(s / 60) + "'" + String(s % 60).padStart(2, '0') + '"'; };
+const runs = rs.map(r => ({ r: r, d: parseFloat(r.dist) || 0, s: secOf(r) }));
+let totD = 0, totS = 0, hrSum = 0, hrN = 0;
+runs.forEach(x => { totD += x.d; totS += x.s; const hv = parseFloat(x.r.avgHr); if (hv > 0) { hrSum += hv; hrN++; } });
+// 1) 요약 3칸: 평균 페이스(총시간÷총거리) / 회당 평균 거리 / 평균 심박
+const paceTxt = (totD > 0.01 && totS > 0) ? fmtPace(totS / toU(totD)) : '--';
+const avgDistTxt = (toU(totD) / runs.length).toFixed(2) + ' ' + unitL;
+const hrTxt = hrN > 0 ? Math.round(hrSum / hrN) + ' bpm' : '--';
+const box = (label, val) => '<div class="h-det-box"><div class="h-det-label">' + label + '</div><div class="h-det-val">' + val + '</div></div>';
+let html = '<div class="h-group-grid" style="margin-top:12px;">' +
+box(isKo ? '평균 페이스' : 'AVG PACE', paceTxt) +
+box(isKo ? '회당 거리' : 'AVG DIST', avgDistTxt) +
+box(isKo ? '평균 심박' : 'AVG HR', hrTxt) + '</div>';
+if (runs.length < 2) return html;
+// 2) 페이스 추이: 최근 12회, 빠를수록 위로. (거리 막대·VO2MAX 추이와 다른 지표)
+const pts = runs.filter(x => x.d >= 0.3 && x.s > 0 && (x.s / x.d) >= 120 && (x.s / x.d) <= 1200)
+.map(x => ({ id: x.r.id, r: x.r, v: x.s / toU(x.d) })).sort((a, b) => a.id - b.id).slice(-12);
+if (pts.length >= 2) {
+const W = 300, H = 80, padX = 14, padT = 12, padB = 12;
+const vs = pts.map(p => p.v);
+let mn = Math.min.apply(null, vs), mx = Math.max.apply(null, vs);
+if (mx - mn < 20) { const m = (mx + mn) / 2; mn = m - 10; mx = m + 10; }
+const x = i => padX + i * (W - 2 * padX) / (pts.length - 1);
+const y = v => padT + (v - mn) * (H - padT - padB) / (mx - mn);
+const line = pts.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p.v).toFixed(1)).join(' ');
+const bestIdx = vs.indexOf(Math.min.apply(null, vs));
+const dots = pts.map((p, i) => '<circle cx="' + x(i).toFixed(1) + '" cy="' + y(p.v).toFixed(1) + '" r="' + (i === bestIdx ? 4.5 : 3) + '" fill="' + (i === bestIdx ? '#ffffff' : '#00ff88') + '"/>').join('');
+const diff = vs[vs.length - 1] - vs[0];
+const faster = diff < 0;
+const diffTxt = (faster ? '▲ ' : '▼ ') + fmtPace(Math.abs(diff));
+const dLabel = p => { let d = this.parseRecordDate(p.r.date); if (isNaN(d.getTime())) d = new Date(p.id); return isNaN(d.getTime()) ? '' : (d.getMonth() + 1) + '/' + d.getDate(); };
+html += '<div class="ms-sub">' + (isKo ? '페이스 추이 · 최근 ' + pts.length + '회' : 'PACE TREND · LAST ' + pts.length + ' RUNS') + '</div>' +
+'<div class="ms-trend-head"><span>' + fmtPace(vs[0]) + ' → <b style="color:#fff;">' + fmtPace(vs[vs.length - 1]) + '</b> <span style="color:#777;font-size:var(--fs-xxs);">/' + unitL + '</span></span>' +
+'<span style="color:' + (faster ? '#00ff88' : '#ffcc00') + ';font-weight:700;">' + diffTxt + '</span></div>' +
+'<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block;" preserveAspectRatio="none">' +
+'<path d="' + line + '" fill="none" stroke="#00ff88" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>' + dots + '</svg>' +
+'<div class="ms-trend-dates"><span>' + dLabel(pts[0]) + '</span><span>' + '<b style="color:#fff;">●</b> ' + (isKo ? '최고 페이스' : 'BEST') + '</span><span>' + dLabel(pts[pts.length - 1]) + '</span></div>';
+}
+// 3) 거리별 횟수 (구간은 현재 단위 기준)
+const th = mi ? [2, 3, 6] : [3, 5, 10];
+const dLabels = ['&lt; ' + th[0], th[0] + '–' + th[1], th[1] + '–' + th[2], th[2] + '+'];
+const dCnt = [0, 0, 0, 0];
+runs.forEach(x => { const v = toU(x.d); dCnt[v < th[0] ? 0 : v < th[1] ? 1 : v < th[2] ? 2 : 3]++; });
+const row = (label, n, max) => '<div class="ms-dist-row"><span class="ms-dist-l">' + label + '</span><div class="ms-dist-track"><div class="ms-dist-fill" style="width:' + (n > 0 ? Math.max(5, Math.round(n / max * 100)) : 0) + '%"></div></div><span class="ms-dist-n">' + n + '</span></div>';
+const dMax = Math.max.apply(null, dCnt.concat([1]));
+html += '<div class="ms-sub">' + (isKo ? '거리별 횟수 (' + unitL + ')' : 'RUNS BY DISTANCE (' + unitL + ')') + '</div>' + dLabels.map((l, i) => row(l, dCnt[i], dMax)).join('');
+// 4) 시간대별 횟수
+const tCnt = [0, 0, 0, 0];
+runs.forEach(x => { const d = this.parseRecordDate(x.r.date); if (isNaN(d.getTime())) return; tCnt[Math.min(3, Math.floor(d.getHours() / 6))]++; });
+if (tCnt.some(n => n > 0)) {
+const tLabels = isKo ? ['새벽 0–6시', '오전 6–12시', '오후 12–18시', '저녁 18–24시'] : ['Dawn 0–6', 'Morning 6–12', 'Afternoon 12–18', 'Evening 18–24'];
+const tMax = Math.max.apply(null, tCnt.concat([1]));
+html += '<div class="ms-sub">' + (isKo ? '시간대별 횟수' : 'RUNS BY TIME OF DAY') + '</div>' + tLabels.map((l, i) => row(l, tCnt[i], tMax)).join('');
+}
+return html;
 }
 // [추가] 통계 페이지 전용 "위치별 통계" 섹션. 기존 SUMMARY 집계와는 완전히 별개로 계산한다.
 // 기존 SUMMARY/기록목록/진단/크루의 GCT·VERT 숨김 규칙(isGctVertUnreliable)은 건드리지 않고,
