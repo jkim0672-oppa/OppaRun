@@ -1529,6 +1529,7 @@ flex-wrap: wrap; justify-content: center; white-space: nowrap;
 .mode-split-row .ms-name { color: var(--text-dim); font-size: var(--fs-base); font-weight: 900; }
 .mode-split-row .ms-val { color: var(--primary); font-size: var(--fs-base); font-weight: 900; text-align: right; }
 .mode-split-row .ms-cnt { color: var(--text-main); font-size: var(--fs-base); font-weight: 800; text-align: right; }
+.mode-split-row.tappable { cursor: pointer; } .mode-split-row.tappable:active { background: #2a2a2a; }
 .mode-split-note { color: var(--text-dim); font-size: var(--fs-xs); font-weight: 700; text-align: center; margin: 8px 0 0; }
 .bar-chart { background: var(--card-bg); border-radius: 12px; padding: 16px 8px 10px; display: flex; align-items: flex-end; gap: 4px; height: 130px; }
 .bar-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
@@ -9488,10 +9489,75 @@ const rows = modes.map(m => {
 const rs = records.filter(r => (r.activityMode || 'run') === m[0]);
 let d = 0; rs.forEach(r => { d += parseFloat(r.dist) || 0; });
 const dv = this.currentUnit === 'km' ? d : d * 0.621371;
-return '<div class="mode-split-row"><span class="ms-name">' + m[1] + '</span><span class="ms-val">' + (rs.length > 0 ? dv.toFixed(2) + ' ' + unitL : '--') + '</span><span class="ms-cnt">' + rs.length + (isKo ? '회' : '×') + '</span></div>';
+return '<div class="mode-split-row tappable" onclick="ui.openModeDetail(\'' + m[0] + '\')"><span class="ms-name">' + m[1] + '</span><span class="ms-val">' + (rs.length > 0 ? dv.toFixed(2) + ' ' + unitL : '--') + '</span><span class="ms-cnt">' + rs.length + (isKo ? '회' : '×') + ' ›</span></div>';
 }).join('');
 return '<div class="stats-section-title">' + (t.modeSplitTitle || 'BY ACTIVITY') + '</div>' + rows + '<div class="mode-split-note">' + (t.allExcludesWalk || '') + '</div>';
 }
+// [신규] BY ACTIVITY 행 탭 → 하단 시트 상세(요약/거리 막대/페이스 라인/최고기록)
+openModeDetail(mode) {
+const isKo = (storage.getLang() === 'ko');
+const km = this.currentUnit === 'km', U = km ? 'km' : 'mi', F = km ? 1 : 0.621371;
+const colors = { run: '#00ff88', trail: '#ff9f43', freerun: '#4da6ff' };
+const names = { run: 'RUN', trail: 'TRAIL', freerun: 'FREE RUN' };
+const col = colors[mode] || '#00ff88';
+const filt = this.currentStatFilter || 'weekly';
+const nowD = new Date(); nowD.setHours(23,59,59,999);
+const secOf = r => { if (!r.time || typeof r.time !== 'string') return 0; const p = r.time.split(':').map(x => parseInt(x,10) || 0); return p.length === 3 ? p[0]*3600+p[1]*60+p[2] : (p.length === 2 ? p[0]*60+p[1] : 0); };
+const all = storage.loadHistory().filter(r => (r.activityMode || 'run') === mode).map(r => ({ d: this.parseRecordDate(r.date), dist: parseFloat(r.dist) || 0, sec: secOf(r) })).filter(r => !isNaN(r.d.getTime()));
+// 버킷 구성: 주=7일, 월=30일, 년=12개월
+let buckets = [];
+if (filt === 'yearly') { for (let i = 11; i >= 0; i--) { const d = new Date(nowD.getFullYear(), nowD.getMonth() - i, 1); buckets.push({ s: d, e: new Date(d.getFullYear(), d.getMonth() + 1, 1), label: (d.getMonth() + 1) + (isKo ? '월' : '') }); } }
+else { const n = filt === 'monthly' ? 30 : 7; for (let i = n - 1; i >= 0; i--) { const d = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate() - i); buckets.push({ s: d, e: new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1), label: (d.getMonth() + 1) + '/' + d.getDate() }); } }
+const start = buckets[0].s, end = buckets[buckets.length - 1].e;
+const inP = all.filter(r => r.d >= start && r.d < end).sort((a, b) => a.d - b.d);
+buckets.forEach(b => { b.v = 0; inP.forEach(r => { if (r.d >= b.s && r.d < b.e) b.v += r.dist * F; }); });
+const totD = inP.reduce((a, r) => a + r.dist, 0) * F, totS = inP.reduce((a, r) => a + r.sec, 0);
+const pf = sp => Math.floor(sp / 60) + "'" + String(Math.round(sp % 60)).padStart(2, '0') + '"';
+const avgPace = (totD > 0 && totS > 0) ? pf(totS / totD) : '--';
+// 이전 기간 대비
+const span = end - start, pStart = new Date(start.getTime() - span);
+const prevD = all.filter(r => r.d >= pStart && r.d < start).reduce((a, r) => a + r.dist, 0) * F;
+const diff = totD - prevD, diffTxt = (prevD > 0 || totD > 0) ? ((diff >= 0 ? '▲ +' : '▼ ') + diff.toFixed(1) + ' ' + U + (isKo ? ' (이전 기간 대비)' : ' vs prev')) : '';
+// 막대 차트 SVG
+const W = 340, H = 140, pl = 4, pb = 18, pt = 14, maxV = Math.max(0.1, ...buckets.map(b => b.v));
+const bw = (W - pl * 2) / buckets.length, gap = Math.min(4, bw * 0.25);
+const every = buckets.length > 12 ? 5 : 1;
+let bars = '';
+buckets.forEach((b, i) => {
+const h = Math.max(b.v > 0 ? 2 : 0, (b.v / maxV) * (H - pb - pt)), x = pl + i * bw + gap / 2, y = H - pb - h;
+bars += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + Math.max(1, bw - gap).toFixed(1) + '" height="' + h.toFixed(1) + '" rx="3" fill="' + (b.v > 0 ? col : '#2a2a2a') + '" onclick="ui._mdTip(' + i + ')" data-i="' + i + '"/>';
+if (i % every === 0 || i === buckets.length - 1) bars += '<text x="' + (x + (bw - gap) / 2).toFixed(1) + '" y="' + (H - 4) + '" fill="#999" font-size="9" text-anchor="middle">' + b.label + '</text>';
+});
+this._mdBuckets = buckets; this._mdUnit = U;
+// 페이스 라인 SVG (개별 런, 빠를수록 위)
+const pts = inP.filter(r => r.dist > 0.1 && r.sec > 0).map(r => ({ d: r.d, p: r.sec / (r.dist * F) })).filter(x => x.p > 120 && x.p < 1200);
+let line = '<div style="color:#999;text-align:center;padding:30px 0;font-size:13px">' + (isKo ? '페이스 데이터가 없어요' : 'No pace data') + '</div>';
+if (pts.length >= 2) {
+const pMin = Math.min(...pts.map(x => x.p)), pMax = Math.max(...pts.map(x => x.p)), rng = Math.max(1, pMax - pMin), LH = 110, lp = 8;
+const xy = pts.map((q, i) => [lp + i * ((W - lp * 2) / (pts.length - 1)), 14 + ((q.p - pMin) / rng) * (LH - 28)]);
+line = '<svg viewBox="0 0 ' + W + ' ' + LH + '" width="100%"><polyline fill="none" stroke="' + col + '" stroke-width="2.5" stroke-linejoin="round" points="' + xy.map(q => q[0].toFixed(1) + ',' + q[1].toFixed(1)).join(' ') + '"/>' + xy.map(q => '<circle cx="' + q[0].toFixed(1) + '" cy="' + q[1].toFixed(1) + '" r="3" fill="' + col + '"/>').join('') + '<text x="' + lp + '" y="10" fill="#999" font-size="9">' + pf(pMin) + '</text><text x="' + lp + '" y="' + (LH - 2) + '" fill="#999" font-size="9">' + pf(pMax) + '</text></svg>';
+} else if (pts.length === 1) line = '<div style="color:#fff;text-align:center;padding:24px 0;font-weight:900">' + pf(pts[0].p) + '</div>';
+// 최고 기록 (기간 내)
+const bestP = pts.length ? pf(Math.min(...pts.map(x => x.p))) : '--', longest = inP.length ? (Math.max(...inP.map(r => r.dist)) * F).toFixed(2) + ' ' + U : '--';
+const card = (l, v) => '<div style="flex:1;background:#1e1e1e;border-radius:12px;padding:10px 6px;text-align:center"><div style="color:#999;font-size:10px;font-weight:800">' + l + '</div><div style="color:#fff;font-size:15px;font-weight:900;margin-top:4px">' + v + '</div></div>';
+const perTxt = filt === 'yearly' ? (isKo ? '최근 12개월' : 'LAST 12 MONTHS') : (filt === 'monthly' ? (isKo ? '최근 30일' : 'LAST 30 DAYS') : (isKo ? '최근 7일' : 'LAST 7 DAYS'));
+let ov = document.getElementById('mode-detail-overlay'); if (ov) ov.remove();
+ov = document.createElement('div'); ov.id = 'mode-detail-overlay';
+ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.6);display:flex;align-items:flex-end';
+ov.onclick = e => { if (e.target === ov) ov.remove(); };
+ov.innerHTML = '<div style="width:100%;max-height:88vh;overflow-y:auto;background:#000;border-top:2px solid ' + col + ';border-radius:20px 20px 0 0;padding:16px 16px calc(24px + env(safe-area-inset-bottom,0px))">' +
+'<div style="display:flex;justify-content:space-between;align-items:center"><div><div style="color:' + col + ';font-size:20px;font-weight:900">' + names[mode] + '</div><div style="color:#999;font-size:11px;font-weight:800">' + perTxt + '</div></div><button onclick="document.getElementById(\'mode-detail-overlay\').remove()" style="background:#1e1e1e;color:#fff;border:0;border-radius:10px;padding:8px 14px;font-weight:900">' + (isKo ? '닫기' : 'CLOSE') + '</button></div>' +
+'<div style="display:flex;gap:8px;margin:14px 0 4px">' + card(isKo ? '거리' : 'DIST', totD.toFixed(2) + ' ' + U) + card(isKo ? '횟수' : 'COUNT', inP.length + (isKo ? '회' : '×')) + card(isKo ? '평균 페이스' : 'AVG PACE', avgPace) + '</div>' +
+(diffTxt ? '<div style="color:' + (diff >= 0 ? col : '#ff6b6b') + ';font-size:12px;font-weight:800;text-align:center;margin:6px 0 2px">' + diffTxt + '</div>' : '') +
+'<div class="stats-section-title" style="margin-top:14px">' + (isKo ? '거리' : 'DISTANCE') + '</div>' +
+'<div id="md-tip" style="height:16px;color:#fff;font-size:12px;font-weight:900;text-align:center">' + (isKo ? '막대를 탭하면 수치가 보여요' : 'Tap a bar') + '</div>' +
+'<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%">' + bars + '</svg>' +
+'<div class="stats-section-title" style="margin-top:14px">' + (isKo ? '페이스 추이 (위쪽이 빠름)' : 'PACE TREND (top = faster)') + '</div>' + line +
+'<div class="stats-section-title" style="margin-top:14px">' + (isKo ? '기간 내 최고 기록' : 'BEST IN PERIOD') + '</div>' +
+'<div style="display:flex;gap:8px">' + card(isKo ? '베스트 페이스' : 'BEST PACE', bestP) + card(isKo ? '최장 거리' : 'LONGEST', longest) + '</div></div>';
+document.body.appendChild(ov);
+}
+_mdTip(i) { const b = (this._mdBuckets || [])[i], el = document.getElementById('md-tip'); if (b && el) el.textContent = b.label + ' · ' + b.v.toFixed(2) + ' ' + this._mdUnit; }
 // [추가] 통계 페이지 전용 "위치별 통계" 섹션. 기존 SUMMARY 집계와는 완전히 별개로 계산한다.
 // 기존 SUMMARY/기록목록/진단/크루의 GCT·VERT 숨김 규칙(isGctVertUnreliable)은 건드리지 않고,
 // GCT·체공시간·VERT는 모든 위치 그룹에 표시하되, isGctVertUnreliable() 그룹에는 '참고용' 표시를 붙인다.
