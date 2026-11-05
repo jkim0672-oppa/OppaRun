@@ -9530,22 +9530,26 @@ if (i % every === 0 || i === buckets.length - 1) bars += '<text x="' + (x + (bw 
 });
 this._mdBuckets = buckets; this._mdUnit = U;
 // 페이스 라인 SVG (개별 런, 빠를수록 위)
-const pts = inP.filter(r => r.dist > 0.1 && r.sec > 0).map(r => ({ d: r.d, p: r.sec / (r.dist * F) })).filter(x => x.p > 120 && x.p < 1200);
+const pts = inP.filter(r => r.dist > 0.1 && r.sec > 0).map(r => r.sec / (r.dist * F)).filter(x => x > 120 && x < 1200);
+const bp = buckets.map(b => { let d = 0, sc = 0; inP.forEach(r => { if (r.d >= b.s && r.d < b.e && r.dist > 0.1 && r.sec > 0) { d += r.dist * F; sc += r.sec; } }); return d > 0 ? sc / d : null; });
 let line = '<div style="color:#999;text-align:center;padding:30px 0;font-size:13px">' + (isKo ? '페이스 데이터가 없어요' : 'No pace data') + '</div>';
-if (pts.length >= 2) {
-const pMin = Math.min(...pts.map(x => x.p)), pMax = Math.max(...pts.map(x => x.p)), rng = Math.max(1, pMax - pMin), LH = 110, lp = 8;
-const xy = pts.map((q, i) => [lp + i * ((W - lp * 2) / (pts.length - 1)), 14 + ((q.p - pMin) / rng) * (LH - 28)]);
-line = '<svg viewBox="0 0 ' + W + ' ' + LH + '" width="100%"><polyline fill="none" stroke="' + col + '" stroke-width="2.5" stroke-linejoin="round" points="' + xy.map(q => q[0].toFixed(1) + ',' + q[1].toFixed(1)).join(' ') + '"/>' + xy.map(q => '<circle cx="' + q[0].toFixed(1) + '" cy="' + q[1].toFixed(1) + '" r="3" fill="' + col + '"/>').join('') + '<text x="' + lp + '" y="10" fill="#999" font-size="9">' + pf(pMin) + '</text><text x="' + lp + '" y="' + (LH - 2) + '" fill="#999" font-size="9">' + pf(pMax) + '</text></svg>';
-} else if (pts.length === 1) line = '<div style="color:#fff;text-align:center;padding:24px 0;font-weight:900">' + pf(pts[0].p) + '</div>';
+const valid = bp.filter(x => x != null);
+if (valid.length >= 1) {
+const pMin = Math.min(...valid), pMax = Math.max(...valid), rng = Math.max(1, pMax - pMin), LH = 120;
+const yOf = v => 22 + ((v - pMin) / rng) * (LH - 44), xOf = i => pl + i * bw + bw / 2;
+let path = '', dots = '', prev = false;
+bp.forEach((v, i) => { if (v == null) { prev = false; return; } path += (prev ? 'L' : 'M') + xOf(i).toFixed(1) + ' ' + yOf(v).toFixed(1) + ' '; prev = true; dots += '<circle cx="' + xOf(i).toFixed(1) + '" cy="' + yOf(v).toFixed(1) + '" r="3.5" fill="' + col + '"/>'; });
+line = '<svg viewBox="0 0 ' + W + ' ' + LH + '" width="100%"><path d="' + path + '" fill="none" stroke="' + col + '" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>' + dots + '<text x="2" y="10" fill="#999" font-size="10">' + pf(pMin) + '</text><text x="2" y="' + (LH - 4) + '" fill="#999" font-size="10">' + pf(pMax) + '</text></svg>';
+}
 // 최고 기록 (기간 내)
-const bestP = pts.length ? pf(Math.min(...pts.map(x => x.p))) : '--', longest = inP.length ? (Math.max(...inP.map(r => r.dist)) * F).toFixed(2) + ' ' + U : '--';
+const bestP = pts.length ? pf(Math.min(...pts)) : '--', longest = inP.length ? (Math.max(...inP.map(r => r.dist)) * F).toFixed(2) + ' ' + U : '--';
 const card = (l, v) => '<div style="flex:1;background:#1e1e1e;border-radius:12px;padding:10px 6px;text-align:center"><div style="color:#999;font-size:10px;font-weight:800">' + l + '</div><div style="color:#fff;font-size:15px;font-weight:900;margin-top:4px">' + v + '</div></div>';
 const perTxt = filt === 'yearly' ? (isKo ? '최근 12개월' : 'LAST 12 MONTHS') : (filt === 'monthly' ? (isKo ? '최근 30일' : 'LAST 30 DAYS') : (isKo ? '최근 7일' : 'LAST 7 DAYS'));
 let ov = document.getElementById('mode-detail-overlay'); if (ov) ov.remove();
 ov = document.createElement('div'); ov.id = 'mode-detail-overlay';
-ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.6);display:flex;align-items:flex-end';
+ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.88);display:flex;align-items:flex-end';
 ov.onclick = e => { if (e.target === ov) ov.remove(); };
-ov.innerHTML = '<div style="width:100%;max-height:88vh;overflow-y:auto;background:#000;border-top:2px solid ' + col + ';border-radius:20px 20px 0 0;padding:16px 16px calc(24px + env(safe-area-inset-bottom,0px))">' +
+ov.innerHTML = '<div style="width:100%;height:86vh;overflow-y:auto;-webkit-overflow-scrolling:touch;background:#000;border-top:2px solid ' + col + ';border-radius:20px 20px 0 0;padding:10px 16px calc(120px + env(safe-area-inset-bottom,0px));box-sizing:border-box"><div style="width:44px;height:5px;border-radius:3px;background:#444;margin:0 auto 12px"></div>' +
 '<div style="display:flex;justify-content:space-between;align-items:center"><div><div style="color:' + col + ';font-size:20px;font-weight:900">' + names[mode] + '</div><div style="color:#999;font-size:11px;font-weight:800">' + perTxt + '</div></div><button onclick="document.getElementById(\'mode-detail-overlay\').remove()" style="background:#1e1e1e;color:#fff;border:0;border-radius:10px;padding:8px 14px;font-weight:900">' + (isKo ? '닫기' : 'CLOSE') + '</button></div>' +
 '<div style="display:flex;gap:8px;margin:14px 0 4px">' + card(isKo ? '거리' : 'DIST', totD.toFixed(2) + ' ' + U) + card(isKo ? '횟수' : 'COUNT', inP.length + (isKo ? '회' : '×')) + card(isKo ? '평균 페이스' : 'AVG PACE', avgPace) + '</div>' +
 (diffTxt ? '<div style="color:' + (diff >= 0 ? col : '#ff6b6b') + ';font-size:12px;font-weight:800;text-align:center;margin:6px 0 2px">' + diffTxt + '</div>' : '') +
