@@ -1561,10 +1561,10 @@ flex-wrap: wrap; justify-content: center; white-space: nowrap;
 .ms-sub-row { display: flex; justify-content: space-between; align-items: baseline; margin: 16px 0 8px; }
 .ms-sub { font-size: var(--fs-xxs); font-weight: 900; color: #aaa; letter-spacing: 0.5px; text-transform: uppercase; }
 .ms-hint { font-size: var(--fs-xxs); font-weight: 800; color: #777; }
-.ms-trend-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: var(--fs-sm); color: #ccc; }
+.ms-trend-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; font-size: var(--fs-sm); color: #ccc; }
 .ms-trend-head b { color: #fff; font-weight: 900; }
 .ms-unit { color: #777; font-size: var(--fs-xxs); font-weight: 800; }
-.ms-chip { font-size: var(--fs-xxs); font-weight: 900; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.ms-chip { font-size: var(--fs-xxs); font-weight: 900; padding: 3px 9px; border-radius: 999px; white-space: nowrap; flex-shrink: 0; }
 .ms-trend-dates { display: flex; justify-content: space-between; font-size: var(--fs-xxs); color: #777; font-weight: 800; margin-top: 4px; }
 .ms-hist { display: flex; gap: 6px; }
 .ms-hcol { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; }
@@ -9610,27 +9610,53 @@ if (runs.length < 2) return html;
 const pts = runs.filter(x => x.d >= 0.3 && x.s > 0 && (x.s / x.d) >= 120 && (x.s / x.d) <= 1200)
 .map(x => ({ id: x.r.id, r: x.r, v: x.s / toU(x.d) })).sort((a, b) => a.id - b.id).slice(-12);
 if (pts.length >= 2) {
-const W = 320, H = 104, pX = 10, pT = 12, pB = 12;
+const W = 320, H = 104, pL = 22, pX = 10, pT = 12, pB = 12;
 const n = pts.length, vs = pts.map(p => p.v);
 const vMin = Math.min.apply(null, vs), vMax = Math.max.apply(null, vs);
-let lo = vMin, hi = vMax;
-if (hi - lo < 20) { const mid = (hi + lo) / 2; lo = mid - 10; hi = mid + 10; }
-const dx = (W - 2 * pX) / (n - 1);
-const X = i => pX + i * dx;
-const ys = vs.map(v => pT + (v - lo) * (H - pT - pB) / (hi - lo));
+// [수정 2026-11-05] 세로축 고정: 3~12분/km (mi 단위면 같은 구간을 환산). 기록이 바뀌어도 출렁임 폭이 일정하다.
+// 'expand' = 범위 밖 기록이 있으면 3분 단위로 축을 넓힘 / 'clip' = 범위 끝에 붙이고 속이 빈 점 + "12+" 로 표시
+const PACE_AXIS_MODE = 'expand';
+const uf = mi ? 1.609344 : 1;
+let lo = 180 * uf, hi = 720 * uf;
+let axisMode = PACE_AXIS_MODE;
+if (axisMode === 'clip' && vMin > hi) axisMode = 'expand'; // 전부 12분보다 느리면 바닥에 붙은 선만 남으므로 자동 확장
+if (axisMode === 'expand') {
+if (vMax > hi) hi = Math.ceil((vMax - 0.01) / (180 * uf)) * (180 * uf);
+if (vMin < lo) lo = Math.floor((vMin + 0.01) / (60 * uf)) * (60 * uf);
+}
+const outLo = vs.map(v => v < lo - 0.5), outHi = vs.map(v => v > hi + 0.5);
+const vp = vs.map(v => Math.min(hi, Math.max(lo, v)));
+const dx = (W - pL - pX) / (n - 1);
+const X = i => pL + i * dx;
+const ys = vp.map(v => pT + (v - lo) * (H - pT - pB) / (hi - lo));
 const dd = []; for (let i = 0; i < n - 1; i++) dd.push(ys[i + 1] - ys[i]);
 const mm = [dd[0]]; for (let i = 1; i < n - 1; i++) mm.push(dd[i - 1] * dd[i] > 0 ? (2 * dd[i - 1] * dd[i]) / (dd[i - 1] + dd[i]) : 0); mm.push(dd[n - 2]);
 let line = 'M' + X(0).toFixed(1) + ' ' + ys[0].toFixed(1);
 for (let i = 0; i < n - 1; i++) line += ' C' + (X(i) + dx / 3).toFixed(1) + ' ' + (ys[i] + mm[i] / 3).toFixed(1) + ',' + (X(i + 1) - dx / 3).toFixed(1) + ' ' + (ys[i + 1] - mm[i + 1] / 3).toFixed(1) + ',' + X(i + 1).toFixed(1) + ' ' + ys[i + 1].toFixed(1);
-const area = line + ' L' + X(n - 1).toFixed(1) + ' ' + H + ' L' + X(0).toFixed(1) + ' ' + H + ' Z';
+const yBase = H - pB;
+const area = line + ' L' + X(n - 1).toFixed(1) + ' ' + yBase + ' L' + X(0).toFixed(1) + ' ' + yBase + ' Z';
 const bestIdx = vs.indexOf(vMin);
 const gid = 'msg-' + key;
-const grid = [pT, (pT + H - pB) / 2, H - pB].map(y => '<line x1="0" x2="' + W + '" y1="' + y + '" y2="' + y + '" stroke="#262626" stroke-width="1"/>').join('');
+const yOf = v => pT + (v - lo) * (H - pT - pB) / (hi - lo);
+const spanM = (hi - lo) / 60;
+let tStep = 10; [1, 2, 3, 5, 10].some(s => { if (spanM / s <= 4.2) { tStep = s; return true; } return false; });
+const slowCut = axisMode === 'clip' && outHi.some(Boolean);
+const gridLine = (gy, txt) => '<line x1="' + pL + '" x2="' + W + '" y1="' + gy.toFixed(1) + '" y2="' + gy.toFixed(1) + '" stroke="#262626" stroke-width="1"/>' +
+'<text x="' + (pL - 5) + '" y="' + (gy + 3).toFixed(1) + '" text-anchor="end" font-size="9" font-weight="800" fill="#666">' + txt + '</text>';
+let grid = '', edgeDrawn = false;
+for (let m = Math.ceil(lo / 60 / tStep - 1e-9) * tStep; m * 60 <= hi + 0.5; m += tStep) {
+const atEdge = slowCut && Math.abs(m * 60 - hi) < 0.5;
+if (atEdge) edgeDrawn = true;
+grid += gridLine(yOf(m * 60), m + (atEdge ? '+' : ''));
+}
+if (slowCut && !edgeDrawn) grid += gridLine(yOf(hi), Math.round(hi / 60) + '+');
 let dots = '';
 for (let i = 0; i < n; i++) {
 if (i === bestIdx) continue;
-if (i === n - 1) dots += '<circle cx="' + X(i).toFixed(1) + '" cy="' + ys[i].toFixed(1) + '" r="8" fill="' + this.msHexA(C, 0.18) + '"/><circle cx="' + X(i).toFixed(1) + '" cy="' + ys[i].toFixed(1) + '" r="4" fill="' + C + '"/>';
-else dots += '<circle cx="' + X(i).toFixed(1) + '" cy="' + ys[i].toFixed(1) + '" r="2.5" fill="' + C + '" stroke="#161616" stroke-width="1.5"/>';
+const cx = X(i).toFixed(1), cy = ys[i].toFixed(1), isOut = outLo[i] || outHi[i];
+if (i === n - 1) dots += '<circle cx="' + cx + '" cy="' + cy + '" r="8" fill="' + this.msHexA(C, 0.18) + '"/><circle cx="' + cx + '" cy="' + cy + '" r="4" fill="' + (isOut ? '#161616' : C) + '"' + (isOut ? ' stroke="' + C + '" stroke-width="2"' : '') + '/>';
+else if (isOut) dots += '<circle cx="' + cx + '" cy="' + cy + '" r="3.5" fill="#161616" stroke="' + C + '" stroke-width="1.8"/>';
+else dots += '<circle cx="' + cx + '" cy="' + cy + '" r="2.5" fill="' + C + '" stroke="#161616" stroke-width="1.5"/>';
 }
 dots += '<circle cx="' + X(bestIdx).toFixed(1) + '" cy="' + ys[bestIdx].toFixed(1) + '" r="5" fill="#ffffff" stroke="' + C + '" stroke-width="2"/>';
 const diff = vs[n - 1] - vs[0];
