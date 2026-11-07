@@ -10521,10 +10521,11 @@ const _altRefHtml = (_altAsc != null) ? ('<div class="diag-ref">' + (lang === 'k
 // 흔들릴 수 있어 최고값 후보에서 제외한다(케이던스 최고값이 비정상적으로 튀어 보이던 원인).
 const _cadPeakVals = _splitsForGraph.filter((s, i) => !_edgeCad.has(i) && typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3)).map(s => s.avgCadence);
 const cadPeakForDiag = _cadPeakVals.length ? Math.max(..._cadPeakVals) : null;
-const _pacePeakSecs = _splitsForGraph.filter((s, i) => !_edgePace.has(i)).map(s => paceStrToSeconds(s.pace)).filter(v => typeof v === 'number');
+// [수정 2026-11-06] 최고 페이스: 100m 순간값(GPS 튐) 대신 그래프/구간표와 같은 묶음 구간(_gS) 기준으로 계산
+const _pacePeakSecs = _gS.filter((s, i) => !_gEdgePace.has(i)).map(s => paceStrToSeconds(s.pace)).filter(v => typeof v === 'number' && v > 0);
 const pacePeakSecForDiag = _pacePeakSecs.length ? Math.min(..._pacePeakSecs) : null;
 // [신규] 구간 최고 파워(와트) — PACE/CAD와 동일하게 100m 구간 값들 중 최댓값으로 근사.
-const _powerPeakVals = _splitsForGraph.filter((s, i) => !_edgePow.has(i)).map(s => s.power).filter(v => typeof v === 'number' && isFinite(v));
+const _powerPeakVals = _gS.filter((s, i) => !_gEdgePow.has(i)).map(s => s.power).filter(v => typeof v === 'number' && isFinite(v));
 const powerPeakForDiag = _powerPeakVals.length ? Math.max(..._powerPeakVals) : null;
 function _fmtPeakPaceStr(sec) {
   if (sec == null) return null;
@@ -12285,9 +12286,8 @@ colorFor(level) { return level === 'good' ? 'var(--good)' : level === 'warning' 
 // [추가 2026-10-12] 신뢰도 낮은 값 표시: 전방 기울기 15도 초과(현실적으로 드문 값)이거나 기준 자세가 강제 확정('fallback')이면 "참고용"으로 취급 → 회색 + 참고용 표시
 UNRELIABLE_DEG: 15,
 isUnreliable(totalDeg, fwdDeg, quality) {
-const p = this.primary(totalDeg, fwdDeg);
-if (!p) return false;
-return Math.abs(p.deg) > this.UNRELIABLE_DEG || quality === 'fallback';
+// [수정 2026-11-06] 린각도는 '참고용' 표시/회색 처리 없이 항상 정상 지표로 출력
+return false;
 },
 refTagText(lang) { return (lang === 'ko') ? '참고용' : 'ref only'; },
 refTagBlockHtml(record, lang) {
@@ -13822,7 +13822,12 @@ this.state.diagHrSamples = [];
 }
 } else if (timeDelta > 4 && d < 0.4) {
 // GPS 갭(터널 등) 후 복구: 보수적으로 반영
-let corrected = Math.min(d, 0.08);
+// [수정 2026-11-06] 고정 상한 80m는 러닝 중 5~6초 끊긴 뒤 복구될 때 68m 점프가 그대로 통과해 거리·최고 페이스가 튀었음.
+// 상한 = (직전 이동속도와 현재까지 평균속도 중 큰 값) × 끊긴 시간 × 1.5, 최소 20m ~ 최대 80m.
+const _avgKmps = (this.state.seconds > 10 && this.state.totalDist > 0.02) ? (this.state.totalDist / this.state.seconds) : 0.0033;
+const _recentKmps = (this._lastDeltaTime > 0.2 && this._lastDeltaDist > 0) ? (this._lastDeltaDist / this._lastDeltaTime) : 0;
+const _gapCap = Math.max(0.02, Math.min(0.08, Math.max(_avgKmps, _recentKmps) * timeDelta * 1.5));
+let corrected = Math.min(d, _gapCap);
 this.state.totalDist += corrected;
 this.state.pathCoords.push(pos);
 if(this.polyline) this.polyline.setLatLngs(this.state.pathCoords);
