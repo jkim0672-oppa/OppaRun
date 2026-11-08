@@ -4023,6 +4023,22 @@ const SMOOTH_MIN_POINTS = 11; // 10개까지는 직선+점(+번호). 긴 러닝�
 const smoothOn = (opts && typeof opts.smooth === 'boolean') ? opts.smooth : (pts.length >= SMOOTH_MIN_POINTS);
 const _xy = coords.map(c => { const a = c.split(','); return [parseFloat(a[0]), parseFloat(a[1])]; });
 const _f1 = (v) => v.toFixed(1);
+// [추가 2026-11-07] 가운데에 있는 제외 점(GPS 점프 등 튄 구간): 값이 맨 위/아래 끝에 붙어 최고처럼 보이지 않도록
+// 선은 이웃 점을 잇는 위치로 지나가게 하고, 점은 속이 빈 회색 고리로 그린다(탭하면 실제 값은 말풍선에 그대로 표시).
+const _midEdge = new Set();
+if (edgeSet) {
+  const _fc = pts.findIndex(p => !isEdge(p));
+  let _lc = pts.length - 1; while (_lc > 0 && isEdge(pts[_lc])) _lc--;
+  for (let k = _fc + 1; k < _lc; k++) {
+    if (!isEdge(pts[k])) continue;
+    let a = k - 1; while (a > _fc && isEdge(pts[a])) a--;
+    let b = k + 1; while (b < _lc && isEdge(pts[b])) b++;
+    const dx = _xy[b][0] - _xy[a][0];
+    const y = dx ? _xy[a][1] + (_xy[b][1] - _xy[a][1]) * (_xy[k][0] - _xy[a][0]) / dx : _xy[a][1];
+    _xy[k][1] = y; coords[k] = _xy[k][0].toFixed(1) + ',' + y.toFixed(1);
+    _midEdge.add(k);
+  }
+}
 let _tan = null;
 if (smoothOn && _xy.length >= 3) {
   const n = _xy.length, ms = [];
@@ -4061,6 +4077,11 @@ let dotsSvg = '';
 if (!smoothOn) {
   const dotW = (opts && opts.heightPx && opts.heightPx > 40) ? 5 : 3.6;
   for (let k = firstCore; k <= lastCore; k++) {
+    if (_midEdge.has(k)) {
+      dotsSvg += '<path d="M ' + _f1(_xy[k][0]) + ',' + _f1(_xy[k][1]) + ' h0.01" fill="none" stroke="#777" stroke-width="' + dotW + '" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>'
+        + '<path d="M ' + _f1(_xy[k][0]) + ',' + _f1(_xy[k][1]) + ' h0.01" fill="none" stroke="#111" stroke-width="' + (dotW - 2.6) + '" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>';
+      continue;
+    }
     dotsSvg += '<path d="M ' + _f1(_xy[k][0]) + ',' + _f1(_xy[k][1]) + ' h0.01" fill="none" stroke="' + colorHex + '" stroke-width="' + dotW + '" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>';
   }
 }
