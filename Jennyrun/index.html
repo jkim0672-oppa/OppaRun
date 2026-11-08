@@ -2349,6 +2349,7 @@ button[style*="--danger"]:active, button[style*="#e57373"]:active, .c33:active, 
 <div class="diag-card dc-metric"><div id="info-balance-title" class="u-title-primary">UNDERSTANDING BALANCE METRICS</div><div id="info-balance-desc" class="u-desc-sm">GCT/Gyro Balance compare left vs right leg as an L:R ratio (50:50 = perfectly even). A 5~8 point gap is normal; 10+ persistently may signal a muscle imbalance worth checking.</div></div>
 <div class="diag-card dc-metric"><div id="info-lean-title" class="u-title-primary">UNDERSTANDING LEAN ANGLE</div><div id="info-lean-desc" class="u-desc-sm">LEAN ANGLE shows your forward lean, plus total lean and lateral sway alongside. Forward lean: 4-8° good, 8-12° borderline, 12°+ excessive. Lateral sway: under 5° fine, 10°+ may signal weak core/hip stability.</div></div>
 <div class="diag-card dc-metric"><div id="info-pacing-title" class="u-title-primary">UNDERSTANDING PACING METRICS</div><div id="info-pacing-desc" class="u-desc-sm">Pace stability is how much your 100 m split pace swings (±sec). Split diff is 2nd-half minus 1st-half pace (negative = negative split). Cadence drift is how much cadence changed in the 2nd half. HR drift is how much heart rate rose in the 2nd half (10+ min runs only).</div></div>
+<div class="diag-card dc-metric"><div id="info-best-title" class="u-title-primary">HOW BEST IS CALCULATED</div><div id="info-best-desc" class="u-desc-sm">Best pace, cadence and power use the best 200 m stretch. Sudden GPS spikes are ignored. Table rows and graph points are section averages, so they may differ.</div></div>
 <div class="diag-card dc-care"><div id="info-warmup-title" class="u-title-primary">WARM-UP & COOL-DOWN</div><div id="info-warmup-desc" class="u-desc-sm">Start with 5~10 min of light jogging or dynamic stretching to raise your heart rate gradually. After running, walk and stretch for 5~10 min to help recovery and reduce muscle soreness.</div></div>
 <div class="diag-card dc-care"><div id="info-hydration-title" class="u-title-primary">HYDRATION & FUELING</div><div id="info-hydration-desc" class="u-desc-sm">For runs over 60 minutes, drink small amounts of water regularly. For runs over 90 minutes, consider light carbohydrate intake (gels, bananas, sports drinks).</div></div>
 <div class="diag-card dc-care"><div id="info-recovery-title" class="u-title-primary">REST & RECOVERY DAYS</div><div id="info-recovery-desc" class="u-desc-sm">Muscles rebuild during rest. Beginners should take at least 1~2 full rest days per week, and avoid running through persistent joint pain.</div></div>
@@ -2403,6 +2404,7 @@ alt="runner"/>
 <div id="settings-app-area">
 <div class="section-title" id="section-title-general">GENERAL</div>
 <div class="settings-group"><div class="profile-col"><div id="label-select-lang" class="settings-label">SELECT LANGUAGE</div><div class="dropdown-select mini-select" onclick="ui.toggleDropdown('dropdown-options')"><span id="current-lang-text">English (US)</span><span class="c18">▼</span></div><div id="dropdown-options" class="dropdown-options"><div class="dropdown-option" onclick="ui.selectLang('en')">English (US)</div><div class="dropdown-option" onclick="ui.selectLang('ko')">한국어 (KR)</div></div></div></div>
+<div class="settings-group"><div class="settings-label" id="label-diag-detail-graph">ZOOM GRAPH</div><button id="btn-diag-detail-graph" class="btn-raw" style="width:100%; padding:13px 4px;" onclick="ui.toggleDiagDetailGraph()"><span id="btn-diag-detail-graph-label">ZOOM GRAPH: STANDARD</span></button></div>
 <div class="settings-group">
   <div class="settings-label" id="label-email-login">EMAIL LOGIN</div>
   <div id="email-login-box">
@@ -7882,6 +7884,18 @@ if(infoPacingD) infoPacingD.innerHTML = buildInfoListRows(isKo ? [
   ['HR drift', '2nd-half minus 1st-half HR (bpm). Shown for runs of 10+ min'],
   ['Note', 'Based on GPS, step detection and HR, so it works at any wear position. White lines in the DIAG graphs are 1st/2nd-half averages; ±7–13 s is normal due to GPS error']
 ]);
+const infoBest = document.getElementById('info-best-title');
+if(infoBest) infoBest.textContent = isKo ? '최고값 기준' : 'HOW BEST IS CALCULATED';
+const infoBestD = document.getElementById('info-best-desc');
+if(infoBestD) infoBestD.innerHTML = buildInfoListRows(isKo ? [
+  ['기준', '최고 페이스·케이던스·파워는 연속 200m 평균 중 가장 좋은 값이에요'],
+  ['GPS 튐', 'GPS가 튄 구간은 자동으로 제외돼요'],
+  ['표·그래프', '묶은 구간 평균이라 최고값과 다를 수 있어요']
+] : [
+  ['Basis', 'Best pace, cadence and power use the best 200 m stretch'],
+  ['GPS spikes', 'Sudden GPS spikes are ignored'],
+  ['Table & graph', 'Section averages, so they may differ from BEST']
+]);
 const infoLean = document.getElementById('info-lean-title');
 if(infoLean) infoLean.textContent = t.infLean;
 const infoLeanD = document.getElementById('info-lean-desc');
@@ -8195,7 +8209,23 @@ this.refreshCalibFactorSwitch();
 }
 // [추가 2026-10-14] 원시 센서 기록(분석용). 켜 두면 다음 러닝부터 가속도(중력 포함/제외)·자이로 원시값과
 // 걸음 확정 시점(GCT/수직진동 값)을 메모리에 모았다가, 러닝 후 설정에서 CSV로 내보낼 수 있다. 기본 OFF.
+// [추가 2026-11-07] 확대 그래프 표시 방식: 기본(약 10점으로 묶음) / 상세(200m 구간, 좌우 스크롤). 설정 > APP에서 전환, 기본은 '기본'.
+toggleDiagDetailGraph() {
+  try { const prof = storage.loadProfile(); prof.diagDetailGraph = !prof.diagDetailGraph; storage.saveProfile(prof); } catch (e) {}
+  this.refreshDiagDetailGraphSwitch();
+}
+refreshDiagDetailGraphSwitch() {
+  const isKo = storage.getLang() === 'ko';
+  let on = false; try { on = !!storage.loadProfile().diagDetailGraph; } catch (e) {}
+  const lab = document.getElementById('btn-diag-detail-graph-label');
+  const ttl = document.getElementById('label-diag-detail-graph');
+  const btn = document.getElementById('btn-diag-detail-graph');
+  if (ttl) ttl.textContent = isKo ? '확대 그래프' : 'ZOOM GRAPH';
+  if (lab) lab.textContent = (isKo ? '확대 그래프: ' : 'ZOOM GRAPH: ') + (on ? (isKo ? '상세 (200m)' : 'DETAIL (200 m)') : (isKo ? '기본' : 'STANDARD'));
+  if (btn) btn.classList.toggle('active', on);
+}
 refreshRawCaptureSwitch() {
+  try { this.refreshDiagDetailGraphSwitch(); } catch (e) {}
   const isKo = storage.getLang() === 'ko';
   let on = false; try { on = !!storage.loadProfile().rawSensorCapture; } catch (e) {}
   const btn = document.getElementById('btn-raw-capture');
@@ -22789,18 +22819,37 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
 // [추가 2026-11-07] 최고값(페이스/케이던스/파워) 공용 계산: 100m 구간 연속 2개(=200m) 평균 중 가장 좋은 값과 그 위치(km).
 // 끝 자투리(edge)와 중앙값 대비 25% 넘게 튄 비정상 구간(GPS 점프 등)은 제외. 진단 카드와 확대 화면이 같은 함수를 사용.
 // 반환: { val, kmFrom, kmTo } 또는 null. 페이스는 초/km(작을수록 좋음), 케이던스/파워는 클수록 좋음.
+// [추가 2026-11-07] 고립된 튐(GPS 점프 등) 판정: 중앙값 대비 많이 빠르게/높게 나온 구간이면서 이웃 구간은 평범한 경우만 이상치로 본다.
+// 인터벌처럼 빠른 구간이 연속되는 실제 훈련은 이웃도 빠르므로 이상치로 잘리지 않는다.
+window.diagSpikeSet = function(vals, key) {
+  const set = new Set();
+  if (!vals || vals.length < 4) return set;
+  const isPace = key === 'pace';
+  const nums = vals.filter(v => typeof v === 'number' && isFinite(v) && v > 0).sort((x, y) => x - y);
+  if (nums.length < 4) return set;
+  const med = nums[Math.floor(nums.length / 2)];
+  const hot = (v) => typeof v === 'number' && isFinite(v) && v > 0 && (isPace ? v < med * 0.8 : v > med * 1.25);
+  const mild = (v) => v == null || !isFinite(v) || (isPace ? v >= med * 0.9 : v <= med * 1.1);
+  vals.forEach((v, i) => { if (hot(v) && mild(vals[i - 1]) && mild(vals[i + 1])) set.add(i); });
+  return set;
+};
 window.calcBest200Info = function(splits, key) {
   if (!splits || splits.length < 2) return null;
   const isPace = key === 'pace';
   const vals = splits.map(s => isPace ? paceStrToSeconds(s.pace)
     : key === 'cadence' ? (typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3) ? s.avgCadence : null)
     : (typeof s.power === 'number' && isFinite(s.power) ? s.power : null));
-  const edge = key === 'power' ? getGraphEdgeSet(splits, vals)
-    : getGraphEdgeSet(splits, vals, getLeadExcludeCount(splits, isPace ? GRAPH_LEAD_SEC.pace : GRAPH_LEAD_SEC.cad));
-  const valid = vals.filter((v, i) => typeof v === 'number' && v > 0 && !edge.has(i)).sort((x, y) => x - y);
-  if (!valid.length) return null;
-  const med = valid[Math.floor(valid.length / 2)];
-  const ok = (i) => typeof vals[i] === 'number' && vals[i] > 0 && !edge.has(i) && (isPace ? vals[i] >= med * 0.75 : vals[i] <= med * 1.25);
+  // 출발 가속 구간(앞쪽)과 끝 자투리(70m 미만)만 제외. 마지막 구간이 중앙값과 달라도(막판 스퍼트·마지막 인터벌 등) 제외하지 않음:
+  // 최고값 계산에서 감속 구간은 어차피 안 뽑히고, 튄 값은 아래 diagSpikeSet이 걸러낸다.
+  const edge = new Set();
+  if (splits.length >= 5) {
+    const lead = key === 'power' ? 1 : getLeadExcludeCount(splits, isPace ? GRAPH_LEAD_SEC.pace : GRAPH_LEAD_SEC.cad);
+    for (let k = 0; k < Math.min(lead, splits.length); k++) edge.add(k);
+    const kL = parseFloat(splits[splits.length - 1].km), kP = parseFloat(splits[splits.length - 2].km);
+    if (isFinite(kL) && isFinite(kP) && (kL - kP) < 0.07) edge.add(splits.length - 1);
+  }
+  const spike = window.diagSpikeSet(vals, key);
+  const ok = (i) => typeof vals[i] === 'number' && vals[i] > 0 && !edge.has(i) && !spike.has(i);
   const kmOf = (sp) => (typeof sp.km === 'number' ? sp.km : parseFloat(sp.km));
   let best = null;
   for (let i = 0; i + 1 < vals.length; i++) {
@@ -22822,8 +22871,10 @@ const r = h.find(rec => rec.id === id);
 const rawSplits = (r && r.diagSplits) || [];
 if (!r || rawSplits.length < 2) return;
 // [추가 2026-10-31] 10개 초과 구간은 5km 등 보기 좋은 단위로 묶어서 점/번호/목록을 최대 10개 안팎으로 표시(작은 카드와 동일 규칙)
-const FS_MAX_POINTS = 75, FS_MIN_STEP_KM = 0.2; // [실험D] 15km까지 200m, 이후 500m→1km 단위 자동
-const G = groupDiagSplits(rawSplits, FS_MAX_POINTS, FS_MIN_STEP_KM);
+// 설정 > 확대 그래프: 상세(켜짐)면 15km까지 200m 구간·좌우 스크롤(이후 500m→1km 단위 자동), 꺼짐(기본)이면 기존처럼 약 10점으로 묶음.
+let _detail = false; try { _detail = storage.loadProfile().diagDetailGraph === true; } catch (e) {}
+const FS_MAX_POINTS = 75, FS_MIN_STEP_KM = 0.2;
+const G = _detail ? groupDiagSplits(rawSplits, FS_MAX_POINTS, FS_MIN_STEP_KM) : groupDiagSplits(rawSplits);
 const splits = G.splits;
 const lang = storage.getLang();
 const t = translations[lang];
@@ -22880,9 +22931,9 @@ if (metricKey === 'pace') {
   // [수정 2026-10-21] 원본: noteHtml = ''  → 고도 소스(기압계/GPS) 표시
   noteHtml = (typeof r.totalAscent === 'number') ? ((koLang ? '고도 소스: ' : 'Source: ') + (r.altSource === 'baro' ? (koLang ? '기압계' : 'Barometer') : 'GPS')) : '';
 } else { return; }
-if (G.grouped) { edge = new Set(); half = G.remapHalf(half); } // 묶인 상태: 흐린 출발 구간 없음, 전/후반 범위는 묶인 점 기준으로 변환
+if (G.grouped) { edge = (metricKey === 'pace' || metricKey === 'cadence' || metricKey === 'power') ? window.diagSpikeSet(vals, metricKey) : new Set(); half = G.remapHalf(half); } // 묶인 상태: 출발 흐림은 없지만 GPS 점프 같은 고립된 튐은 흐리게 제외(BEST와 같은 기준) // 묶인 상태: 흐린 출발 구간 없음, 전/후반 범위는 묶인 점 기준으로 변환
 let lay = null;
-const svg = buildSparklineSVG(vals, color, invert, true, true, times, { edge: edge, half: half, minRangePct: minRangePct, minRange: (metricKey === 'alt' ? 10 : 0), heightPx: 150, maxPoints: FS_MAX_POINTS, smooth: false, onLayout: (L) => { lay = L; } });
+const svg = buildSparklineSVG(vals, color, invert, true, true, times, { edge: edge, half: half, minRangePct: minRangePct, minRange: (metricKey === 'alt' ? 10 : 0), heightPx: 150, maxPoints: _detail ? FS_MAX_POINTS : undefined, smooth: _detail ? false : undefined, onLayout: (L) => { lay = L; } });
 if (!svg) return;
 const axisHtml = buildDiagAxisLabelsHtml(splits);
 // 세부 지표: 작은 카드엔 없던 평균/최고/최저/구간 수/총 소요시간을 계산해 보여준다.
@@ -22957,7 +23008,7 @@ const rowInfo = splits.map((sp, i) => {
 });
 // 구간이 너무 많은(30개 초과) 경우 목록은 생략. 흐린 행 = 그래프의 흐린 점선(평균/최고 계산에서 제외된 구간).
 let listHtml = '';
-if (splits.length <= 80) {
+if (splits.length <= (_detail ? 80 : 30)) {
   let bestI = -1;
   vals.forEach((v, i) => { if (typeof v === 'number' && isFinite(v) && !edge.has(i)) { if (bestI < 0 || (invert ? v < vals[bestI] : v > vals[bestI])) bestI = i; } });
   // [추가 2026-11-01] 최저(WORST): 최고와 같은 기준(흐린 행 제외)으로 반대 방향. 고도 탭은 제외, 최고와 같은 행이면 표시 안 함
@@ -22990,12 +23041,12 @@ const _lblAvg = _hasOfficialAvg ? _officialAvg : (validVals.length ? validVals.r
 const _lblBest = validVals.length ? (invert ? Math.min(...validVals) : Math.max(...validVals)) : null;
 const _plotHtml = buildDiagGraphFsPlotHtml(svg, lay, { ko: koLang, fmt: fmt, invert: invert, heightPx: 150, avgVal: _lblAvg, bestVal: _lblBest, info: rowInfo.map((x, i) => (i + 1) + ' \u00b7 ' + x.dist + ' \u00b7 ' + x.time + ' \u00b7 ' + x.val) });
 // [실험D] 점이 많으면(점당 30px 고정 폭) 그래프+하단 축을 한 덩어리로 좌우 스크롤. 열릴 때 최고 200m 구간 중앙으로 이동.
-const _PT_PX = 30;
+const _PT_PX = 22;
 const _availPx = Math.max(240, Math.min(window.innerWidth || 360, 640) - 56);
 const _scrollW = splits.length * _PT_PX;
 let _scrollMode = false;
 if (svgWrapEl) {
-  if (lay && lay.pts && _scrollW > _availPx) {
+  if (_detail && lay && lay.pts && _scrollW > _availPx) {
     _scrollMode = true;
     const _totKm = parseFloat(splits[splits.length - 1].km) || 1;
     const _pxPerKm = _scrollW / _totKm;
@@ -23030,7 +23081,7 @@ if (_scrollMode) {
     const _tk = parseFloat(splits[splits.length - 1].km) || 1;
     const _cx = (_bi2 && _bi2.kmFrom != null && _bi2.kmTo != null && (metricKey === 'pace' || metricKey === 'cadence' || metricKey === 'power')) ? ((_bi2.kmFrom + _bi2.kmTo) / 2) : 0;
     const _go = () => { _sc.scrollLeft = Math.max(0, _scrollW * (_cx / _tk) - _sc.clientWidth / 2); };
-    _go(); requestAnimationFrame(_go); setTimeout(_go, 80);
+    _go(); requestAnimationFrame(_go); [30, 100, 250, 500, 900].forEach(function (ms) { setTimeout(function () { if (_sc.scrollWidth > _sc.clientWidth) _go(); }, ms); });
   }
 }
 try { history.pushState({ jrPage: 'diagGraphFull' }, ''); } catch (e) {}
