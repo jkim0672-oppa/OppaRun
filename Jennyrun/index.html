@@ -909,6 +909,14 @@ overscroll-behavior-y: none; /* [수정 2026-11-07] contain은 끝에서 늘어�
 .diag-graph-fs-row.best span:nth-child(4) { color: #FFD60A; }
 /* [추가 2026-11-01] 리스트 최저(WORST) 행: 페이스 숫자만 빨강. 고도 탭은 제외 */
 .diag-graph-fs-row.worst span:nth-child(4) { color: #ff4d4d; }
+/* [추가 2026-11-08] EI 확대 화면 구간표: # | 거리 | 페이스 | 심박 | EI (5열). 최고/최저 색은 마지막(EI) 열에만 */
+.diag-graph-fs-row.cols5 span:nth-child(2) { flex: 1.1; }
+.diag-graph-fs-row.cols5 span:nth-child(3) { flex: 0.9; text-align: right; color: #ccc; }
+.diag-graph-fs-row.cols5 span:nth-child(4) { flex: 0.7; text-align: right; color: #ccc; }
+.diag-graph-fs-row.cols5 span:nth-child(5) { flex: 0.7; text-align: right; }
+.diag-graph-fs-row.cols5.best span:nth-child(5) { color: #FFD60A; }
+.diag-graph-fs-row.cols5.worst span:nth-child(5) { color: #ff4d4d; }
+.diag-graph-fs-row.cols5.head span { color: #888; }
 .diag-graph-fs-list-note { padding: 8px 14px; font-size: var(--fs-xxs); color: #777; font-weight: 700; border-top: 1px solid #1e1e1e; }
 /* 진단 카드 안의 작은 그래프 클릭 영역: 탭 가능함을 알려주는 커서+우측 하단 확대 힌트 */
 .diag-graph-wrap { cursor: pointer; position: relative; }
@@ -3963,6 +3971,18 @@ function calcRecordEI(r) {
   }
   return calcEI(paceSec, r.avgHr);
 }
+// [신규 2026-11-08] 이번 기록보다 앞선 같은 종목 최근 5회(EI가 있는 기록만)의 EI 평균. EI 확대 화면의 기준선/"최근 N회 대비"에 쓴다.
+// 진단 카드의 "vs last N runs"와 같은 기준(id 순, 같은 activityMode, 최대 5개). 2회 미만이면 null.
+function getEiBaseline(r) {
+  try {
+    const base = storage.loadHistory()
+      .filter(function (x) { return x && x.id < r.id && (x.activityMode || 'run') === (r.activityMode || 'run'); })
+      .sort(function (a, b) { return b.id - a.id; })
+      .map(calcRecordEI).filter(function (v) { return v != null; }).slice(0, 5);
+    if (base.length < 2) return null;
+    return { n: base.length, avg: base.reduce(function (a, v) { return a + v; }, 0) / base.length };
+  } catch (e) { return null; }
+}
 // [추가] 진단 화면 박스 안에 들어가는 작고 심플한 구간별(km 스플릿 기준) 변화 그래프.
 // values: 숫자 배열(null/NaN 섞여도 됨, 유효값만 사용). invert=true면 값이 작을수록 위로
 // 올라가게 그림(페이스처럼 "작을수록 좋음"인 지표에 사용). 유효 포인트가 2개 미만이면 빈 문자열 반환.
@@ -4031,6 +4051,9 @@ if (scaleFloor && (max - min) < scaleFloor) {
   min = mid - scaleFloor / 2;
   max = mid + scaleFloor / 2;
 }
+// [추가 2026-11-08] opts.refVal: 확대 화면의 비교용 기준선(예: EI "최근 5회 평균"). 선이 그래프 밖에 걸리지 않게 세로 범위에 포함한다. 안 넘기면 아무 일도 없다.
+const _hasRef = !!(opts && typeof opts.refVal === 'number' && isFinite(opts.refVal));
+if (_hasRef) { if (opts.refVal < min) min = opts.refVal; if (opts.refVal > max) max = opts.refVal; }
 if (max - min < 1e-6) { min -= 1; max += 1; }
 const yFor = (v) => {
   let t = (v - min) / (max - min); // 0~1 (edge 값은 범위를 벗어날 수 있음)
@@ -4120,6 +4143,11 @@ if (!smoothOn) {
 // 피드백으로 제거 — 점선만 남긴다.
 // [추가 2026-09-19] 확대 화면 라벨용: 아래 블록들이 이미 계산하는 좌표를 모아둔다(새 계산 없음).
 const _lay = { avgY: null, best: [], half: null };
+let refDashSvg = '';
+if (_hasRef) {
+  const refY = yFor(opts.refVal).toFixed(1);
+  refDashSvg = '<line x1="' + PAD + '" y1="' + refY + '" x2="' + (W - PAD) + '" y2="' + refY + '" stroke="#4dd0e1" stroke-opacity="0.9" stroke-width="1.2" stroke-dasharray="4,3" vector-effect="non-scaling-stroke"></line>';
+}
 let avgDashSvg = '';
 if (showAvgLine) {
   const avgVal = scalePts.reduce((a, p) => a + p.v, 0) / scalePts.length;
@@ -4206,6 +4234,7 @@ if (opts && typeof opts.onLayout === 'function') opts.onLayout({ W: W, H: H, avg
 return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="width:100%;height:' + svgHeightPx + 'px;display:block;margin-top:6px;">'
   + '<path d="' + areaD + '" fill="' + colorHex + '" opacity="0.12" stroke="none"></path>'
   + avgDashSvg
+  + refDashSvg
   + bestLineSvg
   + halfSvg
   + edgeSvg
@@ -10709,7 +10738,7 @@ try {
     const _eiSvg = buildSparklineSVG(_eiVals, '#ba68c8', false, undefined, undefined, _gTimes, { edge: _gEdgeHr, minRangePct: GRAPH_MIN_RANGE_PCT.hr });
     eiCardHtml = '<div class="diag-card"><div class="diag-label">' + t.diagEiLabel + '</div><div class="diag-val-group"><div class="diag-main-val" style="color:#ba68c8">' + _eiNow.toFixed(2) + '</div><div class="diag-ref">' + _eiRef + '</div></div>' +
       (_eiTip ? '<div class="diag-tip">' + _eiTip + '</div>' : '') +
-      (_eiSvg ? '<div class="diag-graph-wrap">' + _eiSvg + diagAxisLabelsHtml + '</div>' : '') + '</div>';
+      _wrapGraph('ei', _eiSvg, diagAxisLabelsHtml) + '</div>';
   }
 } catch (eEi) { try { jrLogErr('eiCard', eEi); } catch (e2) {} }
 contentArea.innerHTML =
@@ -23014,6 +23043,7 @@ const koLang = lang === 'ko';
 const times = splits.map(s => (typeof s.t_sec === 'number' ? s.t_sec : null));
 const pm = calcPacingMetrics(r);
 let vals, color, invert, edge, half, label, fmt, noteHtml, minRangePct;
+let eiBase = null, eiHalfPct = null; // [신규 2026-11-08] EI 확대 화면용(최근 5회 기준, 전/후반 변화 %)
 if (metricKey === 'pace') {
   vals = splits.map(s => paceStrToSeconds(s.pace));
   color = '#00ff88'; invert = true;
@@ -23053,6 +23083,36 @@ if (metricKey === 'pace') {
   label = t.powerLabel || 'POWER';
   fmt = (v) => (v == null || !isFinite(v)) ? '--' : (Math.round(v) + ' W');
   noteHtml = '';
+} else if (metricKey === 'ei') {
+  // [신규 2026-11-08] EI(효율 지수) 확대 화면. 구간별 EI = calcEI(구간 페이스, 구간 심박).
+  // 진단 카드의 미니 그래프와 같은 값·같은 흐림 기준(출발 후 심박이 오르는 60초, GRAPH_LEAD_SEC.hr)을 쓴다.
+  vals = splits.map(s => calcEI(paceStrToSeconds(s.pace), s.avgHr));
+  color = '#ba68c8'; invert = false;
+  edge = getGraphEdgeSet(splits, vals, getLeadExcludeCount(splits, GRAPH_LEAD_SEC.hr));
+  minRangePct = GRAPH_MIN_RANGE_PCT.hr;
+  label = t.diagEiLabel;
+  fmt = (v) => (v == null || !isFinite(v)) ? '--' : v.toFixed(2);
+  half = null;
+  const _sgn = (v) => v > 0 ? '+' : (v < 0 ? '\u2212' : '');
+  // 전/후반 평균: 심박 드리프트(pm.hrHalf)와 같은 구간 범위에서 원본 100m 구간 EI의 평균을 낸다.
+  const _eiRaw = rawSplits.map(s => calcEI(paceStrToSeconds(s.pace), s.avgHr));
+  const _eiHalfAvg = (rg) => { let sum = 0, n = 0; for (let k = Math.ceil(rg[0]); k <= Math.floor(rg[1]) && k < _eiRaw.length; k++) { const v = _eiRaw[k]; if (typeof v === 'number' && isFinite(v)) { sum += v; n++; } } return n ? sum / n : null; };
+  if (pm.hrHalf) {
+    const _e1 = _eiHalfAvg(pm.hrHalf.r1), _e2 = _eiHalfAvg(pm.hrHalf.r2);
+    if (_e1 != null && _e2 != null && _e1 > 0) {
+      half = { v1: _e1, v2: _e2, r1: pm.hrHalf.r1, r2: pm.hrHalf.r2, mid: pm.hrHalf.mid };
+      eiHalfPct = (_e2 / _e1 - 1) * 100;
+    }
+  }
+  eiBase = getEiBaseline(r);
+  const _eiNow = calcRecordEI(r);
+  const _swatch = (c) => '<i style="display:inline-block;width:18px;border-top:2px dashed ' + c + ';vertical-align:middle;margin-right:6px;"></i>';
+  const _ln = [];
+  if (half) _ln.push((koLang ? '전반 ' : '1st half ') + half.v1.toFixed(2) + ' \u2192 ' + (koLang ? '후반 ' : '2nd half ') + half.v2.toFixed(2) + ' (' + _sgn(eiHalfPct) + Math.abs(eiHalfPct).toFixed(1) + '%)');
+  if (_eiNow != null) _ln.push(_swatch('#888') + (koLang ? '이번 러닝 평균 ' : 'This run avg ') + _eiNow.toFixed(2));
+  if (eiBase) _ln.push(_swatch('#4dd0e1') + (koLang ? ('최근 ' + eiBase.n + '회 평균 ') : ('Last ' + eiBase.n + ' runs avg ')) + eiBase.avg.toFixed(2));
+  _ln.push('<span style="color:#888;">' + (koLang ? '높을수록 같은 심박으로 더 빠르게 달렸다는 뜻이에요' : 'Higher = faster at the same heart rate') + '</span>');
+  noteHtml = _ln.join('<br>');
 } else if (metricKey === 'alt') {
   vals = splits.map(s => (typeof s.altTo === 'number' ? s.altTo : null));
   color = '#90a4ae'; invert = false;
@@ -23065,7 +23125,7 @@ if (metricKey === 'pace') {
 } else { return; }
 if (G.grouped) { edge = (metricKey === 'pace' || metricKey === 'cadence' || metricKey === 'power') ? window.diagSpikeSet(vals, metricKey) : new Set(); half = G.remapHalf(half); } // 묶인 상태: 출발 흐림은 없지만 GPS 점프 같은 고립된 튐은 흐리게 제외(BEST와 같은 기준) // 묶인 상태: 흐린 출발 구간 없음, 전/후반 범위는 묶인 점 기준으로 변환
 let lay = null;
-const svg = buildSparklineSVG(vals, color, invert, true, true, times, { edge: edge, half: half, minRangePct: minRangePct, minRange: (metricKey === 'alt' ? 10 : 0), heightPx: 150, maxPoints: _detail ? FS_MAX_POINTS : undefined, smooth: _detail ? false : undefined, onLayout: (L) => { lay = L; } });
+const svg = buildSparklineSVG(vals, color, invert, true, true, times, { edge: edge, half: half, minRangePct: minRangePct, minRange: (metricKey === 'alt' ? 10 : 0), refVal: (metricKey === 'ei' && eiBase ? eiBase.avg : undefined), heightPx: 150, maxPoints: _detail ? FS_MAX_POINTS : undefined, smooth: _detail ? false : undefined, onLayout: (L) => { lay = L; } });
 if (!svg) return;
 const axisHtml = buildDiagAxisLabelsHtml(splits);
 // 세부 지표: 작은 카드엔 없던 평균/최고/최저/구간 수/총 소요시간을 계산해 보여준다.
@@ -23081,6 +23141,7 @@ const _officialAvg = metricKey === 'cadence' ? (typeof r.cadence === 'number' ? 
   : metricKey === 'pace' ? paceStrToSeconds(r.avgPace)
   : metricKey === 'hr' ? (typeof r.avgHr === 'number' ? r.avgHr : null)
   : metricKey === 'power' ? (typeof r.power === 'number' ? r.power : null)
+  : metricKey === 'ei' ? calcRecordEI(r)
   : null;
 const _hasOfficialAvg = _officialAvg != null && isFinite(_officialAvg);
 let statsHtml = '';
@@ -23109,6 +23170,16 @@ if (validVals.length) {
     + stat(koLang ? '구간 수' : 'SPLITS', String(validVals.length))
     + (totalT != null ? stat(koLang ? '총 시간' : 'TOTAL TIME', fmtDiagAxisTime(totalT)) : '');
   // [추가 2026-10-21] 고도 그래프는 평균 고도보다 최고/최저 + 상승/하강이 의미 있어서 세부 지표를 바꿔 보여준다(가민 비교용)
+  // [신규 2026-11-08] EI 세부 지표: 평균/최고에 더해 "최근 N회 대비"와 "전·후반 변화"(심박 드리프트와 같은 구간 기준)를 보여준다.
+  if (metricKey === 'ei') {
+    const _fp = (p) => (p > 0 ? '+' : (p < 0 ? '\u2212' : '')) + Math.abs(p).toFixed(1) + '%';
+    const _nowEi = calcRecordEI(r);
+    statsHtml = stat(koLang ? '평균' : 'AVG', fmt(avg)) + stat(koLang ? '최고' : 'BEST', fmt(bestVal))
+      + ((eiBase && _nowEi != null) ? stat(koLang ? ('최근 ' + eiBase.n + '회 대비') : ('VS LAST ' + eiBase.n), _fp((_nowEi / eiBase.avg - 1) * 100)) : '')
+      + (eiHalfPct != null ? stat(koLang ? '전·후반 변화' : '1ST \u2192 2ND', _fp(eiHalfPct)) : '')
+      + stat(koLang ? '총 거리' : 'TOTAL DIST', totalDistStr)
+      + (totalT != null ? stat(koLang ? '총 시간' : 'TOTAL TIME', fmtDiagAxisTime(totalT)) : '');
+  }
   if (metricKey === 'alt') {
     const _mn = Math.min(...validVals);
     statsHtml = stat(koLang ? '최고 고도' : 'MAX', fmt(mx)) + stat(koLang ? '최저 고도' : 'MIN', fmt(_mn))
@@ -23136,7 +23207,13 @@ const rowInfo = splits.map((sp, i) => {
     if (G.grouped) { const pk = i > 0 ? parseFloat(splits[i - 1].km) : 0; dist = _dv(isFinite(pk) ? pk : 0) + '\u2013' + _dv(kmN) + _du; }
     else dist = _dv(kmN) + _du;
   }
-  return { dist: dist, time: _fmtT(sp.t_sec), val: fmt(vals[i]) };
+  const _row = { dist: dist, time: _fmtT(sp.t_sec), val: fmt(vals[i]) };
+  if (metricKey === 'ei') { // [신규 2026-11-08] EI가 왜 변했는지 보이도록 구간 페이스·심박을 함께 보여준다
+    const _ps = paceStrToSeconds(sp.pace);
+    _row.pace = _ps ? (this.currentUnit === 'mile' ? this.convertPaceToUnit(sp.pace, 'mile') : sp.pace) : '--';
+    _row.hr = (typeof sp.avgHr === 'number' && sp.avgHr > 0) ? String(Math.round(sp.avgHr)) : '--';
+  }
+  return _row;
 });
 // 구간이 너무 많은(30개 초과) 경우 목록은 생략. 흐린 행 = 그래프의 흐린 점선(평균/최고 계산에서 제외된 구간).
 let listHtml = '';
@@ -23150,11 +23227,13 @@ if (splits.length <= (_detail ? 80 : 30)) {
     if (worstI === bestI) worstI = -1;
   }
   let hasEdge = false;
-  const row = (cls, i, a, b, c, d) => '<div class="diag-graph-fs-row' + (cls ? ' ' + cls : '') + '"' + (i != null ? ' data-i="' + i + '" onclick="diagGraphSelect(' + i + ')"' : '') + '><span>' + a + '</span><span>' + b + '</span><span>' + c + '</span><span>' + d + '</span></div>';
-  listHtml = row('head', null, '#', koLang ? '거리' : 'DIST', koLang ? '시간' : 'TIME', label);
+  const row = (cls, i, a, b, c, d, e) => '<div class="diag-graph-fs-row' + (cls ? ' ' + cls : '') + (e !== undefined ? ' cols5' : '') + '"' + (i != null ? ' data-i="' + i + '" onclick="diagGraphSelect(' + i + ')"' : '') + '><span>' + a + '</span><span>' + b + '</span><span>' + c + '</span><span>' + d + '</span>' + (e !== undefined ? '<span>' + e + '</span>' : '') + '</div>';
+  listHtml = metricKey === 'ei'
+    ? row('head', null, '#', koLang ? '거리' : 'DIST', koLang ? '페이스' : 'PACE', koLang ? '심박' : 'HR', 'EI')
+    : row('head', null, '#', koLang ? '거리' : 'DIST', koLang ? '시간' : 'TIME', label);
   splits.forEach((sp, i) => {
     const isE = edge.has(i); if (isE) hasEdge = true;
-    listHtml += row((isE ? 'dim' : '') + (i === bestI ? ' best' : '') + (i === worstI ? ' worst' : ''), i, String(i + 1), rowInfo[i].dist, rowInfo[i].time, rowInfo[i].val);
+    listHtml += row((isE ? 'dim' : '') + (i === bestI ? ' best' : '') + (i === worstI ? ' worst' : ''), i, String(i + 1), rowInfo[i].dist, metricKey === 'ei' ? rowInfo[i].pace : rowInfo[i].time, metricKey === 'ei' ? rowInfo[i].hr : rowInfo[i].val, metricKey === 'ei' ? rowInfo[i].val : undefined);
   });
   if (G.grouped) listHtml += '<div class="diag-graph-fs-list-note">' + (koLang ? ('약 ' + (_isMile ? parseFloat((G.step * 0.621371).toFixed(2)) + ' mi' : G.step + ' km') + ' 단위로 묶은 값이에요') : ('Grouped by ~' + (_isMile ? parseFloat((G.step * 0.621371).toFixed(2)) + ' mi' : G.step + ' km'))) + '</div>';
   if (hasEdge) listHtml += '<div class="diag-graph-fs-list-note">' + (koLang ? '흐린 행은 평균·최고 계산에서 제외된 구간이에요' : 'Dimmed rows are excluded from AVG/BEST') + '</div>';
@@ -23171,7 +23250,7 @@ if (subEl) subEl.textContent = this.formatRecordDateTimeLocalized(r.date) + (r.d
 // [수정 2026-09-25] 위 AVG와 동일한 이유로 공식 값을 우선 사용해 스탯카드/그래프 라벨이 서로도 어긋나지 않게 함.
 const _lblAvg = _hasOfficialAvg ? _officialAvg : (validVals.length ? validVals.reduce((a, b) => a + b, 0) / validVals.length : null);
 const _lblBest = validVals.length ? (invert ? Math.min(...validVals) : Math.max(...validVals)) : null;
-const _plotHtml = buildDiagGraphFsPlotHtml(svg, lay, { ko: koLang, fmt: fmt, invert: invert, heightPx: 150, avgVal: _lblAvg, bestVal: _lblBest, info: rowInfo.map((x, i) => (i + 1) + ' \u00b7 ' + x.dist + ' \u00b7 ' + x.time + ' \u00b7 ' + x.val) });
+const _plotHtml = buildDiagGraphFsPlotHtml(svg, lay, { ko: koLang, fmt: fmt, invert: invert, heightPx: 150, avgVal: _lblAvg, bestVal: _lblBest, info: rowInfo.map((x, i) => (i + 1) + ' \u00b7 ' + x.dist + ' \u00b7 ' + x.time + ' \u00b7 ' + x.val + (metricKey === 'ei' ? '<br><span style="color:#bbb;font-weight:700;">' + x.pace + ' \u00b7 ' + x.hr + ' bpm</span>' : '')) });
 // [실험D] 점이 많으면(점당 30px 고정 폭) 그래프+하단 축을 한 덩어리로 좌우 스크롤. 열릴 때 최고 200m 구간 중앙으로 이동.
 const _PT_PX = 18;
 const _availPx = Math.max(240, Math.min(window.innerWidth || 360, 640) - 60); // 화면 좌우 여백+그래프 박스 안쪽 여백을 뺀 가로 폭
