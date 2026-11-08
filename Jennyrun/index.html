@@ -3950,7 +3950,7 @@ if (pts.length < 2) return '';
 // [추가] 100m 단위 스플릿이라 긴 러닝(예: 하프/풀코스)은 포인트가 수십~백여 개가 될 수 있음.
 // 작은 박스 안에서 지저분해 보이지 않도록, 너무 많으면 구간 평균으로 묶어 단순화(데이터 손실은
 // 저장된 splits 자체가 아니라 이 미니 그래프 표시에만 적용됨).
-const MAX_POINTS = 40;
+const MAX_POINTS = (opts && opts.maxPoints) || 40; // [실험D] 확대 스크롤 그래프는 75점까지 묶지 않고 그대로 그림
 // [추가] 최고기록 유지 구간의 지속시간(초)을 판단하려면 각 포인트의 누적 시간(t_sec)이 필요.
 // 40개 넘어 구간 평균으로 묶일 때는 그 구간에서 "마지막" 스플릿의 시간을 대표값으로 쓴다.
 let ptTimes = times ? pts.map(p => (typeof times[p.i] === 'number' ? times[p.i] : null)) : null;
@@ -4166,15 +4166,17 @@ return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style=
 //  - 원본 기록(record.diagSplits)은 건드리지 않고 화면 표시용으로만 쓴다. 묶인 상태에선 출발 흐린 구간(edge)을 따로 두지 않는다.
 const DIAG_MAX_POINTS = 10;
 const DIAG_GROUP_STEPS_KM = [0.2, 0.5, 1, 2, 2.5, 5, 10, 20, 50];
-function groupDiagSplits(splits) {
+function groupDiagSplits(splits, maxPoints, minStepKm) {
   const ident = { grouped: false, step: 0.1, splits: splits || [], remapHalf: function (h) { return h; } };
-  if (!splits || splits.length <= DIAG_MAX_POINTS) return ident;
+  const maxPts = maxPoints || DIAG_MAX_POINTS; // [실험D] 확대 화면은 maxPoints(75)·minStepKm(0.2)를 넘겨 항상 200m 이상 단위로 표시
+  if (!splits || (splits.length <= maxPts && !minStepKm)) return ident;
   const kmOf = (sp) => (typeof sp.km === 'number' ? sp.km : parseFloat(sp.km));
   const totalKm = kmOf(splits[splits.length - 1]);
   if (!isFinite(totalKm) || totalKm <= 0) return ident;
   let step = DIAG_GROUP_STEPS_KM[DIAG_GROUP_STEPS_KM.length - 1];
   for (let q = 0; q < DIAG_GROUP_STEPS_KM.length; q++) {
-    if (Math.ceil(totalKm / DIAG_GROUP_STEPS_KM[q] - 1e-6) <= DIAG_MAX_POINTS) { step = DIAG_GROUP_STEPS_KM[q]; break; }
+    if (minStepKm && DIAG_GROUP_STEPS_KM[q] < minStepKm - 1e-9) continue;
+    if (Math.ceil(totalKm / DIAG_GROUP_STEPS_KM[q] - 1e-6) <= maxPts) { step = DIAG_GROUP_STEPS_KM[q]; break; }
   }
   const groups = []; let lastKey = null;
   splits.forEach((sp, i) => {
@@ -4205,6 +4207,7 @@ function groupDiagSplits(splits) {
     if (tEnd != null) prevT = tEnd;
     prevKm = kmEnd;
   });
+  if (out.length < 2) return ident;
   const centers = groups.map(g => (g.s + g.e) / 2);
   const mapIdx = (x) => {
     if (x == null) return x;
@@ -10520,13 +10523,23 @@ const _altRefHtml = (_altAsc != null) ? ('<div class="diag-ref">' + (lang === 'k
 // [수정] 자투리 등 샘플 수가 너무 적은(3개 미만) 구간은 순간 노이즈 하나로도 평균이 크게
 // 흔들릴 수 있어 최고값 후보에서 제외한다(케이던스 최고값이 비정상적으로 튀어 보이던 원인).
 const _cadPeakVals = _splitsForGraph.filter((s, i) => !_edgeCad.has(i) && typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3)).map(s => s.avgCadence);
-const cadPeakForDiag = _cadPeakVals.length ? Math.max(..._cadPeakVals) : null;
+let cadPeakForDiag = window.calcBest200Max(_splitsForGraph, 'cadence');
+if (cadPeakForDiag === null) cadPeakForDiag = _cadPeakVals.length ? Math.max(..._cadPeakVals) : null;
+if (cadPeakForDiag !== null) cadPeakForDiag = Math.round(cadPeakForDiag);
 // [수정 2026-11-06] 최고 페이스: 100m 순간값(GPS 튐) 대신 그래프/구간표와 같은 묶음 구간(_gS) 기준으로 계산
-const _pacePeakSecs = _gS.filter((s, i) => !_gEdgePace.has(i)).map(s => paceStrToSeconds(s.pace)).filter(v => typeof v === 'number' && v > 0);
-const pacePeakSecForDiag = _pacePeakSecs.length ? Math.min(..._pacePeakSecs) : null;
+// [재수정 2026-11-07] 최고 페이스는 100m 구간 연속 2개(200m) 평균 중 최소값 — 카드와 확대 화면이 같은 함수(calcBestPace200Sec)를 사용.
+// 0.5km 묶음은 막판 스퍼트를 평균에 묻어버리고, 100m 단독값은 GPS 점프에 취약하기 때문.
+let pacePeakSecForDiag = window.calcBestPace200Sec(_splitsForGraph);
+if (pacePeakSecForDiag === null) {
+  const _pacePeakSecs = _gS.filter((s, i) => !_gEdgePace.has(i)).map(s => paceStrToSeconds(s.pace)).filter(v => typeof v === 'number' && v > 0);
+  pacePeakSecForDiag = _pacePeakSecs.length ? Math.min(..._pacePeakSecs) : null;
+}
 // [신규] 구간 최고 파워(와트) — PACE/CAD와 동일하게 100m 구간 값들 중 최댓값으로 근사.
 const _powerPeakVals = _gS.filter((s, i) => !_gEdgePow.has(i)).map(s => s.power).filter(v => typeof v === 'number' && isFinite(v));
-const powerPeakForDiag = _powerPeakVals.length ? Math.round(Math.max(..._powerPeakVals)) : null; // [수정] 묶음 평균이라 소수점이 생기므로 정수 W로 반올림
+let powerPeakForDiag = window.calcBest200Max(_splitsForGraph, 'power');
+if (powerPeakForDiag === null) powerPeakForDiag = _powerPeakVals.length ? Math.max(..._powerPeakVals) : null;
+if (powerPeakForDiag !== null) powerPeakForDiag = Math.round(powerPeakForDiag);
+// // [수정] 묶음 평균이라 소수점이 생기므로 정수 W로 반올림
 function _fmtPeakPaceStr(sec) {
   if (sec == null) return null;
   const m = Math.floor(sec / 60), s = Math.round(sec % 60);
@@ -22773,13 +22786,44 @@ if (_detailMapFull) { _detailMapFull.remove(); _detailMapFull = null; }
 // [추가 2026-09-19] 진단 화면 미니 그래프 확대(전체화면) — 작은 카드에서 안 보이던
 // 평균/최고/최저/구간수/총시간 같은 세부 지표를 큰 그래프와 함께 보여준다.
 // id로 기록을 다시 찾아 그래프별 값을 새로 계산하는 방식(openDiag과 별개, 자기완결적).
+// [추가 2026-11-07] 최고값(페이스/케이던스/파워) 공용 계산: 100m 구간 연속 2개(=200m) 평균 중 가장 좋은 값과 그 위치(km).
+// 끝 자투리(edge)와 중앙값 대비 25% 넘게 튄 비정상 구간(GPS 점프 등)은 제외. 진단 카드와 확대 화면이 같은 함수를 사용.
+// 반환: { val, kmFrom, kmTo } 또는 null. 페이스는 초/km(작을수록 좋음), 케이던스/파워는 클수록 좋음.
+window.calcBest200Info = function(splits, key) {
+  if (!splits || splits.length < 2) return null;
+  const isPace = key === 'pace';
+  const vals = splits.map(s => isPace ? paceStrToSeconds(s.pace)
+    : key === 'cadence' ? (typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3) ? s.avgCadence : null)
+    : (typeof s.power === 'number' && isFinite(s.power) ? s.power : null));
+  const edge = key === 'power' ? getGraphEdgeSet(splits, vals)
+    : getGraphEdgeSet(splits, vals, getLeadExcludeCount(splits, isPace ? GRAPH_LEAD_SEC.pace : GRAPH_LEAD_SEC.cad));
+  const valid = vals.filter((v, i) => typeof v === 'number' && v > 0 && !edge.has(i)).sort((x, y) => x - y);
+  if (!valid.length) return null;
+  const med = valid[Math.floor(valid.length / 2)];
+  const ok = (i) => typeof vals[i] === 'number' && vals[i] > 0 && !edge.has(i) && (isPace ? vals[i] >= med * 0.75 : vals[i] <= med * 1.25);
+  const kmOf = (sp) => (typeof sp.km === 'number' ? sp.km : parseFloat(sp.km));
+  let best = null;
+  for (let i = 0; i + 1 < vals.length; i++) {
+    if (!ok(i) || !ok(i + 1)) continue;
+    const w = (vals[i] + vals[i + 1]) / 2;
+    if (best === null || (isPace ? w < best.val : w > best.val)) {
+      const kTo = kmOf(splits[i + 1]);
+      const kFrom = i > 0 ? kmOf(splits[i - 1]) : 0;
+      best = { val: w, kmFrom: isFinite(kFrom) ? kFrom : null, kmTo: isFinite(kTo) ? kTo : null };
+    }
+  }
+  return best;
+};
+window.calcBestPace200Sec = function(splits) { const b = window.calcBest200Info(splits, 'pace'); return b ? b.val : null; };
+window.calcBest200Max = function(splits, key) { const b = window.calcBest200Info(splits, key); return b ? b.val : null; };
 UIManager.prototype.openDiagGraphFullscreen = function(metricKey, id) {
 const h = storage.loadHistory();
 const r = h.find(rec => rec.id === id);
 const rawSplits = (r && r.diagSplits) || [];
 if (!r || rawSplits.length < 2) return;
 // [추가 2026-10-31] 10개 초과 구간은 5km 등 보기 좋은 단위로 묶어서 점/번호/목록을 최대 10개 안팎으로 표시(작은 카드와 동일 규칙)
-const G = groupDiagSplits(rawSplits);
+const FS_MAX_POINTS = 75, FS_MIN_STEP_KM = 0.2; // [실험D] 15km까지 200m, 이후 500m→1km 단위 자동
+const G = groupDiagSplits(rawSplits, FS_MAX_POINTS, FS_MIN_STEP_KM);
 const splits = G.splits;
 const lang = storage.getLang();
 const t = translations[lang];
@@ -22838,7 +22882,7 @@ if (metricKey === 'pace') {
 } else { return; }
 if (G.grouped) { edge = new Set(); half = G.remapHalf(half); } // 묶인 상태: 흐린 출발 구간 없음, 전/후반 범위는 묶인 점 기준으로 변환
 let lay = null;
-const svg = buildSparklineSVG(vals, color, invert, true, true, times, { edge: edge, half: half, minRangePct: minRangePct, minRange: (metricKey === 'alt' ? 10 : 0), heightPx: 150, onLayout: (L) => { lay = L; } });
+const svg = buildSparklineSVG(vals, color, invert, true, true, times, { edge: edge, half: half, minRangePct: minRangePct, minRange: (metricKey === 'alt' ? 10 : 0), heightPx: 150, maxPoints: FS_MAX_POINTS, smooth: false, onLayout: (L) => { lay = L; } });
 if (!svg) return;
 const axisHtml = buildDiagAxisLabelsHtml(splits);
 // 세부 지표: 작은 카드엔 없던 평균/최고/최저/구간 수/총 소요시간을 계산해 보여준다.
@@ -22860,7 +22904,17 @@ let statsHtml = '';
 if (validVals.length) {
   const avg = _hasOfficialAvg ? _officialAvg : (validVals.reduce((a, b) => a + b, 0) / validVals.length);
   const mx = Math.max(...validVals);
-  const bestVal = invert ? Math.min(...validVals) : mx;
+  let bestVal = invert ? Math.min(...validVals) : mx;
+  // 카드와 동일한 200m 기준 최고값 + 그 위치를 안내(구간표는 구간 평균이라 값이 다를 수 있음)
+  if (metricKey === 'pace' || metricKey === 'cadence' || metricKey === 'power') {
+    const _bi = window.calcBest200Info(rawSplits, metricKey);
+    if (_bi) {
+      bestVal = _bi.val;
+      const _u = this.currentUnit === 'mile' ? 0.621371 : 1, _uTxt = this.currentUnit === 'mile' ? 'mi' : 'km';
+      const _rng = (_bi.kmFrom != null && _bi.kmTo != null) ? ((_bi.kmFrom * _u).toFixed(1) + '~' + (_bi.kmTo * _u).toFixed(1) + _uTxt + ' \u00b7 ') : '';
+      noteHtml = (noteHtml ? noteHtml + '<br>' : '') + (koLang ? '최고 200m: ' : 'Best 200m: ') + _rng + fmt(_bi.val);
+    }
+  }
   let totalT = null;
   for (let k = times.length - 1; k >= 0; k--) { if (typeof times[k] === 'number') { totalT = times[k]; break; } }
   // [수정 2026-09-27] WORST(최저)는 출발 구간(점선, 통계 제외) 영향이 커서 AVG(전체 평균, 점선 포함)보다
@@ -22903,7 +22957,7 @@ const rowInfo = splits.map((sp, i) => {
 });
 // 구간이 너무 많은(30개 초과) 경우 목록은 생략. 흐린 행 = 그래프의 흐린 점선(평균/최고 계산에서 제외된 구간).
 let listHtml = '';
-if (splits.length <= 30) {
+if (splits.length <= 80) {
   let bestI = -1;
   vals.forEach((v, i) => { if (typeof v === 'number' && isFinite(v) && !edge.has(i)) { if (bestI < 0 || (invert ? v < vals[bestI] : v > vals[bestI])) bestI = i; } });
   // [추가 2026-11-01] 최저(WORST): 최고와 같은 기준(흐린 행 제외)으로 반대 방향. 고도 탭은 제외, 최고와 같은 행이면 표시 안 함
@@ -22934,14 +22988,51 @@ if (subEl) subEl.textContent = this.formatRecordDateTimeLocalized(r.date) + (r.d
 // [수정 2026-09-25] 위 AVG와 동일한 이유로 공식 값을 우선 사용해 스탯카드/그래프 라벨이 서로도 어긋나지 않게 함.
 const _lblAvg = _hasOfficialAvg ? _officialAvg : (validVals.length ? validVals.reduce((a, b) => a + b, 0) / validVals.length : null);
 const _lblBest = validVals.length ? (invert ? Math.min(...validVals) : Math.max(...validVals)) : null;
-if (svgWrapEl) svgWrapEl.innerHTML = buildDiagGraphFsPlotHtml(svg, lay, { ko: koLang, fmt: fmt, invert: invert, heightPx: 150, avgVal: _lblAvg, bestVal: _lblBest, info: rowInfo.map((x, i) => (i + 1) + ' \u00b7 ' + x.dist + ' \u00b7 ' + x.time + ' \u00b7 ' + x.val) });
-if (axisEl) axisEl.innerHTML = axisHtml;
+const _plotHtml = buildDiagGraphFsPlotHtml(svg, lay, { ko: koLang, fmt: fmt, invert: invert, heightPx: 150, avgVal: _lblAvg, bestVal: _lblBest, info: rowInfo.map((x, i) => (i + 1) + ' \u00b7 ' + x.dist + ' \u00b7 ' + x.time + ' \u00b7 ' + x.val) });
+// [실험D] 점이 많으면(점당 30px 고정 폭) 그래프+하단 축을 한 덩어리로 좌우 스크롤. 열릴 때 최고 200m 구간 중앙으로 이동.
+const _PT_PX = 30;
+const _availPx = Math.max(240, Math.min(window.innerWidth || 360, 640) - 56);
+const _scrollW = splits.length * _PT_PX;
+let _scrollMode = false;
+if (svgWrapEl) {
+  if (lay && lay.pts && _scrollW > _availPx) {
+    _scrollMode = true;
+    const _totKm = parseFloat(splits[splits.length - 1].km) || 1;
+    const _pxPerKm = _scrollW / _totKm;
+    const _lblStepKm = [0.5, 1, 2, 5, 10].find(v => v * _pxPerKm >= 64) || 10;
+    let _ax = '', _prevBin = -1;
+    splits.forEach((sp, ii) => {
+      const kmv = parseFloat(sp.km); if (!isFinite(kmv)) return;
+      const bin = Math.floor(kmv / _lblStepKm + 1e-6);
+      if (bin === _prevBin && ii > 0) return;
+      _prevBin = bin;
+      const pt = lay.pts.find(q => q.i === ii); if (!pt) return;
+      const tt = sp.t_sec != null ? sp.t_sec : 0;
+      _ax += '<span style="position:absolute;top:0;left:' + (pt.x / lay.W * 100).toFixed(2) + '%;transform:translateX(' + (ii === 0 ? '0' : '-50%') + ');white-space:nowrap;font-size:var(--fs-xs);color:#aaa;font-weight:700;line-height:1.4;text-align:center;">' + _dv(kmv) + (_isMile ? 'mi' : 'km') + '<br>' + fmtDiagAxisTime(tt) + '</span>';
+    });
+    svgWrapEl.innerHTML = '<div id="dgfs-scroller" style="overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;padding-bottom:2px;"><div style="width:' + _scrollW + 'px;">' + _plotHtml + '<div style="position:relative;height:34px;margin-top:4px;">' + _ax + '</div></div></div>';
+    noteHtml = '<span style="color:#888;">\u2190 ' + (koLang ? '좌우로 밀어서 전체 구간 보기' : 'Swipe to scroll') + '</span>' + (noteHtml ? '<br>' + noteHtml : '');
+  } else {
+    svgWrapEl.innerHTML = _plotHtml;
+  }
+}
+if (axisEl) axisEl.innerHTML = _scrollMode ? '' : axisHtml;
 if (noteEl) noteEl.innerHTML = noteHtml;
 if (statsEl) statsEl.innerHTML = statsHtml;
 const listEl = document.getElementById('diag-graph-fs-list');
 if (listEl) { listEl.innerHTML = listHtml; listEl.style.display = listHtml ? '' : 'none'; }
 const overlay = document.getElementById('diag-graph-fullscreen-overlay');
 if (overlay) overlay.classList.add('active');
+if (_scrollMode) {
+  const _bi2 = window.calcBest200Info(rawSplits, metricKey === 'pace' || metricKey === 'cadence' || metricKey === 'power' ? metricKey : 'pace');
+  const _sc = document.getElementById('dgfs-scroller');
+  if (_sc) {
+    const _tk = parseFloat(splits[splits.length - 1].km) || 1;
+    const _cx = (_bi2 && _bi2.kmFrom != null && _bi2.kmTo != null && (metricKey === 'pace' || metricKey === 'cadence' || metricKey === 'power')) ? ((_bi2.kmFrom + _bi2.kmTo) / 2) : 0;
+    const _go = () => { _sc.scrollLeft = Math.max(0, _scrollW * (_cx / _tk) - _sc.clientWidth / 2); };
+    _go(); requestAnimationFrame(_go); setTimeout(_go, 80);
+  }
+}
 try { history.pushState({ jrPage: 'diagGraphFull' }, ''); } catch (e) {}
 };
 UIManager.prototype.closeDiagGraphFullscreen = function() {
