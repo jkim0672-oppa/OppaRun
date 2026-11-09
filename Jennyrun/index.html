@@ -1457,6 +1457,18 @@ margin-top: 10px; font-family: -apple-system, system-ui;
 .type-card.tc-key-walk:active { border-color: #4fc3f7; background: rgba(79,195,247,0.06); }
 .ref-tag { font-size: 0.8em; font-weight: 700; color: #aaa; opacity: 0.8; margin-left: 4px; white-space: nowrap; }
 .type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+/* [추가 2026-11-09] TOTAL 홈: 최근 7일 요약 + 직전 7일 대비 (전체 러닝 기준, 걷기 제외) */
+.week-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #1c1c1c; border: 1.5px solid #3a3a3a; border-radius: 12px; padding: 8px 14px; margin: 0 0 10px; }
+.week-bar .wb-label { color: #aaa; font-size: var(--fs-xs); font-weight: 900; letter-spacing: 0.5px; }
+.week-bar .wb-val { margin-top: 1px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.week-bar .wb-dist { color: var(--primary); font-size: var(--fs-md); font-weight: 900; }
+.week-bar .wb-cnt { color: var(--text-main); font-size: var(--fs-base); font-weight: 900; }
+.week-bar .wb-delta { text-align: right; flex-shrink: 0; }
+.week-bar .wb-delta b { display: block; font-size: var(--fs-md); font-weight: 900; font-variant-numeric: tabular-nums; }
+.week-bar .wb-delta small { color: var(--text-dim); font-size: var(--fs-xs); font-weight: 700; }
+.week-bar .wb-up b { color: var(--primary); }   /* 늘었음: 앱 대표 초록 */
+.week-bar .wb-down b { color: #ffb74d; }        /* 줄었음: 경고 빨강 대신 부드러운 앰버 */
+.week-bar .wb-flat b { color: var(--text-dim); }/* 같음/비교 불가: 회색 */
 .type-card.tc-sq { display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; gap: 6px; margin-bottom: 0; padding: 14px; min-height: 104px; }
 .type-card.tc-sq .tc-dist { font-size: var(--fs-xl); text-align: left; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .type-card.tc-sq.tc-zero { opacity: 0.5; }
@@ -1475,7 +1487,7 @@ margin-top: 10px; font-family: -apple-system, system-ui;
 .total-detail.act-all  { --act: #ffffff; --act-bg: rgba(255,255,255,0.06); }
 .total-detail.act-walk { --act: #4fc3f7; --act-bg: rgba(79,195,247,0.06); }
 .total-detail .total-detail-title { color: var(--act); }
-.total-detail .close-detail.total-close { color: var(--act); }
+.total-detail .close-detail.total-close { color: var(--primary); }  /* [수정 2026-11-09] 원본: color: var(--act) — BACK은 종목색(걷기 파랑/전체 흰색)이 아니라 다른 페이지와 같은 초록으로 통일 */
 .total-detail .stat-filter-btn.active { border-color: var(--act); color: var(--act); background: var(--act-bg); }
 .type-card.tc-key-all  { background: #262626; border-color: #6a6a6a; }
 .type-card.tc-key-run, .type-card.tc-key-trail, .type-card.tc-key-freerun { background: #14261a; border-color: #2d5a3f; }
@@ -10168,6 +10180,25 @@ gridHtml += '<button class="type-card tc-sq' + (rows.length === 0 ? ' tc-zero' :
 }
 });
 html += '<div class="type-grid">' + gridHtml + '</div>';
+// [추가 2026-11-09] 최근 7일 요약 + 직전 7일 대비 (전체 러닝 기준, 걷기 제외). 상세 화면 WEEKLY와 같은 7일 기준
+const _wk = { d: 0, n: 0, pd: 0 };
+hAll.forEach(r => {
+if (!inType(r, 'all')) return;
+const _rd = this.parseRecordDate(r.date); if (isNaN(_rd.getTime())) return;
+const _age = Math.max(0, (now - _rd) / 86400000), _ds = parseFloat(r.dist) || 0;
+if (_age <= 7) { _wk.d += _ds; _wk.n++; } else if (_age <= 14) { _wk.pd += _ds; }
+});
+let _wTxt = '--', _wCls = 'wb-flat';
+if (_wk.pd > 0) {
+const _pc = Math.round((_wk.d - _wk.pd) / _wk.pd * 100);
+if (_pc > 0) { _wTxt = '\u25b2 ' + _pc + '%'; _wCls = 'wb-up'; }
+else if (_pc < 0) { _wTxt = '\u25bc ' + Math.abs(_pc) + '%'; _wCls = 'wb-down'; }
+else { _wTxt = '= 0%'; }
+} else if (_wk.d > 0) { _wTxt = 'NEW'; _wCls = 'wb-up'; }
+html += '<div class="week-bar">' +
+'<div class="wb-main"><div class="wb-label">' + (isKo ? '최근 7일 · 전체 러닝' : 'LAST 7 DAYS · ALL RUN') + '</div>' +
+'<div class="wb-val"><span class="wb-dist">' + toUnit(_wk.d).toFixed(2) + ' ' + unitLabel + '</span><span class="wb-cnt"> \u00b7 ' + _wk.n + cntUnit + '</span></div></div>' +
+'<div class="wb-delta ' + _wCls + '"><b>' + _wTxt + '</b><small>' + (isKo ? '직전 7일 대비' : 'vs PREV 7 DAYS') + '</small></div></div>';
 // 오늘 리포트: 러닝(걷기 제외)과 걷기를 분리해서 표시
 const todayKey = this.dayKey(new Date());
 const isToday = r => { const d = this.parseRecordDate(r.date); return !isNaN(d.getTime()) && this.dayKey(d) === todayKey; };
@@ -10185,7 +10216,7 @@ card(lblTime, fmtT(ts)) +
 card(isKo ? '칼로리' : 'CALORIES', tk + ' kcal') +
 card(lblCnt, rows.length) + '</div>';
 };
-html += todayBlock(isKo ? '오늘의 리포트 · 걷기' : "TODAY'S REPORT · WALK", 'walk', isKo ? '오늘은 아직 걸은 기록이 없어요' : 'No walks yet today', true);
+// [수정 2026-11-09] 하단 걷기 박스 제거(위 WALK 카드와 숫자가 겹침). 원본: html += todayBlock(isKo ? '오늘의 리포트 · 걷기' : "TODAY'S REPORT · WALK", 'walk', isKo ? '오늘은 아직 걸은 기록이 없어요' : 'No walks yet today', true);
 home.innerHTML = html;
 }
 updateTotalStats() {
