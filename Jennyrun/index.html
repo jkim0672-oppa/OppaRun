@@ -1458,7 +1458,9 @@ margin-top: 10px; font-family: -apple-system, system-ui;
 .ref-tag { font-size: 0.8em; font-weight: 700; color: #aaa; opacity: 0.8; margin-left: 4px; white-space: nowrap; }
 .type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
 /* [추가 2026-11-09] TOTAL 홈: 최근 7일 요약 + 직전 7일 대비 (전체 러닝 기준, 걷기 제외) */
-.week-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #1c1c1c; border: 1.5px solid #3a3a3a; border-radius: 12px; padding: 8px 14px; margin: 0 0 10px; }
+.week-bar { background: #1c1c1c; border: 1.5px solid #3a3a3a; border-radius: 12px; padding: 0 14px; margin: 0 0 10px; }
+.week-bar .wb-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
+.week-bar .wb-row + .wb-row { border-top: 1px solid #333; }
 .week-bar .wb-label { color: #aaa; font-size: var(--fs-xs); font-weight: 900; letter-spacing: 0.5px; }
 .week-bar .wb-val { margin-top: 1px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .week-bar .wb-dist { color: var(--primary); font-size: var(--fs-md); font-weight: 900; }
@@ -10180,25 +10182,38 @@ gridHtml += '<button class="type-card tc-sq' + (rows.length === 0 ? ' tc-zero' :
 }
 });
 html += '<div class="type-grid">' + gridHtml + '</div>';
-// [추가 2026-11-09] 최근 7일 요약 + 직전 7일 대비 (전체 러닝 기준, 걷기 제외). 상세 화면 WEEKLY와 같은 7일 기준
-const _wk = { d: 0, n: 0, pd: 0 };
+// [추가 2026-11-09] TOTAL 홈 비교 줄 2개 (전체 러닝 기준, 걷기 제외)
+// ① 최근 7일 vs 직전 7일(상세 WEEKLY와 같은 7일 기준)  ② 이번 주(달력 주) 지금까지 vs 지난주 같은 시점
+const _wDelta = (cur, prev) => {
+if (prev > 0) {
+const _pc = Math.round((cur - prev) / prev * 100);
+if (_pc > 0) return ['\u25b2 ' + _pc + '%', 'wb-up'];
+if (_pc < 0) return ['\u25bc ' + Math.abs(_pc) + '%', 'wb-down'];
+return ['= 0%', 'wb-flat'];
+}
+return cur > 0 ? ['NEW', 'wb-up'] : ['--', 'wb-flat'];
+};
+const _WEEK_START = 1; // 달력 주 시작 요일: 1=월요일, 0=일요일
+const _ws = new Date(now); _ws.setHours(0, 0, 0, 0); _ws.setDate(_ws.getDate() - ((_ws.getDay() - _WEEK_START + 7) % 7));
+const _pws = new Date(_ws); _pws.setDate(_pws.getDate() - 7);
+const _pnow = new Date(now); _pnow.setDate(_pnow.getDate() - 7);
+const _wk = { d: 0, n: 0, pd: 0 }, _cw = { d: 0, n: 0, pd: 0 };
 hAll.forEach(r => {
 if (!inType(r, 'all')) return;
 const _rd = this.parseRecordDate(r.date); if (isNaN(_rd.getTime())) return;
 const _age = Math.max(0, (now - _rd) / 86400000), _ds = parseFloat(r.dist) || 0;
 if (_age <= 7) { _wk.d += _ds; _wk.n++; } else if (_age <= 14) { _wk.pd += _ds; }
+if (_rd >= _ws && _rd <= now) { _cw.d += _ds; _cw.n++; } else if (_rd >= _pws && _rd <= _pnow) { _cw.pd += _ds; }
 });
-let _wTxt = '--', _wCls = 'wb-flat';
-if (_wk.pd > 0) {
-const _pc = Math.round((_wk.d - _wk.pd) / _wk.pd * 100);
-if (_pc > 0) { _wTxt = '\u25b2 ' + _pc + '%'; _wCls = 'wb-up'; }
-else if (_pc < 0) { _wTxt = '\u25bc ' + Math.abs(_pc) + '%'; _wCls = 'wb-down'; }
-else { _wTxt = '= 0%'; }
-} else if (_wk.d > 0) { _wTxt = 'NEW'; _wCls = 'wb-up'; }
+const _wRow = (label, o, sub) => {
+const _t = _wDelta(o.d, o.pd);
+return '<div class="wb-row"><div class="wb-main"><div class="wb-label">' + label + '</div>' +
+'<div class="wb-val"><span class="wb-dist">' + toUnit(o.d).toFixed(2) + ' ' + unitLabel + '</span><span class="wb-cnt"> \u00b7 ' + o.n + cntUnit + '</span></div></div>' +
+'<div class="wb-delta ' + _t[1] + '"><b>' + _t[0] + '</b><small>' + sub + '</small></div></div>';
+};
 html += '<div class="week-bar">' +
-'<div class="wb-main"><div class="wb-label">' + (isKo ? '최근 7일 · 전체 러닝' : 'LAST 7 DAYS · ALL RUN') + '</div>' +
-'<div class="wb-val"><span class="wb-dist">' + toUnit(_wk.d).toFixed(2) + ' ' + unitLabel + '</span><span class="wb-cnt"> \u00b7 ' + _wk.n + cntUnit + '</span></div></div>' +
-'<div class="wb-delta ' + _wCls + '"><b>' + _wTxt + '</b><small>' + (isKo ? '직전 7일 대비' : 'vs PREV 7 DAYS') + '</small></div></div>';
+_wRow(isKo ? '최근 7일 · 전체 러닝' : 'LAST 7 DAYS · ALL RUN', _wk, isKo ? '직전 7일 대비' : 'vs PREV 7 DAYS') +
+_wRow(isKo ? '이번 주 · 전체 러닝' : 'THIS WEEK · ALL RUN', _cw, isKo ? '지난주 같은 시점 대비' : 'vs LAST WEEK SO FAR') + '</div>';
 // 오늘 리포트: 러닝(걷기 제외)과 걷기를 분리해서 표시
 const todayKey = this.dayKey(new Date());
 const isToday = r => { const d = this.parseRecordDate(r.date); return !isNaN(d.getTime()) && this.dayKey(d) === todayKey; };
