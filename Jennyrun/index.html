@@ -13535,8 +13535,8 @@ const sec = Math.floor((Date.now() - this.state.startTimestamp - pausedMs) / 100
 return sec > 0 ? sec : 0;
 }
 // [수정] 일시정지가 시작/종료되는 시점에 pausedMs를 정확히 누적시키는 헬퍼
-// [추가 2026-11-10] 자동멈춤/재개 진동: 멈춤=길게 1번, 재개=짧게 2번 (HR 끊김 [300,120,300]·길게 눌러 정지 [30,40,30]과 구분되는 패턴)
-autoPauseHaptic(kind) { try { if (navigator.vibrate) navigator.vibrate(kind === 'pause' ? 250 : [90, 80, 90]); } catch (e) {} }
+// [수정 2026-11-10] 자동멈춤/재개 진동: 멈출 때도, 다시 달릴 때도 똑같이 '길게 1번' (500ms). 심박 끊김(짧게 2번)과 구분됨
+autoPauseHaptic(kind) { try { if (navigator.vibrate) navigator.vibrate(500); } catch (e) {} }
 markPauseStart() {
 if (!this.state.pauseStartedAt) this.state.pauseStartedAt = Date.now();
 }
@@ -18876,7 +18876,28 @@ const metro = new MetroEngine();
 const hrManager = {
   device: null, char: null, _hr: 0, _samples: [],
   // [추가] 러닝 시작 시 심박 샘플 초기화 (평균/최고 심박 계산용)
-  reset() { this._samples = []; this._hr = 0; },
+  reset() { this._samples = []; this._hr = 0; this._stopLostBuzz(); },
+  // [수정 2026-11-10] 러닝 중 심박 끊김 진동: '짧게 2번'을 끊긴 직후 1회 + 30초 뒤 1회, 총 2회만 울리고 멈춤.
+  // (심박계가 아예 꺼진 경우 계속 울리지 않게 하기 위함.) 연결/복구될 때는 진동 없음.
+  // 수동 일시정지 중에는 울리지 않고(횟수에도 안 셈), 연결 복구·러닝 종료·수동 해제 시에도 중단.
+  _lostBuzzTimer: null, _lostBuzzCount: 0,
+  _buzzLost() {
+    try {
+      if (typeof app === 'undefined' || !app.state || !app.state.isRunning || !this._lost) { this._stopLostBuzz(); return; }
+      if (app.state.isPaused) return;
+      if (navigator.vibrate) navigator.vibrate([100, 100, 100]);
+      this._lostBuzzCount++;
+      if (this._lostBuzzCount >= 2) this._stopLostBuzz(); // 총 2회(직후 + 30초 뒤)만
+    } catch (e) {}
+  },
+  _startLostBuzz() {
+    this._stopLostBuzz();
+    this._lostBuzzCount = 0;
+    if (typeof app === 'undefined' || !app.state || !app.state.isRunning) return; // 러닝 중일 때만
+    this._buzzLost();
+    this._lostBuzzTimer = setInterval(() => this._buzzLost(), 30000);
+  },
+  _stopLostBuzz() { if (this._lostBuzzTimer) { clearInterval(this._lostBuzzTimer); this._lostBuzzTimer = null; } },
   // [추가] 누적된 심박 샘플로부터 평균/최고 심박 계산
   getAvgMax() {
     if (!this._samples || this._samples.length === 0) return { avg: null, max: null };
@@ -18902,7 +18923,7 @@ const hrManager = {
   updateDisplay(hr) {
     this._hr = hr;
     // [신규 2026-11-02] 심박 데이터가 들어오는 시각 기록 + 끊김 상태였다면 복구 처리
-    if (hr && hr > 0) { this._lastHrAt = Date.now(); if (this._lost) { this._lost = false; this._connected = true; this.hideLostBanner(); this._setNoSignalUi(false); } }
+    if (hr && hr > 0) { this._lastHrAt = Date.now(); if (this._lost) { this._lost = false; this._connected = true; this._stopLostBuzz(); this.hideLostBanner(); this._setNoSignalUi(false); } }
     // [추가] 러닝 중이면 심박 샘플 누적 (평균/최고 심박 계산용)
     if (hr && hr > 0 && typeof app !== 'undefined' && app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
       this._samples.push(hr);
@@ -18943,7 +18964,7 @@ const hrManager = {
   // 1) 연결 해제 이벤트  2) 연결은 돼 있는데 15초 넘게 데이터가 없을 때  3) START 누를 때 끊겨 있으면 다시 알림
   _isWanted() { try { return localStorage.getItem('jrHrWanted') === '1'; } catch (e) { return false; } },
   _markConnected() {
-    this._connected = true; this._userDisc = false; this._lost = false; this._sessionUsed = true; this._lastHrAt = Date.now();
+    this._connected = true; this._userDisc = false; this._lost = false; this._stopLostBuzz(); this._sessionUsed = true; this._lastHrAt = Date.now();
     try { localStorage.setItem('jrHrWanted', '1'); } catch (e) {}
     this.hideLostBanner();
   },
@@ -18959,7 +18980,7 @@ const hrManager = {
     this._lost = true;
     this._setNoSignalUi(true); // [신규 2026-11-04] 연결은 남아 있는데 데이터만 끊긴 경우, 마지막 심박값/'Connected'가 그대로 남지 않게 함
     this.showLostBanner();
-    try { if (navigator.vibrate) navigator.vibrate([300, 120, 300]); } catch (e) {}
+    this._startLostBuzz(); // [수정 2026-11-10] 1회 진동 → 러닝 중이면 짧게 2번, 30초 간격 반복
   },
   // [신규 2026-11-04] 연결은 유지된 채 심박 데이터가 끊긴 경우(워치에서 운동 저장 등) 화면 표시를 실제 상태에 맞춘다.
   // on=true: 심박 카드를 '--'로 비우고 연결 창 문구를 '심박 신호 없음'으로. on=false(데이터 복구): 문구를 '연결됨'으로 되돌린다.
@@ -19048,7 +19069,7 @@ const hrManager = {
   },
   disconnect() {
     // [신규] 사용자가 직접 해제한 것이므로 끊김 알림을 띄우지 않고, 다음부터도 묻지 않도록 기록 제거
-    this._userDisc = true; this._lost = false; this.hideLostBanner();
+    this._userDisc = true; this._lost = false; this._stopLostBuzz(); this.hideLostBanner();
     try { localStorage.removeItem('jrHrWanted'); } catch (e) {}
     if (window.AndroidHrBridge) {
       window.AndroidHrBridge.disconnect();
