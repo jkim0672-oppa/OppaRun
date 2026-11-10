@@ -4134,11 +4134,17 @@ if (scaleFloor && (max - min) < scaleFloor) {
 const _hasRef = !!(opts && typeof opts.refVal === 'number' && isFinite(opts.refVal));
 if (_hasRef) { if (opts.refVal < min) min = opts.refVal; if (opts.refVal > max) max = opts.refVal; }
 if (max - min < 1e-6) { min -= 1; max += 1; }
+// [수정 2026-11-10] 선이 그래프 위쪽에 몰려 보이던 문제 개선:
+//  1) 위/아래 여백(Y_TOP/Y_BOT)을 둬서 실제 데이터 구간(min~max)이 박스 가운데쪽에 그려지게 함(위 라벨·바닥과 안 붙음).
+//  2) 범위 밖 edge 값(끝 자투리 등)이 박스 바닥까지 수직 낙하하지 않도록, 데이터 범위 기준 ±35%까지만 벗어나게 제한.
+const Y_TOP = PAD + 6, Y_BOT = H - PAD - 5;
+const EDGE_OVER = 0.35;
 const yFor = (v) => {
   let t = (v - min) / (max - min); // 0~1 (edge 값은 범위를 벗어날 수 있음)
   if (invert) t = 1 - t;
-  const y = PAD + (1 - t) * (H - PAD * 2);
-  return Math.min(H - PAD, Math.max(PAD, y)); // 범위를 벗어나는 edge 값은 그래프 안쪽 끝에 붙임
+  t = Math.min(1 + EDGE_OVER, Math.max(-EDGE_OVER, t));
+  const y = Y_TOP + (1 - t) * (Y_BOT - Y_TOP);
+  return Math.min(H - PAD, Math.max(PAD, y));
 };
 const xStep = (W - PAD * 2) / (values.length - 1 || 1);
 const xFor = (idx) => Math.min(W - PAD, Math.max(PAD, PAD + idx * xStep));
