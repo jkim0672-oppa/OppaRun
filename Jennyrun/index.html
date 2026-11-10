@@ -4411,6 +4411,16 @@ function diagGraphSelect(i) {
 // [수정 2026-09-19] leadCount 파라미터 추가: calcPacingMetrics의 전/후반 평균 계산(pick, i>=2)과
 // 케이던스·심박 그래프의 흐린 edge 표시 범위를 맞추기 위해, 해당 그래프는 leadCount=2로 호출한다
 // (평균 계산에 안 쓰인 초반 구간은 그래프에서도 흐리게 보이도록 일관성을 맞춤).
+// [추가 2026-11-10] 묶음(grouped) 모드용: 마지막 구간이 직전 구간보다 70m 미만 자투리면 edge(제외 구간)에 넣는다.
+// 묶음 모드는 edge를 따로 두지 않아서 0.02km짜리 꼬리 값이 세로 범위를 끌어내리고 바닥까지 수직 낙하하던 문제를 막는다.
+function addSliverEdge(splits, edgeSet) {
+  const out = new Set(edgeSet || []);
+  if (!splits || splits.length < 4) return out;
+  const n = splits.length;
+  const kl = parseFloat(splits[n - 1].km), kp = parseFloat(splits[n - 2].km);
+  if (isFinite(kl) && isFinite(kp) && (kl - kp) < 0.07) out.add(n - 1);
+  return out;
+}
 function getGraphEdgeSet(splits, vals, leadCount) {
   const set = new Set();
   if (!splits || splits.length < 5) return set;
@@ -10776,7 +10786,8 @@ const _gCad = _G.grouped ? _gS.map(s => (typeof s.avgCadence === 'number' ? s.av
 const _gHr = _G.grouped ? _gS.map(s => (typeof s.avgHr === 'number' ? s.avgHr : null)) : _hrVals;
 const _gPow = _G.grouped ? _gS.map(s => (typeof s.power === 'number' ? s.power : null)) : _powVals;
 const _gNoEdge = new Set();
-const _gEdgePace = _G.grouped ? _gNoEdge : _edgePace, _gEdgeCad = _G.grouped ? _gNoEdge : _edgeCad, _gEdgeHr = _G.grouped ? _gNoEdge : _edgeHr, _gEdgePow = _G.grouped ? _gNoEdge : _edgePow;
+const _gSliver = _G.grouped ? addSliverEdge(_gS, _gNoEdge) : _gNoEdge;
+const _gEdgePace = _G.grouped ? _gSliver : _edgePace, _gEdgeCad = _G.grouped ? _gSliver : _edgeCad, _gEdgeHr = _G.grouped ? _gSliver : _edgeHr, _gEdgePow = _G.grouped ? _gSliver : _edgePow;
 const paceSparkSvg = buildSparklineSVG(_gPace, '#00ff88', true, undefined, undefined, _gTimes, { edge: _gEdgePace, half: _G.remapHalf(_pm.paceHalf), minRangePct: GRAPH_MIN_RANGE_PCT.pace });
 const cadSparkSvg = buildSparklineSVG(_gCad, '#4fc3f7', false, undefined, undefined, _gTimes, { edge: _gEdgeCad, half: _G.remapHalf(_pm.cadHalf), minRangePct: GRAPH_MIN_RANGE_PCT.cad });
 const hrSparkSvg = buildSparklineSVG(_gHr, '#e53935', false, undefined, undefined, _gTimes, { edge: _gEdgeHr, half: _G.remapHalf(_pm.hrHalf), minRangePct: GRAPH_MIN_RANGE_PCT.hr });
@@ -23263,6 +23274,7 @@ if (metricKey === 'pace') {
   noteHtml = (typeof r.totalAscent === 'number') ? ((koLang ? '고도 소스: ' : 'Source: ') + (r.altSource === 'baro' ? (koLang ? '기압계' : 'Barometer') : 'GPS')) : '';
 } else { return; }
 if (G.grouped) { edge = (metricKey === 'pace' || metricKey === 'cadence' || metricKey === 'power') ? window.diagSpikeSet(vals, metricKey) : new Set(); half = G.remapHalf(half); } // 묶인 상태: 출발 흐림은 없지만 GPS 점프 같은 고립된 튐은 흐리게 제외(BEST와 같은 기준) // 묶인 상태: 흐린 출발 구간 없음, 전/후반 범위는 묶인 점 기준으로 변환
+if (G.grouped && metricKey !== 'alt') edge = addSliverEdge(splits, edge); // [추가 2026-11-10] 끝 자투리 제외
 let lay = null;
 const svg = buildSparklineSVG(vals, color, invert, true, true, times, { edge: edge, half: half, minRangePct: minRangePct, minRange: (metricKey === 'alt' ? 10 : 0), refVal: (metricKey === 'ei' && eiBase ? eiBase.avg : undefined), heightPx: 150, maxPoints: _detail ? FS_MAX_POINTS : undefined, smooth: _detail ? false : undefined, onLayout: (L) => { lay = L; } });
 if (!svg) return;
