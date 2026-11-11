@@ -13551,6 +13551,32 @@ if (inCalib) { txt = t.pauseCalibWait || 'CALIBRATING'; el.classList.add('is-ope
 if (el.textContent !== txt) el.textContent = txt;
 } catch (e) {}
 }
+// [추가 2026-11-10] GPS 두절/불량일 때만 걸음 기반으로 멈춤 해제.
+// 신호 대기(GPS 정상)에선 제자리걸음에 풀리면 안 되므로 속도 기준만 쓰고, GPS를 못 잡는 상황(숲/터널/fix 대기)에서
+// 속도값이 0으로만 들어와 시작 대기·멈춤이 영영 안 풀리는 걸 막는다. 걸음이 3초 이상 연속 잡히면 해제.
+checkGpsLostRelease() {
+try {
+const st = this.state, now = Date.now();
+if (!st.isRunning || st.isPaused || !st.isAutoPaused) { st._glSince = null; st._glStepRunStart = null; return; }
+const staleMs = (ui.currentActivityMode === 'trail') ? 9000 : 6000;
+const base = st.lastGpsCbAt || st.startTimestamp || now;
+const gpsLost = ((now - base) > staleMs) || (st.badAccSince && (now - st.badAccSince) > 6000);
+if (!gpsLost) { st._glSince = null; st._glStepRunStart = null; return; }
+if (!st._glSince) st._glSince = now;
+const ls = this.motion ? this.motion.lastStepTime : 0;
+const stepAlive = ls > 0 && (now - ls) < 1500;
+if (stepAlive) { if (!st._glStepRunStart) st._glStepRunStart = now; } else { st._glStepRunStart = null; return; }
+if ((now - Math.max(st._glStepRunStart, st._glSince)) < 3000) return;
+st.isAutoPaused = false; st.startWaitOnly = false; st.startWaitPhase = false;
+st.autoResumeCandStart = null; st.lowSpeedStartTime = null; st._glSince = null; st._glStepRunStart = null;
+this.markPauseEnd();
+this.autoPauseHaptic('resume');
+if (this.motion) this.motion.lastStepTime = 0;
+st.lastPos = null; // GPS가 돌아오면 첫 fix에서 기준점만 잡고, 두절 중 표류분이 거리에 더해지지 않게 함
+this._lastDeltaDist = 0; this._lastDeltaTime = 0;
+if (ui.dom.pauseStatus) ui.dom.pauseStatus.classList.remove('is-open');
+} catch (e) {}
+}
 autoPauseHaptic(kind) { try { jrVibrate(500); } catch (e) {} } // [수정 2026-11-10] 화면 꺼짐에서도 울리도록 네이티브 진동 사용
 markPauseStart() {
 if (!this.state.pauseStartedAt) this.state.pauseStartedAt = Date.now();
@@ -13744,6 +13770,7 @@ if (this.noSleep) { try { this.noSleep.disable(); } catch (e) { jrLogErr('noSlee
 // startLiveTimer()만 호출한다. 새 지표/훅을 추가할 땐 runTick() 한 곳만 고치면 되고,
 // 세 곳 중 하나를 빠뜨려서 특정 상황(재개/복구)에서만 동작 안 하는 실수를 방지한다.
 runTick() {
+if (this.state.isRunning && !this.state.isPaused && this.state.isAutoPaused) this.checkGpsLostRelease(); // [추가 2026-11-10]
 if (!this.state.isRunning || this.state.isPaused || this.state.isAutoPaused) return;
 this.state.seconds = this.getElapsedSeconds();
 let m = Math.floor(this.state.seconds / 60);
@@ -13952,6 +13979,7 @@ const rawLat = p.coords.latitude;
 const rawLng = p.coords.longitude;
 const accuracy = Number.isFinite(p.coords.accuracy) ? Math.round(p.coords.accuracy) : 999;
 this.state.lastGpsAccuracy = accuracy; // [추가] 정밀로그에서 참조할 GPS 정확도 저장
+{ const _gn = Date.now(); this.state.lastGpsCbAt = _gn; if (accuracy > 50) { if (!this.state.badAccSince) this.state.badAccSince = _gn; } else this.state.badAccSince = null; } // [추가 2026-11-10] GPS 두절/불량 판정용(멈춤 중 걸음 기반 해제)
 const rawAlt = p.coords.altitude ? Math.round(p.coords.altitude) : 0;
 // [수정] GPS raw 고도 대신, Open-Elevation API로 받은 offset을 보정해 사용
 // (오차가 큰 GPS 고도값을 실제 지형 고도 기준으로 맞춤 - 가민 워치의 기압계 고도와 유사한 결과)
@@ -14928,6 +14956,7 @@ this.state.totalDist = 0;
 this.state.calibWaitPauseDone = false; // [추가 2026-11-10] 린각도 캘리브레이션 대기 멈춤은 러닝마다 1회
 this.state.startWaitOnly = false;
 this.state.startWaitPhase = false;
+this.state.lastGpsCbAt = null; this.state.badAccSince = null; this.state._glSince = null; this.state._glStepRunStart = null;
 this.state.autoResumeCandStart = null;
 this.state._prevRawSpeedForPause = null;
 this.state.seconds = 0;
