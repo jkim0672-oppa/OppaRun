@@ -3512,6 +3512,17 @@ function jrErrMarkSeen() {
   jrErrUiRefresh();
 }
 const JR_SUPPORT_EMAIL = 'jkim0672@gmail.com'; // [추가] 문제 신고 수신 주소
+// [추가 2026-11-10] 화면이 꺼져 있어도 울리는 진동. navigator.vibrate()는 WebView가 '숨김'(화면 꺼짐) 상태면 차단되므로,
+// 네이티브 브릿지(AndroidVibrateBridge = Kotlin Vibrator)가 있으면 그걸 쓰고, 없으면(브라우저 미리보기/구버전 앱) 기존 navigator.vibrate로 폴백.
+function jrVibrate(pattern) {
+  try {
+    if (window.AndroidVibrateBridge && typeof window.AndroidVibrateBridge.vibrate === 'function') {
+      window.AndroidVibrateBridge.vibrate(Array.isArray(pattern) ? pattern.join(',') : String(pattern));
+      return;
+    }
+  } catch (e) {}
+  try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) {}
+}
 function jrLogErr(tag, e) {
   try {
     const now = Date.now();
@@ -13525,7 +13536,7 @@ return sec > 0 ? sec : 0;
 }
 // [수정] 일시정지가 시작/종료되는 시점에 pausedMs를 정확히 누적시키는 헬퍼
 // [수정 2026-11-10] 자동멈춤/재개 진동: 멈출 때도, 다시 달릴 때도 똑같이 '길게 1번' (500ms). 심박 끊김(짧게 2번)과 구분됨
-autoPauseHaptic(kind) { try { if (navigator.vibrate) navigator.vibrate(500); } catch (e) {} }
+autoPauseHaptic(kind) { try { jrVibrate(500); } catch (e) {} } // [수정 2026-11-10] 화면 꺼짐에서도 울리도록 네이티브 진동 사용
 markPauseStart() {
 if (!this.state.pauseStartedAt) this.state.pauseStartedAt = Date.now();
 }
@@ -18874,7 +18885,7 @@ const hrManager = {
     try {
       if (typeof app === 'undefined' || !app.state || !app.state.isRunning || !this._lost) { this._stopLostBuzz(); return; }
       if (app.state.isPaused) return;
-      if (navigator.vibrate) navigator.vibrate([100, 100, 100]);
+      jrVibrate([100, 100, 100]); // [수정 2026-11-10] 화면 꺼짐에서도 울리도록 네이티브 진동 사용
       this._lostBuzzCount++;
       if (this._lostBuzzCount >= 2) this._stopLostBuzz(); // 총 2회(직후 + 30초 뒤)만
     } catch (e) {}
