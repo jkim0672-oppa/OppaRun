@@ -1699,8 +1699,12 @@ flex-wrap: wrap; justify-content: center; white-space: nowrap;
 .share-crew-photo-placeholder.is-open { display:block; }
 .share-crew-photo-preview { display:none; width:100%; max-height:200px; object-fit:contain; }
 .share-crew-photo-preview.is-open { display:block; }
-.share-crew-items-dropdown { display:none; flex-direction:column; flex:1 1 auto; min-height:0; background:#202020; border:1px solid #383838; border-radius:10px; padding:10px 14px; margin-bottom:14px; max-height:220px; overflow-y:auto; }
-.share-crew-items-dropdown.is-open { display:flex; }
+.share-crew-items-dropdown { display:none; flex-direction:column; flex:1 1 auto; min-height:150px; background:#202020; border:1px solid #383838; border-radius:10px; padding:10px 14px; margin-bottom:14px; max-height:300px; overflow-y:auto; }
+.share-crew-items-dropdown.is-open { display:grid; grid-template-columns:1fr 1fr; column-gap:10px; align-content:start; }
+.share-tier-tag { font-size:10px; font-weight:800; color:#00ff88; border:1px solid #00ff88; border-radius:4px; padding:0 4px; margin-left:5px; white-space:nowrap; }
+.share-tier-tag.is-locked { color:#999; border-color:#666; }
+.share-crew-items-dropdown .checkbox-row-flex { padding:5px 0; min-width:0; }
+.share-crew-items-dropdown .c02 { font-size:min(var(--fs-base),14px); }
 .user-action-main { display:none; flex-direction:column; gap:8px; }
 .user-action-main.is-open { display:flex; }
 .user-action-reasons { display:none; flex-direction:column; gap:8px; }
@@ -2483,6 +2487,8 @@ alt="runner"/>
   <div class="settings-label" id="admin-title">ADMIN · 해제 계정 관리</div>
   <div class="admin-sec-box" id="admin-lock-title" onclick="premium.toggleSec('lock')">PRO 항목 (누르면 PRO/무료 전환)</div>
   <div id="admin-lock-list" style="margin-bottom:14px;"></div>
+  <div class="admin-sec-box" id="admin-share-title" onclick="premium.toggleSec('share')">공유 항목 등급</div>
+  <div id="admin-share-list" style="display:none; margin-bottom:14px;"></div>
   <div class="admin-sec-box" id="admin-ent-title" onclick="premium.toggleSec('ent')">해제된 계정</div>
   <div id="admin-ent-body" style="display:none;">
   <div id="admin-ent-list" style="margin-bottom:10px;"></div>
@@ -2907,6 +2913,28 @@ function isMetricVisible(record, metric) {
   return rule.positions.indexOf(record.devicePos || 'chest') >= 0; // 위치 값 없는 옛 기록 = 가슴으로 간주
 }
 // 기존 호출부(공유카드/공유모달/크루 업로드/UIManager 등)가 쓰던 이름은 그대로 유지하되 위 표에 위임한다.
+// [추가] 공유/크루/쉐어카드 항목의 일반(free) / PRO 등급 — 이 표 한 곳만 고치면 공유창·크루 업로드·쉐어카드 모두 반영된다.
+// PRO 항목은 premium.shareLocked()(서버 feature_locks 'share_dyn' + 계정 PRO 여부)일 때 잠긴다. 관리자/PRO 계정은 전부 사용.
+const SHARE_ITEM_TIERS = {
+  route:'free', hr:'free', hrzone:'free', cadence:'free', stride:'free', kcal:'free', steps:'free',
+  gct:'pro', flight:'pro', eff:'pro', lean:'pro', power:'pro', vo2:'pro', splits:'pro'
+};
+const SHARE_ITEM_LABELS = {
+  route:['경로맵','Route map'], hr:['심박','Heart rate'], hrzone:['심박 존','HR zone'], cadence:['케이던스','Cadence'], stride:['보폭','Stride'],
+  kcal:['칼로리','Calories'], steps:['걸음수','Steps'], gct:['지면접촉시간 (GCT)','Ground contact time'], flight:['체공 비율 (FLIGHT)','Flight ratio'],
+  eff:['효율점수','Efficiency score'], lean:['린각도','Lean angle'], power:['파워','Power'], vo2:['VO2max','VO2max'], splits:['km 스플릿','Km splits']
+};
+// 관리자 설정(서버 feature_locks): 'share_item_<key>' true=PRO / false=일반, 'share_off_<key>' true=전체 제외(OFF). 없으면 위 기본표 사용.
+function shareItemTier(k) {
+  let L = {}; try { L = premium.locks || {}; } catch (e) {}
+  if (L['share_off_' + k] === true) return 'off';
+  if (L['share_item_' + k] === true) return 'pro';
+  if (L['share_item_' + k] === false) return 'free';
+  return SHARE_ITEM_TIERS[k] || 'free';
+}
+function shareItemOff(k) { return shareItemTier(k) === 'off'; }
+function shareItemLocked(k) { return shareItemTier(k) === 'pro' && premium.shareLocked(); }
+function shareItemBlocked(k) { return shareItemOff(k) || shareItemLocked(k); }
 function isGctVertUnreliable(record) { return !isMetricVisible(record, 'gctFlight'); }
 function isBalanceUnreliable(record) { return !isMetricVisible(record, 'balance'); }
 // [추가 2026-10-28] FLIGHT가 실측이 아니라 속도 기반 추정값인 기록(가슴(러닝) 외 전부).
@@ -3059,14 +3087,14 @@ function generateRunCardCanvas(data, isKo) {
     const row2y = gridY;
     const row3y = gridY + sh + 10;
 
-    const statTile = (x, y, w, h, label, val, unit) => {
+    const statTile = (x, y, w, h, label, val, unit, refTag) => {
       ctx.fillStyle = LIGHTGRAY;
       roundRect(ctx, x, y, w, h, 14); ctx.fill();
       ctx.font = 'bold 13px Arial, sans-serif';
       ctx.fillStyle = GRAY;
-      ctx.fillText(label, x + 16, y + 26);
+      ctx.fillText(refTag ? (label + ' (' + refTag + ')') : label, x + 16, y + 26);
       ctx.font = 'bold 32px Arial, sans-serif';
-      ctx.fillStyle = BLACK;
+      ctx.fillStyle = refTag ? GRAY : BLACK;
       ctx.fillText(String(val), x + 16, y + 66);
       ctx.font = 'bold 13px Arial, sans-serif';
       ctx.fillStyle = GREEN;
@@ -3083,10 +3111,10 @@ function generateRunCardCanvas(data, isKo) {
       statTile(PAD+sw*2+20, row3y, sw, sh, isKo?'칼로리':'KCAL',    data.kcal||'--', '');
     } else {
       statTile(PAD,         row2y, sw, sh, isKo?'케이던스':'CADENCE',    data.cadence||'--', 'SPM');
-      statTile(PAD+sw+10,   row2y, sw, sh, isKo?'지면접촉':'GCT',       data.gct||'--',     'ms');
-      statTile(PAD+sw*2+20, row2y, sw, sh, effIsSimple ? (isKo?'효율(간이)':'EFF (SIMPLE)') : (isKo?'효율점수':'EFFICIENCY'),  effScore,           '/ 100');
+      statTile(PAD+sw+10,   row2y, sw, sh, isKo?'지면접촉':'GCT',       data.gct||'--',     'ms', data.gct ? (data.gctRef ? (isKo?'참고용':'REF') : null) : null);
+      statTile(PAD+sw*2+20, row2y, sw, sh, effIsSimple ? (isKo?'효율(간이)':'EFF (SIMPLE)') : (isKo?'효율점수':'EFFICIENCY'),  (effScore > 0 ? effScore : '--'),           (effScore > 0 ? '/ 100' : ''));
       statTile(PAD,         row3y, sw, sh, 'ALT',                         (data.alt != null ? data.alt : '--'), 'm');
-      statTile(PAD+sw+10,   row3y, sw, sh, isKo?'체공시간':'FLIGHT',      data.flight||'--',  '%');
+      statTile(PAD+sw+10,   row3y, sw, sh, isKo?'체공시간':'FLIGHT',      data.flight||'--',  '%', data.flight ? (data.flightEst ? (isKo?'추정':'EST') : null) : null);
       // [수정 2026-11-03] 원본: GCT BAL 칸 → VO2MAX(추정)로 교체
       statTile(PAD+sw*2+20, row3y, sw, sh, 'VO2MAX', (data.vo2max != null ? Number(data.vo2max).toFixed(1) : '--'), 'ml/kg/min');
     }
@@ -3105,7 +3133,7 @@ function generateRunCardCanvas(data, isKo) {
       const walkMsg = isKo ? '오늘도 걸었어요!' : 'Great walk today!';
       ctx.fillText(walkMsg, PAD + 16, barY + 48);
     } else {
-      const effC = effScore >= 75 ? '#00aa55' : effScore >= 50 ? '#f5a623' : '#e03e3e';
+      const effC = effScore <= 0 ? '#aaaaaa' : effScore >= 75 ? '#00aa55' : effScore >= 50 ? '#f5a623' : '#e03e3e';
       ctx.font = 'bold 13px Arial, sans-serif';
       ctx.fillStyle = GRAY;
       ctx.fillText(effIsSimple ? (isKo ? '효율 점수 (간이)' : 'EFFICIENCY SCORE (SIMPLE)') : (isKo ? '효율 점수' : 'EFFICIENCY SCORE'), PAD + 16, barY + 22);
@@ -3121,7 +3149,7 @@ function generateRunCardCanvas(data, isKo) {
       ctx.font = 'bold 22px Arial, sans-serif';
       ctx.fillStyle = effC;
       ctx.textAlign = 'right';
-      ctx.fillText(effScore + ' pts', W - PAD - 16, barY + 48);
+      ctx.fillText(effScore > 0 ? (effScore + ' pts') : '--', W - PAD - 16, barY + 48);
       ctx.textAlign = 'left';
     }
 
@@ -5179,7 +5207,7 @@ notifTitle: "NOTIFICATIONS", notifEmpty: "No notifications yet.", notifClearAll:
 notifFollow: "started following you", notifLike: "liked your run", notifComment: "commented", notifCount: "notifications",
 blockConfirm: "Block this user? You will no longer see their posts and comments.", reportSubmitted: "Report submitted. Thank you.",
 reportFailed: "Couldn't submit the report. Please check your connection and try again.", blockFailed: "Couldn't block this user. Please check your connection and try again.",
-crewSharePrompt: "Are you sharing with the crew?", crewSavedConfirm: "✓ Saved to your history", crewIncludeRoute: "Route map", crewIncludeHr: "Heart rate", crewIncludeCadence: "Cadence", crewIncludeGct: "Ground contact time", crewIncludeFlight: "Flight ratio", crewIncludeStride: "Stride", crewIncludeKcal: "Calories", crewIncludeSteps: "Steps", crewIncludeLean: "Lean angle", crewShareItemsToggle: "Share items", crewAddPhoto: "Add a photo (optional)",
+crewSharePrompt: "Are you sharing with the crew?", crewSavedConfirm: "✓ Saved to your history", crewIncludeRoute: "Route map", crewIncludeHr: "Heart rate", crewIncludeCadence: "Cadence", crewIncludeGct: "Ground contact time", crewIncludeFlight: "Flight ratio", crewIncludeStride: "Stride", crewIncludeKcal: "Calories", crewIncludeSteps: "Steps", crewIncludeLean: "Lean angle", crewIncludePower: "Power", crewIncludeVo2: "VO2max", crewIncludeHrZone: "HR zone", crewIncludeEff: "Efficiency score", crewIncludeSplits: "Km splits", crewShareItemsToggle: "Share items", crewAddPhoto: "Add a photo (optional)",
 crewShareBtn: "SHARE", crewChangePhoto: "Change photo", shareToCrewListBtn: "SHARE",
 crewCancelBtn: "SKIP", crewExitBtn: "APP CLOSE", crewCancelConfirm: "Discard this run without saving it to history?",
 crewNicknameLabel: "CREW NICKNAME", nicknamePlaceholder: "Nickname (max 12 chars)", nicknameHint: "Nicknames are unique and this is how others find you in Crew search",
@@ -5294,7 +5322,7 @@ notifTitle: "알림", notifEmpty: "아직 알림이 없습니다.", notifClearAl
 notifFollow: "님이 팔로우했어요", notifLike: "님이 내 기록에 좋아요를 눌렀어요", notifComment: "님이 댓글", notifCount: "개",
 blockConfirm: "이 사용자를 차단할까요? 앞으로 이 사용자의 게시글과 댓글이 보이지 않습니다.", reportSubmitted: "신고가 접수되었습니다. 감사합니다.",
 reportFailed: "신고를 접수하지 못했어요. 연결 상태를 확인하고 다시 시도해주세요.", blockFailed: "차단하지 못했어요. 연결 상태를 확인하고 다시 시도해주세요.",
-crewSharePrompt: "크루와 공유하시겠어요?", crewSavedConfirm: "✓ 기록에 저장 완료", crewIncludeRoute: "경로 지도", crewIncludeHr: "심박수", crewIncludeCadence: "케이던스", crewIncludeGct: "지면접촉시간", crewIncludeFlight: "체공비율", crewIncludeStride: "보폭", crewIncludeKcal: "칼로리", crewIncludeSteps: "걸음수", crewIncludeLean: "린각도", crewShareItemsToggle: "크루쉐어 아이템", crewAddPhoto: "사진 추가 (선택)",
+crewSharePrompt: "크루와 공유하시겠어요?", crewSavedConfirm: "✓ 기록에 저장 완료", crewIncludeRoute: "경로 지도", crewIncludeHr: "심박수", crewIncludeCadence: "케이던스", crewIncludeGct: "지면접촉시간", crewIncludeFlight: "체공비율", crewIncludeStride: "보폭", crewIncludeKcal: "칼로리", crewIncludeSteps: "걸음수", crewIncludeLean: "린각도", crewIncludePower: "파워", crewIncludeVo2: "VO2max", crewIncludeHrZone: "심박 존", crewIncludeEff: "효율점수", crewIncludeSplits: "구간(km) 스플릿", crewShareItemsToggle: "크루쉐어 아이템", crewAddPhoto: "사진 추가 (선택)",
 crewShareBtn: "공유하기", crewChangePhoto: "사진 변경", shareToCrewListBtn: "공유",
 crewCancelBtn: "닫기", crewExitBtn: "앱 종료", crewCancelConfirm: "이 러닝 기록을 저장하지 않고 취소할까요?",
 crewNicknameLabel: "크루 닉네임", nicknamePlaceholder: "닉네임 (최대 12자)", nicknameHint: "닉네임은 다른 사람과 겹칠 수 없고, 크루에서 이 이름으로 검색됩니다",
@@ -9273,6 +9301,9 @@ const stepsLabel = document.getElementById('share-crew-steps-label');
 // [추가] 린각도 공유 체크박스
 const leanCheckbox = document.getElementById('share-crew-lean-checkbox');
 const leanLabel = document.getElementById('share-crew-lean-label');
+const _newShareItems = ['power','vo2','hrzone','eff','splits'].map(k => ({ k, cb: document.getElementById('share-crew-' + k + '-checkbox'), lb: document.getElementById('share-crew-' + k + '-label') }));
+const _newShareText = { power: t.crewIncludePower, vo2: t.crewIncludeVo2, hrzone: t.crewIncludeHrZone, eff: t.crewIncludeEff, splits: t.crewIncludeSplits };
+_newShareItems.forEach(o => { if (o.lb && _newShareText[o.k]) o.lb.textContent = _newShareText[o.k]; });
 const itemsToggleLabel = document.getElementById('share-crew-items-toggle-label');
 const itemsDropdown = document.getElementById('share-crew-items-dropdown');
 const itemsToggleArrow = document.getElementById('share-crew-items-toggle-arrow');
@@ -9309,13 +9340,30 @@ setOptionalRow(cadenceCheckbox, !!record.cadence);
 // FLIGHT도 GCT에서 파생된 값이라 같은 조건으로 체크박스를 숨김.
 // [리팩토링] 방어용 폴백(삼항연산자 속 조건 복붙) 제거 — 전역 isGctVertUnreliable() 하나만 참조.
 const _shareModalGctUntrusted = isGctVertUnreliable(record);
-setOptionalRow(gctCheckbox, !_shareModalGctUntrusted && !!record.gct && record.gct !== '--');
-setOptionalRow(flightCheckbox, !_shareModalGctUntrusted && !isFlightEstimated(record) && record.flight != null && record.flight !== '--');
+setOptionalRow(gctCheckbox, !!record.gct && record.gct !== '--'); // [수정] 리스트와 동일하게 값만 있으면 공유 가능
+setOptionalRow(flightCheckbox, record.flight != null && record.flight !== '--');
 setOptionalRow(strideCheckbox, !!record.stride);
 setOptionalRow(kcalCheckbox, !!record.kcal);
 setOptionalRow(stepsCheckbox, !!(record.steps || record.walkSpm));
 // [추가] 린각도는 LeanAngleUI 기능 자체가 켜져있고, 이번 기록에 값이 있을 때만 체크박스 노출
 setOptionalRow(leanCheckbox, LeanAngleUI.ENABLED && record.avgLeanAngleDeg != null);
+// [추가] 신규 공유 항목: 해당 기록에 값이 있을 때만 노출
+let _vo2Val = null; try { _vo2Val = ui.estimateVo2max(record); } catch (e) {}
+const _newHas = { power: record.power != null, vo2: _vo2Val != null, hrzone: !!record.hrZone, eff: !!record.cadence, splits: Array.isArray(record.splits) && record.splits.length > 0 };
+_newShareItems.forEach(o => setOptionalRow(o.cb, !!_newHas[o.k]));
+// [추가] 일반/PRO 표시: PRO 항목엔 PRO 태그, 잠긴 계정은 자물쇠 + 체크 불가
+[['route',checkbox,routeLabel],['hr',hrCheckbox,hrLabel],['cadence',cadenceCheckbox,cadenceLabel],['gct',gctCheckbox,gctLabel],['flight',flightCheckbox,flightLabel],['stride',strideCheckbox,strideLabel],['kcal',kcalCheckbox,kcalLabel],['steps',stepsCheckbox,stepsLabel],['lean',leanCheckbox,leanLabel]]
+  .concat(_newShareItems.map(o => [o.k, o.cb, o.lb])).forEach(([k, cb, lb]) => {
+    if (!cb) return;
+    cb.disabled = false;
+    if (shareItemOff(k)) { const _row = cb.closest('label'); if (_row) _row.classList.add('hidden'); cb.checked = false; cb.disabled = true; return; }
+    const locked = shareItemLocked(k), pro = shareItemTier(k) === 'pro';
+    if (lb) {
+      if (pro) { const tag = document.createElement('span'); tag.className = 'share-tier-tag' + (locked ? ' is-locked' : ''); tag.textContent = 'PRO'; lb.appendChild(tag); }
+      lb.style.opacity = locked ? '0.5' : '';
+    }
+    if (locked) { cb.checked = false; cb.disabled = true; }
+  });
 if(fileInput) fileInput.value = '';
 // [수정] 첫 공유 후 SHARE 버튼이 disabled=true로 남아있던 버그 수정.
 // 예전엔 공유 후 항상 페이지를 새로고침해서 우연히 가려졌던 문제인데,
@@ -9387,13 +9435,14 @@ const includeSteps = stepsCheckbox ? stepsCheckbox.checked : true;
 // [추가] 린각도 공유 체크박스 상태
 const leanCheckbox = document.getElementById('share-crew-lean-checkbox');
 const includeLean = leanCheckbox ? leanCheckbox.checked : true;
+const _chk = id => { const e = document.getElementById(id); return e ? e.checked : true; };
 const photoFile = this.pendingSharePhotoFile;
 const msgInput = document.getElementById('share-crew-message-input');
 const message = msgInput ? msgInput.value.trim() : '';
 // [추가] 리스트에서 연 경우엔 전체 새로고침 대신 리스트만 다시 그려서 그 화면에 머무른다.
 const isFromList = this._shareModalContext === 'list';
 this._shareModalContext = null;
-community.uploadRecord(record, photoFile, { route: includeRoute, hr: includeHr, cadence: includeCadence, gct: includeGct, flight: includeFlight, stride: includeStride, kcal: includeKcal, steps: includeSteps, leanAngle: includeLean }, message).then(() => {
+community.uploadRecord(record, photoFile, { route: includeRoute, hr: includeHr, cadence: includeCadence, gct: includeGct, flight: includeFlight, stride: includeStride, kcal: includeKcal, steps: includeSteps, leanAngle: includeLean, power: _chk('share-crew-power-checkbox'), vo2max: _chk('share-crew-vo2-checkbox'), hrZone: _chk('share-crew-hrzone-checkbox'), eff: _chk('share-crew-eff-checkbox'), splits: _chk('share-crew-splits-checkbox') }, message).then(() => {
 this._sharing = false;
 if (isFromList) { this.updateHistoryList(); } else { window.location.reload(); }
 }).catch(() => {
@@ -10763,21 +10812,21 @@ const vertRatioVal = record.vertRatio ? record.vertRatio : (7.5 - (cadence - 160
 // 효율점수는 정식 점수 대신 케이던스+보폭 기반 "간이" 점수를 표시(카드에 간이 표기).
 const _shareGctUntrusted = this.isGctVertUnreliable(record);
 const _shareEffSimple = _shareGctUntrusted && !!record.cadence;
-const effScore = !_shareGctUntrusted ? (calcEffScore(record) ?? 0) : (_shareEffSimple ? (calcEffScoreSimple(record) ?? 0) : 0);
+const effScore = shareItemBlocked('eff') ? 0 : (!_shareGctUntrusted ? (calcEffScore(record) ?? 0) : (_shareEffSimple ? (calcEffScoreSimple(record) ?? 0) : 0));
 const dateStr = record.date ? record.date.split(' ')[0] : '';
 
 shareRunCardImage({
   dist: displayDist.toFixed(2), distUnit: unitText, time: record.time, pace: displayPace,
-  cadence: record.cadence,
-  gct: (_shareGctUntrusted || premium.shareLocked()) ? '--' : record.gct,
-  flight: (_shareGctUntrusted || isFlightEstimated(record) || premium.shareLocked()) ? '--' : record.flight,
+  cadence: shareItemBlocked('cadence') ? null : record.cadence,
+  gct: shareItemBlocked('gct') ? '--' : record.gct, gctRef: _shareGctUntrusted,   // [수정] 크루 카드와 동일: 값은 그대로, 참고용/추정은 표시만
+  flight: shareItemBlocked('flight') ? '--' : record.flight, flightEst: isFlightEstimated(record),
   vertRatio: vertRatioVal,
   gctBal: (_shareGctUntrusted || premium.shareLocked()) ? '--' : record.gctBal, effScore, effSimple: _shareEffSimple, dateStr,
   // [추가] 활동모드에 따라 카드 레이아웃(걷기용 STEPS/SPM 등)이 분기되도록 전달
   activityMode: Treadmill.statKey(record), // [TMILL] 트레드밀이면 'treadmill'
-  steps: record.steps, walkSpm: record.walkSpm, stride: record.stride,
-  kcal: record.kcal, alt: record.alt, avgHr: record.avgHr, nickname: null,
-  vo2max: (function(){ try { return ui.estimateVo2max(record); } catch (e) { return null; } })()
+  steps: shareItemBlocked('steps') ? null : record.steps, walkSpm: shareItemBlocked('steps') ? null : record.walkSpm, stride: shareItemBlocked('stride') ? null : record.stride,
+  kcal: shareItemBlocked('kcal') ? null : record.kcal, alt: record.alt, avgHr: shareItemBlocked('hr') ? null : record.avgHr, nickname: null,
+  vo2max: shareItemBlocked('vo2') ? null : (function(){ try { return ui.estimateVo2max(record); } catch (e) { return null; } })()
 }, isKo, null);
 }
 // [추가] 경로맵 상세 페이지 스타일(지도 대신 경로 라인만 그린 것 + SPLIT ANALYTICS +
@@ -12745,6 +12794,12 @@ return this.sessionSumLateral / this.sessionCountForward;
 // [추가] 크루 카드 전용 케이던스/GCT/체공시간 2단계(좋음/나쁨) 색상 판정.
 // 기존 3단계(good/warning/danger) 판정 로직(UIManager.getCadenceLevel 등)은 그대로 재사용하되,
 // warning과 danger를 합쳐 "나쁨" 한 단계로 취급해 크루 카드에서는 좋음/나쁨 2색만 쓴다.
+// [추가] 크루 카드용: 리스트와 같은 규칙(METRIC_VISIBILITY)으로 GCT '참고용' / FLIGHT '추정' 여부 판단
+function crewDynMeta(r) {
+  const mode = (r.activity_mode === 'treadmill') ? 'freerun' : (r.activity_mode || 'run');
+  const rec = { activityMode: mode, devicePos: r.device_pos || null };
+  return { gctRef: isGctVertUnreliable(rec), flightEst: isFlightEstimated(rec) };
+}
 const CrewStatColor = {
 GOOD: '#00aa55', // 크루카드 "나" 닉네임과 동일한 초록
 BAD: '#e53935',
@@ -16250,6 +16305,9 @@ const premium = {
     if (a) { a.textContent = this._s('PRO 항목', 'PRO FEATURES') + ' (' + Object.keys(this.FEATURES).length + ')'; a.classList.toggle('is-open', !!o.lock); }
     const b = document.getElementById('admin-ent-title');
     if (b) { b.textContent = this._s('해제된 계정', 'UNLOCKED ACCOUNTS') + (this._entCount != null ? ' (' + this._entCount + ')' : ''); b.classList.toggle('is-open', !!o.ent); }
+    const sh = document.getElementById('admin-share-title');
+    if (sh) { sh.textContent = this._s('공유 항목 등급 (일반 / PRO / 제외)', 'SHARE ITEMS (FREE / PRO / OFF)'); sh.classList.toggle('is-open', !!o.share); }
+    const sl = document.getElementById('admin-share-list'); if (sl) sl.style.display = o.share ? '' : 'none';
     const lb = document.getElementById('admin-lock-list'); if (lb) lb.style.display = o.lock ? '' : 'none';
     const eb = document.getElementById('admin-ent-body'); if (eb) eb.style.display = o.ent ? '' : 'none';
   },
@@ -16291,6 +16349,43 @@ const premium = {
       btn.addEventListener('click', () => this.setLock(k, !on));
       row.appendChild(name); row.appendChild(btn); box.appendChild(row);
     });
+    this.renderShareItems();
+  },
+  renderShareItems() {
+    const box = document.getElementById('admin-share-list');
+    if (!box) return;
+    if (!this.isAdmin) { box.textContent = ''; return; } // 관리자 전용
+    box.textContent = '';
+    const hint = document.createElement('div');
+    hint.style.cssText = 'font-size:var(--fs-xxs); color:#888; font-weight:700; padding:2px 2px 8px;';
+    hint.textContent = this._s('버튼을 누르면 일반 → PRO → 제외 순으로 바뀌어요. 제외는 모든 계정의 공유창·크루·쉐어카드에서 빠져요.', 'Tap to cycle FREE → PRO → OFF. OFF removes the item for everyone (share dialog, crew, share card).');
+    box.appendChild(hint);
+    const NEXT = { free: 'pro', pro: 'off', off: 'free' };
+    const STYLE = { free: ['#00c853', this._s('일반', 'FREE')], pro: ['#d8b26b', 'PRO'], off: ['#888', this._s('제외', 'OFF')] };
+    Object.keys(SHARE_ITEM_LABELS).forEach(k => {
+      const tier = shareItemTier(k);
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px; background:#2a2a2a; border:1px solid #444; border-radius:10px; padding:8px 10px; margin-bottom:6px;';
+      const name = document.createElement('span');
+      name.style.cssText = 'font-size:var(--fs-sm); color:#fff; font-weight:700;';
+      name.textContent = SHARE_ITEM_LABELS[k][this._ko() ? 0 : 1];
+      const btn = document.createElement('button');
+      btn.textContent = STYLE[tier][1];
+      btn.style.cssText = 'flex:none; min-width:64px; background:none; border:1.5px solid ' + STYLE[tier][0] + '; color:' + STYLE[tier][0] + '; padding:8px 12px; border-radius:8px; font-size:var(--fs-xs); font-weight:800; cursor:pointer;';
+      btn.addEventListener('click', () => this.setShareTier(k, NEXT[tier]));
+      row.appendChild(name); row.appendChild(btn); box.appendChild(row);
+    });
+  },
+  async setShareTier(k, tier) {
+    if (!this.isAdmin) return; // 관리자 전용(서버 admin_set_lock도 is_admin을 다시 확인)
+    const pairs = [['share_item_' + k, tier === 'pro'], ['share_off_' + k, tier === 'off']];
+    for (const [key, val] of pairs) {
+      const { error } = await _sb.rpc('admin_set_lock', { p_key: key, p_locked: val });
+      if (error) { await appAlert(this._s('변경 실패: ', 'Failed: ') + error.message); this.renderShareItems(); return; }
+      this.locks[key] = val;
+    }
+    try { localStorage.setItem(this.LOCKS_KEY, JSON.stringify(this.locks)); } catch (e) { jrLogErr('locksSave4', e); }
+    this.renderShareItems();
   },
   async setLock(k, locked) {
     const { error } = await _sb.rpc('admin_set_lock', { p_key: k, p_locked: locked });
@@ -17997,16 +18092,17 @@ async uploadRecord(record, photoFile, shareOptions, message) {
         photoUrl = await this.uploadPhoto(uid, record.id, photoFile);
       }
       const opts = (typeof shareOptions === 'boolean') ? { route: shareOptions, hr: true } : (shareOptions || {});
-      const shareRoute = opts.route !== false;
-      const shareHr = opts.hr !== false;
+      const shareRoute = opts.route !== false && !shareItemBlocked('route');
+      const shareHr = opts.hr !== false && !shareItemBlocked('hr');
       // [추가] 드롭다운에서 추가된 데이터 항목들의 공유 여부 (기본값 true = 하위호환)
-      const shareCadence = opts.cadence !== false;
-      const shareGct = opts.gct !== false;
-      const shareFlight = opts.flight !== false;
-      const shareStride = opts.stride !== false;
-      const shareKcal = opts.kcal !== false;
-      const shareSteps = opts.steps !== false;
-const shareLeanAngle = opts.leanAngle !== false; // [신규] 린각도 공유 여부(기본 true) — LeanAngleUI.ENABLED가 최종 게이트
+      const shareCadence = opts.cadence !== false && !shareItemBlocked('cadence');
+      const shareGct = opts.gct !== false && !shareItemBlocked('gct');
+      const shareFlight = opts.flight !== false && !shareItemBlocked('flight');
+      const shareStride = opts.stride !== false && !shareItemBlocked('stride');
+      const shareKcal = opts.kcal !== false && !shareItemBlocked('kcal');
+      const shareSteps = opts.steps !== false && !shareItemBlocked('steps');
+const sharePower = opts.power !== false && !shareItemBlocked('power'), shareVo2 = opts.vo2max !== false && !shareItemBlocked('vo2'), shareHrZone = opts.hrZone !== false && !shareItemBlocked('hrzone'), shareEff = opts.eff !== false && !shareItemBlocked('eff'), shareSplits = opts.splits !== false && !shareItemBlocked('splits'); // [추가] 신규 공유 항목
+const shareLeanAngle = opts.leanAngle !== false && !shareItemBlocked('lean'); // [신규] 린각도 공유 여부(기본 true) — LeanAngleUI.ENABLED가 최종 게이트
       let locationName = null;
       if (shareRoute && record.path && record.path.length > 0) {
         const first = record.path[0];
@@ -18031,21 +18127,21 @@ const shareLeanAngle = opts.leanAngle !== false; // [신규] 린각도 공유 �
         pace_sec_per_km: paceSec,
         // [수정] 공유 모달 드롭다운의 각 체크박스를 끄면 해당 필드는 null로 업로드(비공개)
         cadence: shareCadence ? (record.cadence || null) : null,
-        gct_ms: (shareGct && !dynamicsUntrusted) ? (record.gct || null) : null,
-        flight_pct: (shareFlight && !dynamicsUntrusted && !isFlightEstimated(record) && record.flight) ? parseInt(record.flight) : null,
+        gct_ms: shareGct ? ((record.gct && record.gct !== '--') ? record.gct : null) : null, // [수정] 리스트와 동일: 착용위치/모드와 무관하게 업로드(회색 '참고용' 표시는 크루 카드에서 처리)
+        flight_pct: (shareFlight && record.flight && record.flight !== '--' && !isNaN(parseInt(record.flight))) ? parseInt(record.flight) : null, // [수정] 리스트와 동일(추정값 'EST' 표시는 크루 카드에서 처리)
         stride_m: shareStride ? (record.stride || null) : null,
         // [수정] 효율점수는 케이던스/GCT/체공비율로부터 계산되는 파생값이라, 그중 하나라도 비공개 처리되면 함께 숨김
         eff_score: dynamicsUntrusted
-          ? ((shareCadence && shareStride) ? effScoreSimple : null)
-          : ((shareCadence && shareGct && shareFlight) ? effScore : null),
+          ? ((shareEff && shareCadence && shareStride) ? effScoreSimple : null)
+          : ((shareEff && shareCadence && shareGct && shareFlight) ? effScore : null),
         alt: record.alt || 0,
         // [추가] 칼로리 (기존엔 아예 업로드되지 않아 크루 카드/공유카드에서 항상 비어있었음)
         kcal: shareKcal ? (record.kcal || null) : null,
         // [신규] 러닝 파워(와트) 추정치. Supabase 'records' 테이블에 power_w(numeric, nullable)
         // 컬럼이 없다면 먼저 추가해야 저장됨. 칼로리와 같은 공개 체크박스(shareKcal)를 재사용.
-        power_w: shareKcal ? (record.power != null ? record.power : null) : null,
+        power_w: sharePower ? (record.power != null ? record.power : null) : null,
         // [신규] 체중당 파워(W/kg) — 크루카드 강도 색상 판정용. power_wkg(numeric, nullable) 컬럼 필요.
-        power_wkg: shareKcal ? (record.powerWkg != null ? record.powerWkg : null) : null,
+        power_wkg: sharePower ? (record.powerWkg != null ? record.powerWkg : null) : null,
         // [추가] 걷기 기록의 걸음수/분당걸음수도 함께 업로드 (크루 피드 카드에서 사용)
         steps: shareSteps ? (record.steps || null) : null,
         walk_spm: shareSteps ? (record.walkSpm || null) : null,
@@ -18055,15 +18151,15 @@ const shareLeanAngle = opts.leanAngle !== false; // [신규] 린각도 공유 �
 avg_lean_forward_deg: LeanAngleUI.sharePayloadForwardValue(record, shareLeanAngle), // [추가]
 avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngle), // [추가]
         path: shareRoute ? (record.path || null) : null,
-        splits: record.splits || null,
+        splits: shareSplits ? (record.splits || null) : null,
         photo_url: photoUrl,
         message: message || null,
         // [수정] 공유 모달의 HR 체크박스를 끄면 null로 업로드(비공개)
         avg_hr: shareHr ? (record.avgHr || null) : null,
         max_hr: shareHr ? (record.maxHr || null) : null,
-        hr_zone: shareHr ? (record.hrZone || null) : null,
+        hr_zone: (shareHr && shareHrZone) ? (record.hrZone || null) : null,
         // [신규 2026-11-03] VO2max 추정값(심박 기반이라 HR 공개 체크와 함께). Supabase 'records'에 vo2max(numeric, nullable) 컬럼 필요(없으면 빼고 업로드)
-        vo2max: shareHr ? (function(){ try { const v = ui.estimateVo2max(record); return v != null ? v : null; } catch (e) { return null; } })() : null
+        vo2max: shareVo2 ? (function(){ try { const v = ui.estimateVo2max(record); return v != null ? v : null; } catch (e) { return null; } })() : null
       };
       let { error } = await _sb.from('records').insert(payload);
       if (error && /device_pos/i.test(error.message || '')) { delete payload.device_pos; ({ error } = await _sb.from('records').insert(payload)); } // 컬럼 미생성 시 위치만 빼고 업로드
@@ -18143,13 +18239,13 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
         ? `${r.nickname}님의 ${activityNounKo}: ${distText}km · ${durText} · 페이스 ${paceText}/km${r.message ? '\n' + r.message : ''}`
         : `${r.nickname}'s ${activityNounEn}: ${distText}km in ${durText} @ ${paceText}/km${r.message ? '\n' + r.message : ''}`;
       const effScore = r.eff_score || 0;
-      const effIsSimpleCrew = r.eff_score != null && r.eff_score > 0 && r.gct_ms == null; // 간이 점수 식별
+      const effIsSimpleCrew = r.eff_score != null && r.eff_score > 0 && (r.gct_ms == null || crewDynMeta(r).gctRef); // 간이 점수 식별
       const headerDateStr = new Date(r.created_at).toLocaleString(isKo?'ko-KR':'en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
       await shareRunCardImage({
         nickname: r.nickname,
         dist: distText, distUnit: 'km',
         time: durText, pace: paceText,
-        cadence: r.cadence, gct: r.gct_ms, flight: r.flight_pct, effScore, effSimple: effIsSimpleCrew,
+        cadence: r.cadence, gct: r.gct_ms, flight: r.flight_pct, gctRef: crewDynMeta(r).gctRef, flightEst: crewDynMeta(r).flightEst, effScore, effSimple: effIsSimpleCrew,
         avgHr: r.avg_hr || null, hrZone: r.hr_zone || null, vo2max: r.vo2max != null ? r.vo2max : null,
         // [추가] 활동모드에 따라 카드 레이아웃이 분기되도록 전달
         activityMode: activityMode,
@@ -18433,45 +18529,46 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
       // [수정] 크루 카드 효율점수 표시용 (기존 effColor/effBg는 어디에도 쓰이지 않아 교체).
       // eff_score는 있는데 gct_ms가 없으면 간이 점수(손/프리런). 카드는 좋음/나쁨 2색 규칙을 따른다.
       const hasEffCard = r.eff_score != null && r.eff_score > 0;
-      const effIsSimpleCard = hasEffCard && r.gct_ms == null;
+      const _dm = crewDynMeta(r);
+      const effIsSimpleCard = hasEffCard && (r.gct_ms == null || _dm.gctRef);
       const effValColorCard = !hasEffCard ? '#111'
         : ((r.eff_score >= 80) ? CrewStatColor.GOOD : CrewStatColor.BAD);
       const effLabelCard = effIsSimpleCard ? (t.crewEffSimple || 'EFF (SIMPLE)') : (t.crewEff || 'EFF');
       // [수정] 세부 지표를 하나의 배열로 모아 4열 그리드에 순서대로 채움 (러닝/트레일/프리런/걷기 공통)
       const _nn = v => v !== undefined && v !== null;
-      const _sc = (label, val, unit, color) => `<div class="crew-stat-cell"><div class="u-label-xxs-dim">${label}</div><div class="u-card-stat-value"${color ? ` style="color:${color};"` : ''}>${val}${unit ? `<span class="u-label-xxs-999"> ${unit}</span>` : ''}</div></div>`;
-      const _hrCell = _nn(r.avg_hr) ? _sc(t.hrAvgMax||'HR', r.avg_hr + '/' + (_nn(r.max_hr) ? r.max_hr : r.avg_hr), '', '#e53935') : '';
+      const _sc = (label, val, unit, color, tag, key) => `<div class="crew-stat-cell"${key ? ` data-k="${key}"` : ''}><div class="u-label-xxs-dim">${label}${tag || ''}</div><div class="u-card-stat-value"${color ? ` style="color:${color};"` : ''}>${val}${unit ? `<span class="u-label-xxs-999"> ${unit}</span>` : ''}</div></div>`;
+      const _hrCell = _nn(r.avg_hr) ? _sc(t.hrAvgMax||'HR', r.avg_hr + '/' + (_nn(r.max_hr) ? r.max_hr : r.avg_hr), '', '#e53935', '', 'hr') : '';
       const _statCells = [];
       if (r.activity_mode === 'walk') {
         _statCells.push(
-          _sc(t.stepsLabel||'STEPS', r.steps || '--', ''),
-          _sc(t.spmLabel||'SPM', r.walk_spm || '--', ''),
-          _sc(t.stride||'STRIDE', r.stride_m || '--', 'm'),
+          _sc(t.stepsLabel||'STEPS', r.steps || '--', '', '', '', 'steps'),
+          _sc(t.spmLabel||'SPM', r.walk_spm || '--', '', '', '', 'steps'),
+          _sc(t.stride||'STRIDE', r.stride_m || '--', 'm', '', '', 'stride'),
           _sc(t.alt||'ALT', _nn(r.alt) ? r.alt : '--', 'm'),
           _hrCell,
-          _sc(t.cal||'KCAL', _nn(r.kcal) ? r.kcal : '--', 'kcal')
+          _sc(t.cal||'KCAL', _nn(r.kcal) ? r.kcal : '--', 'kcal', '', '', 'kcal')
         );
-        if (r.hr_zone) _statCells.push(_sc(t.hrZoneLabel||'HR ZONE', r.hr_zone, '', CrewStatColor.hrZoneColor(r.hr_zone)));
+        if (r.hr_zone) _statCells.push(_sc(t.hrZoneLabel||'HR ZONE', r.hr_zone, '', CrewStatColor.hrZoneColor(r.hr_zone), '', 'hrzone'));
       } else {
         _statCells.push(
-          _sc(t.cadence||'CADENCE', r.cadence || '--', 'spm', CrewStatColor.cadence(r.cadence)),
-          _sc(t.gct||'GCT', r.gct_ms || '--', 'ms', CrewStatColor.gct(r.gct_ms)),
-          _sc(t.flight||'FLIGHT', _nn(r.flight_pct) ? r.flight_pct : '--', '%', CrewStatColor.flight(r.flight_pct)),
-          _sc(t.stride||'STRIDE', _nn(r.stride_m) ? r.stride_m : '--', 'm'),
+          _sc(t.cadence||'CADENCE', r.cadence || '--', 'spm', CrewStatColor.cadence(r.cadence), '', 'cadence'),
+          _sc(t.gct||'GCT', r.gct_ms || '--', 'ms', _dm.gctRef ? '#888' : CrewStatColor.gct(r.gct_ms), _dm.gctRef ? gctRefTagHtml(storage.getLang()) : '', 'gct'),
+          _sc(t.flight||'FLIGHT', _nn(r.flight_pct) ? r.flight_pct : '--', '%', _dm.flightEst ? '#888' : CrewStatColor.flight(r.flight_pct), _dm.flightEst ? flightEstTagHtml(storage.getLang()) : '', 'flight'),
+          _sc(t.stride||'STRIDE', _nn(r.stride_m) ? r.stride_m : '--', 'm', '', '', 'stride'),
           _sc(t.alt||'ALT', _nn(r.alt) ? r.alt : '--', 'm')
         );
         if (LeanAngleUI.ENABLED && r.avg_lean_angle_deg != null) {
-          _statCells.push(_sc(LeanAngleUI.label(storage.getLang()), LeanAngleUI.fmtPrimary(r.avg_lean_angle_deg, r.avg_lean_forward_deg), '', LeanAngleUI.colorForPrimaryCrew(r.avg_lean_angle_deg, r.avg_lean_forward_deg) || '#111'));
+          _statCells.push(_sc(LeanAngleUI.label(storage.getLang()), LeanAngleUI.fmtPrimary(r.avg_lean_angle_deg, r.avg_lean_forward_deg), '', LeanAngleUI.colorForPrimaryCrew(r.avg_lean_angle_deg, r.avg_lean_forward_deg) || '#111', '', 'lean'));
         }
-        _statCells.push(_sc(t.cal||'KCAL', _nn(r.kcal) ? r.kcal : '--', 'kcal'));
-        if (_nn(r.power_w)) _statCells.push(_sc(t.powerLabel||'POWER', r.power_w, 'W', (typeof ui !== 'undefined') ? ui.getPowerColor(r.power_wkg) : '#111'));
+        _statCells.push(_sc(t.cal||'KCAL', _nn(r.kcal) ? r.kcal : '--', 'kcal', '', '', 'kcal'));
+        if (_nn(r.power_w)) _statCells.push(_sc(t.powerLabel||'POWER', r.power_w, 'W', (typeof ui !== 'undefined') ? ui.getPowerColor(r.power_wkg) : '#111', '', 'power'));
         // [신규 2026-11-03] VO2MAX(추정) — 업로드 시 계산해 둔 값이 있는 기록만 표시
-        if (_nn(r.vo2max)) _statCells.push(_sc(t.vo2Label||'VO2MAX', Number(r.vo2max).toFixed(1), '', (typeof ui !== 'undefined' && ui.getVo2Level(Number(r.vo2max)) >= 3) ? CrewStatColor.GOOD : '#111'));
-        if (r.hr_zone) _statCells.push(_sc(t.hrZoneLabel||'HR ZONE', r.hr_zone, '', CrewStatColor.hrZoneColor(r.hr_zone)));
-        if (hasEffCard) _statCells.push(_sc(effLabelCard, r.eff_score, '/100', effValColorCard));
+        if (_nn(r.vo2max)) _statCells.push(_sc(t.vo2Label||'VO2MAX', Number(r.vo2max).toFixed(1), '', (typeof ui !== 'undefined' && ui.getVo2Level(Number(r.vo2max)) >= 3) ? CrewStatColor.GOOD : '#111', '', 'vo2'));
+        if (r.hr_zone) _statCells.push(_sc(t.hrZoneLabel||'HR ZONE', r.hr_zone, '', CrewStatColor.hrZoneColor(r.hr_zone), '', 'hrzone'));
+        if (hasEffCard) _statCells.push(_sc(effLabelCard, r.eff_score, '/100', effValColorCard, '', 'eff'));
         _statCells.push(_hrCell);
       }
-      const _statGridHtml = _statCells.filter(Boolean).join('');
+      const _statGridHtml = _statCells.filter(Boolean).filter(c => { const m = /data-k="([a-z0-9]+)"/.exec(c); return !(m && shareItemOff(m[1])); }).join('');
       // [수정] RUN/WALK/TRAIL/FREE RUN 배지 (과거 기록엔 activity_mode가 없으므로 'run'으로 간주)
       const activityMode = r.activity_mode || 'run';
       const isKoFeed = storage.getLang() === 'ko';
@@ -18889,13 +18986,14 @@ avg_lean_lateral_deg: LeanAngleUI.sharePayloadLateralValue(record, shareLeanAngl
   // 피드 카드용 상세 조회 (loadFeed 와 같은 컬럼)
   async _fetchProfilePage(userId, from, count, recordId) {
     const _cols = 'id, nickname, avatar_url, location_name, title, activity_mode, distance_km, duration_sec, pace_sec_per_km, cadence, gct_ms, flight_pct, eff_score, alt, created_at, user_id, path, splits, photo_url, message, avg_hr, max_hr, hr_zone, steps, walk_spm, stride_m, kcal, power_w, power_wkg, avg_lean_angle_deg, avg_lean_forward_deg, avg_lean_lateral_deg';
-    const _run = (withPos) => {
-      let q = _sb.from('records').select(_cols + (withPos ? ', device_pos' : '')).eq('user_id', userId);
+    const _run = (withPos, withVo2 = true) => {
+      let q = _sb.from('records').select(_cols + (withVo2 ? ', vo2max' : '') + (withPos ? ', device_pos' : '')).eq('user_id', userId);
       if (recordId) q = q.eq('id', recordId);
       return q.order('created_at', { ascending: false }).range(from, from + count - 1);
     };
-    let { data, error } = await _run(true);
-    if (error && /device_pos/i.test(error.message || '')) ({ data, error } = await _run(false));
+    let { data, error } = await _run(true, true);
+    if (error && /vo2max/i.test(error.message || '')) ({ data, error } = await _run(true, false));
+    if (error && /device_pos/i.test(error.message || '')) ({ data, error } = await _run(false, false));
     if (error) throw error;
     return data || [];
   }
@@ -24273,7 +24371,7 @@ UIManager.prototype.stopRoutePlayback = function() {
 <div id="share-crew-saved-badge" class="share-crew-saved-badge">✓ Saved to your history</div>
 <div id="share-crew-modal-msg" class="custom-confirm-msg" style="margin-bottom:12px; flex:0 0 auto;">Share this run with the crew?</div>
 <input id="share-crew-message-input" type="text" maxlength="100" placeholder="Add a message (optional)" style="flex:0 0 auto; width:100%; background:#2a2a2a; border:1.5px solid #444; border-radius:10px; color:#fff; padding:10px 14px; font-size:var(--fs-base); margin-bottom:12px; box-sizing:border-box; outline:none;">
-<label id="share-crew-photo-label" for="share-crew-photo-input" style="flex:0 0 auto; display:flex; align-items:center; justify-content:center; width:100%; min-height:140px; background:#222; border:1.5px dashed #444; border-radius:12px; margin-bottom:14px; overflow:hidden; cursor:pointer; position:relative;">
+<label id="share-crew-photo-label" for="share-crew-photo-input" style="flex:0 0 auto; display:flex; align-items:center; justify-content:center; width:100%; min-height:96px; background:#222; border:1.5px dashed #444; border-radius:12px; margin-bottom:14px; overflow:hidden; cursor:pointer; position:relative;">
 <span id="share-crew-photo-placeholder" class="share-crew-photo-placeholder is-open">Add a photo (optional)</span>
 <img id="share-crew-photo-preview" class="share-crew-photo-preview">
 </label>
@@ -24318,6 +24416,26 @@ UIManager.prototype.stopRoutePlayback = function() {
 <label class="checkbox-row-flex">
 <input id="share-crew-lean-checkbox" type="checkbox" checked class="c01">
 <span id="share-crew-lean-label" class="c02">Lean angle</span>
+</label>
+<label class="checkbox-row-flex">
+<input id="share-crew-power-checkbox" type="checkbox" checked class="c01">
+<span id="share-crew-power-label" class="c02">Power</span>
+</label>
+<label class="checkbox-row-flex">
+<input id="share-crew-vo2-checkbox" type="checkbox" checked class="c01">
+<span id="share-crew-vo2-label" class="c02">VO2max</span>
+</label>
+<label class="checkbox-row-flex">
+<input id="share-crew-hrzone-checkbox" type="checkbox" checked class="c01">
+<span id="share-crew-hrzone-label" class="c02">HR zone</span>
+</label>
+<label class="checkbox-row-flex">
+<input id="share-crew-eff-checkbox" type="checkbox" checked class="c01">
+<span id="share-crew-eff-label" class="c02">Efficiency score</span>
+</label>
+<label class="checkbox-row-flex">
+<input id="share-crew-splits-checkbox" type="checkbox" checked class="c01">
+<span id="share-crew-splits-label" class="c02">Km splits</span>
 </label>
 </div>
 <div style="flex:0 0 auto; padding:12px 0 22px 0; background:#1a1a1a;">
