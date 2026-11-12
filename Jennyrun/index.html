@@ -1388,6 +1388,8 @@ button.tone-amber:active { color:#ffcc66 !important; border-color:#ffcc66 !impor
 #onb-devpos-armband.active { background: #d8b26b; color: #000; border-color: #d8b26b; }
 #onb-devpos-hand.active    { background: #e05a4e; color: #fff; border-color: #e05a4e; }
 #activity-mode-row .gender-btn, #onb-activity-mode-row .gender-btn { font-size:var(--fs-xs); padding: 13px 4px; }
+#onb-activity-mode-row2 { justify-content: center; } /* [TMILL] */
+#onb-activity-mode-row2 .gender-btn { flex: 0 0 50%; font-size:var(--fs-xs); padding: 13px 4px; } /* [TMILL] */
 #quick-mode-row .gender-btn { font-size:var(--fs-base); padding: 14px 4px; } /* [수정] SWITCH MODE 1단계 버튼 글자 키움(11px→13px). 2단계(착용 위치)는 영향 없음 */
 #quick-mode-row2 { justify-content: center; }
 #quick-mode-row2 .gender-btn { flex: 0 0 50%; font-size:var(--fs-base); padding: 14px 4px; }
@@ -1913,7 +1915,10 @@ button[style*="--danger"]:active, button[style*="#e57373"]:active, .c33:active, 
       <div id="onb-mode-run" class="gender-btn" onclick="ui.onbSelectMode('run')">RUN</div>
       <div id="onb-mode-walk" class="gender-btn" onclick="ui.onbSelectMode('walk')">WALK</div>
       <div id="onb-mode-trail" class="gender-btn" onclick="ui.onbSelectMode('trail')">TRAIL</div>
+    </div>
+    <div class="gender-toggle-row" id="onb-activity-mode-row2"><!-- [TMILL] 퀵 팝업과 동일하게 3 + 2 배치 -->
       <div id="onb-mode-freerun" class="gender-btn" onclick="ui.onbSelectMode('freerun')">FREE RUN</div>
+      <div id="onb-mode-treadmill" class="gender-btn" onclick="ui.onbSelectMode('treadmill')">TREADMILL</div>
     </div>
   </div>
   <div class="settings-group" style="margin-top:8px;">
@@ -7133,12 +7138,34 @@ void el.offsetWidth;
 el.classList.add('onb-flash');
 });
 }
-onbSelectMode(mode) {
-this.onbMode = mode;
-['run','walk','trail','freerun'].forEach(m => {
+// [TMILL] 온보딩 모드 버튼 하이라이트: 트레드밀은 'freerun' 모드 + 트레드밀 플래그 조합
+onbSyncModeBtns() {
+const tm = this.onbMode === 'freerun' && this.onbTreadmill === true;
+['run','walk','trail','freerun','treadmill'].forEach(m => {
 const el = document.getElementById('onb-mode-' + m);
-if (el) el.classList.toggle('active', m === mode);
+if (!el) return;
+const on = (m === 'treadmill') ? tm : (m === 'freerun') ? (this.onbMode === 'freerun' && !tm) : (m === this.onbMode);
+el.classList.toggle('active', on);
 });
+}
+// [TMILL] 트레드밀 선택 시 자동멈춤/로그기록은 퀵 팝업과 동일하게 OFF 표시 + 비활성(표시만, 실제 설정값은 건드리지 않음)
+onbApplyTmGates() {
+const tm = this.onbMode === 'freerun' && this.onbTreadmill === true;
+const ap = document.getElementById('onb-autopause-switch'), aps = document.getElementById('onb-autopause-status');
+if (ap) { ap.classList.toggle('active', this.onbAutoPause === true && !tm); ap.style.opacity = tm ? '0.6' : ''; ap.style.pointerEvents = tm ? 'none' : ''; }
+if (aps) aps.textContent = (this.onbAutoPause && !tm) ? 'ON' : 'OFF';
+if (tm) {
+const lg = document.getElementById('onb-precision-log-switch'), lgs = document.getElementById('onb-precision-log-status');
+if (lg) { lg.classList.remove('active'); lg.style.opacity = '0.6'; lg.style.pointerEvents = 'none'; lg.style.cursor = 'not-allowed'; }
+if (lgs) lgs.textContent = 'OFF';
+}
+}
+onbSelectMode(mode) {
+const _tm = (mode === 'treadmill'); // [TMILL]
+if (_tm) mode = 'freerun'; // [TMILL] 내부 모드는 freerun, 트레드밀은 플래그로 구분
+this.onbTreadmill = _tm; // [TMILL]
+this.onbMode = mode;
+this.onbSyncModeBtns(); // [TMILL]
 // [수정] 걷기+프리러닝 모드는 기기 착용 위치와 무관하게 동일한 로직으로 동작하므로,
 // 선택 시 위치 스위치 하이라이트를 모두 꺼서 "위치 선택이 필요하다"는
 // 오해를 방지. 러닝/트레일로 다시 돌아오면 저장된 위치로 하이라이트 복원.
@@ -7151,9 +7178,12 @@ this.onbUpdateStartBtn();
 this.onbUpdatePosAvailability();
 this.onbUpdatePrecisionLogAvailability();
 this.onbUpdateLeanAngleAvailability();
+this.onbApplyTmGates(); // [TMILL]
 this.onbFlashTappable('mode');
 // [변경] 온보딩에서 바로 저장/적용해 설정 페이지와 항상 동일한 상태 유지
 this.setActivityMode(mode);
+setTreadmillFlag(_tm); // [TMILL] setActivityMode는 모드가 바뀔 때만 플래그를 끄므로, 선택 결과를 명시적으로 반영
+this.updateTabRunLabel(); try { this.updateModeChip(); } catch (e) {} // [TMILL]
 }
 // [추가] 최초 실행 온보딩 화면 - 기기 착용 위치 선택
 onbSelectPos(pos) {
@@ -7277,6 +7307,7 @@ onbConfirm() {
 if (!this.onbMode || !this.onbPos) return;
 this.clearTapHints();
 this.setActivityMode(this.onbMode);
+setTreadmillFlag(this.onbMode === 'freerun' && this.onbTreadmill === true); // [TMILL]
 this.setDevicePos(this.onbPos);
 this.setAutoPause(this.onbAutoPause);
 this.setPrecisionLogRecording(this.onbPrecisionLog);
@@ -7308,10 +7339,8 @@ if (logoWrap) logoWrap.style.display = (force === true) ? 'none' : '';
 overlay.classList.add('is-open');
 // [변경] 활동모드/기기위치도 현재 저장된 설정값으로 초기 표시 (설정페이지와 동일하게)
 this.onbMode = this.currentActivityMode;
-['run','walk','trail','freerun'].forEach(m => {
-const el = document.getElementById('onb-mode-' + m);
-if (el) el.classList.toggle('active', m === this.onbMode);
-});
+this.onbTreadmill = (this.onbMode === 'freerun' && getTreadmillFlag()); // [TMILL]
+this.onbSyncModeBtns(); // [TMILL]
 const currentProfile = storage.loadProfile();
 this.onbPos = currentProfile.devicePos;
 // [수정] 저장된 모드가 걷기/프리러닝이면, 온보딩을 처음 열 때부터 위치 하이라이트를 꺼서 표시
@@ -7334,6 +7363,7 @@ this.onbUpdatePrecisionLogAvailability();
 this.onbLeanAngle = this.currentLeanAngleEnabled;
 // [변경] 러닝+가슴 조건이 아니면 초기 표시부터 강제 OFF + 비활성화 처리
 this.onbUpdateLeanAngleAvailability();
+this.onbApplyTmGates(); // [TMILL]
 // [추가] 화면이 처음 열릴 때도 지금 누를 수 있는 아래 박스들을 바로 하이라이트(위 버튼을 누른 것과 동일한 효과)
 this.onbFlashTappable('mode');
 }
@@ -8077,6 +8107,7 @@ const onbModeTrailEl = document.getElementById('onb-mode-trail');
 if(onbModeTrailEl) onbModeTrailEl.textContent = t.modeTrailLabel;
 const onbModeFreerunEl = document.getElementById('onb-mode-freerun');
 if(onbModeFreerunEl) onbModeFreerunEl.textContent = t.modeFreerunLabel;
+const onbModeTmEl = document.getElementById('onb-mode-treadmill'); if (onbModeTmEl) onbModeTmEl.textContent = treadmillStatLabel(); // [TMILL]
 const onbDevposChestEl = document.getElementById('onb-devpos-chest');
 if(onbDevposChestEl) onbDevposChestEl.textContent = t.devposChest;
 const onbDevposWaistEl = document.getElementById('onb-devpos-waist');
