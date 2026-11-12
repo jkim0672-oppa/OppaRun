@@ -6550,6 +6550,7 @@ if (!tabRun) return;
 // 실제 갱신은 setActivityMode()와 updateDevicePosUI()(착용 위치 변경/로드 시)에서
 // 이 함수를 자동으로 다시 호출해줌.
 const mode = this.currentActivityMode || 'run';
+if (mode === 'freerun' && getTreadmillFlag()) { tabRun.textContent = (storage.getLang() === 'ko') ? '러닝머신' : 'TREADMILL'; return; } // [추가 2026-11-11] 러닝머신 = 프리런 + 옵션
 if (mode === 'walk') { tabRun.textContent = t.modeWalkLabel; return; }
 if (mode === 'freerun') { tabRun.textContent = t.modeFreerunLabel; return; }
 if (mode === 'trail') { tabRun.textContent = t.modeTrailLabel; return; }
@@ -6600,6 +6601,7 @@ const t = translations[storage.getLang()] || translations['en'];
 const mode = this.currentActivityMode || 'run';
 let text;
 if (mode === 'walk') text = t.modeWalkLabel;
+else if (mode === 'freerun' && getTreadmillFlag()) text = (storage.getLang() === 'ko') ? '러닝머신' : 'TREADMILL'; // [추가 2026-11-11]
 else if (mode === 'freerun') text = t.modeFreerunLabel;
 else if (mode === 'trail') text = t.modeTrailLabel;
 else {
@@ -6651,15 +6653,16 @@ if (freerunBtn) freerunBtn.textContent = t.modeFreerunLabel;
 this._pendingMode = this.currentActivityMode || 'run';
 this._pendingDevicePos = storage.loadProfile().devicePos;
 this._pendingLeanAngle = this.currentLeanAngleEnabled;
+try { const _pp = localStorage.getItem('oppaRunPreTmPos'); if (_pp) { this._pendingDevicePos = _pp; this._pendingLeanAngle = (localStorage.getItem('oppaRunPreTmLean') === 'on'); } } catch (e) {} // [추가 2026-11-11] 러닝머신으로 바꾸기 전 위치/린각도
 // [추가] 로그 기록도 린각도와 동일하게 "펜딩" 값으로 관리 - 모드를 왔다갔다 해도
 // 마지막으로 골라둔 값을 기억했다가, 다시 사용 가능한 모드로 돌아오면 그대로 복원한다.
 this._pendingPrecisionLog = this.currentPrecisionLogEnabled;
 this._pendingTreadmill = getTreadmillFlag();
 this.syncQuickTreadmillBtn();
-if (runBtn) runBtn.classList.toggle('active', this._pendingMode === 'run' && !this._pendingTreadmill);
+if (runBtn) runBtn.classList.toggle('active', this._pendingMode === 'run');
 if (walkBtn) walkBtn.classList.toggle('active', this._pendingMode === 'walk');
 if (trailBtn) trailBtn.classList.toggle('active', this._pendingMode === 'trail');
-if (freerunBtn) freerunBtn.classList.toggle('active', this._pendingMode === 'freerun');
+if (freerunBtn) freerunBtn.classList.toggle('active', this._pendingMode === 'freerun' && !this._pendingTreadmill);
 // [추가] 항상 1단계(모드 선택)부터 열리도록 초기화 - 직전에 2단계에서 닫았어도 다음엔 처음부터
 const step1 = document.getElementById('quick-mode-step1');
 const step2 = document.getElementById('quick-mode-step2');
@@ -6704,13 +6707,13 @@ syncQuickTreadmillBtn() {
 const b = document.getElementById('quick-treadmill-btn'); if (!b) return;
 const ko = storage.getLang() === 'ko';
 b.textContent = ko ? '러닝머신' : 'TREADMILL';
-b.classList.toggle('active', (this._pendingMode || 'run') === 'run' && !!this._pendingTreadmill);
+b.classList.toggle('active', (this._pendingMode || 'run') === 'freerun' && !!this._pendingTreadmill);
 b.style.opacity = '';
 }
 quickToggleTreadmill() {
 // 러닝머신 = RUN + 러닝머신 옵션. 다른 모드 버튼처럼 눌러서 바로 2단계(착용 위치 + CONFIRM)로 넘어간다.
 this._pendingTreadmill = true;
-this.quickSetActivityMode('run', true);
+this.quickSetActivityMode('freerun', true); // 러닝머신 = 프리런과 같은 로직(착용 위치 무관) + 러닝머신 옵션
 }
 quickSetActivityMode(mode, keepTreadmill) {
 if (!keepTreadmill) this._pendingTreadmill = false;
@@ -6719,10 +6722,10 @@ const runBtn = document.getElementById('quick-mode-run');
 const walkBtn = document.getElementById('quick-mode-walk');
 const trailBtn = document.getElementById('quick-mode-trail');
 const freerunBtn = document.getElementById('quick-mode-freerun');
-if (runBtn) runBtn.classList.toggle('active', mode === 'run' && !this._pendingTreadmill);
+if (runBtn) runBtn.classList.toggle('active', mode === 'run');
 if (walkBtn) walkBtn.classList.toggle('active', mode === 'walk');
 if (trailBtn) trailBtn.classList.toggle('active', mode === 'trail');
-if (freerunBtn) freerunBtn.classList.toggle('active', mode === 'freerun');
+if (freerunBtn) freerunBtn.classList.toggle('active', mode === 'freerun' && !this._pendingTreadmill);
 this.syncQuickTreadmillBtn();
 // [수정] 걷기 모드를 고르면 로그 기록/린각도는 "펜딩 값은 그대로 기억한 채" 화면에만 OFF로
 // 표시한다(showQuickDevicePosStep/disableQuickLeanAngleToggle이 처리). 펜딩 값 자체를 지우지
@@ -6774,7 +6777,7 @@ this.syncQuickTogglesUI(); // [추가] 자동멈춤/로그기록/메트로놈 �
 // [수정] 퀵 팝업 2단계에서 위치 선택 - 더 이상 즉시 적용/자동 닫힘 없이 "펜딩" 값만 갱신한다.
 // 실제 저장(setDevicePos)과 팝업 닫힘은 오직 CONFIRM(quickConfirmModeSwitch)에서만 일어난다.
 quickSetDevicePos(pos) {
-if (this._pendingMode !== 'run') return; // WALK/FREE RUN/TRAIL에서는 비활성 상태이므로 무시
+if (this._pendingMode !== 'run') return; // WALK/FREE RUN/TRAIL/러닝머신에서는 비활성 상태이므로 무시
 this._pendingDevicePos = pos;
 const chestBtn = document.getElementById('quick-devpos-chest');
 const waistBtn = document.getElementById('quick-devpos-waist');
@@ -6834,7 +6837,9 @@ if (offBtn) offBtn.classList.toggle('active', enabled !== true);
 quickConfirmModeSwitch() {
 this.clearTapHints();
 const mode = this._pendingMode || this.currentActivityMode || 'run';
-setTreadmillFlag(!!this._pendingTreadmill);
+const _wasTm = getTreadmillFlag();
+const _tm = (mode === 'freerun' && !!this._pendingTreadmill);
+setTreadmillFlag(_tm);
 this.setActivityMode(mode);
 // [추가] 로그 기록: 걷기가 아닌 모드로 확정될 때만 펜딩 값을 실제로 적용한다.
 // 걷기로 확정되는 경우엔 위 setActivityMode() 안의 updatePrecisionLogAvailability()가
@@ -6848,6 +6853,7 @@ this.setDevicePos(pos);
 if (this._isLeanAngleGated(mode, pos)) {
 this.setLeanAngleEnabled(this._pendingLeanAngle === true);
 }
+try { localStorage.removeItem('oppaRunPreTmPos'); localStorage.removeItem('oppaRunPreTmLean'); } catch (e) {}
 }
 // [추가] 모드/위치가 모두 저장된 뒤 하단 RUN 탭 라벨을 최종 동기화
 this.updateTabRunLabel();
@@ -6883,11 +6889,12 @@ const metroLabel = document.getElementById('quick-label-metro');
 if (metroLabel) metroLabel.textContent = t.metroTitle;
 const apBox = document.getElementById('quick-autopause-switch');
 const apStatus = document.getElementById('quick-autopause-status');
-if (apBox) apBox.classList.toggle('active', this.currentAutoPause === true);
-if (apStatus) apStatus.textContent = this.currentAutoPause ? 'ON' : 'OFF';
+const _tmPending = (this._pendingMode === 'freerun' && !!this._pendingTreadmill);
+if (apBox) { apBox.classList.toggle('active', this.currentAutoPause === true && !_tmPending); apBox.style.opacity = _tmPending ? '0.6' : ''; apBox.style.pointerEvents = _tmPending ? 'none' : ''; }
+if (apStatus) apStatus.textContent = (this.currentAutoPause && !_tmPending) ? 'ON' : 'OFF';
 // [수정] 로그기록은 펜딩 값을 쓰되, 걷기 모드처럼 사용 불가한 상태에서는 펜딩 값과 무관하게
 // 항상 OFF로 표시 + 흐리게 + 클릭 차단한다. 펜딩 값 자체는 지우지 않아 나중에 복원 가능.
-const logAvailable = this._isWalkGated(this._pendingMode);
+const logAvailable = this._isWalkGated(this._pendingMode) && !(this._pendingMode === 'freerun' && this._pendingTreadmill);
 const logBox = document.getElementById('quick-precision-log-switch');
 const logStatus = document.getElementById('quick-precision-log-status');
 if (logBox) {
@@ -13590,13 +13597,14 @@ const st = this.state, now = Date.now();
 if (!st.isRunning || st.isPaused || !st.isAutoPaused) { st._glSince = null; st._glStepRunStart = null; return; }
 const staleMs = (ui.currentActivityMode === 'trail') ? 9000 : 6000;
 const base = st.lastGpsCbAt || st.startTimestamp || now;
-const gpsLost = ((now - base) > staleMs) || (st.badAccSince && (now - st.badAccSince) > 6000);
+const _tm = !!st.treadmill; // 러닝머신은 GPS를 쓰지 않으므로 항상 걸음으로 판단
+const gpsLost = _tm || ((now - base) > staleMs) || (st.badAccSince && (now - st.badAccSince) > 6000);
 if (!gpsLost) { st._glSince = null; st._glStepRunStart = null; return; }
 if (!st._glSince) st._glSince = now;
 const ls = this.motion ? this.motion.lastStepTime : 0;
 const stepAlive = ls > 0 && (now - ls) < 1500;
 if (stepAlive) { if (!st._glStepRunStart) st._glStepRunStart = now; } else { st._glStepRunStart = null; return; }
-if ((now - Math.max(st._glStepRunStart, st._glSince)) < 3000) return;
+if ((now - Math.max(st._glStepRunStart, st._glSince)) < (_tm ? 1500 : 3000)) return;
 st.isAutoPaused = false; st.startWaitOnly = false; st.startWaitPhase = false;
 st.autoResumeCandStart = null; st.lowSpeedStartTime = null; st._glSince = null; st._glStepRunStart = null;
 this.markPauseEnd();
@@ -15140,8 +15148,13 @@ this.state.runPro = isCalibFactorsOn(); // [추가 2026-10-13] 시작 시점의 
 if(this.motion) this.motion.reset();
 // [신규] 걷기 모드 상태 초기화 (러닝 상태 초기화와 완전 분리, 시작 시점의 설정값을 세션 내내 고정)
 this.state.activityMode = storage.getActivityMode();
-this.state.treadmill = !!(getTreadmillFlag() && this.state.activityMode === 'run'); // [추가 2026-11-11]
+this.state.treadmill = !!(getTreadmillFlag() && this.state.activityMode === 'freerun'); // [추가 2026-11-11] 러닝머신 = 프리런 + 옵션
 this.state._tmAsked = false; this.state.tmKmh = 0; this.state.tmStepLenM = 0;
+if (this.state.treadmill) { // [추가 2026-11-11] 러닝머신도 START 후 첫 걸음이 이어질 때까지 기록 제외(배지 없음)
+this.state.isAutoPaused = true; this.state.startWaitPhase = true; this.state.calibWaitPauseDone = true;
+this.state.pauseStartedAt = this.state.startTimestamp || Date.now();
+if (this.motion) this.motion.lastStepTime = 0;
+}
 this.state.walkSteps = 0;
 this.state.walkStepTimes = [];
 this.state.walkSpmSamples = [];
@@ -15543,7 +15556,9 @@ const _isKo = storage.getLang() === 'ko';
 // [수정] 트레일/프리러닝 모드는 제목에도 구분 표시 (예: '아침 러닝' → '아침 트레일러닝' / '아침 프리러닝')
 const _isTrailTitle = this.state.activityMode === 'trail';
 const _isFreerunTitle = this.state.activityMode === 'freerun';
-const _autoTitle = _isKo
+const _autoTitle = this.state.treadmill
+  ? (_isKo ? (_h>=5&&_h<11?'아침 러닝머신':_h>=11&&_h<17?'오후 러닝머신':_h>=17&&_h<21?'저녁 러닝머신':'야간 러닝머신') : (_h>=5&&_h<11?'Morning Treadmill':_h>=11&&_h<17?'Afternoon Treadmill':_h>=17&&_h<21?'Evening Treadmill':'Night Treadmill'))
+  : _isKo
   ? (_isTrailTitle
       ? (_h>=5&&_h<11?'아침 트레일러닝':_h>=11&&_h<17?'오후 트레일러닝':_h>=17&&_h<21?'저녁 트레일러닝':'야간 트레일러닝')
       : _isFreerunTitle
