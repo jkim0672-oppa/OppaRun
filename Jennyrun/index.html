@@ -4823,9 +4823,6 @@ const MOTION_ONLY_POS = ['freerun', 'trail', 'treadmill']; // [수정 2026-10-20
 function isMotionOnlyPos(pos) { return MOTION_ONLY_POS.indexOf(pos) >= 0; }
 // [추가 2026-10-20] 트레일 = 프리런과 같은 구조(착용 위치 무관 · 전용 내부 모션 엔진 · 모션 전용 슬롯)이되 보정 슬롯은 'trail'로 독립.
 function isFreerunLikeMode(mode) { return mode === 'freerun' || mode === 'trail'; }
-// [추가 2026-11-13] 정밀 로그 보관 한도 분리: 러닝머신 로그와 그 외 로그가 각각 최대 max개(최신순). 한쪽이 쌓여도 다른 쪽을 밀어내지 않는다.
-function isTreadmillLog(l) { return !!(l && (l.isTreadmill || l.devicePos === 'treadmill')); }
-function capPrecLogsByGroup(list, max) { let g = 0, t = 0; return (Array.isArray(list) ? list : []).filter(function (l) { return isTreadmillLog(l) ? (++t <= max) : (++g <= max); }); }
 function engineSlotKeyOf(mode, tm) { return mode === 'trail' ? 'trail' : ((mode === 'freerun' && tm) ? 'treadmill' : 'freerun'); } // [수정 2026-11-12] 러닝머신 = 독립 슬롯 'treadmill'
 // [추가 2026-08-21] gctFallbackRatio만 예외적으로 "진짜 팩토리 원점"이 있다 — Malisoux 2019
 // (레크리에이션 러너 860명 평균 듀티팩터, 남 39%/여 41%)에 근거한 인구평균값 0.40으로,
@@ -5996,7 +5993,7 @@ getMaxPrecisionLogs() { return 15; }
 // 하나씩 줄여서라도 저장이 성공하게 한다 (긴 러닝 로그가 많으면 30개가 다 안 들어갈 수 있음).
 // 최신 로그 1개조차 못 넣을 때만 savePrecisionLogsList()의 기존 실패 알림이 뜬다.
 savePrecisionLogsCapped(list) {
-let arr = capPrecLogsByGroup(list, this.getMaxPrecisionLogs()); // [수정 2026-11-13] 러닝머신/그 외 각각 15개
+let arr = list.slice(0, this.getMaxPrecisionLogs());
 while (arr.length > 1) {
 try {
 bigStore.set(this.getPrecisionLogsKey(), arr); // [수정 2026-10-05] 원본: localStorage.setItem(this.getPrecisionLogsKey(), JSON.stringify(arr));
@@ -6011,7 +6008,7 @@ loadPrecisionLogs() {
 try {
 const arr = bigStore.get(this.getPrecisionLogsKey(), []); // [수정 2026-10-05] 원본: localStorage.getItem(...) 후 JSON.parse
 // [추가] 예전에 30개까지 쌓인 로그가 있어도 상한(15개)만 보이도록 자름
-return Array.isArray(arr) ? capPrecLogsByGroup(arr, this.getMaxPrecisionLogs()) : []; // [수정 2026-11-13] 러닝머신/그 외 각각 15개
+return Array.isArray(arr) ? arr.slice(0, this.getMaxPrecisionLogs()) : [];
 } catch (e) { return []; }
 }
 savePrecisionLogsList(list) {
@@ -7851,7 +7848,7 @@ if (!wrap) return;
 const list = storage.loadPrecisionLogs();
 const isKo = storage.getLang() === 'ko';
 const maxLogs = storage.getMaxPrecisionLogs();
-{ const _tmN = list.filter(isTreadmillLog).length; if (labelEl) labelEl.textContent = (isKo ? '정밀 로그' : 'PRECISION LOGS') + ' (' + (list.length - _tmN) + '/' + maxLogs + (_tmN ? (' + ' + (isKo ? '러닝머신 ' : 'TREADMILL ') + _tmN + '/' + maxLogs) : '') + ')'; } // [수정 2026-11-13] 보관 한도 분리 표시
+if (labelEl) labelEl.textContent = (isKo ? '정밀 로그' : 'PRECISION LOGS') + ' (' + list.length + '/' + maxLogs + ')';
 if (clearBtn) clearBtn.textContent = isKo ? '전체삭제' : 'CLEAR ALL';
 if (importBtn) importBtn.textContent = isKo ? '불러오기' : 'IMPORT';
 if (!list.length) {
@@ -11550,7 +11547,7 @@ try {
   // [추가 2026-10-20] 암밴드/손 보정슬롯 분리: 현재 프리런 슬롯 값을 각 슬롯의 초기값으로 1회만 복사한다.
   // 걸음 감지값(rotRejectThreshold)과 3회 평균 표식(avg3Prev/avg3Applied)은 가져오지 않는다. 실패해도 앱 시작에는 영향 없도록 try/catch.
   try {
-    ['armband', 'hand', 'trail'].forEach(function(_sp) {
+    ['armband', 'hand', 'trail', 'treadmill'].forEach(function(_sp) {
       const _flag = _sp + 'SlotSplitDone';
       if (_prof[_flag]) return;
       const _src = _prof.motionCalibOverrides && _prof.motionCalibOverrides.freerun;
@@ -20619,7 +20616,7 @@ const garmin = (function () {
     const prunedPinned = pinned.filter(id => aliveIds.indexOf(id) >= 0);
     if (prunedPinned.length !== pinned.length) savePinnedAutoLogIds(prunedPinned);
     pinned = prunedPinned;
-    const latest = capPrecLogsByGroup(allLogs, MAX_ANALYSIS_AUTOLOGS); // [수정 2026-11-13] 러닝머신/그 외 각각 최신 15개
+    const latest = allLogs.slice(0, MAX_ANALYSIS_AUTOLOGS);
     const latestIds = latest.map(l => l.id);
     const extra = allLogs.filter(l => latestIds.indexOf(l.id) < 0 && pinned.indexOf(l.id) >= 0);
     const autoLogs = allLogs.filter(l => latestIds.indexOf(l.id) >= 0 || pinned.indexOf(l.id) >= 0);
@@ -20629,8 +20626,7 @@ const garmin = (function () {
       selectedPrecLogIds = selectedPrecLogIds.filter(id => hiddenIds.indexOf(id) < 0);
       hiddenIds.forEach(id => { delete autoMatchedGarminByPrecLogId[id]; });
     }
-    const _latestTm = latest.filter(isTreadmillLog).length;
-    if (labelEl) labelEl.textContent = (isKo ? '자동저장 로그' : 'AUTO-SAVED LOGS') + ' (' + (latest.length - _latestTm) + '/' + MAX_ANALYSIS_AUTOLOGS + (_latestTm ? (' + ' + (isKo ? '러닝머신 ' : 'TREADMILL ') + _latestTm + '/' + MAX_ANALYSIS_AUTOLOGS) : '') + (extra.length ? ' + ' + extra.length + (isKo ? ' 복원' : ' restored') : '') + ')';
+    if (labelEl) labelEl.textContent = (isKo ? '자동저장 로그' : 'AUTO-SAVED LOGS') + ' (' + latest.length + '/' + MAX_ANALYSIS_AUTOLOGS + (extra.length ? ' + ' + extra.length + (isKo ? ' 복원' : ' restored') : '') + ')';
     renderRestorePanel(isKo); // 분석실에서 숨긴 로그가 있으면 복원 버튼/목록 표시
     if (!autoLogs.length) {
       if (currentText) currentText.textContent = isKo ? '자동저장 로그 없음' : 'NO AUTO-SAVED LOGS';
@@ -22285,7 +22281,7 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
   function renderCalibStatus(isKo) {
     const box = document.getElementById('garmin-calib-status');
     if (!box) return;
-    let overridesMap = {}, undosMap = {}, switchUndoOk = {}, resetUndoOk = {};
+    let overridesMap = {}, undosMap = {}, switchUndoOk = {};
     try {
       const p = storage.loadProfile();
       overridesMap = p.motionCalibOverrides || {};
@@ -22294,7 +22290,6 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
       // 적용한 위치가 이전 위치의 되돌리기를 지워버렸음)
       undosMap = p.motionCalibUndos || {};
       Object.keys(p.motionCalibSwitchUndos || {}).forEach(k => { try { if (switchUndoValid(p, k)) switchUndoOk[k] = true; } catch (_e) {} }); // [추가] 갈아타기 UNDO 버튼 표시 여부
-      Object.keys(p.motionCalibResetUndos || {}).forEach(k => { try { if (resetUndoValid(p, k)) resetUndoOk[k] = true; } catch (_e) {} }); // [추가] 초기화 UNDO RESET 버튼 표시 여부
     } catch (e) { overridesMap = {}; }
 
     const hasUndoFor = (pos) => !!undosMap[pos];
@@ -22378,7 +22373,6 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
         + '<button style="margin-top:8px; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.copySnippet(\'' + escapedSnippet + '\')">' + (isKo ? '스니펫 복사' : 'COPY SNIPPET') + '</button>'
         + undoBtnHtml(pos)
         + '<button class="c33" onclick="garmin.resetCalibration(\'' + pos + '\')">' + (isKo ? posLabel + '만 기본값으로 초기화' : 'RESET ' + posLabel + ' ONLY TO DEFAULT') + '</button>'
-        + (resetUndoOk[pos] ? '<button id="btn-undo-reset-' + pos + '" style="margin-top:8px; background:transparent; color:var(--primary); border:1.5px solid #2a3a2f; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.undoResetCalibration(\'' + pos + '\')">' + (isKo ? '초기화 취소 (초기화 직전 값으로 되돌리기)' : 'UNDO RESET') + '</button>' : '')
         + (isMotionOnlyPos(pos) ? '' : '<button style="margin-top:8px; background:transparent; color:var(--primary); border:1px solid #445544; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.applyCommittedDefault(\'' + pos + '\')">' + (isKo ? '최신 커밋된 기본값으로 갈아타기' : 'SWITCH TO LATEST COMMITTED DEFAULT') + '</button>'
           + (switchUndoOk[pos] ? '<button id="btn-undo-switch-' + pos + '" style="margin-top:8px; background:transparent; color:var(--primary); border:1.5px solid #2a3a2f; padding:10px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.undoCommittedDefault(\'' + pos + '\')">' + (isKo ? '갈아타기 취소 (직전 값으로 되돌리기)' : 'UNDO SWITCH') + '</button>' : ''))
         + '</div></details>';
@@ -22661,90 +22655,35 @@ if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'A
     }
   }
 
-  // [추가] 한 위치만 초기화(resetCalibration)하기 직전 상태를 motionCalibResetUndos[pos]에 백업해두고
-  // UNDO RESET 버튼으로 복원한다. 초기화 이후 보정값이 또 바뀌었다면(afterSig 불일치) 복원이
-  // 그 변경을 덮어쓰게 되므로 유효하지 않은 것으로 보고 버튼을 숨긴다.
-  function resetStateSig(prof, pos) {
-    const f = (m) => (m && typeof m[pos] === 'number') ? m[pos] : null;
-    return JSON.stringify([
-      (prof.motionCalibOverrides && prof.motionCalibOverrides[pos]) || null,
-      f(prof.strideCorrectionFactorByPos), f(prof.gpsDistCorrectionFactorByPos),
-      f(prof.cadCorrectionFactorByPos), f(prof.paceCorrectionFactorByPos)
-    ]);
-  }
-  function resetUndoValid(prof, pos) {
-    const u = prof && prof.motionCalibResetUndos && prof.motionCalibResetUndos[pos];
-    return !!(u && typeof u.afterSig === 'string' && u.afterSig === resetStateSig(prof, pos));
-  }
-  function undoResetCalibration(pos) {
-    const isKo = isKoLang();
-    try {
-      const prof = storage.loadProfile();
-      ensureCalibFactorMaps(prof);
-      const u = prof.motionCalibResetUndos && prof.motionCalibResetUndos[pos];
-      if (!u) {
-        alert(isKo ? '되돌릴 초기화 기록이 없습니다.' : 'No reset to undo.');
-        return;
-      }
-      if (!resetUndoValid(prof, pos)) {
-        delete prof.motionCalibResetUndos[pos];
-        storage.saveProfile(prof);
-        renderCalibStatus(isKo);
-        alert(isKo ? '초기화 이후 보정값이 또 바뀌어서 되돌릴 수 없습니다.' : 'Calibration changed after the reset, so it cannot be undone.');
-        return;
-      }
-      if (!prof.motionCalibOverrides) prof.motionCalibOverrides = {};
-      if (u.override) prof.motionCalibOverrides[pos] = u.override; else delete prof.motionCalibOverrides[pos];
-      if (!isMotionOnlyPos(pos) && u.factors) {
-        const restore = (map, k) => { if (typeof u.factors[k] === 'number' && u.factors[k] > 0) map[pos] = u.factors[k]; else delete map[pos]; };
-        restore(prof.strideCorrectionFactorByPos, 'stride');
-        restore(prof.gpsDistCorrectionFactorByPos, 'gps');
-        restore(prof.cadCorrectionFactorByPos, 'cad');
-        restore(prof.paceCorrectionFactorByPos, 'pace');
-        if (prof.devicePos === pos) {
-          const d = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || FACTORY_DEFAULT_FACTORS;
-          const eff = (map, k) => (typeof map[pos] === 'number' && map[pos] > 0) ? map[pos] : d[k];
-          const fl = u.flat || {};
-          const pick = (k, fallback) => (typeof fl[k] === 'number' && fl[k] > 0) ? fl[k] : fallback;
-          prof.strideCorrectionFactor = pick('stride', eff(prof.strideCorrectionFactorByPos, 'stride'));
-          prof.gpsDistCorrectionFactor = pick('gps', eff(prof.gpsDistCorrectionFactorByPos, 'gps'));
-          prof.cadCorrectionFactor = pick('cad', eff(prof.cadCorrectionFactorByPos, 'cad'));
-          prof.paceCorrectionFactor = pick('pace', eff(prof.paceCorrectionFactorByPos, 'pace'));
-        }
-      }
-      if (u.undo) { if (!prof.motionCalibUndos) prof.motionCalibUndos = {}; prof.motionCalibUndos[pos] = u.undo; }
-      delete prof.motionCalibResetUndos[pos]; // 한 번 되돌리면 기록 삭제(1단계)
-      storage.saveProfile(prof);
-      if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
-        app.motion.applyDevicePos(prof.devicePos || 'chest');
-      }
-      renderCalibStatus(isKo);
-      try { renderPendingCalibList(isKo); } catch (_e) {}
-      try { const _cd = document.getElementById('current-data-result'); if (_cd && _cd.classList.contains('is-open')) { ui.toggleCurrentData(); ui.toggleCurrentData(); } } catch (_e) {}
-      const lbl = getPosLabel(pos, isKo);
-      alert(isKo ? '[' + lbl + '] 위치를 초기화 직전 값으로 되돌렸습니다.' : '[' + lbl + '] restored to the values before the reset.');
-    } catch (err) {
-      alert((isKo ? '되돌리기 중 오류: ' : 'Undo error: ') + err.message);
-    }
-  }
-
   // [추가] 적용된 보정값을 지우고 코드 기본값(위치별 프로파일)으로 되돌린다.
   // 보폭 보정계수는 override 적용 직전의 값으로 정확히 복원(다른 기능인 실측거리
   // 캘리브레이션 값을 실수로 지우지 않기 위함). 지금 살아있는 app.motion에도 바로 반영.
-  async function resetCalibration(pos) { // [수정] 누르자마자 초기화되던 것을 실행 전 확인/취소 창을 거치도록 변경
+  async function resetCalibration(pos) { // [수정 2026-11-13] 실행 전 "현재값 → 팩토리값" 확인/취소 창 추가(예전엔 누르면 바로 초기화되고 OK 알림만 떴음)
     const isKo = isKoLang();
     try {
-      const prof0 = storage.loadProfile();
-      if (!prof0.motionCalibOverrides || !prof0.motionCalibOverrides[pos]) {
-        return;
-      }
       {
-        const lbl0 = getPosLabel(pos, isKo);
-        const msg0 = isKo
-          ? '[' + lbl0 + '] 위치 보정값을 기본값으로 초기화할까요?\n\n초기화 직후에는 UNDO RESET 버튼으로 직전 값으로 되돌릴 수 있어요. 다른 위치는 그대로예요.'
-          : 'Reset [' + lbl0 + '] calibration to default?\n\nYou can restore the previous values right after with the UNDO RESET button. Other positions are unchanged.';
-        const ok0 = await appConfirm(msg0, { ok: isKo ? '초기화' : 'RESET', cancel: isKo ? '취소' : 'CANCEL', multiline: true });
-        if (!ok0) return;
+        const p0 = storage.loadProfile();
+        if (!p0.motionCalibOverrides || !p0.motionCalibOverrides[pos]) {
+          return;
+        }
+        ensureCalibFactorMaps(p0);
+        const f0 = FACTORY_DEFAULT_FACTORS;
+        const cur0 = (map, d) => (map && typeof map[pos] === 'number' && map[pos] > 0) ? map[pos] : d;
+        let lines = '';
+        if (!isMotionOnlyPos(pos)) {
+          lines = [
+            ['stride', cur0(p0.strideCorrectionFactorByPos, f0.stride), f0.stride],
+            ['gps', cur0(p0.gpsDistCorrectionFactorByPos, f0.gps), f0.gps],
+            ['cad', cur0(p0.cadCorrectionFactorByPos, f0.cad), f0.cad],
+            ['pace', cur0(p0.paceCorrectionFactorByPos, f0.pace), f0.pace]
+          ].map(r => r[0] + '  ' + r[1].toFixed(3) + ' → ' + r[2].toFixed(3) + (Math.abs(r[1] - r[2]) < 1e-9 ? '' : '  ●')).join('\n') + '\n\n';
+        }
+        const posLabel0 = getPosLabel(pos, isKo);
+        const msg = isKo
+          ? '[' + posLabel0 + '] 위치 보정값을 팩토리 기본값(보정없음)으로 초기화할까요?\n\n' + lines + '모션 보정(GCT 등)도 팩토리값으로 돌아가고, 이 위치의 UNDO 기록도 지워져요. 다른 위치는 그대로예요.'
+          : 'Reset [' + posLabel0 + '] calibration to factory defaults (no correction)?\n\n' + lines + 'Motion calibration (GCT etc.) also returns to factory values, and this position\'s UNDO history is cleared. Other positions are unchanged.';
+        const ok = await appConfirm(msg, { ok: isKo ? '초기화' : 'RESET', cancel: isKo ? '취소' : 'CANCEL', multiline: true });
+        if (!ok) return;
       }
       const prof = storage.loadProfile(); // 확인창이 떠 있는 동안 바뀌었을 수 있으니 다시 읽는다
       if (!prof.motionCalibOverrides || !prof.motionCalibOverrides[pos]) {
@@ -22759,22 +22698,6 @@ if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'A
       // 그래서 RESET은 절대 안 바뀌는 FACTORY_DEFAULT_FACTORS(항상 1.0)를 참조한다.
       // 위치별 슬롯이므로 이 pos에 대해서만 초기화하고 다른 위치는 그대로 둔다.
       ensureCalibFactorMaps(prof);
-      // [추가] 초기화 직전 상태 백업. 초기화를 연속으로 두 번 눌러도(상태가 아직 초기화 직후 그대로면)
-      // 진짜 이전 값 백업을 덮어쓰지 않고 기존 백업을 유지한다.
-      const _numOrNull = (v) => (typeof v === 'number' ? v : null);
-      const _keepOldBackup = resetUndoValid(prof, pos);
-      const _backup = _keepOldBackup ? null : {
-        override: prof.motionCalibOverrides[pos] ? JSON.parse(JSON.stringify(prof.motionCalibOverrides[pos])) : null,
-        undo: (prof.motionCalibUndos && prof.motionCalibUndos[pos]) ? JSON.parse(JSON.stringify(prof.motionCalibUndos[pos])) : null,
-        factors: {
-          stride: _numOrNull(prof.strideCorrectionFactorByPos[pos]), gps: _numOrNull(prof.gpsDistCorrectionFactorByPos[pos]),
-          cad: _numOrNull(prof.cadCorrectionFactorByPos[pos]), pace: _numOrNull(prof.paceCorrectionFactorByPos[pos])
-        },
-        flat: (prof.devicePos === pos) ? {
-          stride: _numOrNull(prof.strideCorrectionFactor), gps: _numOrNull(prof.gpsDistCorrectionFactor),
-          cad: _numOrNull(prof.cadCorrectionFactor), pace: _numOrNull(prof.paceCorrectionFactor)
-        } : null
-      };
       const defFactors = FACTORY_DEFAULT_FACTORS;
       if (!isMotionOnlyPos(pos)) { // [추가] 프리런은 보정계수 슬롯이 없어 모션 override만 초기화
       prof.strideCorrectionFactorByPos[pos] = defFactors.stride;
@@ -22809,11 +22732,6 @@ if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'A
       // 안 된 것처럼 보이는 버그가 있었음(사용자 리포트로 발견). 리셋은 완전히
       // 새로운 원점이므로 이 위치의 undo 스냅샷도 함께 지운다.
       if (prof.motionCalibUndos) delete prof.motionCalibUndos[pos];
-      if (_backup) {
-        if (!prof.motionCalibResetUndos) prof.motionCalibResetUndos = {};
-        _backup.afterSig = resetStateSig(prof, pos);
-        prof.motionCalibResetUndos[pos] = _backup;
-      }
       storage.saveProfile(prof);
 
       if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
@@ -22825,7 +22743,7 @@ if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'A
       if (resultBox) resultBox.innerHTML = '';
       lastSuggestion = null;
       const resetPosLabel = getPosLabel(pos, isKo);
-      alert(isKo ? '[' + resetPosLabel + '] 위치만 기본값으로 초기화되었습니다. 다른 위치는 그대로예요.\n되돌리려면 UNDO RESET 버튼을 누르세요.' : '[' + resetPosLabel + '] reset to default. Other positions are unchanged.\nTap UNDO RESET to restore the previous values.');
+      alert(isKo ? '[' + resetPosLabel + '] 위치만 기본값으로 초기화되었습니다. 다른 위치는 그대로예요.' : '[' + resetPosLabel + '] reset to default. Other positions are unchanged.');
     } catch (err) {
       alert((isKo ? '초기화 중 오류: ' : 'Reset error: ') + err.message);
     }
@@ -23133,7 +23051,6 @@ if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'A
         };
         if (prof.motionCalibUndos) delete prof.motionCalibUndos[pos];
       });
-      prof.motionCalibResetUndos = {}; // [추가] 전체 초기화는 자체 복원 버튼이 있으니 위치별 초기화 백업은 비운다
       storage.saveProfile(prof);
 
       if (typeof app !== 'undefined' && app && app.motion && typeof app.motion.applyDevicePos === 'function') {
@@ -23306,7 +23223,7 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
     saveTextFileNative(reportStr, fileName, 'text/plain;charset=utf-8', isKo);
   }
 
-  return { refreshCalibStatus: function () { renderCalibStatus(isKoLang()); }, clearAllSelections, hideAutoLog, clearHiddenList, toggleRestorePanel, toggleRestoreSel, restoreSelectedAutoLogs, importFitFile, deleteImport, quickCompareFit, quickRunGroup, quickTogglePair, quickReset, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, toggleGarminDetail, openInfo, closeInfo, togglePrecLogSelect, togglePrecLogSelectAutoMatch, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, undoResetCalibration, applyCommittedDefault, undoCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
+  return { refreshCalibStatus: function () { renderCalibStatus(isKoLang()); }, clearAllSelections, hideAutoLog, clearHiddenList, toggleRestorePanel, toggleRestoreSel, restoreSelectedAutoLogs, importFitFile, deleteImport, quickCompareFit, quickRunGroup, quickTogglePair, quickReset, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, toggleGarminDetail, openInfo, closeInfo, togglePrecLogSelect, togglePrecLogSelectAutoMatch, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, undoCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
