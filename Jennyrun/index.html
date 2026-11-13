@@ -4823,6 +4823,9 @@ const MOTION_ONLY_POS = ['freerun', 'trail', 'treadmill']; // [수정 2026-10-20
 function isMotionOnlyPos(pos) { return MOTION_ONLY_POS.indexOf(pos) >= 0; }
 // [추가 2026-10-20] 트레일 = 프리런과 같은 구조(착용 위치 무관 · 전용 내부 모션 엔진 · 모션 전용 슬롯)이되 보정 슬롯은 'trail'로 독립.
 function isFreerunLikeMode(mode) { return mode === 'freerun' || mode === 'trail'; }
+// [추가 2026-11-13] 정밀 로그 보관 한도 분리: 러닝머신 로그와 그 외 로그가 각각 최대 max개(최신순). 한쪽이 쌓여도 다른 쪽을 밀어내지 않는다.
+function isTreadmillLog(l) { return !!(l && (l.isTreadmill || l.devicePos === 'treadmill')); }
+function capPrecLogsByGroup(list, max) { let g = 0, t = 0; return (Array.isArray(list) ? list : []).filter(function (l) { return isTreadmillLog(l) ? (++t <= max) : (++g <= max); }); }
 function engineSlotKeyOf(mode, tm) { return mode === 'trail' ? 'trail' : ((mode === 'freerun' && tm) ? 'treadmill' : 'freerun'); } // [수정 2026-11-12] 러닝머신 = 독립 슬롯 'treadmill'
 // [추가 2026-08-21] gctFallbackRatio만 예외적으로 "진짜 팩토리 원점"이 있다 — Malisoux 2019
 // (레크리에이션 러너 860명 평균 듀티팩터, 남 39%/여 41%)에 근거한 인구평균값 0.40으로,
@@ -5993,7 +5996,7 @@ getMaxPrecisionLogs() { return 15; }
 // 하나씩 줄여서라도 저장이 성공하게 한다 (긴 러닝 로그가 많으면 30개가 다 안 들어갈 수 있음).
 // 최신 로그 1개조차 못 넣을 때만 savePrecisionLogsList()의 기존 실패 알림이 뜬다.
 savePrecisionLogsCapped(list) {
-let arr = list.slice(0, this.getMaxPrecisionLogs());
+let arr = capPrecLogsByGroup(list, this.getMaxPrecisionLogs()); // [수정 2026-11-13] 러닝머신/그 외 각각 15개
 while (arr.length > 1) {
 try {
 bigStore.set(this.getPrecisionLogsKey(), arr); // [수정 2026-10-05] 원본: localStorage.setItem(this.getPrecisionLogsKey(), JSON.stringify(arr));
@@ -6008,7 +6011,7 @@ loadPrecisionLogs() {
 try {
 const arr = bigStore.get(this.getPrecisionLogsKey(), []); // [수정 2026-10-05] 원본: localStorage.getItem(...) 후 JSON.parse
 // [추가] 예전에 30개까지 쌓인 로그가 있어도 상한(15개)만 보이도록 자름
-return Array.isArray(arr) ? arr.slice(0, this.getMaxPrecisionLogs()) : [];
+return Array.isArray(arr) ? capPrecLogsByGroup(arr, this.getMaxPrecisionLogs()) : []; // [수정 2026-11-13] 러닝머신/그 외 각각 15개
 } catch (e) { return []; }
 }
 savePrecisionLogsList(list) {
@@ -7848,7 +7851,7 @@ if (!wrap) return;
 const list = storage.loadPrecisionLogs();
 const isKo = storage.getLang() === 'ko';
 const maxLogs = storage.getMaxPrecisionLogs();
-if (labelEl) labelEl.textContent = (isKo ? '정밀 로그' : 'PRECISION LOGS') + ' (' + list.length + '/' + maxLogs + ')';
+{ const _tmN = list.filter(isTreadmillLog).length; if (labelEl) labelEl.textContent = (isKo ? '정밀 로그' : 'PRECISION LOGS') + ' (' + (list.length - _tmN) + '/' + maxLogs + (_tmN ? (' + ' + (isKo ? '러닝머신 ' : 'TREADMILL ') + _tmN + '/' + maxLogs) : '') + ')'; } // [수정 2026-11-13] 보관 한도 분리 표시
 if (clearBtn) clearBtn.textContent = isKo ? '전체삭제' : 'CLEAR ALL';
 if (importBtn) importBtn.textContent = isKo ? '불러오기' : 'IMPORT';
 if (!list.length) {
@@ -20616,7 +20619,7 @@ const garmin = (function () {
     const prunedPinned = pinned.filter(id => aliveIds.indexOf(id) >= 0);
     if (prunedPinned.length !== pinned.length) savePinnedAutoLogIds(prunedPinned);
     pinned = prunedPinned;
-    const latest = allLogs.slice(0, MAX_ANALYSIS_AUTOLOGS);
+    const latest = capPrecLogsByGroup(allLogs, MAX_ANALYSIS_AUTOLOGS); // [수정 2026-11-13] 러닝머신/그 외 각각 최신 15개
     const latestIds = latest.map(l => l.id);
     const extra = allLogs.filter(l => latestIds.indexOf(l.id) < 0 && pinned.indexOf(l.id) >= 0);
     const autoLogs = allLogs.filter(l => latestIds.indexOf(l.id) >= 0 || pinned.indexOf(l.id) >= 0);
@@ -20626,7 +20629,8 @@ const garmin = (function () {
       selectedPrecLogIds = selectedPrecLogIds.filter(id => hiddenIds.indexOf(id) < 0);
       hiddenIds.forEach(id => { delete autoMatchedGarminByPrecLogId[id]; });
     }
-    if (labelEl) labelEl.textContent = (isKo ? '자동저장 로그' : 'AUTO-SAVED LOGS') + ' (' + latest.length + '/' + MAX_ANALYSIS_AUTOLOGS + (extra.length ? ' + ' + extra.length + (isKo ? ' 복원' : ' restored') : '') + ')';
+    const _latestTm = latest.filter(isTreadmillLog).length;
+    if (labelEl) labelEl.textContent = (isKo ? '자동저장 로그' : 'AUTO-SAVED LOGS') + ' (' + (latest.length - _latestTm) + '/' + MAX_ANALYSIS_AUTOLOGS + (_latestTm ? (' + ' + (isKo ? '러닝머신 ' : 'TREADMILL ') + _latestTm + '/' + MAX_ANALYSIS_AUTOLOGS) : '') + (extra.length ? ' + ' + extra.length + (isKo ? ' 복원' : ' restored') : '') + ')';
     renderRestorePanel(isKo); // 분석실에서 숨긴 로그가 있으면 복원 버튼/목록 표시
     if (!autoLogs.length) {
       if (currentText) currentText.textContent = isKo ? '자동저장 로그 없음' : 'NO AUTO-SAVED LOGS';
