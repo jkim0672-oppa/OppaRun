@@ -2550,6 +2550,11 @@ alt="runner"/>
     <div id="precision-log-dropdown-options" class="precision-dropdown-options c12 log-dd-panel"></div>
   </div>
   <div id="precision-log-list"></div>
+  <!-- [추가 2026-11-12] 러닝머신 보정 로그(프리런/정밀 로그와 별도 저장소) -->
+  <div class="c20" style="margin-top:18px;">
+    <div class="settings-label u-margin-bottom-0" id="label-tm-calib-log">TREADMILL CALIBRATION</div>
+  </div>
+  <div id="tm-calib-log-list"></div>
 </div>
 <div class="settings-group u-margin-top-14px">
 <div id="label-data-backup" class="settings-label">FULL DATA BACKUP</div>
@@ -4814,11 +4819,11 @@ function refreshCalibAvg3Switch() {
 // [추가 2026-09-20] "모션 전용" 위치 목록. 프리런은 GCT/수직진동(=motionCalibOverrides)만 보정 슬롯을 갖고,
 // 보폭/GPS거리/케이던스/페이스 보정계수 슬롯은 없다 — 프리런의 코어 지표(케이던스·거리·페이스)는
 // 네이티브 걸음센서/GPS 그대로 유지하기 위함. 위치별 보정계수 맵(...ByPos)에는 이 위치를 절대 쓰지 않는다.
-const MOTION_ONLY_POS = ['freerun', 'trail']; // [수정 2026-10-20] 트레일도 프리런과 같은 모션 전용 슬롯(보정계수 슬롯 없음)
+const MOTION_ONLY_POS = ['freerun', 'trail', 'treadmill']; // [수정 2026-10-20] 트레일도 프리런과 같은 모션 전용 슬롯(보정계수 슬롯 없음)
 function isMotionOnlyPos(pos) { return MOTION_ONLY_POS.indexOf(pos) >= 0; }
 // [추가 2026-10-20] 트레일 = 프리런과 같은 구조(착용 위치 무관 · 전용 내부 모션 엔진 · 모션 전용 슬롯)이되 보정 슬롯은 'trail'로 독립.
 function isFreerunLikeMode(mode) { return mode === 'freerun' || mode === 'trail'; }
-function engineSlotKeyOf(mode) { return mode === 'trail' ? 'trail' : 'freerun'; }
+function engineSlotKeyOf(mode, tm) { return mode === 'trail' ? 'trail' : ((mode === 'freerun' && tm) ? 'treadmill' : 'freerun'); } // [수정 2026-11-12] 러닝머신 = 독립 슬롯 'treadmill'
 // [추가 2026-08-21] gctFallbackRatio만 예외적으로 "진짜 팩토리 원점"이 있다 — Malisoux 2019
 // (레크리에이션 러너 860명 평균 듀티팩터, 남 39%/여 41%)에 근거한 인구평균값 0.40으로,
 // 특정 폰/사용자 실측이 아닌 독립적 연구값이라 FACTORY_DEFAULT_FACTORS(1.0)와 같은 자격을 가짐.
@@ -4874,6 +4879,7 @@ const FACTORY_MOTION_PROFILES = {
   // [추가 2026-09-20] chest/waist/armband/hand 에는 절대 영향이 없다. vertScale은 hand/armband와
   // 동일하게 0으로 리셋(이전엔 허리 커밋값 0.511을 시드로 빌려왔었음) — 프리런 전용 실측이 쌓이면 켠다.
   freerun: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.142, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] hand/armband과 동일하게 vertEnabled:false·vertScale:0으로 리셋 — 프리런 전용 실측 검증 전까진 꺼두고 원시 진폭만 쌓는다
+  treadmill: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.142, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [추가 2026-11-12] 러닝머신 독립 슬롯 — 프리런 현재값을 시드로 복사, 이후 프리런과 별개로 보정
   trail: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.133, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [추가 2026-10-20] 트레일 전용 슬롯(프리런 구조, 위치 무관) — 프리런 값을 시작값으로 복사
 };
 // [리팩토링 2026-08-21] 위치별 모션 프로파일(gctFallbackRatio 등)이 이 파일 3곳
@@ -4916,6 +4922,7 @@ const DEVICE_MOTION_PROFILES = {
   // [수정 2026-09-21] armband/hand와 동일한 이유로 vertScale 시드 적용(0 → 가슴 커밋값 0.492).
   // vertEnabled는 false 그대로 유지 — 가민 분석실 비교표 표시 전용, 메인 화면·기록엔 영향 없음.
   freerun: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.142, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [수정 2026-09-20] 허리 커밋값(0.511)을 시드로 빌려와 vertEnabled:true였던 걸 되돌림 — hand/armband과 동일하게 꺼두고 프리런 전용 데이터로 새로 검증한다. GCT 쪽(gctFallbackRatio 등)은 그대로.
+  treadmill: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.142, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [추가 2026-11-12] 러닝머신 독립 슬롯 — 프리런 현재값을 시드로 복사, 이후 프리런과 별개로 보정
   trail: { groundThreshold: 11, impactThreshold: 10.5, gctFallbackRatio: 0.73, vertScale: 0.133, minStepInterval: 230, vertEnabled: true, rotRejectThreshold: 220, nativeRescueEnabled: false, stepTrigger: 'native', gctFilterDelayMs: 55 }, // [추가 2026-10-20] 트레일 전용 슬롯(프리런 구조, 위치 무관) — 프리런 값을 시작값으로 복사
 };
 // [삭제 2026-08-22] 예전엔 APP_DEFAULT_MOTION_PROFILES(=DEVICE_MOTION_PROFILES 별칭)라는
@@ -5365,7 +5372,7 @@ function runPosText(item, opts) {
   opts = opts || {}; item = item || {};
   var lang = opts.lang, isKo = typeof lang === 'boolean' ? lang : lang === 'ko';
   var pos = '';
-  if (item.treadmill && !opts.noFreerun) { // [TMILL] 트레드밀 기록은 착용 위치 대신 러닝머신 표기
+  if ((item.treadmill || item.isTreadmill) && !opts.noFreerun) { // [TMILL] 트레드밀 기록은 착용 위치 대신 러닝머신 표기
   pos = opts.abbr ? 'TM' : (isKo ? '러닝머신' : 'TREADMILL');
   } else if (item.isTrail && !opts.noFreerun) {
     pos = opts.abbr ? 'T' : (getPosLabelMap(isKo).trail || (isKo ? '트레일러닝' : 'TRAIL'));
@@ -5381,7 +5388,7 @@ function runPosText(item, opts) {
 function getPosLabelMap(langOrIsKo) {
 const isKo = typeof langOrIsKo === 'boolean' ? langOrIsKo : langOrIsKo === 'ko';
 const tt = translations[isKo ? 'ko' : 'en'];
-return { chest: tt.devposChest, waist: tt.devposWaist, armband: tt.devposArmband, hand: tt.devposHand, freerun: tt.modeFreerunLabel, trail: tt.modeTrailLabel };
+return { chest: tt.devposChest, waist: tt.devposWaist, armband: tt.devposArmband, hand: tt.devposHand, freerun: tt.modeFreerunLabel, trail: tt.modeTrailLabel, treadmill: (isKo ? '러닝머신' : 'TREADMILL') };
 }
 // [수정] 활동모드 명사 라벨(트레일러닝/프리러닝 등)이 2곳(SNS 공유카드/크루피드 공유텍스트)에서
 // 표기가 어긋나 있던 것(트레일런/프리런 vs 트레일러닝/프리러닝)을 앱 전체 표기(modeFreerunLabel 등)와
@@ -5396,6 +5403,48 @@ const Treadmill = {
   setFlag(v) { try { localStorage.setItem('oppaRunTreadmill', v ? '1' : '0'); } catch (e) {} },
   getScale() { try { const v = parseFloat(localStorage.getItem('oppaRunTreadmillScale')); return (v > 0.5 && v < 2) ? v : 1.0; } catch (e) { return 1.0; } },
   setScale(v) { try { localStorage.setItem('oppaRunTreadmillScale', String(v)); } catch (e) {} },
+  // [추가 2026-11-12] 러닝머신 보정 로그: 종료 후 거리 입력으로 보폭 배율이 바뀔 때마다 1건씩 기록(최근 30건). 프리런과 무관한 자체 키.
+  getCalibLog() { try { const a = JSON.parse(localStorage.getItem('oppaRunTreadmillCalibLog') || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } },
+  setCalibLog(a) { try { localStorage.setItem('oppaRunTreadmillCalibLog', JSON.stringify((Array.isArray(a) ? a : []).slice(0, 30))); } catch (e) {} },
+  addCalibLog(entry) { const a = Treadmill.getCalibLog(); a.unshift(entry); Treadmill.setCalibLog(a); },
+  // [추가 2026-11-12] 설정 탭에서 보정 기록 1건 삭제 / 전체 삭제. 기록만 지우며 현재 보폭 배율은 그대로 유지한다.
+  deleteCalibLog(t) { Treadmill.setCalibLog(Treadmill.getCalibLog().filter(e => e.t !== t)); Treadmill.renderCalibLog(); },
+  async clearCalibLog() { const ko = storage.getLang() === 'ko'; if (!Treadmill.getCalibLog().length) return; if (await appConfirm(ko ? '러닝머신 보정 기록을 전부 삭제할까요? 현재 보폭 배율은 유지됩니다.' : 'Delete all treadmill calibration entries? The current stride scale is kept.')) { Treadmill.setCalibLog([]); Treadmill.renderCalibLog(); } },
+  // [추가 2026-11-12] 설정 탭: 현재 보폭 배율 + 최근 보정 10건 표시(읽기 전용). 기존 카드 클래스를 그대로 재사용.
+  renderCalibLog() {
+    const wrap = document.getElementById('tm-calib-log-list'); if (!wrap) return;
+    const ko = storage.getLang() === 'ko', mi = storage.getUnit() === 'mi', u = mi ? 'mi' : 'km', k = mi ? 0.621371 : 1;
+    const list = Treadmill.getCalibLog();
+    const label = document.getElementById('label-tm-calib-log');
+    if (label) label.textContent = (ko ? '러닝머신 보정' : 'TREADMILL CALIBRATION') + ' (' + list.length + '/30)';
+    const num = (v) => { v = Number(v); return isFinite(v) ? v : 0; };
+    let html = '<div class="garmin-import-item"><div class="garmin-import-item-head"><div class="garmin-import-item-title u-line-height-1-5">'
+      + '<div>' + (ko ? '현재 보폭 배율' : 'Current stride scale') + ' ×' + Treadmill.getScale().toFixed(3) + '</div>'
+      + '<div class="c26">' + (ko ? '종료 후 입력한 거리로 학습 · 프리런과 별도 저장' : 'Learned from the distance you enter · stored separately from Free Run') + '</div>'
+      + '</div>' + (list.length ? '<div class="c07"><div class="garmin-import-item-del" onclick="Treadmill.clearCalibLog()">' + (ko ? '전체삭제' : 'CLEAR ALL') + '</div></div>' : '') + '</div></div>';
+    if (!list.length) {
+      html += '<div class="garmin-import-empty">' + (ko ? '보정 기록이 없습니다. 러닝머신을 종료할 때 거리를 입력하면 쌓입니다.' : 'No corrections yet. They appear when you enter the distance after a treadmill run.') + '</div>';
+    } else {
+      html += list.slice(0, 10).map(function (e) {
+        const d = new Date(e.t), p2 = (n) => String(n).padStart(2, '0');
+        const ds = isNaN(d.getTime()) ? '-' : ((d.getMonth() + 1) + '.' + d.getDate() + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()));
+        const delBtn = '</div><div class="c07"><div class="garmin-import-item-del" onclick="Treadmill.deleteCalibLog(\'' + e.t + '\')">' + (ko ? '삭제' : 'DELETE') + '</div></div></div></div>';
+        if (e.skipped) {
+          return '<div class="garmin-import-item"><div class="garmin-import-item-head"><div class="garmin-import-item-title u-line-height-1-5">'
+            + '<div>' + ds + ' · ' + (ko ? '건너뜀 · 추정 ' : 'Skipped · Est ') + (num(e.estKm) * k).toFixed(2) + ' ' + u + '</div>'
+            + '<div class="c26">' + (ko ? '배율' : 'Scale') + ' ' + num(e.scaleBefore).toFixed(3) + ' · ' + (ko ? '보정 안 함' : 'not corrected') + '</div>' + delBtn;
+        }
+        const sub = e.applied
+          ? ((ko ? '배율' : 'Scale') + ' ' + num(e.scaleBefore).toFixed(3) + ' → ' + num(e.scaleAfter).toFixed(3))
+          : ((ko ? '배율' : 'Scale') + ' ' + num(e.scaleBefore).toFixed(3) + ' · ' + (ko ? '변경 없음(너무 짧거나 오차 과대)' : 'unchanged (too short or error too large)'));
+        return '<div class="garmin-import-item"><div class="garmin-import-item-head"><div class="garmin-import-item-title u-line-height-1-5">'
+          + '<div>' + ds + ' · ' + (ko ? '추정 ' : 'Est ') + (num(e.estKm) * k).toFixed(2) + ' → ' + (ko ? '입력 ' : 'Entered ') + (num(e.actualKm) * k).toFixed(2) + ' ' + u + ' (×' + num(e.ratio).toFixed(2) + ')</div>'
+          + '<div class="c26">' + sub + '</div>' + delBtn;
+      }).join('');
+      if (list.length > 10) html += '<div class="garmin-import-empty">' + (ko ? ('최근 10건만 표시 (총 ' + list.length + '건 저장)') : ('Showing latest 10 (' + list.length + ' stored)')) + '</div>';
+    }
+    wrap.innerHTML = html;
+  },
   // 케이던스(spm)와 키로 1걸음 길이(m) 추정. 걷기/달리기 구간을 나눠 선형 근사하고, 종료 후 입력한 실제 거리로 학습한 배율(scale)을 곱한다.
   stepLenM(heightCm, spm, scale) {
   const h = (heightCm > 100 ? heightCm : 170) / 100;
@@ -5461,6 +5510,7 @@ ov.style.alignItems = 'flex-start';
 ov.style.paddingTop = 'calc(env(safe-area-inset-top, 0px) + 56px)';
 ov.innerHTML = '<div class="custom-confirm-box">'
 + '<div class="custom-confirm-msg" style="margin-bottom:12px;">' + (ko ? '러닝머신 거리 입력' : 'Treadmill distance') + '<div style="font-size:13px;font-weight:600;opacity:.75;margin-top:6px;">' + (ko ? '러닝머신 표시 거리를 입력하면 기록과 다음 추정이 보정돼요.' : 'Enter the treadmill distance to correct this run and future estimates.') + '<br>' + (ko ? '추정 거리: ' : 'Estimated: ') + estShown + ' ' + uTxt + '</div></div>'
++ '<div id="tm-presets" style="display:flex;gap:8px;margin-bottom:10px;">' + [1, 3, 5, 10].map(function (v) { return '<button type="button" class="tm-preset" data-v="' + v + '" style="flex:1;padding:12px 0;font-size:16px;font-weight:800;border-radius:10px;border:1px solid #666;background:transparent;color:inherit;cursor:pointer;">' + v + ' ' + uTxt + '</button>'; }).join('') + '</div>'
 + '<input id="tm-dist-input" type="number" inputmode="decimal" step="0.01" min="0" placeholder="' + uTxt + '" style="width:100%;box-sizing:border-box;padding:12px;font-size:18px;border-radius:10px;border:1px solid #666;background:transparent;color:inherit;margin-bottom:16px;">'
 + '<div class="custom-confirm-actions"><button id="tm-skip" class="btn-confirm-act btn-confirm-cancel">' + (ko ? '건너뛰기' : 'SKIP') + '</button><button id="tm-ok" class="btn-confirm-act btn-confirm-save">' + (ko ? '저장' : 'SAVE') + '</button></div></div>';
 document.body.appendChild(ov);
@@ -5469,18 +5519,29 @@ ov.remove();
 if (val != null && val > 0) {
 const actualKm = mi ? val / 0.621371 : val;
 const ratio = est > 0 ? actualKm / est : 0;
+const scaleBefore = Treadmill.getScale(); let scaleAfter = scaleBefore, applied = false; // [추가 2026-11-12] 보정 로그용
 if (est >= 0.3 && ratio >= 0.5 && ratio <= 2) {
 const ns = Math.max(0.6, Math.min(1.6, Treadmill.getScale() * (0.5 + 0.5 * ratio)));
-Treadmill.setScale(Math.round(ns * 1000) / 1000);
+scaleAfter = Math.round(ns * 1000) / 1000; Treadmill.setScale(scaleAfter); applied = true;
 }
+Treadmill.addCalibLog({ t: new Date().toISOString(), sec: app.state.seconds || 0, estKm: Math.round(est * 1000) / 1000, actualKm: Math.round(actualKm * 1000) / 1000, ratio: Math.round(ratio * 1000) / 1000, scaleBefore: scaleBefore, scaleAfter: scaleAfter, applied: applied }); // [추가 2026-11-12]
+app.state.tmEstKm = est; app.state.tmActualKm = actualKm; // [추가 2026-11-12] 기록에 추정/입력 거리 함께 저장
 app.state.totalDist = actualKm;
+} else { // [추가 2026-11-12] 건너뛰기/빈 값 저장도 보정 로그에 남김(보정 안 함)
+const _sc = Treadmill.getScale();
+Treadmill.addCalibLog({ t: new Date().toISOString(), sec: app.state.seconds || 0, estKm: Math.round(est * 1000) / 1000, actualKm: null, ratio: null, scaleBefore: _sc, scaleAfter: _sc, applied: false, skipped: true });
 }
 app.state._tmAsked = true;
 app.onFinish();
 };
 ov.querySelector('#tm-skip').onclick = () => done(null);
 ov.querySelector('#tm-ok').onclick = () => { const v = parseFloat(ov.querySelector('#tm-dist-input').value); done(isFinite(v) && v > 0 ? v : null); };
-setTimeout(() => { try { ov.querySelector('#tm-dist-input').focus(); } catch (e) {} }, 100);
+// [수정 2026-11-12] 입력창은 열릴 때 자동 포커스(키보드 바로 표시). 프리셋 버튼은 입력칸을 채우기만 하고 포커스/키보드는 유지한다(SAVE로 확정).
+{ const inp = ov.querySelector('#tm-dist-input'), pbs = ov.querySelectorAll('.tm-preset');
+const syncPreset = () => { pbs.forEach(b => { const on = inp.value !== '' && parseFloat(inp.value) === parseFloat(b.dataset.v); b.style.borderColor = on ? 'var(--primary)' : '#666'; b.style.background = on ? 'rgba(0,255,136,0.15)' : 'transparent'; b.style.color = on ? 'var(--primary)' : 'inherit'; }); };
+pbs.forEach(b => { b.addEventListener('mousedown', (e) => e.preventDefault()); b.onclick = () => { inp.value = b.dataset.v; syncPreset(); try { inp.focus(); } catch (e) {} }; });
+inp.addEventListener('input', syncPreset);
+setTimeout(() => { try { inp.focus(); } catch (e) {} }, 100); }
 }
 };
 function getTreadmillFlag() { return Treadmill.getFlag(); } // [TMILL] 별칭
@@ -5902,6 +5963,7 @@ garminImports: bigStore.get('oppaRunGarminImports', []), // [수정 2026-10-05] 
 precLogImports: bigStore.get('oppaRunPrecLogImports', []), // [수정 2026-10-05] 원본: this._readRaw('oppaRunPrecLogImports', [])
 pendingCalibRuns: this._readRaw('oppaRunPendingCalibRuns', []),
 treadmillScale: Treadmill.getScale(), // [TMILL] 학습된 러닝머신 보폭 보정값
+treadmillCalibLog: Treadmill.getCalibLog(), // [추가 2026-11-12] 러닝머신 보정 로그
 community: {
 nickname: localStorage.getItem('jennyRunNickname') || '',
 userId: localStorage.getItem('jennyRunUserId') || '',
@@ -5982,7 +6044,7 @@ const list = this.loadPrecisionLogs();
 // [추가] isFreerun: 프리런은 착용 위치가 devicePos에 기록되지 않으므로(null),
 // 이 플래그로 "FREE RUN" 로그임을 구분한다. [수정 2026-09-20] 가민 분석실은 이제 이 플래그를
 // 5번째 위치('freerun')로 취급해 GCT/수직진동을 비교·보정한다(다른 4개 위치와 독립).
-list.unshift({ id: 'plog_' + Date.now(), savedAt: new Date().toISOString(), log: finalLog, downsampled: downsampled, devicePos: devicePos || null, isFreerun: activityMode === 'freerun', isTrail: activityMode === 'trail', proRun: (proRun === true || proRun === false) ? proRun : null });
+list.unshift({ id: 'plog_' + Date.now(), savedAt: new Date().toISOString(), log: finalLog, downsampled: downsampled, devicePos: devicePos || null, isFreerun: activityMode === 'freerun', isTrail: activityMode === 'trail', isTreadmill: activityMode === 'treadmill', proRun: (proRun === true || proRun === false) ? proRun : null });
 // [수정] localStorage 용량 보호 + "지난 로그가 쌓여봐야 소용없다"는 사용 패턴 반영.
 // [수정] 최근 10개 → 30개까지 보관 (용량 부족 시 오래된 것부터 자동 정리: savePrecisionLogsCapped).
 this.savePrecisionLogsCapped(list);
@@ -6113,7 +6175,7 @@ if (!entry || !entry.log || !entry.log.length) {
 alert(isKo ? '로그를 찾을 수 없습니다.' : 'Could not find this log.');
 return;
 }
-const csvStr = this.buildPrecisionCsv(entry.log, entry.isFreerun ? 'freerun' : (entry.isTrail ? 'trail' : entry.devicePos), entry.proRun); // [수정] 프리런 로그는 device_pos에 'freerun'으로 남겨 재가져오기 시에도 구분
+const csvStr = this.buildPrecisionCsv(entry.log, entry.isFreerun ? 'freerun' : (entry.isTrail ? 'trail' : (entry.isTreadmill ? 'treadmill' : entry.devicePos)), entry.proRun); // [수정] 프리런 로그는 device_pos에 'freerun'으로 남겨 재가져오기 시에도 구분
 const d = new Date(entry.savedAt);
 // [수정] 파일명이 'precision-log-2026-07-19-214457'처럼 너무 길어진다는 피드백에 따라
 // 화면에 표시되는 순서번호(#1, #2...)를 그대로 재사용해 짧게 축약. 연도는 생략(월일만).
@@ -6121,7 +6183,7 @@ const d = new Date(entry.savedAt);
 const numStr = String(idx + 1).padStart(2, '0');
 const dateStr = String(d.getMonth() + 1).padStart(2,'0') + String(d.getDate()).padStart(2,'0'); // MMDD, 연도 생략
 const timeStr = d.toTimeString().slice(0,8).replace(/:/g,'');
-const posSuffix = entry.isFreerun ? '.freerun' : entry.isTrail ? '.trail' : (entry.devicePos ? ('.' + entry.devicePos) : '');
+const posSuffix = entry.isFreerun ? '.freerun' : entry.isTrail ? '.trail' : entry.isTreadmill ? '.treadmill' : (entry.devicePos ? ('.' + entry.devicePos) : '');
 const modeSuffix = entry.proRun === true ? '.pro' : (entry.proRun === false ? '.lite' : '');
 const fileName = 'log-' + numStr + '.' + dateStr + '.' + timeStr + posSuffix + modeSuffix + '.csv';
 this.downloadCsvFile(csvStr, fileName);
@@ -7020,7 +7082,7 @@ if (apBox) { apBox.classList.toggle('active', this.currentAutoPause === true && 
 if (apStatus) apStatus.textContent = (this.currentAutoPause && !_tmPending) ? 'ON' : 'OFF'; // [TMILL]
 // [수정] 로그기록은 펜딩 값을 쓰되, 걷기 모드처럼 사용 불가한 상태에서는 펜딩 값과 무관하게
 // 항상 OFF로 표시 + 흐리게 + 클릭 차단한다. 펜딩 값 자체는 지우지 않아 나중에 복원 가능.
-const logAvailable = this._isWalkGated(this._pendingMode) && !(this._pendingMode === 'freerun' && this._pendingTreadmill); // [TMILL]
+const logAvailable = this._isWalkGated(this._pendingMode); // [TMILL 수정 2026-11-12] 러닝머신도 정밀 로그 사용 가능(잠금 해제)
 const logBox = document.getElementById('quick-precision-log-switch');
 const logStatus = document.getElementById('quick-precision-log-status');
 if (logBox) {
@@ -7191,11 +7253,7 @@ const tm = this.onbMode === 'freerun' && this.onbTreadmill === true;
 const ap = document.getElementById('onb-autopause-switch'), aps = document.getElementById('onb-autopause-status');
 if (ap) { ap.classList.toggle('active', this.onbAutoPause === true && !tm); ap.style.opacity = tm ? '0.6' : ''; ap.style.pointerEvents = tm ? 'none' : ''; }
 if (aps) aps.textContent = (this.onbAutoPause && !tm) ? 'ON' : 'OFF';
-if (tm) {
-const lg = document.getElementById('onb-precision-log-switch'), lgs = document.getElementById('onb-precision-log-status');
-if (lg) { lg.classList.remove('active'); lg.style.opacity = '0.6'; lg.style.pointerEvents = 'none'; lg.style.cursor = 'not-allowed'; }
-if (lgs) lgs.textContent = 'OFF';
-}
+// [수정 2026-11-12] 러닝머신도 정밀 로그 스위치를 잠그지 않는다(onbUpdatePrecisionLogAvailability의 공용 규칙을 그대로 따름)
 }
 // [TMILL] 온보딩에서 TREADMILL을 누르면 퀵 팝업과 같은 2단계 박스(자동멈춤/로그/메트로놈/위치/린각도 + CONFIRM)를 바로 띄운다
 onbOpenTmSubBox() {
@@ -7763,7 +7821,7 @@ if (garminBtn) garminBtn.classList.toggle('active', target === 'garmin');
 if (garminArea) garminArea.classList.toggle('hidden', target !== 'garmin');
 if (target === 'garmin' && typeof garmin !== 'undefined' && garmin.render) garmin.render();
 if (target === 'app') {
-this.renderPrecisionLogList(); // [수정] 정밀 로그 리스트 갱신
+this.renderPrecisionLogList(); try { Treadmill.renderCalibLog(); } catch (e) {} // [수정] 정밀 로그 리스트 갱신 (+[추가 2026-11-12] 러닝머신 보정 카드)
 } else if (target === 'crew') {
 community.renderBlockedList();
 community.renderFollowStats();
@@ -7886,7 +7944,7 @@ precisionArea.classList.add('is-open');
 }
 changeLanguage(lang) {
 storage.setLang(lang);
-try { this.renderPrecisionLogList(); if (typeof garmin !== 'undefined' && garmin.render) garmin.render(); } catch (e) {} // 언어 전환 시 정밀 로그 목록(날짜/단위/버튼)도 즉시 다시 그림
+try { this.renderPrecisionLogList(); Treadmill.renderCalibLog(); if (typeof garmin !== 'undefined' && garmin.render) garmin.render(); } catch (e) {} // 언어 전환 시 정밀 로그 목록(날짜/단위/버튼)도 즉시 다시 그림
 const t = translations[lang] || translations['en'];
 const isKo = (lang === 'ko');
 // [추가] 개인정보처리방침 링크에 현재 앱 언어를 쿼리파라미터로 실어 보냄.
@@ -8815,7 +8873,7 @@ const isKo = lang === 'ko';
 const prof = storage.loadProfile();
 const curPos = (prof && prof.devicePos) || 'chest';
 const POS_LABEL = getPosLabelMap(isKo);
-const order = ['chest', 'waist', 'armband', 'hand', 'freerun', 'trail'];
+const order = ['chest', 'waist', 'armband', 'hand', 'freerun', 'trail', 'treadmill'];
 let html = '<div class="c69">';
 html += '<div class="c37">' +
   (isKo ? '보정을 한 번도 적용하지 않았을 때 앱이 실제로 쓰는 기본값입니다.' : 'These are the raw defaults the app uses before any calibration is applied.') +
@@ -8864,7 +8922,7 @@ const isKo = lang === 'ko';
 const prof = storage.loadProfile();
 const curPos = (prof && prof.devicePos) || 'chest';
 const POS_LABEL = getPosLabelMap(isKo);
-const order = ['chest', 'waist', 'armband', 'hand', 'freerun', 'trail'];
+const order = ['chest', 'waist', 'armband', 'hand', 'freerun', 'trail', 'treadmill'];
 const overridesMap = prof.motionCalibOverrides || {};
 const factorMapKeys = { stride: 'strideCorrectionFactorByPos', gps: 'gpsDistCorrectionFactorByPos', cad: 'cadCorrectionFactorByPos', pace: 'paceCorrectionFactorByPos' };
 
@@ -9242,6 +9300,7 @@ if (Array.isArray(data.garminImports)) bigStore.set('oppaRunGarminImports', data
 if (Array.isArray(data.precLogImports)) bigStore.set('oppaRunPrecLogImports', data.precLogImports); // [수정 2026-10-05] 원본: localStorage.setItem('oppaRunPrecLogImports', JSON.stringify(...))
 if (Array.isArray(data.pendingCalibRuns)) localStorage.setItem('oppaRunPendingCalibRuns', JSON.stringify(data.pendingCalibRuns));
 if (typeof data.treadmillScale === 'number' && data.treadmillScale > 0.5 && data.treadmillScale < 2) Treadmill.setScale(data.treadmillScale); // [TMILL]
+if (Array.isArray(data.treadmillCalibLog)) Treadmill.setCalibLog(data.treadmillCalibLog); // [추가 2026-11-12]
 // [추가] 크루 기능 로컬 식별 정보 복원 (게시글/좋아요 등 실제 콘텐츠는 서버(Supabase)에 있으므로
 // 여기선 닉네임/유저ID/아바타/이메일 같은 "이 기기가 어떤 크루 계정인지" 식별 정보만 복원)
 if (data.community) {
@@ -11175,7 +11234,7 @@ updateDisplay() { const bpmInput = document.getElementById('metro-bpm'); const b
 //       GCT = 기준 주기 × 듀티비(위치별), FLIGHT = (주기 - GCT) / 주기. LITE/PRO 모두 이 엔진을 공유하므로 동일하게 적용된다.
 // 듀티비 가민 대조값(GCT/걸음간격): 가슴 0.706~0.712, 허리 0.725~0.731, 손 0.719~0.735.
 // 가슴/허리는 각각 보정, 손·암밴드·프리런은 같은 값(0.73)을 쓴다.
-const GCT_DUTY_BY_POS = { chest: 0.71, waist: 0.73, armband: 0.73, hand: 0.73, freerun: 0.73, trail: 0.73 };
+const GCT_DUTY_BY_POS = { chest: 0.71, waist: 0.73, armband: 0.73, hand: 0.73, freerun: 0.73, trail: 0.73, treadmill: 0.73 };
 const GCT_DUTY_MIN = 0.66, GCT_DUTY_MAX = 0.78; // 이 범위를 벗어난 저장값(예전 0.31~0.49 override 등)은 무시하고 위치 기본값 사용
 const GCT_PERIOD_WINDOW = 16; // 기준 걸음 주기 계산에 쓰는 최근 걸음 수(약 5초)
 // [추가 2026-10-25] 위치별 방침: 가슴/허리 = 정확도 우선(위 값 그대로, 변화에 빠르게 반응), 그 외(손/암밴드/프리런/트레일) = 안정감 우선.
@@ -11488,7 +11547,7 @@ try {
   // [추가 2026-10-20] 암밴드/손 보정슬롯 분리: 현재 프리런 슬롯 값을 각 슬롯의 초기값으로 1회만 복사한다.
   // 걸음 감지값(rotRejectThreshold)과 3회 평균 표식(avg3Prev/avg3Applied)은 가져오지 않는다. 실패해도 앱 시작에는 영향 없도록 try/catch.
   try {
-    ['armband', 'hand', 'trail'].forEach(function(_sp) {
+    ['armband', 'hand', 'trail', 'treadmill'].forEach(function(_sp) {
       const _flag = _sp + 'SlotSplitDone';
       if (_prof[_flag]) return;
       const _src = _prof.motionCalibOverrides && _prof.motionCalibOverrides.freerun;
@@ -15227,7 +15286,7 @@ try {
   if (storage.loadProfile().rawSensorCapture && premium.isAdmin) { // [수정 2026-10-14] 관리자 전용: 예전에 ON으로 저장된 일반 계정은 기록하지 않음
     this.rawSensorBuf = [];
     this._rawGctSeen = undefined;
-    this.rawSensorMeta = { startMs: Date.now(), startIso: new Date().toISOString(), devicePos: (isFreerunLikeMode(storage.getActivityMode()) ? engineSlotKeyOf(storage.getActivityMode()) : (storage.loadProfile().devicePos || 'chest')), // [수정 2026-10-20] 프리런은 착용 위치가 없으므로 위치 자리에 'freerun'을 기록 → 파일명 raw_freerun_...
+    this.rawSensorMeta = { startMs: Date.now(), startIso: new Date().toISOString(), devicePos: (isFreerunLikeMode(storage.getActivityMode()) ? engineSlotKeyOf(storage.getActivityMode(), getTreadmillFlag()) : (storage.loadProfile().devicePos || 'chest')), // [수정 2026-10-20] 프리런은 착용 위치가 없으므로 위치 자리에 'freerun'을 기록 → 파일명 raw_freerun_...
       runMode: isCalibFactorsOn() ? 'pro' : 'lite', activity: storage.getActivityMode() || 'run' };
     // [수정 2026-10-20] 원본: activity: this.state.activityMode || 'run' — 이 시점엔 this.state.activityMode가 아직 갱신 전(아래 줄에서 대입)이라
     // 항상 초기값 'run'이 들어가 프리런 로그도 파일명에 _freerun이 안 붙고 마지막 착용 위치(waist 등) 파일처럼 저장됐음. 시작 시점의 설정값을 직접 읽도록 수정
@@ -15278,7 +15337,7 @@ this.state.runPro = isCalibFactorsOn(); // [추가 2026-10-13] 시작 시점의 
 if(this.motion) this.motion.reset();
 // [신규] 걷기 모드 상태 초기화 (러닝 상태 초기화와 완전 분리, 시작 시점의 설정값을 세션 내내 고정)
 this.state.activityMode = storage.getActivityMode();
-this.state.treadmill = !!(getTreadmillFlag() && this.state.activityMode === 'freerun'); // [추가 2026-11-11] 러닝머신 = 프리런 + 옵션 [TMILL]
+this.state.treadmill = !!(getTreadmillFlag() && this.state.activityMode === 'freerun'); this.state.tmEstKm = null; this.state.tmActualKm = null; // [추가 2026-11-12] // [추가 2026-11-11] 러닝머신 = 프리런 + 옵션 [TMILL]
 this.state._tmAsked = false; this.state.tmKmh = 0; this.state.tmStepLenM = 0; // [TMILL]
 if (this.state.treadmill) { // [추가 2026-11-11] 러닝머신도 START 후 첫 걸음이 이어질 때까지 기록 제외(배지 없음) [TMILL]
 this.state.isAutoPaused = true; this.state.startWaitPhase = true; this.state.calibWaitPauseDone = true;
@@ -15321,7 +15380,7 @@ this.freerunMotion.reset();
 // 기준으로 덮어쓴다. 여기서 그걸 그대로 썼다간, 실제 저장된 착용 위치가 예를 들어 hand인데도
 // 프리런을 시작할 때마다 그 캐시가 waist 값으로 덮여써져서, 다음 실제 hand 러닝이 잘못된
 // 보정계수로 시작하는 문제가 생긴다. 그래서 필요한 필드만 직접 복사하고 저장소엔 쓰지 않는다.
-const _slot = engineSlotKeyOf(this.state.activityMode); // [추가 2026-10-20] 프리런='freerun' / 트레일='trail'
+const _slot = engineSlotKeyOf(this.state.activityMode, this.state.treadmill); // [추가 2026-10-20] 프리런='freerun' / 트레일='trail'
 const _wp = DEVICE_MOTION_PROFILES[_slot] || DEVICE_MOTION_PROFILES.freerun || DEVICE_MOTION_PROFILES.waist; // [수정 2026-09-20] 프리런 전용 슬롯 사용(허리 값과 분리)
 this.freerunMotion.groundThreshold = _wp.groundThreshold;
 this.freerunMotion.impactThreshold = _wp.impactThreshold;
@@ -15709,7 +15768,7 @@ id: Date.now(),
 // [수정] 기존엔 'run'으로 하드코딩되어 있어서 TRAIL 모드로 뛰어도 항상 'run'으로
 // 저장되던 버그. this.state.activityMode를 그대로 반영하도록 수정.
 activityMode: this.state.activityMode || 'run', // 과거 기록은 activityMode 없음 → 조회 시 'run'으로 간주
-treadmill: !!this.state.treadmill, // [추가 2026-11-11] 러닝머신 기록 표시(기록 종류는 RUN 그대로) [TMILL]
+treadmill: !!this.state.treadmill, tmEstKm: (this.state.treadmill && this.state.tmActualKm != null) ? Math.round(this.state.tmEstKm * 1000) / 1000 : undefined, tmActualKm: (this.state.treadmill && this.state.tmActualKm != null) ? Math.round(this.state.tmActualKm * 1000) / 1000 : undefined, // [추가 2026-11-11] 러닝머신 기록 표시(기록 종류는 RUN 그대로) [TMILL]
 title: _autoTitle,
 date: new Date().toLocaleString(),
 dist: this.state.totalDist.toFixed(2),
@@ -15773,7 +15832,7 @@ try { if ((record.activityMode || 'run') === 'run') calibAvg3RecordSelfRun(this.
 // 기기 저장/가민분석실 노출 여부는 여기서 설정으로 게이팅한다(이 설정의 "로그 export 대상으로
 // 남길지" 의미는 그대로 유지, "매초 계산을 건너뛸지"는 위 logPrecisionSample() 참고).
 if (storage.getPrecisionLogEnabled()) {
-storage.savePrecisionLog(this.state.precisionLog, isFreerunLikeMode(this.state.activityMode) ? null : (this.state.runDevicePos || null), this.state.activityMode, !!this.state.runPro); // [수정] 정밀 로그 영구 저장 (앱 재시작/새 러닝 후에도 내보내기 가능) + 착용위치 동봉 — record.devicePos와 동일 규칙으로 프리런 예외 적용, activityMode는 목록에 FREE RUN 배지 표시용
+storage.savePrecisionLog(this.state.precisionLog, isFreerunLikeMode(this.state.activityMode) ? null : (this.state.runDevicePos || null), (this.state.treadmill ? 'treadmill' : this.state.activityMode), !!this.state.runPro); // [수정] 정밀 로그 영구 저장 (앱 재시작/새 러닝 후에도 내보내기 가능) + 착용위치 동봉 — record.devicePos와 동일 규칙으로 프리런 예외 적용, activityMode는 목록에 FREE RUN 배지 표시용
 }
 // 커뮤니티 업로드는 선택사항: 공유 모달을 띄워 사용자가 선택
 storage.clearTempSession();
@@ -20460,10 +20519,10 @@ const garmin = (function () {
         const rowWithPos = log.find(r => r.devicePos);
         const importedDevicePos = rowWithPos ? rowWithPos.devicePos : null;
         const importedIsFreerun = importedDevicePos === 'freerun';
-        const importedIsTrail = importedDevicePos === 'trail'; // [추가] 프리런 로그는 isFreerun 플래그로 복원(devicePos는 null 유지)
+        const importedIsTrail = importedDevicePos === 'trail'; const importedIsTreadmill = importedDevicePos === 'treadmill'; // [추가] 프리런 로그는 isFreerun 플래그로 복원(devicePos는 null 유지)
         const rowWithMode = log.find(r => r.runMode);
         const importedProRun = rowWithMode ? (rowWithMode.runMode === 'pro' ? true : (rowWithMode.runMode === 'lite' ? false : null)) : null;
-        const entry = { id: 'pcmp_' + Date.now(), savedAt: new Date().toISOString(), log: log, imported: true, proRun: importedProRun, devicePos: (importedIsFreerun || importedIsTrail) ? null : importedDevicePos, isFreerun: importedIsFreerun, isTrail: importedIsTrail, fileName: file.name || null };
+        const entry = { id: 'pcmp_' + Date.now(), savedAt: new Date().toISOString(), log: log, imported: true, proRun: importedProRun, devicePos: (importedIsFreerun || importedIsTrail || importedIsTreadmill) ? null : importedDevicePos, isFreerun: importedIsFreerun, isTrail: importedIsTrail, isTreadmill: importedIsTreadmill, fileName: file.name || null };
         list.unshift(entry);
         savePrecLogImportsList(list.slice(0, MAX_PRECLOG_IMPORTS));
         if (selectedPrecLogIds.indexOf(entry.id) < 0) selectedPrecLogIds.push(entry.id); // [수정] 방금 불러온 로그를 다중선택 배열에 추가
@@ -20954,6 +21013,7 @@ const garmin = (function () {
     if (!p) return null;
     if (p.isFreerun || p.devicePos === 'freerun') return 'freerun';
     if (p.isTrail || p.devicePos === 'trail') return 'trail';
+    if (p.isTreadmill || p.devicePos === 'treadmill') return 'treadmill'; // [추가 2026-11-12] 러닝머신 독립 슬롯
     return p.devicePos || null;
   }
   function precLastDistKm(log) {
@@ -22241,7 +22301,7 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
     // [수정] 보정값 저장 슬롯이 위치별로 나뉘어서, 가슴/손 등 여러 위치에 동시에
     // 보정값이 적용돼 있을 수 있다. 각 위치마다 카드를 따로 그리고, RESET/스니펫/다운로드
     // 버튼도 그 위치(pos)를 명시해서 그 위치의 슬롯에만 영향을 준다.
-    const positions = ['chest', 'waist', 'armband', 'hand', 'freerun', 'trail'];
+    const positions = ['chest', 'waist', 'armband', 'hand', 'freerun', 'trail', 'treadmill'];
     const activePositions = positions.filter(p => overridesMap[p]);
 
     const undoOnlyPositions = positions.filter(p => hasUndoFor(p)); // [수정] 위치별로 남아있는 되돌리기 스냅샷 전부 표시
@@ -22501,7 +22561,7 @@ if (!premium.isAdmin) { premium.proAlert('관리자 전용 기능이에요.', 'A
       // 전부 모아서 patches 배열로 만들고, 한 번의 다운로드로 같은 파일에 함께 반영한다.
       // [수정 2026-09-20] 프리런(freerun)이 목록에서 빠져 있어서, 프리런 세션의 보정값은
       // 아무리 캘리브레이션을 맞춰도 DOWNLOAD PATCHED HTML에 절대 반영되지 않던 버그 수정.
-      const positions = ['chest', 'waist', 'armband', 'hand', 'freerun', 'trail'];
+      const positions = ['chest', 'waist', 'armband', 'hand', 'freerun', 'trail', 'treadmill'];
       const patches = [];
       const patchedPositions = [];
       positions.forEach(function (pos) {
