@@ -995,7 +995,7 @@ body.prem-lock-dyn .h-det-box.lk-dyn { position:relative; }
 body.prem-lock-dyn .h-det-box.lk-dyn .h-det-val { visibility:hidden; }
 body.prem-lock-dyn .h-det-box.lk-dyn::after { content:'PRO'; position:absolute; left:0; right:0; bottom:10px; text-align:center; font-size:var(--fs-xxs); font-weight:800; letter-spacing:1px; color:#aaa; }
 body.prem-lock-garmin #btn-apply-calib::after { content:'PRO'; margin-left:8px; padding:2px 7px; border-radius:6px; background:#000; color:#ffcc66; font-size:.7em; font-weight:900; letter-spacing:1px; vertical-align:middle; }
-body.prem-lock-garmin #btn-save-good-calib, body.prem-lock-garmin #garmin-good-sets, body.prem-lock-garmin #btn-save-pending-calib, body.prem-lock-garmin #btn-save-calib-report, body.prem-lock-garmin #btn-calib-avg3-save { display:none; }
+body.prem-lock-garmin #btn-save-pending-calib, body.prem-lock-garmin #btn-save-calib-report, body.prem-lock-garmin #btn-calib-avg3-save { display:none; }
 body.prem-lock-garmin #garmin-calib-status > * { display:none; }
 body.prem-lock-garmin #garmin-calib-status:not(:empty)::before { content: var(--lk-status-title, 'APPLIED VALUES · PRO'); display:block; text-align:center; font-weight:800; color:#aaa; font-size:var(--fs-sm); letter-spacing:1px; padding:14px 0; }
 #garmin-sample-box { display:none; }
@@ -2848,7 +2848,6 @@ alt="runner"/>
 <div id="garmin-calib-result" class="u-margin-top-12px"></div>
 <div id="garmin-calib-pending" class="u-margin-top-12px"></div>
 <div id="garmin-calib-status" class="u-margin-top-10px"></div>
-<div id="garmin-good-sets" class="u-margin-top-10px"></div>
 <!-- [/추가] 캘리브레이션 비교 -->
 </div>
 </div>
@@ -4962,9 +4961,6 @@ if (suggestion.vertScale != null) override.vertScale = suggestion.vertScale;
 // 이 두 값을 직접 조정해야 오차가 줄어든다 (근거: garmin.runCalibrationCompare의 measuredFrac 게이팅).
 if (suggestion.ground != null) override.groundThreshold = suggestion.ground;
 if (suggestion.impact != null) override.impactThreshold = suggestion.impact;
-// [추가 2026-11-15] 좋은 기록 되돌리기용: 설정 화면엔 안 보이는 숨은 값(속도보정 쌍 / GCT 필터지연)도 직접 지정 가능. 속도보정은 slope+vref가 한 쌍일 때만 반영.
-if (suggestion.vertSpeedSlope != null && suggestion.vertRefSpeed != null) { override.vertSpeedSlope = suggestion.vertSpeedSlope; override.vertRefSpeed = suggestion.vertRefSpeed; }
-if (suggestion.gctFilterDelayMs != null) override.gctFilterDelayMs = suggestion.gctFilterDelayMs;
 
 const _defFactors = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || { stride: 1.0, gps: 1.0, cad: 1.0, pace: 1.0 }; // [추가 2026-08-08]
 const curStride = (typeof prof.strideCorrectionFactorByPos[pos] === 'number' && prof.strideCorrectionFactorByPos[pos] > 0) ? prof.strideCorrectionFactorByPos[pos] : _defFactors.stride;
@@ -5680,46 +5676,6 @@ function calibEffectiveSnapshot(prof, pos, at) {
   }
   return snap;
 }
-// [추가 2026-11-15] 좋은 기록용 "러닝 당시 계수" 박제 헬퍼.
-// 설정 화면엔 안 보이지만 수직진동/GCT 결과를 바꾸는 숨은 값 3개(속도보정 쌍, GCT 필터지연)의 지금 실효값. override가 없으면 속도보정은 0/0, GCT 지연은 위치별 기본값.
-function calibHiddenSnapshot(prof, pos) {
-  const cm = DEVICE_MOTION_PROFILES[pos] || DEVICE_MOTION_PROFILES.chest;
-  const ov = (prof && prof.motionCalibOverrides && prof.motionCalibOverrides[pos]) || {};
-  return {
-    vertSpeedSlope: (typeof ov.vertSpeedSlope === 'number') ? ov.vertSpeedSlope : 0,
-    vertRefSpeed: (typeof ov.vertRefSpeed === 'number') ? ov.vertRefSpeed : 0,
-    gctFilterDelayMs: (typeof ov.gctFilterDelayMs === 'number') ? ov.gctFilterDelayMs : (typeof cm.gctFilterDelayMs === 'number' ? cm.gctFilterDelayMs : 0)
-  };
-}
-// [추가 2026-11-15] 러닝이 끝나 정밀 로그를 저장할 때, 그 러닝에 실제로 적용돼 있던 계수를 로그에 같이 박제한다.
-// 모션 값은 실제로 값을 만든 엔진(this.motion / this.freerunMotion)에서, 보폭·GPS·케이던스·페이스 계수는 러닝 중 읽힌 플랫 필드에서 가져온다.
-// → 나중에 지난 로그를 가민과 비교할 때 "지금 앱 저장소 값"이 아니라 "그 로그를 만든 계수"를 기준으로 삼을 수 있다.
-function buildRunCalibSnapshot(eng, prof, posKey) {
-  if (!eng) return null;
-  const o = {};
-  const put = function (k, v) { if (typeof v === 'number' && isFinite(v)) o[k] = v; };
-  put('gctFallbackRatio', eng.gctFallbackRatio);
-  put('vertScale', eng.vertScale);
-  put('rotRejectThreshold', eng.rotRejectThreshold);
-  put('groundThreshold', eng.groundThreshold);
-  put('impactThreshold', eng.impactThreshold);
-  put('vertSpeedSlope', eng.vertSpeedSlope || 0);
-  put('vertRefSpeed', eng.vertRefSpeed || 0);
-  put('gctFilterDelayMs', eng.gctFilterDelayMs);
-  if (prof && !isMotionOnlyPos(posKey)) {
-    const f = function (v) { return (typeof v === 'number' && v > 0) ? v : null; };
-    put('stride', f(prof.strideCorrectionFactor));
-    put('gps', f(prof.gpsDistCorrectionFactor));
-    put('cad', f(prof.cadCorrectionFactor));
-    put('pace', f(prof.paceCorrectionFactor));
-  }
-  return Object.keys(o).length ? o : null;
-}
-function calibFullSnapshot(prof, pos) {
-  const s = Object.assign({}, calibEffectiveSnapshot(prof, pos), calibHiddenSnapshot(prof, pos));
-  delete s.t;
-  return s;
-}
 // UNDO 스냅샷(= 직전 적용 "이전" 상태)을 이력 한 칸 형태로 변환
 function calibSnapshotFromUndo(pos, undo) {
   const cm = DEVICE_MOTION_PROFILES[pos] || DEVICE_MOTION_PROFILES.chest;
@@ -6064,7 +6020,7 @@ alert(isKo
 return false;
 }
 }
-savePrecisionLog(log, devicePos, activityMode, proRun, calib) { // [수정] 착용 위치를 로그와 함께 저장해 나중에 export해도 어느 위치 기록인지 확인 가능하게 함
+savePrecisionLog(log, devicePos, activityMode, proRun) { // [수정] 착용 위치를 로그와 함께 저장해 나중에 export해도 어느 위치 기록인지 확인 가능하게 함
 if (!log || !log.length) return;
 // [추가] 초장거리(예: 마라톤/울트라, 3시간+) 러닝은 초당 샘플이 수만 개까지 쌓여
 // localStorage 용량 한도를 넘길 수 있음. 5000개(초당 기록 기준 약 1시간 23분 분량)를
@@ -6081,7 +6037,7 @@ const list = this.loadPrecisionLogs();
 // [추가] isFreerun: 프리런은 착용 위치가 devicePos에 기록되지 않으므로(null),
 // 이 플래그로 "FREE RUN" 로그임을 구분한다. [수정 2026-09-20] 가민 분석실은 이제 이 플래그를
 // 5번째 위치('freerun')로 취급해 GCT/수직진동을 비교·보정한다(다른 4개 위치와 독립).
-list.unshift({ id: 'plog_' + Date.now(), savedAt: new Date().toISOString(), log: finalLog, downsampled: downsampled, devicePos: devicePos || null, isFreerun: activityMode === 'freerun', isTrail: activityMode === 'trail', isTreadmill: activityMode === 'treadmill', proRun: (proRun === true || proRun === false) ? proRun : null, calib: (calib && typeof calib === 'object') ? calib : null }); // [추가 2026-11-15] 이 로그를 만든 러닝에 적용돼 있던 계수
+list.unshift({ id: 'plog_' + Date.now(), savedAt: new Date().toISOString(), log: finalLog, downsampled: downsampled, devicePos: devicePos || null, isFreerun: activityMode === 'freerun', isTrail: activityMode === 'trail', isTreadmill: activityMode === 'treadmill', proRun: (proRun === true || proRun === false) ? proRun : null });
 // [수정] localStorage 용량 보호 + "지난 로그가 쌓여봐야 소용없다"는 사용 패턴 반영.
 // [수정] 최근 10개 → 30개까지 보관 (용량 부족 시 오래된 것부터 자동 정리: savePrecisionLogsCapped).
 this.savePrecisionLogsCapped(list);
@@ -6183,7 +6139,7 @@ if (ui.updateTotalStats) ui.updateTotalStats();
 }
 console.log('[migrateCadence] updated ' + updatedCount + ' / ' + history.length + ' records (' + (history.length - updatedCount) + ' had no matching precision log).');
 }
-buildPrecisionCsv(log, devicePos, proRun, calib) {
+buildPrecisionCsv(log, devicePos, proRun) {
 // [수정] device_pos 컬럼 추가: 이 로그 전체가 어느 착용 위치(chest/waist/armband/hand)로
 // 뛴 러닝인지 매 행에 동일한 값으로 남겨서, export한 CSV만 봐도 확인 가능하게 함.
 // 기존엔 이 정보가 CSV 어디에도 없어서, 같은 날 위치를 바꿔가며 여러 번 뛰면
@@ -6197,9 +6153,7 @@ const headers = ['t_sec','timestamp','lat','lng','gps_accuracy_m','dist_km','spe
 const _runModeStr = proRun === true ? 'pro' : (proRun === false ? 'lite' : '');
 // (이전 주석) [수정 2026-09-21] vert_osc_raw(vertScale 미적용 원시 진폭) 열을 맨 끝에 추가 — 기존 열 순서는 그대로
 const rows = log.map(r => [r.t, r.timestamp || '', r.lat || '', r.lng || '', r.gpsAcc != null ? r.gpsAcc : '', r.distKm, r.speedKmh, r.cadence, r.gctMs, r.flightPct, r.stepLengthM != null ? r.stepLengthM : '', r.stepLengthWindowM != null ? r.stepLengthWindowM : '', r.stepLengthInstantM != null ? r.stepLengthInstantM : '', r.vertOscMm != null ? r.vertOscMm : '', r.altM != null ? r.altM : '', r.hrBpm, r.hrZone, r.rotPeakDps != null ? r.rotPeakDps : '', r.gyroAlpha != null ? r.gyroAlpha : '', r.gyroBeta != null ? r.gyroBeta : '', r.gyroGamma != null ? r.gyroGamma : '', devicePos || '', r.stepDetectorCnt != null ? r.stepDetectorCnt : '', r.stepCounterSteps != null ? r.stepCounterSteps : '', r.gctMeasuredCnt != null ? r.gctMeasuredCnt : '', r.gctFallbackCnt != null ? r.gctFallbackCnt : '', r.gctClampedCnt != null ? r.gctClampedCnt : '', r.leanAngleDeg != null ? r.leanAngleDeg : '', r.leanForwardDeg != null ? r.leanForwardDeg : '', r.leanLateralDeg != null ? r.leanLateralDeg : '', r.vertOscRaw != null ? r.vertOscRaw : '', _runModeStr, r.altGpsRawM != null ? r.altGpsRawM : '', r.altBaroRawM != null ? r.altBaroRawM : '', r.altSrc != null ? r.altSrc : '', r.gradePct != null ? r.gradePct : '', r.ascentM != null ? r.ascentM : '', r.descentM != null ? r.descentM : '', r.vertBasis || ''].join(','));
-// [추가 2026-11-15] 마지막 열 calib: 이 로그를 만든 러닝의 계수(첫 행에만, 'k=v;k=v' 형식 — 콤마 없음). 예전 CSV는 이 열이 없어도 그대로 읽힌다.
-const _calibStr = (calib && typeof calib === 'object') ? Object.keys(calib).filter(function (k) { return typeof calib[k] === 'number'; }).map(function (k) { return k + '=' + calib[k]; }).join(';') : '';
-return headers.join(',') + ',calib' + '\n' + rows.map(function (row, i) { return row + ',' + (i === 0 ? _calibStr : ''); }).join('\n');
+return headers.join(',') + '\n' + rows.join('\n');
 }
 downloadCsvFile(csvStr, fileName) {
 const isKo = this.getLang() === 'ko';
@@ -6214,7 +6168,7 @@ if (!entry || !entry.log || !entry.log.length) {
 alert(isKo ? '로그를 찾을 수 없습니다.' : 'Could not find this log.');
 return;
 }
-const csvStr = this.buildPrecisionCsv(entry.log, entry.isFreerun ? 'freerun' : (entry.isTrail ? 'trail' : (entry.isTreadmill ? 'treadmill' : entry.devicePos)), entry.proRun, entry.calib); // [수정] 프리런 로그는 device_pos에 'freerun'으로 남겨 재가져오기 시에도 구분
+const csvStr = this.buildPrecisionCsv(entry.log, entry.isFreerun ? 'freerun' : (entry.isTrail ? 'trail' : (entry.isTreadmill ? 'treadmill' : entry.devicePos)), entry.proRun); // [수정] 프리런 로그는 device_pos에 'freerun'으로 남겨 재가져오기 시에도 구분
 const d = new Date(entry.savedAt);
 // [수정] 파일명이 'precision-log-2026-07-19-214457'처럼 너무 길어진다는 피드백에 따라
 // 화면에 표시되는 순서번호(#1, #2...)를 그대로 재사용해 짧게 축약. 연도는 생략(월일만).
@@ -6280,19 +6234,6 @@ vertOscUncorrMm: num(cols[idx['vert_osc_uncorr_mm']]),
 altM: num(cols[idx['alt_m']]), altGpsRawM: num(cols[idx['alt_gps_raw_m']]), altBaroRawM: num(cols[idx['alt_baro_raw_m']]), altSrc: cols[idx['alt_src']] || '', gradePct: num(cols[idx['grade_pct']]), ascentM: num(cols[idx['ascent_m']]), descentM: num(cols[idx['descent_m']]) // [추가 2026-10-21] 고도 컬럼(예전 CSV는 열이 없어 null)
 });
 }
-// [추가 2026-11-15] calib 열(첫 행의 'k=v;k=v')을 읽어 로그 배열에 calibMeta로 붙여 둔다 (가져오기 때 항목의 calib로 저장).
-try {
-  if (idx['calib'] !== undefined) {
-    for (let i = 1; i < lines.length; i++) {
-      const cs = (lines[i].split(',')[idx['calib']] || '').trim();
-      if (!cs) continue;
-      const o = {};
-      cs.split(';').forEach(function (kv) { const a = kv.split('='); const v = parseFloat(a[1]); if (a[0] && isFinite(v)) o[a[0]] = v; });
-      if (Object.keys(o).length) log.calibMeta = o;
-      break;
-    }
-  }
-} catch (e) {}
 return log;
 }
 // [추가] .csv 파일뿐 아니라 .json 파일도 그대로 불러올 수 있도록 포맷을 자동 감지하는 통합 파서.
@@ -6351,7 +6292,7 @@ const rows = Array.isArray(data) ? data
 : (data && Array.isArray(data.log)) ? data.log
 : (data && Array.isArray(data.rows)) ? data.rows
 : null;
-if (rows) { const _out = this.normalizePrecisionRows(rows); if (data && !Array.isArray(data) && data.calib && typeof data.calib === 'object') _out.calibMeta = data.calib; return _out; }
+if (rows) return this.normalizePrecisionRows(rows);
 } catch (e) {
 // JSON이 아니거나 손상됨 -> 아래 CSV 파싱으로 폴백
 }
@@ -6377,7 +6318,7 @@ alert(isKo ? '로그 데이터를 찾지 못했어요. 파일을 확인해주세
 return;
 }
 const list = this.loadPrecisionLogs();
-list.unshift({ id: 'plog_' + Date.now(), savedAt: new Date().toISOString(), log: log, imported: true, calib: log.calibMeta || null });
+list.unshift({ id: 'plog_' + Date.now(), savedAt: new Date().toISOString(), log: log, imported: true });
 this.savePrecisionLogsCapped(list);
 if (typeof ui !== 'undefined') ui.renderPrecisionLogList();
 alert(isKo ? '정밀 로그를 불러왔습니다.' : 'Precision log imported.');
@@ -7950,8 +7891,7 @@ wrap.innerHTML = '<div class="garmin-import-item">'
 + '<div class="c07">'
 + '<div class="garmin-import-item-del c60" onclick="storage.exportPrecisionLogById(\'' + item.id + '\')">' + (isKo ? '내보내기' : 'EXPORT') + '</div>'
 + '<div class="garmin-import-item-del" onclick="storage.deletePrecisionLog(\'' + item.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</div>'
-+ '</div></div></div>'
-+ ((typeof garmin !== 'undefined' && garmin && typeof garmin.buildLogRestoreHtml === 'function') ? garmin.buildLogRestoreHtml(item.id) : ''); // [추가 2026-11-15] 이 로그 당시 계수로 적용
++ '</div></div></div>';
 }
 // [추가] 드롭다운에서 로그 선택 → 카드 갱신 후 목록 닫기
 selectPrecisionLog(id) {
@@ -15866,13 +15806,7 @@ try { if ((record.activityMode || 'run') === 'run') calibAvg3RecordSelfRun(this.
 // 기기 저장/가민분석실 노출 여부는 여기서 설정으로 게이팅한다(이 설정의 "로그 export 대상으로
 // 남길지" 의미는 그대로 유지, "매초 계산을 건너뛸지"는 위 logPrecisionSample() 참고).
 if (storage.getPrecisionLogEnabled()) {
-let _calibRun = null;
-try {
-  const _flm = isFreerunLikeMode(this.state.activityMode);
-  const _posKeyRun = _flm ? (this.state.treadmill ? 'treadmill' : (this.state.activityMode === 'trail' ? 'trail' : 'freerun')) : (this.state.runDevicePos || null);
-  _calibRun = buildRunCalibSnapshot(_flm ? this.freerunMotion : this.motion, storage.loadProfile(), _posKeyRun);
-} catch (e) { jrLogErr('runCalibSnapshot', e); }
-storage.savePrecisionLog(this.state.precisionLog, isFreerunLikeMode(this.state.activityMode) ? null : (this.state.runDevicePos || null), (this.state.treadmill ? 'treadmill' : this.state.activityMode), !!this.state.runPro, _calibRun); // [수정] 정밀 로그 영구 저장 (앱 재시작/새 러닝 후에도 내보내기 가능) + 착용위치 동봉 — record.devicePos와 동일 규칙으로 프리런 예외 적용, activityMode는 목록에 FREE RUN 배지 표시용
+storage.savePrecisionLog(this.state.precisionLog, isFreerunLikeMode(this.state.activityMode) ? null : (this.state.runDevicePos || null), (this.state.treadmill ? 'treadmill' : this.state.activityMode), !!this.state.runPro); // [수정] 정밀 로그 영구 저장 (앱 재시작/새 러닝 후에도 내보내기 가능) + 착용위치 동봉 — record.devicePos와 동일 규칙으로 프리런 예외 적용, activityMode는 목록에 FREE RUN 배지 표시용
 }
 // 커뮤니티 업로드는 선택사항: 공유 모달을 띄워 사용자가 선택
 storage.clearTempSession();
@@ -21498,15 +21432,6 @@ const phoneAvgGct = avgArr(precItems.map(p => avgFromPrecLogStepWeightedRunning(
       curCadFactor = (typeof _p0.cadCorrectionFactor === 'number' && _p0.cadCorrectionFactor > 0) ? _p0.cadCorrectionFactor : 1.0; // [추가]
       curPaceFactor = (typeof _p0.paceCorrectionFactor === 'number' && _p0.paceCorrectionFactor > 0) ? _p0.paceCorrectionFactor : 1.0; // [추가]
     } catch (e) {}
-    // [추가 2026-11-15] 로그 당시 계수 기준으로 교체(현재 앱 값은 appCalibAtCompare에 남겨 안내문에 쓴다)
-    const logBase = precLogCalibBase(precItems);
-    const appCalibAtCompare = { stride: curStrideFactor, gps: curGpsDistFactor, cad: curCadFactor, pace: curPaceFactor };
-    if (!isMotionOnlyPos(resolvedDevicePos)) {
-      if (logBase.vals.stride != null) curStrideFactor = logBase.vals.stride;
-      if (logBase.vals.gps != null) curGpsDistFactor = logBase.vals.gps;
-      if (logBase.vals.cad != null) curCadFactor = logBase.vals.cad;
-      if (logBase.vals.pace != null) curPaceFactor = logBase.vals.pace;
-    }
 
     // [추가] 보폭(step_length)/수직진동(vert_osc) 비교. 정밀 로그엔 m/cm 단위,
     // 가민 데이터는 mm 단위로 들어있으므로 mm 기준으로 통일해서 비교한다.
@@ -21601,27 +21526,6 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
       curRot = (_posOv && typeof _posOv.rotRejectThreshold === 'number') ? _posOv.rotRejectThreshold : _baseProfile.rotRejectThreshold;
       curVertScale = (_posOv && _ovProfile.vertG2MigrationDone && typeof _posOv.vertScale === 'number') ? _posOv.vertScale : _baseProfile.vertScale; // [수정 2026-10-23] 마이그레이션 전 저장값(z축 기준)은 무시
     } catch (e) {}
-    // [추가 2026-11-15] 로그 당시 계수 기준으로 교체. 현재 앱 값과 다른 항목은 calibBasisRows에 모아 안내문에 보여준다.
-    const calibBasisRows = [];
-    {
-      const _swap = function (key, label, appVal, setter) {
-        const lv = logBase.vals[key];
-        if (typeof lv !== 'number') return;
-        if (typeof appVal !== 'number' || Math.abs(lv - appVal) > Math.max(1e-6, Math.abs(appVal) * 0.005)) calibBasisRows.push({ key: key, label: label, log: lv, app: appVal });
-        setter(lv);
-      };
-      _swap('gctFallbackRatio', 'gctFallbackRatio', curGct, function (v) { curGct = v; });
-      _swap('vertScale', 'vertScale', curVertScale, function (v) { curVertScale = v; });
-      _swap('rotRejectThreshold', 'rotRejectThreshold', curRot, function (v) { curRot = v; });
-      _swap('groundThreshold', 'groundThreshold', curGround, function (v) { curGround = v; });
-      _swap('impactThreshold', 'impactThreshold', curImpact, function (v) { curImpact = v; });
-      if (!isMotionOnlyPos(resolvedDevicePos)) {
-        if (logBase.vals.stride != null && Math.abs(logBase.vals.stride - appCalibAtCompare.stride) > 1e-6) calibBasisRows.push({ key: 'stride', label: isKo ? '보폭 보정계수' : 'stride factor', log: logBase.vals.stride, app: appCalibAtCompare.stride });
-        if (logBase.vals.gps != null && Math.abs(logBase.vals.gps - appCalibAtCompare.gps) > 1e-6) calibBasisRows.push({ key: 'gps', label: isKo ? 'GPS 거리 보정계수' : 'GPS dist factor', log: logBase.vals.gps, app: appCalibAtCompare.gps });
-        if (logBase.vals.cad != null && Math.abs(logBase.vals.cad - appCalibAtCompare.cad) > 1e-6) calibBasisRows.push({ key: 'cad', label: isKo ? '케이던스 보정계수' : 'cadence factor', log: logBase.vals.cad, app: appCalibAtCompare.cad });
-        if (logBase.vals.pace != null && Math.abs(logBase.vals.pace - appCalibAtCompare.pace) > 1e-6) calibBasisRows.push({ key: 'pace', label: isKo ? '페이스 보정계수' : 'pace factor', log: logBase.vals.pace, app: appCalibAtCompare.pace });
-      }
-    }
     // [수정 2026-09-21] vertEnabled:false 위치(손/암밴드/프리런)는 vertOscMm이 항상 비어서, 첫 vertScale을 한 번
     // 적용해 curVertScale > 0이 된 뒤에는 (1) 표의 VERT OSC 폰 값이 계속 '--'이고 (2) 재보정 제안식(아래
     // suggestedVertScale의 curVertScale > 0 && phoneAvgVertMm 조건)도 성립하지 않아 제안이 null이 되는 문제가
@@ -21777,16 +21681,11 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // appliedFields/appliedAt은 아직 비어있고, applyCalibration()이
     // 실행될 때 채워져서 "제안만 됐는지" vs "실제로 적용됐는지"를 리포트에 구분해서 남긴다.
     lastCompareData = {
-      devicePos: resolvedDevicePos, // [추가 2026-11-14] 좋은 기록 세트 저장용
-      baseCalib: Object.assign({}, logBase.vals), // [추가 2026-11-15] 이 비교의 기준이 된 "로그 당시 계수"(좋은 기록 저장에 사용)
-      baseCalibInfo: { logCount: logBase.logCount, withCalib: logBase.withCalib, inferred: logBase.inferred.slice(), mixed: logBase.mixed.slice() },
       comparedAt: new Date().toISOString(),
       garminSavedAt: garminItems.map(g => g.importedAt).filter(Boolean).join(', ') || null, // [수정] 여러 개 선택 시 콤마로 나열
       precLogSavedAt: precItems.map(p => p.savedAt).filter(Boolean).join(', ') || null, // [수정] 여러 개 선택 시 콤마로 나열
       metrics: {
         cadence: { phone: phoneAvgCadence, garmin: garminAvgCadence, diffPct: cadDiffPct, unit: 'spm' },
-        stepDetector: { phone: stepDetectorCadence, garmin: garminAvgCadence, diffPct: stepDetectorDiffPct, unit: 'spm' }, // [추가 2026-11-15] 좋은 기록 저장용(비교표의 OS 걸음감지센서 행)
-        stepCounter: { phone: stepCounterCadence, garmin: garminAvgCadence, diffPct: stepCounterDiffPct, unit: 'spm' }, // [추가 2026-11-15] 좋은 기록 저장용(비교표의 OS 걸음수센서 행)
         gct: { phone: phoneAvgGct, garmin: garminAvgGct, diffPct: gctDiffPct, unit: 'ms' },
         stepLength: { phone: phoneAvgStepMm, garmin: garminAvgStepMm, diffPct: stepDiffPct, unit: 'mm' },
         vertOsc: { phone: phoneAvgVertMm, garmin: garminAvgVertMm, diffPct: vertDiffPct, unit: 'mm' },
@@ -21918,7 +21817,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
 
     const hasSuggestion = suggestedRot != null || suggestedRotOS != null || suggestedGct != null || suggestedVertScale != null || suggestedStrideFactor != null || suggestedGpsDistFactor != null || suggestedCadFactor != null || suggestedPaceFactor != null;
 
-    if (true) { // [수정 2026-11-14] 제안이 없어도 전 항목을 신호등 색으로 항상 표시 (적용 버튼은 hasSuggestion일 때만)
+    if (hasSuggestion) {
       // [수정] 예전엔 아래 5개 값이 있으면 무조건 전부 한꺼번에 적용됐음.
       // 각 항목 앞에 체크박스를 둬서, 원하는 값만 선택해서 적용/대기목록 저장할 수 있게 함.
       // 기본은 전부 체크(기존 동작과 동일)라 아무것도 안 건드리면 이전과 똑같이 동작함.
@@ -21944,32 +21843,8 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
           + inputHtml
           + '</div>';
       };
-      // [추가 2026-11-14] 신호등 점: 비교표와 같은 기준(오차 5% 미만 초록 / 15% 미만 노랑 / 그 이상 빨강, 오차 없으면 회색)
-      const _dot = (pct) => {
-        if (pct == null || !isFinite(pct)) return '<span style="color:#666">●</span> ';
-        const a = Math.abs(pct);
-        const c = a < 5 ? 'var(--good)' : (a < 15 ? 'var(--warning)' : 'var(--danger)');
-        return '<span style="color:' + c + '">●</span> ';
-      };
-      const infoRow = (line, pct, note) => '<div style="padding:4px 0; color:#aaa;">' + _dot(pct) + line
-        + (note ? ' <span class="u-color-666">' + note + '</span>' : '') + '</div>';
-      const _legendHtml = '<div style="font-size:var(--fs-xxs); color:#888; padding:2px 0 8px 0; line-height:1.5;">'
-        + (isKo
-          ? '<span style="color:var(--good)">●</span> 오차 5% 미만(범위 내) · <span style="color:var(--warning)">●</span> 5~15%(보정할 만함) · <span style="color:var(--danger)">●</span> 15% 이상 · <span style="color:#666">●</span> 비교 불가/해당 없음'
-          : '<span style="color:var(--good)">●</span> under 5% (OK) · <span style="color:var(--warning)">●</span> 5-15% (worth tuning) · <span style="color:var(--danger)">●</span> 15%+ · <span style="color:#666">●</span> n/a')
-        + '</div>';
-      const _bi = lastCompareData && lastCompareData.baseCalibInfo ? lastCompareData.baseCalibInfo : { logCount: 0, withCalib: 0, inferred: [], mixed: [] };
-      const _hasLogBase = Object.keys(logBase.vals).length > 0;
-      const _basisHtml = '<div style="font-size:var(--fs-xxs); line-height:1.6; padding:0 0 8px 0; color:' + (_hasLogBase ? '#9ee6b8' : '#ffb86b') + ';">'
-        + (_hasLogBase
-          ? (isKo ? '기준 계수: <b>이 로그를 뛸 때 적용됐던 값</b>' + (_bi.withCalib < _bi.logCount ? ' (당시 계수 기록이 없는 로그는 가능한 항목만 역산)' : '') : 'Basis: <b>coefficients applied when this log was recorded</b>')
-          : (isKo ? '기준 계수: <b>현재 앱 값</b> — 이 로그엔 당시 계수 기록이 없어요. 로그를 만든 뒤 계수를 바꿨다면 제안값이 어긋날 수 있어요.' : 'Basis: <b>current app values</b> — this log has no recorded coefficients.'))
-        + (_bi.inferred.length ? '<div style="color:#888;">' + (isKo ? '※ vertScale은 로그의 화면값÷원시 진폭으로 역산한 추정값이에요.' : 'Note: vertScale is inferred from the log (shown value ÷ raw amplitude).') + '</div>' : '')
-        + (_bi.mixed.length ? '<div style="color:#ffb86b;">' + (isKo ? '※ 선택한 로그들의 계수가 서로 달라요(' + _bi.mixed.join(', ') + '). 평균을 기준으로 계산했어요. 같은 계수의 로그끼리 비교하길 권해요.' : 'Selected logs used different coefficients (' + _bi.mixed.join(', ') + '); the average is used.') + '</div>' : '')
-        + (calibBasisRows.length ? '<div style="color:#aaa;">' + (isKo ? '현재 앱 값과 다른 항목: ' : 'Differs from the app now: ') + calibBasisRows.map(function (r) { return r.label + ' ' + (typeof r.log === 'number' ? r.log.toFixed(3) : '-') + ' (' + (isKo ? '앱 ' : 'app ') + (typeof r.app === 'number' ? r.app.toFixed(3) : '-') + ')'; }).join(' · ') + '</div>' : '')
-        + '</div>';
       html += '<div class="lk-garmin-sugg" style="margin-top:12px; font-size:var(--fs-xs); color:#ccc; line-height:1.5;">'
-        + '<div class="c58">' + (isKo ? '보정수치 전체 (적용할 항목 선택)' : 'ALL CALIBRATION VALUES (select items to apply)') + '</div>' + _legendHtml + _basisHtml;
+        + '<div class="c58">' + (isKo ? '권장 보정수치 (적용할 항목 선택)' : 'RECOMMENDED CALIBRATION (select items to apply)') + '</div>';
       // [수정 2026-07-30] hand는 이제 suggestedRot/suggestedRotOS 자체가 계산 단계에서
       // null이므로(위 참고) 아래 두 항목이 hand에서는 자연히 표시되지 않는다 — 별도 경고문 불필요.
       if (suggestedRot != null) {
@@ -21980,14 +21855,14 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
           + (isKo ? '<span class="u-color-7fd3ff">(OS 센서 기준 대안 — 체크 시 위 값 대신 이 값이 적용됨)</span>' : '<span class="u-color-7fd3ff">(alt., based on OS sensor — overrides the row above if checked)</span>'), false);
       }
       if (suggestedGct != null) {
-        html += checkRow('calib-sel-gct', _dot(gctDiffPct) + 'gctFallbackRatio: ' + curGct.toFixed(3) + ' → <b>' + suggestedGct.toFixed(3) + '</b>', true, 'calib-input-gct', suggestedGct.toFixed(3));
+        html += checkRow('calib-sel-gct', 'gctFallbackRatio: ' + curGct.toFixed(3) + ' → <b>' + suggestedGct.toFixed(3) + '</b>', true, 'calib-input-gct', suggestedGct.toFixed(3));
       }
       if (suggestedGround != null) {
-        html += checkRow('calib-sel-ground', _dot(gctDiffPct) + 'groundThreshold: ' + curGround.toFixed(2) + ' → <b>' + suggestedGround.toFixed(2) + '</b> '
+        html += checkRow('calib-sel-ground', 'groundThreshold: ' + curGround.toFixed(2) + ' → <b>' + suggestedGround.toFixed(2) + '</b> '
           + (isKo ? '<span class="u-color-666">(GCT 실측 경로 보정)</span>' : '<span class="u-color-666">(corrects the measured-GCT path)</span>'), true, 'calib-input-ground', suggestedGround.toFixed(2));
       }
       if (suggestedImpact != null) {
-        html += checkRow('calib-sel-impact', _dot(gctDiffPct) + 'impactThreshold: ' + curImpact.toFixed(2) + ' → <b>' + suggestedImpact.toFixed(2) + '</b>', true, 'calib-input-impact', suggestedImpact.toFixed(2));
+        html += checkRow('calib-sel-impact', 'impactThreshold: ' + curImpact.toFixed(2) + ' → <b>' + suggestedImpact.toFixed(2) + '</b>', true, 'calib-input-impact', suggestedImpact.toFixed(2));
       }
       if ((suggestedGround != null || suggestedImpact != null) && gctMeasuredFrac != null) {
         html += '<div style="font-size:var(--fs-xxs); color:#888; padding:2px 0 6px 23px; line-height:1.5;">'
@@ -22014,13 +21889,13 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
           + '</div>';
       }
       if (suggestedVertScale != null) {
-        html += checkRow('calib-sel-vert', _dot(vertDiffPct) + 'vertScale: ' + curVertScale.toFixed(3) + ' → <b>' + suggestedVertScale.toFixed(3) + '</b>', true, 'calib-input-vert', suggestedVertScale.toFixed(3));
+        html += checkRow('calib-sel-vert', 'vertScale: ' + curVertScale.toFixed(3) + ' → <b>' + suggestedVertScale.toFixed(3) + '</b>', true, 'calib-input-vert', suggestedVertScale.toFixed(3));
       }
       if (suggestedStrideFactor != null) {
-        html += factorRow('calib-sel-stride', _dot(stepDiffPct) + (isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ': ' + curStrideFactor.toFixed(3) + ' → <b>' + suggestedStrideFactor.toFixed(3) + '</b>', true, 'calib-input-stride', suggestedStrideFactor.toFixed(3));
+        html += factorRow('calib-sel-stride', (isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ': ' + curStrideFactor.toFixed(3) + ' → <b>' + suggestedStrideFactor.toFixed(3) + '</b>', true, 'calib-input-stride', suggestedStrideFactor.toFixed(3));
       }
       if (suggestedGpsDistFactor != null) {
-        html += factorRow('calib-sel-gps', _dot(distDiffPct) + (isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + curGpsDistFactor.toFixed(3) + ' → <b>' + suggestedGpsDistFactor.toFixed(3) + '</b> ' + (isKo ? '(실제 거리·페이스에 직접 반영됨)' : '(directly affects real distance/pace)'), true, 'calib-input-gps', suggestedGpsDistFactor.toFixed(3));
+        html += factorRow('calib-sel-gps', (isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + curGpsDistFactor.toFixed(3) + ' → <b>' + suggestedGpsDistFactor.toFixed(3) + '</b> ' + (isKo ? '(실제 거리·페이스에 직접 반영됨)' : '(directly affects real distance/pace)'), true, 'calib-input-gps', suggestedGpsDistFactor.toFixed(3));
         // [수정 2026-08-04] 페이스는 GPS 거리 보정계수에서 자동으로 파생되는 실효 배율
         // (paceImpliedFactor, 아래 안내문)과는 별개로, 거리는 그대로 두고 페이스 표시값만
         // 따로 미세조정할 수 있는 전용 보정계수(paceCorrectionFactor)도 추가로 지원한다.
@@ -22033,45 +21908,25 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         }
       }
       if (suggestedPaceFactor != null) {
-        html += factorRow('calib-sel-pacefactor', _dot(paceDiffPct) + (isKo ? '페이스 전용 보정계수' : 'paceCorrectionFactor') + ': ' + curPaceFactor.toFixed(3) + ' → <b>' + suggestedPaceFactor.toFixed(3) + '</b> '
+        html += factorRow('calib-sel-pacefactor', (isKo ? '페이스 전용 보정계수' : 'paceCorrectionFactor') + ': ' + curPaceFactor.toFixed(3) + ' → <b>' + suggestedPaceFactor.toFixed(3) + '</b> '
           + (isKo ? '<span class="u-color-666">(거리는 그대로 두고 표시 페이스에만 곱해짐 — 계수를 올리면 페이스가 빨라짐/숫자가 작아짐)</span>' : '<span class="u-color-666">(distance untouched — only affects displayed pace; higher = faster/smaller pace number)</span>'),
           true, 'calib-input-pacefactor', suggestedPaceFactor.toFixed(3));
       }
       if (suggestedCadFactor != null) {
-        html += factorRow('calib-sel-cad', _dot(cadDiffPct) + (isKo ? '케이던스 보정계수' : 'cadCorrectionFactor') + ': ' + curCadFactor.toFixed(3) + ' → <b>' + suggestedCadFactor.toFixed(3) + '</b> ' + (isKo ? '(네이티브 걸음센서 원시값은 그대로, 표시/기록값에만 반영됨)' : '(native raw value untouched, applies only to displayed/logged cadence)'), true, 'calib-input-cad', suggestedCadFactor.toFixed(3));
+        html += factorRow('calib-sel-cad', (isKo ? '케이던스 보정계수' : 'cadCorrectionFactor') + ': ' + curCadFactor.toFixed(3) + ' → <b>' + suggestedCadFactor.toFixed(3) + '</b> ' + (isKo ? '(네이티브 걸음센서 원시값은 그대로, 표시/기록값에만 반영됨)' : '(native raw value untouched, applies only to displayed/logged cadence)'), true, 'calib-input-cad', suggestedCadFactor.toFixed(3));
       }
-      // [추가 2026-11-14] 이번 비교에서 제안값이 없는 항목도 현재값 + 신호등 점으로 전부 표시한다.
-      {
-        const _na = isKo ? '해당 없음' : 'n/a';
-        const _noData = isKo ? '제안 없음(비교 데이터 부족)' : 'no suggestion (not enough data)';
-        const _frNote = isKo ? '프리런은 보정 대상 아님' : 'not calibrated in Free Run';
-        let _rows = '';
-        if (suggestedGct == null && curGct != null) _rows += infoRow('gctFallbackRatio: ' + curGct.toFixed(3), gctDiffPct, _noData);
-        if (suggestedVertScale == null && curVertScale != null) _rows += infoRow('vertScale: ' + curVertScale.toFixed(3), vertDiffPct, vertBasisOk ? _noData : (isKo ? '예전 로그(z축 기준)라 제안 생략' : 'old log basis — skipped'));
-        if (suggestedGround == null && curGround != null) _rows += infoRow('groundThreshold: ' + curGround.toFixed(2), null, isKo ? '현재 미사용(GCT 안정화 방식)' : 'currently unused');
-        if (suggestedImpact == null && curImpact != null) _rows += infoRow('impactThreshold: ' + curImpact.toFixed(2), null, isKo ? '현재 미사용(GCT 안정화 방식)' : 'currently unused');
-        if (curRot != null) _rows += infoRow('rotRejectThreshold: ' + curRot, null, isKo ? '걸음 판정에 안 쓰여 미사용' : 'unused (native step detection)');
-        if (suggestedStrideFactor == null) _rows += infoRow((isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ': ' + curStrideFactor.toFixed(3), stepDiffPct, isFreerunPos ? _frNote : _noData);
-        if (suggestedGpsDistFactor == null) _rows += infoRow((isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + curGpsDistFactor.toFixed(3), distDiffPct, isFreerunPos ? _frNote : _noData);
-        if (suggestedPaceFactor == null) _rows += infoRow((isKo ? '페이스 전용 보정계수' : 'paceCorrectionFactor') + ': ' + curPaceFactor.toFixed(3), paceDiffPct, isFreerunPos ? _frNote : _noData);
-        if (suggestedCadFactor == null) _rows += infoRow((isKo ? '케이던스 보정계수' : 'cadCorrectionFactor') + ': ' + curCadFactor.toFixed(3), cadDiffPct, isFreerunPos ? _frNote : _noData);
-        if (_rows) {
-          html += '<div style="margin-top:8px; padding-top:6px; border-top:1px solid #2a2a2a; font-size:var(--fs-xxs); color:#888; font-weight:800;">'
-            + (isKo ? (hasSuggestion ? '변경 제안 없는 항목 (현재값)' : '이번 비교에서 적용할 권장값이 없어요 · 현재값') : (hasSuggestion ? 'No change suggested (current values)' : 'Nothing to apply this time · current values')) + '</div>' + _rows;
-        }
-      }
-      if (hasSuggestion) html += '<div style="color:#888; margin-top:8px; margin-bottom:10px;">' + (isKo
+      html += '<div style="color:#888; margin-top:8px; margin-bottom:10px;">' + (isKo
         ? '체크된 항목만 아래 버튼으로 즉시 적용/저장됩니다. 적용 후 러닝을 한 번 더 진행해서 오차가 줄었는지 다시 비교해보세요.'
         : 'Only the checked items are applied and saved when you tap the button below. Run again afterward and re-compare to confirm the error shrank.') + '</div>'
         + '<button id="btn-apply-calib" style="background:var(--primary); color:#000; border:none; padding:12px; border-radius:10px; width:100%; font-weight:900; font-size:var(--fs-sm); cursor:pointer;" onclick="garmin.applyCalibration()">' + (isKo ? '✓ 이 값으로 자동 반영' : '✓ APPLY THESE VALUES') + '</button>'
-        + '<button id="btn-save-pending-calib" style="margin-top:8px; background:transparent; color:var(--primary); border:1.5px solid #2a3a2f; padding:12px; border-radius:10px; width:100%; font-weight:900; font-size:var(--fs-sm); cursor:pointer;" onclick="garmin.addPendingCalib()">' + (isKo ? '＋ 같은 위치 3개 평균용으로 저장' : '＋ SAVE FOR 3-RESULT AVERAGE') + '</button>';
-      html += '</div>';
+        + '<button id="btn-save-pending-calib" style="margin-top:8px; background:transparent; color:var(--primary); border:1.5px solid #2a3a2f; padding:12px; border-radius:10px; width:100%; font-weight:900; font-size:var(--fs-sm); cursor:pointer;" onclick="garmin.addPendingCalib()">' + (isKo ? '＋ 같은 위치 3개 평균용으로 저장' : '＋ SAVE FOR 3-RESULT AVERAGE') + '</button>'
+        + '</div>';
 
       // [수정] devicePos는 위에서 이미 계산해둔 공용 resolvedDevicePos(선택한 로그의 실제
       // 기록 위치 우선, 없으면 현재 설정값)를 그대로 재사용한다. 위치가 서로 다른 로그를
       // 섞어 선택한 경우엔 위쪽 경고문(posMismatchWarningHtml)에서 이미 안내했으므로
       // 여기서는 대표값(resolvedDevicePos) 하나로만 저장한다.
-      lastSuggestion = !hasSuggestion ? null : {
+      lastSuggestion = {
         devicePos: resolvedDevicePos,
         logCount: precItems.length, // [추가 2026-10-10] 이 제안이 합산(평균)한 정밀 로그 수
         gct: suggestedGct,
@@ -22093,7 +21948,6 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     }
     // [단순화 2026-10-10] 속도·지연 보정 제안 패널 (러닝 내 속도 기울기 + LOO 검증, 모션 엔진에 직접 저장)
     try { html += buildSpeedCalibPanelHtml(garminItems, precItems, resolvedDevicePos, curVertScale, isKo); } catch (e) { console.warn('[speedcalib panel]', e); }
-    html += '<button id="btn-save-good-calib" style="margin-top:10px; background:#14261a; color:#5fd18a; border:1.5px solid #2d5a3f; padding:12px; border-radius:10px; width:100%; font-weight:900; font-size:var(--fs-sm); cursor:pointer;" onclick="garmin.saveGoodCalib()">' + (isKo ? '★ 이 계수 세트 저장 (저장만 해요 · 적용은 "저장된 계수"에서)' : '★ SAVE THIS SET (save only · apply from "Saved sets")') + '</button>';
     html += '<button id="btn-save-calib-report" style="margin-top:10px; background:transparent; color:#999; border:1.5px solid #333; padding:11px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.exportCalibReport()">' + (isKo ? '리포트 다운로드 (.txt)' : 'DOWNLOAD REPORT (.txt)') + '</button>';
     html += '</div>';
     resultBox.innerHTML = html;
@@ -22391,398 +22245,7 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
   const POS_LABEL_KO = getPosLabelMap(true);
   const POS_LABEL_EN = getPosLabelMap(false);
 
-  // ── [추가 2026-11-14] 좋은 기록 계수 세트 ──
-  // 비교 화면에서 "지금 계수 세트"를 위치별로 저장해두고, 나중에 폰 저장소가 틀어졌을 때
-  // 비율 계산 없이 저장된 절대값 그대로 되돌려 적용한다(적용은 기존 applyMotionCalibSuggestion 경로라 UNDO/이력 포함).
-  // [수정 2026-11-15]
-  //  ① 저장할 때 비교표 9개 행(케이던스/OS 걸음감지센서/OS 걸음수센서/GCT/보폭/수직진동/거리/페이스/심박수)의 폰·가민·오차를 통째로 같이 저장하고 카드에 그대로 표시.
-  //  ② 설정 화면(현재 데이터 보기)엔 안 나오지만 수직진동·GCT 결과를 바꾸는 숨은 값 3개(vertSpeedSlope/vertRefSpeed/gctFilterDelayMs)도 세트에 포함.
-  //  ③ "좋은 기록 되돌리기"를 누르면 카드 안에 보정수치 목록이 펼쳐지고(처음엔 전부 체크), 체크한 항목만 폰 저장소에 현재값으로 적용한다.
-  const GOOD_CALIB_KEY = 'oppaRunGoodCalibSets';
-  const MAX_GOOD_PER_POS = 5;
-  const GOOD_HIDDEN_KEYS = ['vertSpeedSlope', 'vertRefSpeed', 'gctFilterDelayMs'];
-  function loadGoodSets() {
-    try { const a = JSON.parse(localStorage.getItem(GOOD_CALIB_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
-  }
-  function saveGoodSetsList(list) {
-    try { localStorage.setItem(GOOD_CALIB_KEY, JSON.stringify(list)); } catch (e) { jrLogErr('goodCalibSave', e); }
-  }
-  function goodSetValsEqual(a, b) {
-    const ka = Object.keys(a || {});
-    if (ka.length !== Object.keys(b || {}).length) return false;
-    return ka.every(function (k) { return typeof a[k] === 'number' && typeof b[k] === 'number' && Math.abs(a[k] - b[k]) < 1e-9; });
-  }
-  function goodHiddenSnapshot(prof, pos) { return calibHiddenSnapshot(prof, pos); }
-  function goodFullSnapshot(prof, pos) { return calibFullSnapshot(prof, pos); }
-  function fmtGoodVal(key, v) {
-    if (typeof v !== 'number') return '-';
-    if (key === 'vertSpeedSlope') return v.toFixed(2);
-    if (key === 'vertRefSpeed' || key === 'gctFilterDelayMs') return v.toFixed(1);
-    const f = CALIB_HISTORY_FIELDS.filter(function (x) { return x.key === key; })[0];
-    return v.toFixed(f ? f.dec : 3);
-  }
-  // 되돌리기 목록의 체크박스 단위. 속도보정(slope+vref)은 한 쌍으로 묶는다(둘 중 하나만 바꾸면 의미가 없어서).
-  function goodRestoreItems(pos, isKo) {
-    const motionOnly = isMotionOnlyPos(pos);
-    const items = [];
-    CALIB_HISTORY_FIELDS.forEach(function (f) {
-      if (motionOnly && f.factor) return;
-      items.push({ id: f.key, label: isKo ? f.ko : f.en, keys: [f.key] });
-    });
-    items.push({ id: 'speedComp', label: isKo ? '속도보정 vertSpeedSlope / vertRefSpeed' : 'Speed comp vertSpeedSlope / vertRefSpeed', keys: ['vertSpeedSlope', 'vertRefSpeed'] });
-    items.push({ id: 'gctFilterDelayMs', label: 'gctFilterDelayMs', keys: ['gctFilterDelayMs'] });
-    return items;
-  }
-  function goodItemHas(it, vals) { return it.keys.every(function (k) { return typeof vals[k] === 'number'; }); }
-  function goodItemSame(it, a, b) { return it.keys.every(function (k) { return typeof a[k] === 'number' && typeof b[k] === 'number' && Math.abs(a[k] - b[k]) < 1e-6; }); }
-  function fmtGoodItem(it, vals) { return it.keys.map(function (k) { return fmtGoodVal(k, vals[k]); }).join(' / '); }
-
-  // 비교표 행 정의(비교 화면 표와 같은 순서·같은 서식)
-  const GOOD_TABLE_ROWS = [
-    ['cadence', '케이던스 (spm)', 'CADENCE (spm)', 'n'],
-    ['stepDetector', '↳ OS 걸음감지센서 (spm)', '↳ OS STEP DETECTOR (spm)', 'n'],
-    ['stepCounter', '↳ OS 걸음수센서 (spm)', '↳ OS STEP COUNTER (spm)', 'n'],
-    ['gct', 'GCT (ms)', 'GCT (ms)', 'n'],
-    ['stepLength', '보폭 (mm)', 'STEP LEN (mm)', 'n'],
-    ['vertOsc', '수직진동 (mm)', 'VERT OSC (mm)', 'n'],
-    ['distance', '실제 거리 (km)', 'DISTANCE (km)', 'km'],
-    ['pace', '페이스 (/km)', 'PACE (/km)', 'pace'],
-    ['hr', '평균 심박수 (bpm)', 'AVG HR (bpm)', 'n']
-  ];
-  function goodTableFmt(kind, v) {
-    if (typeof v !== 'number') return '--';
-    if (kind === 'km') return v.toFixed(2) + ' km';
-    if (kind === 'pace') return fmtPace(v);
-    return v.toFixed(0);
-  }
-  function buildGoodTableHtml(it, isKo) {
-    const t = it.table;
-    if (!t) { // 예전에 저장된 세트(오차 6개만 있음) 호환
-      const d = it.diffs || {};
-      const sg = function (v) { return (v > 0 ? '+' : '') + v.toFixed(1) + '%'; };
-      const dTxt = [['CAD', d.cadence], ['GCT', d.gct], ['STEP', d.stepLength], ['VERT', d.vertOsc], ['DIST', d.distance], ['PACE', d.pace]]
-        .filter(function (x) { return typeof x[1] === 'number'; }).map(function (x) { return x[0] + ' ' + sg(x[1]); }).join(' · ');
-      return dTxt ? '<div style="font-size:var(--fs-xxs); color:#888; line-height:1.6;">' + (isKo ? '당시 오차 ' : 'Error then ') + dTxt + '</div>' : '';
-    }
-    let h = '<div style="margin-top:6px;">'
-      + '<div style="display:flex; justify-content:space-between; font-size:var(--fs-xxs); color:#777; font-weight:800; padding-bottom:2px;"><span>' + (isKo ? '폰 vs 가민' : 'PHONE vs GARMIN') + '</span><span>' + (isKo ? '오차' : 'DIFF') + '</span></div>';
-    GOOD_TABLE_ROWS.forEach(function (r) {
-      const x = t[r[0]];
-      if (!x) return;
-      const d = (typeof x.diffPct === 'number') ? x.diffPct : null;
-      const col = d == null ? '#888' : (Math.abs(d) < 5 ? 'var(--good)' : (Math.abs(d) < 15 ? 'var(--warning)' : 'var(--danger)'));
-      const dTxt = d == null ? '--' : (d > 0 ? '+' : '') + d.toFixed(1) + '%';
-      h += '<div style="display:flex; justify-content:space-between; align-items:baseline; gap:6px; padding:3px 0; border-top:1px solid #222; font-size:var(--fs-xxs);">'
-        + '<span style="color:#888; flex:1.2;">' + (isKo ? r[1] : r[2]) + '</span>'
-        + '<span style="color:#ddd; flex:1.4; text-align:center; font-weight:800;">' + goodTableFmt(r[3], x.phone) + ' <span style="color:#666; font-weight:600;">vs</span> ' + goodTableFmt(r[3], x.garmin) + '</span>'
-        + '<span style="font-weight:900; color:' + col + '; min-width:46px; text-align:right;">' + dTxt + '</span></div>';
-    });
-    return h + '</div>';
-  }
-
-  async function saveGoodCalib() {
-    const isKo = isKoLang();
-    if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 해제된 계정으로 로그인하면 쓸 수 있어요.', 'This is a PRO feature. Log in with a PRO-unlocked account to use it.'); return; }
-    if (!lastCompareData || !lastCompareData.devicePos) { await appAlert(isKo ? '먼저 비교를 실행해주세요.' : 'Run a comparison first.'); return; }
-    try {
-      const pos = lastCompareData.devicePos;
-      const prof = storage.loadProfile();
-      const snap = goodFullSnapshot(prof, pos); // 지난 로그든 현재 로그든 항상 "지금 앱 저장소에 있는 값"
-      const vals = {};
-      CALIB_HISTORY_FIELDS.forEach(function (f) { if (typeof snap[f.key] === 'number') vals[f.key] = snap[f.key]; });
-      GOOD_HIDDEN_KEYS.forEach(function (k) { if (typeof snap[k] === 'number') vals[k] = snap[k]; });
-      // [추가 2026-11-15] 비교 기준이 된 "로그 당시 계수"가 있으면 현재 앱 값보다 우선해 저장한다(로그에 없는 항목만 현재 앱 값).
-      const _bc = lastCompareData.baseCalib || {};
-      const _fromLogKeys = [];
-      Object.keys(_bc).forEach(function (k) { if (typeof _bc[k] === 'number' && (k in vals || GOOD_HIDDEN_KEYS.indexOf(k) >= 0)) { vals[k] = _bc[k]; _fromLogKeys.push(k); } });
-      // 비교표 전체(폰/가민/오차) — 화면에 보이는 9개 행 그대로
-      const m = lastCompareData.metrics || {};
-      const num = function (v, p) { return (typeof v === 'number' && isFinite(v)) ? Math.round(v * p) / p : null; };
-      const table = {};
-      GOOD_TABLE_ROWS.forEach(function (r) {
-        const x = m[r[0]];
-        if (!x) return;
-        const row = { phone: num(x.phone, 1000), garmin: num(x.garmin, 1000), diffPct: num(x.diffPct, 10) };
-        if (row.phone != null || row.garmin != null) table[r[0]] = row;
-      });
-      const lines = goodRestoreItems(pos, isKo).filter(function (it) { return goodItemHas(it, vals); })
-        .map(function (it) { return it.label + ': ' + fmtGoodItem(it, vals); }).join('\n');
-      const ok = await appConfirm(
-        '[' + getPosLabel(pos, isKo) + '] ' + (isKo ? '이 계수 세트를 저장할까요? (저장만 하고, 앱에는 적용되지 않아요)' : 'Save this coefficient set? (saved only — not applied to the app)') + '\n\n' + lines + '\n\n'
-        + (isKo ? (_fromLogKeys.length ? '※ 이 로그를 뛸 때 적용됐던 계수(' + _fromLogKeys.length + '개 항목)로 저장해요. 로그에 없는 항목만 현재 앱 값이에요.' : '※ 이 로그엔 당시 계수 기록이 없어서 현재 앱 값으로 저장해요.') + '\n※ 비교표 전체(케이던스~평균 심박수)도 함께 저장돼요.' : (_fromLogKeys.length ? 'Saved with the coefficients that were applied when the log was recorded (' + _fromLogKeys.length + ' items); only missing ones use the app\'s current values.' : 'This log has no recorded coefficients, so the current app values are saved.') + '\nThe whole comparison table is saved too.'),
-        { ok: isKo ? '저장' : 'SAVE', cancel: isKo ? '취소' : 'CANCEL', multiline: true });
-      if (!ok) return;
-      let list = loadGoodSets().filter(function (x) { return !(x.pos === pos && goodSetValsEqual(x.vals, vals)); });
-      list.unshift({ id: 'g' + Date.now(), pos: pos, savedAt: new Date().toISOString(), runAt: String(lastCompareData.precLogSavedAt || '').split(',')[0].trim() || null, vals: vals, table: table });
-      const cnt = {};
-      list = list.filter(function (x) { cnt[x.pos] = (cnt[x.pos] || 0) + 1; return cnt[x.pos] <= MAX_GOOD_PER_POS; });
-      saveGoodSetsList(list);
-      renderGoodSets(isKo);
-      await appAlert(isKo ? '저장했어요. 아직 앱에는 적용되지 않았어요. 아래 "저장된 계수"에서 "저장된 데이터로 적용"을 누르면 적용돼요.' : 'Saved — not applied to the app yet. Use "Apply saved data" in "Saved sets" below to apply it.');
-    } catch (e) { jrLogErr('saveGoodCalib', e); }
-  }
-  async function deleteGoodCalib(id) {
-    const isKo = isKoLang();
-    const ok = await appConfirm(isKo ? '이 저장된 세트를 삭제할까요?' : 'Delete this saved set?', { ok: isKo ? '삭제' : 'DELETE', cancel: isKo ? '취소' : 'CANCEL' });
-    if (!ok) return;
-    if (window.__goodRestoreOpenId === id) window.__goodRestoreOpenId = null;
-    saveGoodSetsList(loadGoodSets().filter(function (x) { return x.id !== id; }));
-    renderGoodSets(isKo);
-  }
-  // [추가 2026-11-15] 정밀 로그 한 개를 "저장된 세트"처럼 다룬다: 그 로그를 만든 러닝에 적용돼 있던 계수(item.calib).
-  // 계수 기록이 없는 옛 로그는 수직진동만 화면값÷원시진폭으로 역산한다. id는 'log:' + 정밀 로그 id.
-  function logRestoreSource(plogId) {
-    const item = storage.loadPrecisionLogs().filter(function (x) { return x.id === plogId; })[0];
-    if (!item) return null;
-    const pos = logPosOf(item);
-    if (!pos) return null;
-    const vals = {};
-    const c = (item.calib && typeof item.calib === 'object') ? item.calib : {};
-    CALIB_BASE_KEYS.forEach(function (k) { if (typeof c[k] === 'number' && isFinite(c[k])) vals[k] = c[k]; });
-    let inferred = false;
-    if (typeof vals.vertScale !== 'number') { const v = inferLogVertScale(item.log); if (v != null) { vals.vertScale = v; inferred = true; } }
-    return { id: 'log:' + item.id, pos: pos, vals: vals, fromLog: true, inferred: inferred, hasCalib: !!item.calib, savedAt: item.savedAt };
-  }
-  function goodSourceById(id) {
-    if (typeof id === 'string' && id.indexOf('log:') === 0) return logRestoreSource(id.slice(4));
-    return loadGoodSets().filter(function (x) { return x.id === id; })[0] || null;
-  }
-  // "저장된 데이터로 적용" 버튼: 카드 안에 보정수치 체크 목록을 펼치고/접는다(처음엔 전부 체크 상태).
-  function toggleGoodRestore(id) {
-    if (typeof id === 'string' && id.indexOf('log:') === 0) { // 설정 > 정밀 로그 카드
-      window.__logRestoreOpenId = (window.__logRestoreOpenId === id) ? null : id;
-      try { ui.renderPrecisionLogList(); } catch (e) {}
-      return;
-    }
-    window.__goodRestoreOpenId = (window.__goodRestoreOpenId === id) ? null : id;
-    window.__goodSetsOpen = true;
-    renderGoodSets(isKoLang());
-  }
-  // 설정 > 정밀 로그 카드 아래에 붙는 "이 로그 당시 계수로 적용" 버튼 + 펼침 목록
-  function buildLogRestoreHtml(plogId) {
-    try {
-      if (premium.isGarminLocked()) return '';
-      const isKo = isKoLang();
-      const src = logRestoreSource(plogId);
-      const hasVals = !!(src && Object.keys(src.vals).length);
-      if (!hasVals) {
-        return '<div style="margin-top:8px; font-size:var(--fs-xxs); color:#777; line-height:1.5;">' + (isKo ? '이 로그엔 당시 계수 기록이 없어서 적용할 수 없어요. (이번 수정 이후 뛴 러닝부터 기록돼요)' : 'This log has no recorded coefficients to apply (only runs recorded after this update have them).') + '</div>';
-      }
-      const open = (window.__logRestoreOpenId === src.id);
-      let h = '<div style="margin-top:8px;">'
-        + '<button type="button" style="width:100%; background:#14261a; color:#5fd18a; border:1.5px solid #2d5a3f; padding:12px; border-radius:10px; font-weight:900; font-size:var(--fs-sm); cursor:pointer;" onclick="garmin.toggleGoodRestore(\'' + src.id + '\')">'
-        + (isKo ? '↩ 이 로그 당시 계수로 적용' : '↩ APPLY THIS LOG\'S COEFFICIENTS') + '</button>'
-        + (src.inferred && !src.hasCalib ? '<div style="font-size:var(--fs-xxs); color:#888; line-height:1.5; margin-top:4px;">' + (isKo ? '※ 옛 로그라 vertScale만 역산한 추정값이에요.' : 'Old log: only vertScale is inferred.') + '</div>' : '');
-      if (open) h += buildGoodRestorePanel(src, storage.loadProfile(), isKo);
-      return h + '</div>';
-    } catch (e) { jrLogErr('buildLogRestoreHtml', e); return ''; }
-  }
-  async function applyGoodCalib(id) {
-    const isKo = isKoLang();
-    if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 해제된 계정으로 로그인하면 쓸 수 있어요.', 'This is a PRO feature. Log in with a PRO-unlocked account to use it.'); return; }
-    const set = goodSourceById(id);
-    if (!set) return;
-    const pos = set.pos;
-    try {
-      const prof = storage.loadProfile();
-      const snap = goodFullSnapshot(prof, pos);
-      // 체크된 항목만 모은다
-      const checkedIds = {};
-      let checkedCount = 0;
-      document.querySelectorAll('input.good-restore-chk').forEach(function (el) {
-        if (el.getAttribute('data-set') === id && el.checked) { checkedIds[el.getAttribute('data-item')] = true; checkedCount++; }
-      });
-      if (!checkedCount) { await appAlert(isKo ? '적용할 항목을 체크해주세요.' : 'Check at least one item to apply.'); return; }
-      const changed = {};
-      let appliedItems = 0;
-      goodRestoreItems(pos, isKo).forEach(function (it) {
-        if (!checkedIds[it.id] || !goodItemHas(it, set.vals)) return;
-        if (goodItemSame(it, snap, set.vals)) return;
-        it.keys.forEach(function (k) { changed[k] = set.vals[k]; }); // 속도보정은 두 값을 항상 같이 적용
-        appliedItems++;
-      });
-      if (!appliedItems) { await appAlert(isKo ? '체크한 항목은 이미 같은 값이에요.' : 'The checked items already have these values.'); return; }
-      // [추가 2026-11-15] 적용 직전 최종 확인: 어느 위치에 어떤 계수가 현재값 → 새값으로 바뀌는지 전부 보여준다.
-      {
-        const _lines = goodRestoreItems(pos, isKo).filter(function (it) { return checkedIds[it.id] && goodItemHas(it, set.vals) && !goodItemSame(it, snap, set.vals); })
-          .map(function (it) { return it.label + ': ' + fmtGoodItem(it, snap) + ' → ' + fmtGoodItem(it, set.vals); }).join('\n');
-        const _ok = await appConfirm('[' + getPosLabel(pos, isKo) + '] ' + (isKo ? (set.fromLog ? '이 로그 당시 계수로 앱 저장소를 바꿀까요?' : '저장된 데이터로 앱 저장소를 바꿀까요?') : 'Change the app\'s stored coefficients?') + '\n\n' + _lines + '\n\n' + (isKo ? '직전 적용 UNDO로 되돌릴 수 있어요.' : 'You can undo with the last-apply UNDO.'),
-          { ok: isKo ? '적용' : 'APPLY', cancel: isKo ? '취소' : 'CANCEL', multiline: true });
-        if (!_ok) return;
-      }
-      const sugg = {};
-      if (changed.gctFallbackRatio != null) sugg.gct = changed.gctFallbackRatio;
-      if (changed.rotRejectThreshold != null) sugg.rot = changed.rotRejectThreshold;
-      if (changed.vertScale != null) sugg.vertScale = changed.vertScale;
-      if (changed.groundThreshold != null) sugg.ground = changed.groundThreshold;
-      if (changed.impactThreshold != null) sugg.impact = changed.impactThreshold;
-      if (changed.stride != null) sugg.strideFactor = changed.stride;
-      if (changed.gps != null) sugg.gpsDistFactor = changed.gps;
-      if (changed.cad != null) sugg.cadFactor = changed.cad;
-      if (changed.pace != null) sugg.paceFactor = changed.pace;
-      if (changed.vertSpeedSlope != null && changed.vertRefSpeed != null) { sugg.vertSpeedSlope = changed.vertSpeedSlope; sugg.vertRefSpeed = changed.vertRefSpeed; }
-      if (changed.gctFilterDelayMs != null) sugg.gctFilterDelayMs = changed.gctFilterDelayMs;
-      // 수동 입력과 같은 방식: 보정계수 스위치가 꺼져 있어도 저장은 되게 잠깐 켜서 적용 → 원래 상태 복원
-      const origFlag = prof.calibFactorsEnabled;
-      const flat = { s: prof.strideCorrectionFactor, g: prof.gpsDistCorrectionFactor, c: prof.cadCorrectionFactor, p: prof.paceCorrectionFactor };
-      const wasOn = calibFactorsFlag(prof);
-      prof.calibFactorsEnabled = true;
-      const override = applyMotionCalibSuggestion(prof, pos, sugg);
-      if (origFlag === undefined) delete prof.calibFactorsEnabled; else prof.calibFactorsEnabled = origFlag;
-      if (!wasOn) { prof.strideCorrectionFactor = flat.s; prof.gpsDistCorrectionFactor = flat.g; prof.cadCorrectionFactor = flat.c; prof.paceCorrectionFactor = flat.p; }
-      storage.saveProfile(prof);
-      if (typeof app !== 'undefined' && app && app.motion && prof.devicePos === pos) {
-        if (override.gctFallbackRatio != null) app.motion.gctFallbackRatio = override.gctFallbackRatio;
-        if (override.rotRejectThreshold != null) app.motion.rotRejectThreshold = override.rotRejectThreshold;
-        if (override.vertScale != null) app.motion.vertScale = override.vertScale;
-        if (override.groundThreshold != null) app.motion.groundThreshold = override.groundThreshold;
-        if (override.impactThreshold != null) app.motion.impactThreshold = override.impactThreshold;
-        if (override.gctFilterDelayMs != null) app.motion.gctFilterDelayMs = override.gctFilterDelayMs;
-        if (typeof override.vertSpeedSlope === 'number' && typeof override.vertRefSpeed === 'number') { app.motion.vertSpeedSlope = override.vertSpeedSlope; app.motion.vertRefSpeed = override.vertRefSpeed; }
-        if (wasOn && changed.cad != null) app.motion.cadCorrectionFactor = changed.cad;
-        if (wasOn && changed.pace != null) app.motion.paceCorrectionFactor = changed.pace;
-      }
-      window.__goodRestoreOpenId = null;
-      window.__logRestoreOpenId = null;
-      try { ui.renderPrecisionLogList(); } catch (_e) {}
-      renderCalibStatus(isKo);
-      try { const cd = document.getElementById('current-data-result'); if (cd && cd.classList.contains('is-open') && typeof ui !== 'undefined') { ui.toggleCurrentData(); ui.toggleCurrentData(); } } catch (_e) {}
-      await appAlert('[' + getPosLabel(pos, isKo) + '] ' + (isKo ? '체크한 ' + appliedItems + '개 항목이 적용됐어요. 다음 러닝부터 반영돼요.' : appliedItems + ' checked item(s) applied. Takes effect from your next run.'));
-    } catch (e) {
-      jrLogErr('applyGoodCalib', e);
-      await appAlert(isKo ? '적용 중 오류가 발생했어요.' : 'Failed to apply.');
-    }
-  }
-  // 카드 안에 펼쳐지는 "보정수치 되돌리기 (적용할 항목 선택)" 목록
-  function buildGoodRestorePanel(it, prof, isKo) {
-    const cur = goodFullSnapshot(prof, it.pos);
-    const all = goodRestoreItems(it.pos, isKo);
-    const has = all.filter(function (x) { return goodItemHas(x, it.vals); });
-    const missing = all.filter(function (x) { return !goodItemHas(x, it.vals); });
-    const diff = [], same = [];
-    has.forEach(function (x) { (goodItemSame(x, cur, it.vals) ? same : diff).push(x); });
-    const dt = function (iso) { try { return new Date(iso).toLocaleDateString(isKo ? 'ko-KR' : 'en-US'); } catch (e) { return ''; } };
-    const srcTxt = it.fromLog
-      ? ((isKo ? '출처: 정밀 로그 ' : 'Source: precision log ') + dt(it.savedAt) + ((it.inferred && !it.hasCalib) ? (isKo ? ' (vertScale은 추정값)' : ' (vertScale inferred)') : ''))
-      : ((isKo ? '출처: 저장된 세트 ' : 'Source: saved set ') + (it.runAt ? (isKo ? '러닝 ' : 'run ') + String(it.runAt).slice(0, 10) + ' · ' : '') + (isKo ? '저장 ' : 'saved ') + dt(it.savedAt));
-    let h = '<div style="margin-top:10px; padding:10px; border:1px solid #2d5a3f; border-radius:10px; background:#0f1a13;">'
-      + '<div style="font-weight:900; color:var(--primary); font-size:var(--fs-sm); margin-bottom:4px;">' + (it.fromLog ? (isKo ? '이 로그 당시 계수로 적용 (적용할 항목 선택)' : 'APPLY THIS LOG\'S COEFFICIENTS (select items)') : (isKo ? '저장된 데이터로 적용 (적용할 항목 선택)' : 'APPLY SAVED DATA (select items to apply)')) + '</div>'
-      + '<div style="font-size:var(--fs-xxs); color:#9ee6b8; line-height:1.6;">' + (isKo ? '적용 위치: <b>' : 'Apply to: <b>') + getPosLabel(it.pos, isKo) + '</b> · ' + srcTxt + '</div>'
-      + '<div style="font-size:var(--fs-xxs); color:' + (missing.length ? '#ffb86b' : '#9ee6b8') + '; line-height:1.6; margin-bottom:4px;">' + (isKo ? '계수 ' : 'Coefficients ') + has.length + '/' + all.length + (isKo ? '개 포함' : ' included') + (missing.length ? (isKo ? ' · 빠진 항목은 적용되지 않고 현재값이 유지돼요' : ' · missing ones are NOT applied (current values stay)') : '') + '</div>';
-    if (!it.fromLog) { // 저장 당시 비교표(폰 vs 가민)도 적용 직전에 함께 보여준다
-      const tb = buildGoodTableHtml(it, isKo);
-      if (tb) h += '<div style="font-size:var(--fs-xxs); color:#777; font-weight:800; margin-top:4px;">' + (isKo ? '저장 당시 비교' : 'Comparison when saved') + '</div>' + tb;
-    }
-    h += '<div style="font-size:var(--fs-xxs); color:#888; line-height:1.5; margin:8px 0 2px 0;">' + (isKo ? '체크한 항목만 앱 저장소에 적용돼요. 처음엔 바뀌는 항목이 전부 체크돼 있어요.' : 'Only checked items are written to the app. Changing items start checked.') + '</div>';
-    diff.forEach(function (x) {
-      h += '<label style="display:flex; align-items:center; gap:10px; padding:9px 0; border-top:1px solid #1f2d24; cursor:pointer;">'
-        + '<input type="checkbox" class="good-restore-chk" data-set="' + it.id + '" data-item="' + x.id + '" checked style="width:20px; height:20px; flex:none; accent-color:var(--primary);">'
-        + '<span style="flex:1; font-size:var(--fs-xs); color:#ddd; line-height:1.5;">' + x.label + ': <span style="color:#888;">' + fmtGoodItem(x, cur) + '</span> → <b style="color:var(--primary);">' + fmtGoodItem(x, it.vals) + '</b></span></label>';
-    });
-    if (!diff.length) {
-      h += '<div style="font-size:var(--fs-xs); color:#9ee6b8; padding:8px 0;">' + (isKo ? '저장된 값이 전부 현재값과 같아요. 바꿀 항목이 없어요.' : 'All saved values already match the current ones.') + '</div>';
-    }
-    if (same.length) {
-      h += '<div style="font-size:var(--fs-xxs); color:#777; font-weight:800; margin:8px 0 2px 0;">' + (isKo ? '변경 없는 항목 (현재값과 같음)' : 'No change (same as current)') + '</div>';
-      same.forEach(function (x) {
-        h += '<div style="font-size:var(--fs-xxs); color:#777; line-height:1.7;">● ' + x.label + ': ' + fmtGoodItem(x, it.vals) + '</div>';
-      });
-    }
-    if (missing.length) {
-      h += '<div style="font-size:var(--fs-xxs); color:#ffb86b; font-weight:800; margin:8px 0 2px 0;">' + (isKo ? '이 데이터에 없는 항목 (적용 안 됨 · 현재값 유지)' : 'Not in this data (not applied · current kept)') + '</div>';
-      missing.forEach(function (x) {
-        h += '<div style="font-size:var(--fs-xxs); color:#9a7a45; line-height:1.7;">○ ' + x.label + ': ' + fmtGoodItem(x, cur) + '</div>';
-      });
-    }
-    h += '<div style="display:flex; gap:8px; margin-top:10px;">'
-      + (diff.length ? '<button type="button" style="flex:2; background:var(--primary); color:#000; border:none; padding:12px; border-radius:10px; font-weight:900; font-size:var(--fs-sm); cursor:pointer;" onclick="garmin.applyGoodCalib(\'' + it.id + '\')">' + (isKo ? '✓ 체크한 항목 적용' : '✓ APPLY CHECKED') + '</button>' : '')
-      + '<button type="button" style="flex:1; background:transparent; color:#999; border:1.5px solid #333; padding:12px; border-radius:10px; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.toggleGoodRestore(\'' + it.id + '\')">' + (isKo ? '닫기' : 'CLOSE') + '</button>'
-      + '</div></div>';
-    return h;
-  }
-  function renderGoodSets(isKo) {
-    const box = document.getElementById('garmin-good-sets');
-    if (!box) return;
-    const list = loadGoodSets();
-    if (!list.length) { box.innerHTML = ''; return; }
-    let prof = {};
-    try { prof = storage.loadProfile(); } catch (e) {}
-    const order = ['chest', 'waist', 'armband', 'hand', 'freerun', 'trail', 'treadmill'];
-    const sorted = list.slice().sort(function (a, b) { return (order.indexOf(a.pos) - order.indexOf(b.pos)) || String(b.savedAt).localeCompare(String(a.savedAt)); });
-    const short = { gctFallbackRatio: 'gct', vertScale: 'vert', rotRejectThreshold: 'rot', groundThreshold: 'ground', impactThreshold: 'impact', stride: 'stride', gps: 'gps', cad: 'cad', pace: 'pace' };
-    const openId = window.__goodRestoreOpenId;
-    const cards = sorted.map(function (it) {
-      const cur = goodFullSnapshot(prof, it.pos);
-      const isCur = Object.keys(it.vals).every(function (k) { return typeof cur[k] === 'number' && Math.abs(cur[k] - it.vals[k]) < 1e-6; });
-      const _allItems = goodRestoreItems(it.pos, isKo);
-      const _shortId = { speedComp: isKo ? '속도보정' : 'speed', gctFilterDelayMs: 'delay' };
-      const valTxt = _allItems.filter(function (x) { return goodItemHas(x, it.vals); })
-        .map(function (x) { return (short[x.id] || _shortId[x.id] || x.label) + ' ' + fmtGoodItem(x, it.vals); }).join(' · ');
-      const _cntTxt = (isKo ? '계수 ' : 'Coefficients ') + _allItems.filter(function (x) { return goodItemHas(x, it.vals); }).length + '/' + _allItems.length + (isKo ? '개 저장됨' : ' stored');
-      const hasHidden = false;
-      const dt = function (iso) { try { return new Date(iso).toLocaleDateString(isKo ? 'ko-KR' : 'en-US'); } catch (e) { return ''; } };
-      const runTxt = it.runAt ? (isKo ? '러닝 ' : 'Run ') + String(it.runAt).slice(0, 10) + ' · ' : '';
-      const isOpen = (openId === it.id);
-      return '<div style="border-top:1px solid #2a2a2a; padding:10px 0 4px 0;">'
-        + '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">'
-        + '<span style="font-weight:900; color:var(--primary); font-size:var(--fs-sm);">' + getPosLabel(it.pos, isKo) + (isCur ? ' <span style="color:var(--good); font-size:var(--fs-xxs);">' + (isKo ? '● 현재 적용 중' : '● CURRENT') + '</span>' : '') + '</span>'
-        + '<span style="color:#888; font-size:var(--fs-xxs);">' + runTxt + (isKo ? '저장 ' : 'Saved ') + dt(it.savedAt) + '</span></div>'
-        + buildGoodTableHtml(it, isKo)
-        + '<div style="font-size:var(--fs-xxs); color:#ccc; line-height:1.6; margin-top:6px;">' + valTxt + '</div>'
-        + '<div style="font-size:var(--fs-xxs); color:#888; line-height:1.6;">' + _cntTxt + '</div>'
-        + (hasHidden ? '<div style="font-size:var(--fs-xxs); color:#888; line-height:1.6;">' + (isKo ? '속도보정 · GCT지연 포함' : 'Includes speed comp · GCT delay') + '</div>' : '')
-        + '<div style="display:flex; gap:8px; margin-top:8px;">'
-        + '<button type="button" ' + (isCur ? 'disabled ' : '') + 'style="flex:2; background:#14261a; color:#5fd18a; border:1.5px solid #2d5a3f; padding:10px; border-radius:10px; font-weight:900; font-size:var(--fs-xs); cursor:pointer;' + (isCur ? ' opacity:.5;' : '') + '" onclick="garmin.toggleGoodRestore(\'' + it.id + '\')">' + (isKo ? '↩ 저장된 데이터로 적용' : '↩ APPLY SAVED DATA') + '</button>'
-        + '<button type="button" style="flex:1; background:transparent; color:#999; border:1.5px solid #333; padding:10px; border-radius:10px; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.deleteGoodCalib(\'' + it.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</button>'
-        + '</div>'
-        + (isOpen && !isCur ? buildGoodRestorePanel(it, prof, isKo) : '')
-        + '</div>';
-    }).join('');
-    box.innerHTML = '<details class="garmin-import-item calib-acc u-border-color-primary" style="margin-bottom:10px;"' + (window.__goodSetsOpen ? ' open' : '') + ' ontoggle="if(event.target===this)window.__goodSetsOpen=this.open">'
-      + '<summary class="calib-acc-sum">' + (isKo ? '저장된 계수 (적용하기)' : 'SAVED COEFFICIENT SETS (APPLY)') + '<span class="garmin-import-chev">&#9662;</span></summary>'
-      + '<div style="font-size:var(--fs-xxs); color:#888; line-height:1.5; padding:2px 0 4px 0;">' + (isKo ? '저장해 둔 계수를 비율 계산 없이 절대값 그대로 앱에 적용해요. "저장된 데이터로 적용"을 누르면 항목을 골라서 적용할 수 있어요. 직전 적용 UNDO도 그대로 쓸 수 있어요.' : 'Applies the saved coefficients as absolute values (no ratio math). Tap APPLY SAVED DATA to pick which items to apply. UNDO still works.') + '</div>'
-      + cards + '</details>';
-  }
-
-  // [추가 2026-11-15] 지난 로그를 가민과 비교할 때는 \"지금 앱 저장소 값\"이 아니라 그 로그를 만든 러닝에 적용돼 있던 계수를 기준으로 한다.
-  // 우선순위: ① 로그에 박제된 calib ② (수직진동만) 로그의 화면값÷원시진폭으로 역산 ③ 없으면 현재 앱 값(아래 안내 문구로 표시).
-  // 선택한 로그가 여러 개면 평균(모든 로그에 값이 있는 항목만 사용). 로그끼리 계수가 1% 넘게 다르면 mixed로 표시.
-  const CALIB_BASE_KEYS = ['gctFallbackRatio', 'vertScale', 'rotRejectThreshold', 'groundThreshold', 'impactThreshold', 'vertSpeedSlope', 'vertRefSpeed', 'gctFilterDelayMs', 'stride', 'gps', 'cad', 'pace'];
-  function inferLogVertScale(log) {
-    try {
-      const rows = precLogRawRows(log || []);
-      if (!rows.some(function (r) { return r && r.vertBasis === VERT_BASIS; })) return null;
-      const rs = [];
-      rows.forEach(function (r) {
-        const mm = parseFloat(r && r.vertOscMm), raw = parseFloat(r && r.vertOscRaw);
-        if (mm > 0 && raw > 0) rs.push(mm / (raw * 10));
-      });
-      if (rs.length < 5) return null;
-      rs.sort(function (a, b) { return a - b; });
-      return rs[Math.floor(rs.length / 2)];
-    } catch (e) { return null; }
-  }
-  function precLogCalibBase(items) {
-    const out = { vals: {}, mixed: [], inferred: [], logCount: items.length, withCalib: 0 };
-    const per = items.map(function (p) {
-      const c = (p && p.calib && typeof p.calib === 'object') ? Object.assign({}, p.calib) : {};
-      if (p && p.calib) out.withCalib++;
-      if (typeof c.vertScale !== 'number') { const v = inferLogVertScale(p && p.log); if (v != null) { c.vertScale = v; c.__vertInferred = true; } }
-      return c;
-    });
-    CALIB_BASE_KEYS.forEach(function (k) {
-      if (!per.length || !per.every(function (c) { return typeof c[k] === 'number' && isFinite(c[k]); })) return;
-      const vs = per.map(function (c) { return c[k]; });
-      out.vals[k] = vs.reduce(function (a, b) { return a + b; }, 0) / vs.length;
-      const mx = Math.max.apply(null, vs), mn = Math.min.apply(null, vs);
-      if (vs.length > 1 && mx > 0 && (mx - mn) / mx > 0.01) out.mixed.push(k);
-      if (k === 'vertScale' && per.some(function (c) { return c.__vertInferred; })) out.inferred.push('vertScale');
-    });
-    return out;
-  }
-
   function renderCalibStatus(isKo) {
-    try { renderGoodSets(isKo); } catch (_e) { jrLogErr('renderGoodSets', _e); }
     const box = document.getElementById('garmin-calib-status');
     if (!box) return;
     let overridesMap = {}, undosMap = {}, switchUndoOk = {};
@@ -23727,7 +23190,7 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
     saveTextFileNative(reportStr, fileName, 'text/plain;charset=utf-8', isKo);
   }
 
-  return { buildLogRestoreHtml, refreshCalibStatus: function () { renderCalibStatus(isKoLang()); }, clearAllSelections, hideAutoLog, clearHiddenList, toggleRestorePanel, toggleRestoreSel, restoreSelectedAutoLogs, importFitFile, deleteImport, quickCompareFit, quickRunGroup, quickTogglePair, quickReset, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, toggleGarminDetail, openInfo, closeInfo, togglePrecLogSelect, togglePrecLogSelectAutoMatch, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, undoCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, exportCalibReport, updateProjectedPreview, saveGoodCalib, applyGoodCalib, deleteGoodCalib, toggleGoodRestore, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
+  return { refreshCalibStatus: function () { renderCalibStatus(isKoLang()); }, clearAllSelections, hideAutoLog, clearHiddenList, toggleRestorePanel, toggleRestoreSel, restoreSelectedAutoLogs, importFitFile, deleteImport, quickCompareFit, quickRunGroup, quickTogglePair, quickReset, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, toggleGarminDetail, openInfo, closeInfo, togglePrecLogSelect, togglePrecLogSelectAutoMatch, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, undoCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
