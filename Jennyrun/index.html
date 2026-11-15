@@ -4671,16 +4671,33 @@ function buildDiagAxisLabelsHtml(splits) {
 // [기본값 안내] 가슴을 가민분석실에서 보정 후 "수정된 HTML 다운로드"→커밋하면, 여기 chest
 // 줄도 그 시점 값으로 자동 갱신된다(buildPatchedHtml 1-c단계). 즉 이 표 = 지금의 기본값.
 const DEFAULT_PROFILE_FACTORS_BY_POS = {
-  chest:   { stride: 1.048, gps: 0.971, cad: 1.003, pace: 0.973 }, // [수정 2026-08-16] 재실측 전 처음부터 다시 테스트하기 위해 중립값(보정없음)으로 리셋. defaultProfile과 반드시 동일하게 유지
-  waist:   { stride: 1.050, gps: 0.973, cad: 0.993, pace: 0.974 },
-  armband: { stride: 1.059, gps: 0.973, cad: 0.980, pace: 0.973 },
-  hand:    { stride: 1.043, gps: 0.972, cad: 0.996, pace: 0.973 },
+  chest:   { stride: 1.048, gps: 1.0, /*원본 0.971 — 2026-11-15 스무딩 도입으로 1.0*/ cad: 1.003, pace: 0.973 }, // [수정 2026-08-16] 재실측 전 처음부터 다시 테스트하기 위해 중립값(보정없음)으로 리셋. defaultProfile과 반드시 동일하게 유지
+  waist:   { stride: 1.050, gps: 1.0, /*원본 0.973*/ cad: 0.993, pace: 0.974 },
+  armband: { stride: 1.059, gps: 1.0, /*원본 0.973*/ cad: 0.980, pace: 0.973 },
+  hand:    { stride: 1.043, gps: 1.0, /*원본 0.972*/ cad: 0.996, pace: 0.973 },
 };
 // [추가 2026-08-19] 진짜 "출고값(1.0, 보정없음)" — 위 DEFAULT_PROFILE_FACTORS_BY_POS와 별개다.
 // 저건 "커밋된 기본값"(신규 설치 유저가 자동으로 물려받는 값)이라 캘리브레이션을 커밋하면
 // 4개 위치 모두 바뀌지만, 이 상수는 절대 코드로 자동 갱신되지 않는 고정 1.0이다.
 // RESET 버튼이 "커밋된 기본값이 마음에 안 들면 진짜 최초 상태(1.0)로" 되돌리는 용도로 이 상수를 참조한다.
 const FACTORY_DEFAULT_FACTORS = { stride: 1.0, gps: 1.0, cad: 1.0, pace: 1.0 };
+// [추가 2026-11-15] GPS 위치/거리 스무딩 설정.
+// 원인: 기존 칼만 필터는 R=max(1e-5, acc²×1e-9)가 항상 하한 1e-5(=Q)에 걸려 gain이 항상 0.618로 고정(=α=0.62 지수평활 한 줄)이라
+//       GPS 정확도가 반영되지 않았고 노이즈가 33%만 줄었음. 이 오차를 gpsDistCorrectionFactor(0.971)가 가려서 빠른 런만 맞아 보였음.
+// 변경: 'window' = 최근 GPS_SMOOTH_WINDOW_SEC초 후행(과거 데이터만 쓰는) 이동평균 + 지연 보상(마지막 스무딩 점→현재 위치 거리 가산).
+//       'kalman' = 원본 칼만 필터(되돌리기용). 이 값만 바꾸면 원복된다.
+const GPS_SMOOTH_MODE = 'window';
+const GPS_SMOOTH_WINDOW_SEC = 25;      // 위치 평균 창(초). 가민 대조(빠른런 3.8km/느린런 1.3km) 거리 오차: 20초 +0.1%/+3.7%, 25초 -0.3%/+2.3%, 30초 -0.5%/+1.0%
+const GPS_ANCHOR_WINDOW_SEC = 3;       // 지연 보상/지도 마커용 '현재 위치' 평균 창(초)
+const SPEED_WIN_SEC = 20;              // 거리 변화율 속도 창(초)
+const SPEED_WIN_MIN_SEC = 8;           // 이보다 짧은 이력이면 기존 coords.speed 사용
+const SPEED_WIN_BLEND_LO_KMH = 7;      // '러닝 평균 속도'가 이 이하: 거리 변화율 속도 100%
+const SPEED_WIN_BLEND_HI_KMH = 9;      // 러닝 평균 속도가 이 이상: 기존 coords.speed 100%. 7~9는 선형 혼합(실측 데이터 없음)
+const SPEED_WIN_GATE_MIN_SEC = 45;     // 평균 속도 판정에 필요한 최소 경과시간(그 전엔 기존 값)
+// 주의: 혼합 비율을 '순간' 속도로 정하면 안 된다. 20초 창 속도는 정지/출발·코너에서 ~20초 늦게 따라와서 빠른 런이 오히려 나빠짐(RMS 23%→30%, 편향 -2%→-7%).
+//       그래서 런 전체 평균 속도(느린 조깅 vs 빠른 런이라는 '체제')로만 판단한다.
+// [추가 2026-11-15] 스무딩 도입으로 기존 gpsDistCorrectionFactor(0.971 등)가 이중 보정이 되므로, 프로필마다 1회만 1.0으로 되돌린다.
+const DIST_SMOOTH_MIGRATION_KEY = 'distSmoothV1';
 // [추가 2026-10-08] "보정계수 사용" 스위치 (profile.calibFactorsEnabled, 기본 OFF).
 // OFF: 보폭/GPS거리/케이던스/페이스 4개 계수는 모든 위치에서 1.0(네이티브 원본값)으로 쓰이고,
 //      가민분석실의 4개 계수는 "참고용(적용 안 됨)"으로만 보인다. 위치별 저장값(...ByPos)은 지우지 않는다.
@@ -6523,10 +6540,21 @@ loadProfile() {
 // [기본값 안내] defaultProfile의 strideCorrectionFactor 등도 위와 동일 — 가슴(chest) 전용
 // "현재 기본값"이며, 가민분석실에서 가슴을 보정 후 다운로드→커밋하면 그 시점 값으로 자동 갱신됨.
 // [CALIB_ANCHOR:DEFAULT_PROFILE] 캘리브레이션 스니펫(코드 반영용)을 여기 strideCorrectionFactor/gpsDistCorrectionFactor/cadCorrectionFactor/paceCorrectionFactor에 반영하세요.
-const defaultProfile = { h: 175, hu: "cm", w: 70, wu: "kg", age: 30, devicePos: "chest", calibFactorsEnabled: false, strideCorrectionFactor: 1.048, gpsDistCorrectionFactor: 0.971, cadCorrectionFactor: 1.003, paceCorrectionFactor: 0.973 }; // [수정 2026-08-29] SETTINGS > SHOW CURRENT DATA 가슴 캘리브레이션 최종 적용값(노란색)으로 갱신: stride 1.078→1.006, gps 0.976→0.997, cad 1.085→1.000(중립값 유지, 이번 캘리브레이션에서 추가 조정 없었음), pace 0.992→0.995. 이전 실측값(1.078/0.976/1.085/0.992, 2026-08-16 리셋 시점 값)은 이 시점 기준으로 대체.
+const defaultProfile = { h: 175, hu: "cm", w: 70, wu: "kg", age: 30, devicePos: "chest", calibFactorsEnabled: false, strideCorrectionFactor: 1.048, gpsDistCorrectionFactor: 1.0 /*원본 0.971*/, cadCorrectionFactor: 1.003, paceCorrectionFactor: 0.973 }; // [수정 2026-08-29] SETTINGS > SHOW CURRENT DATA 가슴 캘리브레이션 최종 적용값(노란색)으로 갱신: stride 1.078→1.006, gps 0.976→0.997, cad 1.085→1.000(중립값 유지, 이번 캘리브레이션에서 추가 조정 없었음), pace 0.992→0.995. 이전 실측값(1.078/0.976/1.085/0.992, 2026-08-16 리셋 시점 값)은 이 시점 기준으로 대체.
 const data = localStorage.getItem(this.PROFILE_KEY);
 // [수정] 기존 저장 데이터에 새 필드(age, devicePos)가 없을 경우 기본값으로 보완
 const _loaded = data ? Object.assign({}, defaultProfile, JSON.parse(data)) : defaultProfile;
+// [추가 2026-11-15] 거리 스무딩 도입: 저장돼 있던 GPS 거리 보정계수(위치별 포함)를 1회만 1.0으로 되돌린다(재캘리브레이션 필요).
+if (data && !_loaded[DIST_SMOOTH_MIGRATION_KEY]) {
+  try {
+    _loaded.gpsDistCorrectionFactorPreSmooth = _loaded.gpsDistCorrectionFactorByPos ? Object.assign({}, _loaded.gpsDistCorrectionFactorByPos) : undefined; // 원복용 백업
+    _loaded.gpsDistCorrectionFactorFlatPreSmooth = _loaded.gpsDistCorrectionFactor;
+    _loaded.gpsDistCorrectionFactor = 1.0;
+    if (_loaded.gpsDistCorrectionFactorByPos) { Object.keys(_loaded.gpsDistCorrectionFactorByPos).forEach(function (k) { _loaded.gpsDistCorrectionFactorByPos[k] = 1.0; }); }
+    _loaded[DIST_SMOOTH_MIGRATION_KEY] = true;
+    localStorage.setItem(this.PROFILE_KEY, JSON.stringify(_loaded));
+  } catch (e) {}
+}
 // [추가 2026-10-08] 보정계수 스위치 OFF면 읽는 쪽에서도 4개 계수를 1.0으로 돌려준다(저장값 ByPos는 그대로).
 if (!calibFactorsFlag(_loaded) && _loaded.strideCorrectionFactorByPos) { // ByPos 없는 프로필은 마이그레이션이 끝날 때까지 원본 유지
   _loaded.strideCorrectionFactor = 1.0; _loaded.gpsDistCorrectionFactor = 1.0;
@@ -14376,6 +14404,59 @@ updateTrailGrade(deltaKm) {
   }
 }
 
+_updateSmoothedDistance(fixTime) {
+// [추가 2026-11-15] window 모드 지연 보상: 후행 평균 경로는 ~10초(속도×10초만큼) 뒤처지므로, totalDist = 스무딩 경로 누적 + (마지막 스무딩 점 → 현재 위치) 거리.
+// 단조 증가(max)라서 꼬리 노이즈로 거리가 줄지는 않고, 다음 스무딩 점이 쌓이면 꼬리가 줄어드는 만큼 smoothDist가 늘어 이중 계산되지 않는다.
+const st = this.state;
+this._sdFix = fixTime;
+if (st._totalSeen != null && st.totalDist !== st._totalSeen) { st.smoothDist = st.totalDist; st.distHist = []; } // 재개/러닝머신 등 외부에서 totalDist가 바뀐 경우 재동기화
+if (st.smoothDist == null) st.smoothDist = st.totalDist || 0;
+let tail = 0;
+const lp = st.lastPos, an = this._livePos;
+if (lp && an && this.map) {
+  let gf = 1;
+  try { const g = storage.loadProfile().gpsDistCorrectionFactor; if (typeof g === 'number' && g > 0) gf = g; } catch (e) {}
+  tail = this.map.distance(lp, an) / 1000 * gf;
+}
+const cand = st.smoothDist + tail;
+if (cand > (st.totalDist || 0)) st.totalDist = cand;
+st._totalSeen = st.totalDist;
+if (!st.distHist) st.distHist = [];
+st.distHist.push({ t: fixTime, d: st.smoothDist });
+while (st.distHist.length > 1 && (fixTime - st.distHist[0].t) > SPEED_WIN_SEC * 1000) st.distHist.shift();
+}
+_windowSpeedKmh() {
+// 최근 SPEED_WIN_SEC초 스무딩 거리 변화율(km/h). 이력이 SPEED_WIN_MIN_SEC 미만이면 null.
+const h = this.state.distHist;
+if (!h || h.length < 2) return null;
+const dt = (h[h.length - 1].t - h[0].t) / 1000;
+if (dt < SPEED_WIN_MIN_SEC) return null;
+return Math.max(0, (h[h.length - 1].d - h[0].d) / (dt / 3600));
+}
+_applyWindowSpeed(coordsKmh) {
+// 느린 조깅(러닝 평균 ≤7km/h)에선 coords.speed가 가민 대비 +22%(RMS 40%)로 부풀어서 거리 변화율 속도로 대체(→ +4%, RMS 17%), 평균 7~9km/h 혼합, 9 이상은 기존 값 유지.
+if (GPS_SMOOTH_MODE !== 'window') return coordsKmh;
+if (this.state.isAutoPaused || this.state.isPaused) return coordsKmh;
+if (!(coordsKmh >= 1.0)) return coordsKmh; // 정지/저속 진입은 coords.speed가 더 빨리 반응 → 그대로
+const ws = this._windowSpeedKmh();
+if (ws == null) return coordsKmh;
+const secs = this.state.seconds || 0;
+if (secs < SPEED_WIN_GATE_MIN_SEC) return coordsKmh;
+const avgKmh = (this.state.totalDist || 0) / (secs / 3600); // 러닝 평균 속도(체제 판정용)
+const w = Math.max(0, Math.min(1, (SPEED_WIN_BLEND_HI_KMH - avgKmh) / (SPEED_WIN_BLEND_HI_KMH - SPEED_WIN_BLEND_LO_KMH)));
+return w * ws + (1 - w) * coordsKmh;
+}
+flushSmoothTail() {
+// 종료 시: 스무딩 경로가 마지막 ~10초 뒤처져 있으므로 경로선 끝에 현재 위치를 붙인다(거리는 이미 꼬리 포함으로 반영됨).
+try {
+  const lp = this.state.lastPos, an = this._livePos;
+  if (GPS_SMOOTH_MODE === 'window' && lp && an && this.state.pathCoords && this.state.pathCoords.length) {
+    this.state.pathCoords.push(an);
+    this.state.lastPos = an;
+    if (this.polyline) this.polyline.setLatLngs(this.state.pathCoords);
+  }
+} catch (e) {}
+}
 updatePosition(p) {
 if (this.state.treadmill && this.state.isRunning) return; // [추가 2026-11-11] 러닝머신: GPS 위치는 거리/속도/멈춤 판정에 쓰지 않음 [TMILL]
 if(!this.map) return;
@@ -14398,8 +14479,30 @@ this.state.altRawGps = rawAlt; // [추가 2026-10-21] GPS 원본 고도는 항�
 // 보정 엔진은 전 모드 공통으로 돌리고, 모드별로 평활 길이·임계값만 다르게 쓴다(updateTrailAltitude 내부 프리셋).
 this.updateTrailAltitude(rawAlt, accuracy);
 
-// ── 1. 칼만 필터로 GPS 좌표 스무딩 ──────────────────────
-// 정확도가 낮을수록(숫자 클수록) 측정 노이즈가 크므로 Q/R 비율 조정
+// ── 1. GPS 좌표 스무딩 ──────────────────────
+// [수정 2026-11-15] 기본을 칼만 → 후행 시간창 평균으로 교체(GPS_SMOOTH_MODE). 원본 칼만 코드는 'kalman' 모드로 그대로 보존.
+let pos;
+const _fixTs = (p.timestamp && Number.isFinite(p.timestamp)) ? p.timestamp : Date.now();
+this._livePos = null; // 지도 마커/지연 보상용 '현재 위치'(최근 몇 초 평균)
+if (GPS_SMOOTH_MODE === 'window') {
+  if (!this._posBuf) this._posBuf = [];
+  const _bufLimit = (ui.currentActivityMode === 'trail') ? 50 : 35; // 거리 계산의 정확도 한계와 동일: 나쁜 fix는 평균에 섞지 않음
+  if (accuracy < _bufLimit && !(this._posBuf.length && _fixTs <= this._posBuf[this._posBuf.length - 1].t)) {
+    this._posBuf.push({ t: _fixTs, lat: rawLat, lng: rawLng });
+  }
+  // 창 밖(오래된) 점 제거: 항상 최소 1개는 남김
+  while (this._posBuf.length > 1 && (_fixTs - this._posBuf[0].t) > GPS_SMOOTH_WINDOW_SEC * 1000) this._posBuf.shift();
+  if (this._posBuf.length === 0) {
+    pos = [rawLat, rawLng]; this._livePos = pos;
+  } else {
+    const _avg = (arr) => [arr.reduce((a, q) => a + q.lat, 0) / arr.length, arr.reduce((a, q) => a + q.lng, 0) / arr.length];
+    pos = _avg(this._posBuf);
+    const _recent = this._posBuf.filter(q => (_fixTs - q.t) <= GPS_ANCHOR_WINDOW_SEC * 1000);
+    this._livePos = _recent.length ? _avg(_recent) : [this._posBuf[this._posBuf.length - 1].lat, this._posBuf[this._posBuf.length - 1].lng];
+  }
+} else {
+
+// (원본) 정확도가 낮을수록(숫자 클수록) 측정 노이즈가 크므로 Q/R 비율 조정
 if (!this._kalman) {
   // 초기화: 첫 포인트를 그대로 사용
   this._kalman = {
@@ -14423,14 +14526,17 @@ K.lat = K.lat + kGainLat * (rawLat - K.lat);
 K.lng = K.lng + kGainLng * (rawLng - K.lng);
 K.pLat = (1 - kGainLat) * K.pLat;
 K.pLng = (1 - kGainLng) * K.pLng;
-const pos = [K.lat, K.lng]; // 스무딩된 좌표 사용
+pos = [K.lat, K.lng]; // 스무딩된 좌표 사용
+  this._livePos = pos;
+}
 // ─────────────────────────────────────────────────────────
 
 if(ui.dom.status) ui.dom.status.textContent = 'GPS: ±' + accuracy + 'm | ALT: ' + this.state.currentAlt + 'm' +
   (ui.currentActivityMode === 'trail' ? (' | ' + (this.state.trailAltSource === 'baro' ? 'BARO' : 'GPS-ALT') + ' | GRADE: ' + this.state.grade.toFixed(1) + '%' + (this.state.gapKmh > 0.5 ? (' | GAP: ' + this.formatPace(this.state.gapKmh)) : '')) : '');
 if (ui.currentActivityMode === 'trail') ui.updateTrailCards(); // [추가 2026-10-20] ASCENT/GRADE/GAP 카드 갱신
-if (this.marker) { this.marker.setLatLng(pos); this.map.panTo(pos); }
-if (_mainMapFull && _mainMapFullLocMarker) { _mainMapFullLocMarker.setLatLng(pos); }
+const _markerPos = this._livePos || pos; // [수정 2026-11-15] 스무딩 위치는 ~10초 뒤처지므로 마커는 최근 3초 평균 위치
+if (this.marker) { this.marker.setLatLng(_markerPos); this.map.panTo(_markerPos); }
+if (_mainMapFull && _mainMapFullLocMarker) { _mainMapFullLocMarker.setLatLng(_markerPos); }
 
 if (this.state.isRunning && !this.state.isPaused) {
 // [수정] 화면 꺼짐 등으로 setInterval이 멈춰도, 화면 꺼진 동안에도 계속 들어오는
@@ -14610,7 +14716,9 @@ if (d > minJump && d < maxJump && !speedImplausible) {
 // (아래 페이스 계산 블록에서 coords.speed와 블렌딩할 때 사용)
 this._lastDeltaDist = d;
 this._lastDeltaTime = timeDelta;
-this.state.totalDist += d;
+// [수정 2026-11-15] window 모드: 스무딩 경로 누적(smoothDist)에 '마지막 스무딩 점→현재 위치' 꼬리(tail)를 더한 값을 totalDist로 쓴다(단조 증가).
+// 원본: this.state.totalDist += d;
+if (GPS_SMOOTH_MODE === 'window') { this.state.smoothDist = (this.state.smoothDist || 0) + d; this._updateSmoothedDistance(fixTime); } else { this.state.totalDist += d; }
 // [추가] 실시간 상승고도 누적 (기존엔 totalAscent가 어디서도 갱신되지 않아
 // 실시간 칼로리 계산의 경사 보너스가 항상 0으로 처리되던 버그를 함께 수정.
 // 1m 미만 변화는 GPS 고도 노이즈로 간주해 무시)
@@ -14689,10 +14797,13 @@ this.drawArrows();
 this.state.lastPos = pos;
 this.state.lastPosTimestamp = fixTime;
 }
+// [추가 2026-11-15] 지연 보상 + 속도용 거리 이력 (window 모드)
+if (GPS_SMOOTH_MODE === 'window' && this._sdFix !== fixTime) this._updateSmoothedDistance(fixTime);
 } else {
 this.state.lastPos = pos;
 this.state.lastPosTimestamp = fixTime;
 this.state.lastKmAlt = this.state.currentAlt;
+if (GPS_SMOOTH_MODE === 'window') { this.state.smoothDist = this.state.totalDist || 0; this.state._totalSeen = this.state.totalDist || 0; this.state.distHist = []; }
 }
 }
 
@@ -14764,6 +14875,7 @@ if (this.state.speedBuffer.length === 0 && smoothedKmh < 0.5 && this.state.secon
 const backupKmh = this.state.totalDist / (this.state.seconds / 3600);
 if (backupKmh > 0.5) smoothedKmh = backupKmh;
 }
+smoothedKmh = this._applyWindowSpeed(smoothedKmh); // [추가 2026-11-15] 느린 속도 구간만 거리 변화율 속도로 대체/혼합
 // ─────────────────────────────────────────────────────────
 
 // [추가 2026-10-20] 트레일 GAP 속도: 화면 표시용 smoothedKmh는 건드리지 않고 별도 값으로만 보관
@@ -14821,6 +14933,7 @@ if (this.state.metricSpeedBuffer.length === 0 && metricSpeedKmh < 0.5 && this.st
 const backupKmh = this.state.totalDist / (this.state.seconds / 3600);
 if (backupKmh > 0.5) metricSpeedKmh = backupKmh;
 }
+metricSpeedKmh = this._applyWindowSpeed(metricSpeedKmh); // [추가 2026-11-15] 로그 speed_kmh/보폭/GCT 계산용 속도도 동일하게
 this.state.metricSpeedKmh = metricSpeedKmh;
 if (this.leanTracker) this.leanTracker.setGpsSpeedKmh(metricSpeedKmh); // [추가] 전방축 학습 게이트용
 // [추가] 나침반+GPS 방향 캘리브레이션용 — 러닝 시작 후 첫 10m 동안만 leanTracker 내부에서 실제로 반영됨
@@ -15443,6 +15556,8 @@ this.state.pendingMetricSpeedVal = null; // [추가]
 this._lastDeltaDist = null;
 this._lastDeltaTime = null;
 this._kalman = null; // 칼만 필터 리셋 (새 러닝 시작 시 첫 GPS 포인트로 재초기화)
+this._posBuf = []; this._livePos = null; this._sdFix = null; // [추가 2026-11-15] 후행 평균/지연 보상 상태 리셋
+this.state.smoothDist = 0; this.state.distHist = []; this.state._totalSeen = null;
 if (typeof hrManager !== 'undefined') hrManager.reset(); // [추가] 새 러닝 시작 시 심박 샘플 초기화
 // [추가] 러닝 시작 시점에 실제로 적용 중인 착용 위치를 세션 상태에 고정.
 // 기존엔 종료(finish) 시점에 storage.loadProfile().devicePos를 다시 읽어와서 기록했는데,
@@ -15751,6 +15866,7 @@ setTimeout(run, SAVING_MIN_MS + 300);
 onFinish() {
 if (this.state.isRunning && this.state.treadmill && !this.state._tmAsked && !this.state.isCalibrationRun) { Treadmill.askDistance(this); return; } // [추가 2026-11-11] 러닝머신: 종료 전 실제 거리 입력 [TMILL]
 if (!this.state.isRunning) return; // [추가 2026-11-01] 이미 종료 처리된 러닝이면 무시 → 같은 러닝이 두 번 저장되는 것 방지
+this.flushSmoothTail(); // [추가 2026-11-15] 스무딩 경로 끝에 현재 위치 연결
 this.persistRawSensor(); // [추가 2026-10-15] 종료 직후 새로고침 전에 원시 센서 기록을 영구 저장
 if(this.timer) clearInterval(this.timer);
 this.stopSilentKeepAlive();
