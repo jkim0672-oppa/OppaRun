@@ -875,6 +875,9 @@ overscroll-behavior-y: none; /* [수정 2026-11-07] contain은 끝에서 늘어�
 }
 .diag-graph-fs-title { font-size: var(--fs-xl); font-weight: 900; color: #fff; }
 .diag-graph-fs-sub { font-size: var(--fs-xs); color: #888; font-weight: 700; margin-top: 4px; }
+.diag-graph-fs-zoomtoggle { display: flex; gap: 8px; margin: 10px 0 4px; }
+.diag-graph-fs-zoomtoggle button { flex: 0 0 auto; padding: 7px 16px; border-radius: 999px; border: 1px solid #333; background: #1a1a1a; color: #999; font-weight: 800; font-size: var(--fs-xs); font-family: inherit; }
+.diag-graph-fs-zoomtoggle button.on { color: #000; background: var(--primary); border-color: var(--primary); }
 .diag-graph-fs-svgwrap { margin: 14px 0 8px; background: #111; border-radius: 12px; padding: 14px 8px 10px; border: 1px solid #262626; }
 .diag-graph-fs-note { font-size: var(--fs-sm); color: #ccc; font-weight: 700; margin-top: 8px; line-height: 1.4; }
 .diag-graph-fs-stats { display: flex; gap: 10px; margin-top: 26px; flex-wrap: wrap; }
@@ -2176,6 +2179,7 @@ button[style*="--danger"]:active, button[style*="#e57373"]:active, .c33:active, 
 <div class="diag-graph-fs-content">
 <div id="diag-graph-fs-title" class="diag-graph-fs-title">--</div>
 <div id="diag-graph-fs-sub" class="diag-graph-fs-sub"></div>
+<div id="diag-graph-fs-zoomtoggle" class="diag-graph-fs-zoomtoggle"></div><!-- [추가 2026-11-14] 확대 그래프 안에서 기본/상세 전환 -->
 <div id="diag-graph-fs-svgwrap" class="diag-graph-fs-svgwrap"></div>
 <div id="diag-graph-fs-axis"></div>
 <div id="diag-graph-fs-note" class="diag-graph-fs-note"></div>
@@ -2530,9 +2534,6 @@ alt="runner"/>
       <!-- [추가] 선택한 소리를 현재 볼륨으로 바로 들어볼 수 있는 미리듣기 버튼 -->
       <button id="calib-sound-preview-btn" type="button" onclick="ui.previewCalibSound()" title="Preview" style="flex:0 0 auto; background:#2a2a2a; color:var(--primary); border:1.5px solid #444; border-radius:8px; width:30px; height:26px; font-size:var(--fs-sm); font-weight:900; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0;">▶</button>
     </div>
-  </div>
-  <div style="display:block; width:100%; margin:14px 0;">
-    <button id="btn-diag-detail-graph" class="btn-raw" style="display:block; width:100%; padding:13px 4px;" onclick="ui.toggleDiagDetailGraph()"><span id="btn-diag-detail-graph-label">ZOOM GRAPH: STANDARD</span></button>
   </div>
   <div class="c20">
     <div class="settings-label u-margin-bottom-0" id="label-precision-log">PRECISION LOGS</div>
@@ -4369,7 +4370,7 @@ return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style=
 //    remapHalf: calcPacingMetrics가 "원본 구간 인덱스" 기준으로 준 전/후반 범위(r1/r2/mid)를 묶인 점 인덱스로 옮긴다.
 //  - 원본 기록(record.diagSplits)은 건드리지 않고 화면 표시용으로만 쓴다. 묶인 상태에선 출발 흐린 구간(edge)을 따로 두지 않는다.
 const DIAG_MAX_POINTS = 10;
-const DIAG_GROUP_STEPS_KM = [0.2, 0.5, 1, 2, 2.5, 5, 10, 20, 50];
+const DIAG_GROUP_STEPS_KM = [0.1, 0.2, 0.5, 1, 2, 2.5, 5, 10, 20, 50]; // [수정 2026-11-14] 0.1(100m) 추가: 상세 확대 그래프 전용(작은 카드는 최대 10점이라 0.1이 선택되지 않음)
 function groupDiagSplits(splits, maxPoints, minStepKm) {
   const ident = { grouped: false, step: 0.1, splits: splits || [], remapHalf: function (h) { return h; } };
   const maxPts = maxPoints || DIAG_MAX_POINTS; // [실험D] 확대 화면은 maxPoints(75)·minStepKm(0.2)를 넘겨 항상 200m 이상 단위로 표시
@@ -4382,6 +4383,7 @@ function groupDiagSplits(splits, maxPoints, minStepKm) {
     if (minStepKm && DIAG_GROUP_STEPS_KM[q] < minStepKm - 1e-9) continue;
     if (Math.ceil(totalKm / DIAG_GROUP_STEPS_KM[q] - 1e-6) <= maxPts) { step = DIAG_GROUP_STEPS_KM[q]; break; }
   }
+  if (step <= 0.1 + 1e-9) return ident; // [추가 2026-11-14] 100m 단위면 묶지 않고 원본 그대로(출발 흐림 등 기존 처리 유지)
   const groups = []; let lastKey = null;
   splits.forEach((sp, i) => {
     const km = kmOf(sp);
@@ -8690,26 +8692,7 @@ this.refreshCalibFactorSwitch();
 }
 // [추가 2026-10-14] 원시 센서 기록(분석용). 켜 두면 다음 러닝부터 가속도(중력 포함/제외)·자이로 원시값과
 // 걸음 확정 시점(GCT/수직진동 값)을 메모리에 모았다가, 러닝 후 설정에서 CSV로 내보낼 수 있다. 기본 OFF.
-// [추가 2026-11-07] 확대 그래프 표시 방식: 기본(약 10점으로 묶음) / 상세(200m 구간, 좌우 스크롤). 설정 > APP에서 전환, 기본은 '기본'.
-toggleDiagDetailGraph() {
-  try { const prof = storage.loadProfile(); prof.diagDetailGraph = !prof.diagDetailGraph; storage.saveProfile(prof); } catch (e) {}
-  this.refreshDiagDetailGraphSwitch();
-}
-refreshDiagDetailGraphSwitch() {
-  const isKo = storage.getLang() === 'ko';
-  let on = false; try { on = !!storage.loadProfile().diagDetailGraph; } catch (e) {}
-  const lab = document.getElementById('btn-diag-detail-graph-label');
-  const ttl = document.getElementById('label-diag-detail-graph');
-  const btn = document.getElementById('btn-diag-detail-graph');
-  if (ttl) ttl.textContent = isKo ? '확대 그래프' : 'ZOOM GRAPH';
-  if (lab) { // [수정 2026-11-09] 상태는 테두리 대신 글자색으로: 값(기본/상세) 글자만 상세(켜짐)일 때 초록
-const _pre = isKo ? '확대 그래프: ' : 'ZOOM GRAPH: ', _val = on ? (isKo ? '상세 (200m)' : 'DETAIL (200 m)') : (isKo ? '기본' : 'STANDARD');
-lab.innerHTML = _pre + '<span style="color:' + (on ? 'var(--primary)' : 'inherit') + ';">' + _val + '</span>';
-}
-  // [수정 2026-11-09] 켜짐 표시는 테두리/배경(is-on) 대신 위 글자색으로 함 (원본: btn.classList.toggle('active', on) — .btn-raw에는 없는 클래스라 동작 안 했음)
-}
 refreshRawCaptureSwitch() {
-  try { this.refreshDiagDetailGraphSwitch(); } catch (e) {}
   const isKo = storage.getLang() === 'ko';
   let on = false; try { on = !!storage.loadProfile().rawSensorCapture; } catch (e) {}
   const btn = document.getElementById('btn-raw-capture');
@@ -23634,7 +23617,7 @@ window.calcBest200Info = function(splits, key) {
 };
 window.calcBestPace200Sec = function(splits) { const b = window.calcBest200Info(splits, 'pace'); return b ? b.val : null; };
 window.calcBest200Max = function(splits, key) { const b = window.calcBest200Info(splits, key); return b ? b.val : null; };
-UIManager.prototype.openDiagGraphFullscreen = function(metricKey, id) {
+UIManager.prototype.openDiagGraphFullscreen = function(metricKey, id, isRerender) {
 const h = storage.loadHistory();
 const r = h.find(rec => rec.id === id);
 const rawSplits = (r && r.diagSplits) || [];
@@ -23642,8 +23625,9 @@ if (!r || rawSplits.length < 2) return;
 // [추가 2026-10-31] 10개 초과 구간은 5km 등 보기 좋은 단위로 묶어서 점/번호/목록을 최대 10개 안팎으로 표시(작은 카드와 동일 규칙)
 // 설정 > 확대 그래프: 상세(켜짐)면 15km까지 200m 구간·좌우 스크롤(이후 500m→1km 단위 자동), 꺼짐(기본)이면 기존처럼 약 10점으로 묶음.
 let _detail = false; try { _detail = storage.loadProfile().diagDetailGraph === true; } catch (e) {}
-const FS_MAX_POINTS = 75, FS_MIN_STEP_KM = 0.2;
-const G = _detail ? groupDiagSplits(rawSplits, FS_MAX_POINTS, FS_MIN_STEP_KM) : groupDiagSplits(rawSplits);
+// [수정 2026-11-14] 상세=100m 단위(7.5km 초과 시 200m→500m… 자동), 기본=최소 0.5km 단위로 묶어 짧은 러닝에서도 두 모드 차이가 보이게 함.
+const FS_MAX_POINTS = 75, FS_MIN_STEP_KM = 0.1, FS_BASIC_MIN_STEP_KM = 0.5;
+const G = _detail ? groupDiagSplits(rawSplits, FS_MAX_POINTS, FS_MIN_STEP_KM) : groupDiagSplits(rawSplits, undefined, FS_BASIC_MIN_STEP_KM);
 const splits = G.splits;
 const lang = storage.getLang();
 const t = translations[lang];
@@ -23919,7 +23903,18 @@ if (_scrollMode) {
     _go(); requestAnimationFrame(_go); [30, 100, 250, 500, 900].forEach(function (ms) { setTimeout(function () { if (_sc.scrollWidth > _sc.clientWidth) _go(); }, ms); });
   }
 }
-try { history.pushState({ jrPage: 'diagGraphFull' }, ''); } catch (e) {}
+// [추가 2026-11-14] 확대 화면 안의 기본/상세 전환 버튼. 설정(diagDetailGraph)과 같은 값을 공유한다.
+window._dgfsCur = { metricKey: metricKey, id: id };
+const _ztEl = document.getElementById('diag-graph-fs-zoomtoggle');
+if (_ztEl) {
+  _ztEl.innerHTML = '<button type="button" class="' + (_detail ? '' : 'on') + '" onclick="diagGraphFsSetDetail(false)">' + (koLang ? '기본' : 'STANDARD') + '</button>'
+    + '<button type="button" class="' + (_detail ? 'on' : '') + '" onclick="diagGraphFsSetDetail(true)">' + (koLang ? '상세 (100m)' : 'DETAIL (100 m)') + '</button>';
+}
+if (!isRerender) { try { history.pushState({ jrPage: 'diagGraphFull' }, ''); } catch (e) {} } // 전환 시 다시 그릴 때는 history를 쌓지 않음(CLOSE 한 번에 닫히게)
+};
+window.diagGraphFsSetDetail = function(on) {
+  try { const prof = storage.loadProfile(); if (!!prof.diagDetailGraph === !!on) return; prof.diagDetailGraph = !!on; storage.saveProfile(prof); } catch (e) {}
+  const c = window._dgfsCur; if (c) ui.openDiagGraphFullscreen(c.metricKey, c.id, true);
 };
 UIManager.prototype.closeDiagGraphFullscreen = function() {
 const overlay = document.getElementById('diag-graph-fullscreen-overlay');
