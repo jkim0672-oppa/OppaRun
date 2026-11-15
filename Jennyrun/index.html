@@ -1297,7 +1297,7 @@ button.tone-amber:active { color:#ffcc66 !important; border-color:#ffcc66 !impor
 .garmin-dd-row:last-child { border-bottom:none; }
 .garmin-dd-row.is-sel { background:rgba(255,255,255,0.05); }
 .garmin-dd-main { flex:1; min-width:0; display:flex; align-items:center; gap:8px; cursor:pointer; font-size:var(--fs-sm); font-weight:800; color:#fff; line-height:1.45; }
-.garmin-dd-text { min-width:0; }
+.garmin-dd-text { min-width:0; word-break:keep-all; overflow-wrap:anywhere; }  /* [수정] '오후'가 '오/후'로 쪼개져 줄바꿈되지 않게 단어 단위로만 줄바꿈 */
 .garmin-dd-hint { padding:8px 12px; font-size:var(--fs-xxs); color:#888; font-weight:700; text-align:center; }
 .precision-option { padding: 10px 14px; font-size:var(--fs-sm); font-weight: 800; text-align: left; }
 .profile-row { display: flex; gap: 10px; margin-bottom: 25px; }
@@ -1787,7 +1787,7 @@ flex-wrap: wrap; justify-content: center; white-space: nowrap;
 .garmin-import-empty { font-size:var(--fs-xs); color: #999; font-weight: 700; padding: 10px 2px; }
 .garmin-import-item { background: #1a1a1a; border-radius: 12px; border: 1.5px solid #2a3a2f; padding: 8px 14px; margin-top: 8px; }
 .garmin-import-item-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
-.garmin-import-item-title { font-size:var(--fs-sm); font-weight: 900; color: var(--primary); }
+.garmin-import-item-title { font-size:var(--fs-sm); font-weight: 900; color: var(--primary); word-break:keep-all; overflow-wrap:anywhere; }
 /* [수정 2026-10-12] 날짜가 길면 오른쪽 '비교 선택' 라벨이 세로로 쪼개져 정보/삭제 박스가 길게 늘어나던 문제:
    제목이 남는 폭만 쓰며 줄바꿈되고, 오른쪽 액션은 줄바꿈 없이 같은 높이로 고정한다. */
 .garmin-import-item-head { gap:8px; }
@@ -19831,8 +19831,8 @@ const garmin = (function () {
     const h24 = d.getHours(), h12 = (h24 % 12) || 12, mi = String(d.getMinutes()).padStart(2,'0');
     const ampm = isKo ? (h24 < 12 ? '오전' : '오후') : (h24 < 12 ? 'AM' : 'PM');
     return isKo
-      ? (d.getFullYear() + '. ' + (d.getMonth()+1) + '. ' + d.getDate() + '. ' + ampm + ' ' + h12 + ':' + mi)
-      : (d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0') + ' ' + h12 + ':' + mi + ' ' + ampm);
+      ? (d.getFullYear() + '. ' + (d.getMonth()+1) + '. ' + d.getDate() + '. ' + ampm + '\u00A0' + h12 + ':' + mi)
+      : (d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0') + ' ' + h12 + ':' + mi + '\u00A0' + ampm);
   }
 
   function isKoLang() {
@@ -20354,15 +20354,22 @@ const garmin = (function () {
       if (txt) noteHtml = '<div class="garmin-import-empty" style="padding:6px 2px; color:' + (warn ? '#e0a030' : 'var(--primary)') + ';">' + txt + '</div>';
     }
     // [수정] FIT 목록도 카드 나열 대신 체크 드롭다운: 체크=비교 선택, 삭제=개별 삭제.
-    dropdownOptions.innerHTML = list.map((item, idx) => ddCheckRow({
+    // [추가] FIT 파일에는 착용 위치 정보가 없으므로, 같은 시간대의 정밀 로그(숨긴 로그 포함)에서 위치(+LITE/PRO)를 가져와 표시
+    let _posLogs = [];
+    try { _posLogs = (typeof storage !== 'undefined' ? storage.loadPrecisionLogs() : []).concat(loadPrecLogImports()); } catch (e) { _posLogs = []; }
+    dropdownOptions.innerHTML = list.map((item, idx) => {
+      let _fitPos = '';
+      try { const _ml = findBestPrecLogForGarmin(item, _posLogs); _fitPos = _ml ? runPosText(_ml, { lang: isKo }) : ''; } catch (e) {}
+      return ddCheckRow({
       checked: selectedIds.indexOf(item.id) >= 0,
       onToggle: "garmin.toggleGarminSelect('" + item.id + "')",
       order: idx + 1,
       line1: fmtDate(item.startMs),
-      line2: item.distanceKm.toFixed(2) + ' km · ' + fmtDuration(item.durationSec),
+      line2: item.distanceKm.toFixed(2) + ' km · ' + fmtDuration(item.durationSec) + (_fitPos ? ' <span class="c27">· ' + _fitPos + '</span>' : ''),
       infoHtml: infoBtn('fit', item.id, isKo),
       delHtml: '<div class="garmin-import-item-del" onclick="garmin.deleteImport(\'' + item.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</div>'
-    })).join('');
+      });
+    }).join('');
 
     currentText.textContent = selectedIds.length
       ? selectedIds.length + (isKo ? '개 선택됨' : ' selected')
@@ -20482,7 +20489,7 @@ const garmin = (function () {
     if (!restorePanelOpen) { panel.innerHTML = ''; return; }
         restoreSelIds = restoreSelIds.filter(id => hiddenLogs.some(l => l.id === id));
     panel.innerHTML = hiddenLogs.map((l, idx) => {
-      const _pbTxt = runPosText(l, { abbr: true });
+      const _pbTxt = runPosText(l, { lang: isKo });
       const posBadge = _pbTxt ? ' <span class="c27">· ' + _pbTxt + '</span>' : '';
       return ddCheckRow({
         checked: restoreSelIds.indexOf(l.id) >= 0,
@@ -20668,7 +20675,7 @@ const garmin = (function () {
     }
     // [추가] 착용 위치 배지: 길면 첫글자(C/W/A/H)만 축약해서 표시
         panel.innerHTML = autoLogs.map((l, idx) => {
-      const _pbTxt = runPosText(l, { abbr: true });
+      const _pbTxt = runPosText(l, { lang: isKo });
       const posBadge = _pbTxt ? ' <span class="c27">· ' + _pbTxt + '</span>' : '';
       return ddCheckRow({
         checked: selectedPrecLogIds.indexOf(l.id) >= 0,
@@ -20721,8 +20728,8 @@ const garmin = (function () {
     const h24 = d.getHours(), h12 = (h24 % 12) || 12, mi = String(d.getMinutes()).padStart(2, '0');
     const ampm = isKo ? (h24 < 12 ? '오전' : '오후') : (h24 < 12 ? 'AM' : 'PM');
     return isKo
-      ? (d.getFullYear() + '. ' + (d.getMonth() + 1) + '. ' + d.getDate() + '. ' + ampm + ' ' + h12 + ':' + mi)
-      : (d.getFullYear() + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + String(d.getDate()).padStart(2, '0') + ' ' + h12 + ':' + mi + ' ' + ampm);
+      ? (d.getFullYear() + '. ' + (d.getMonth() + 1) + '. ' + d.getDate() + '. ' + ampm + '\u00A0' + h12 + ':' + mi)
+      : (d.getFullYear() + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + String(d.getDate()).padStart(2, '0') + ' ' + h12 + ':' + mi + '\u00A0' + ampm);
   }
   function renderSelfCalib() {
     const isKo = isKoLang();
@@ -20889,6 +20896,11 @@ const garmin = (function () {
         summary.id = 'gimp_' + Date.now();
         summary.importedAt = new Date().toISOString();
         const list = loadImports();
+        // [추가] 같은 FIT(시작·종료 시각이 같음)을 또 가져오면 중복으로 쌓이지 않게 막는다 (QUICK COMPARE 가져오기와 동일한 기준)
+        if (list.some(x => x.startMs === summary.startMs && x.endMs === summary.endMs)) {
+          alert(isKo ? '이미 가져온 FIT 기록이에요.' : 'This FIT file is already imported.');
+          return;
+        }
         list.unshift(summary);
         // [수정] 정밀 로그와 동일하게 최근 3개까지만 보관 (그 이상은 자동으로 밀려남)
         saveImports(list.slice(0, MAX_GARMIN_IMPORTS));
@@ -21069,11 +21081,11 @@ const garmin = (function () {
   // ── 가민 vs 자체알고리즘 캘리브레이션 비교(메인) ──
   // [추가 2026-10-28] QUICK COMPARE: 선택한 .fit(여러 개 가능)을 가져온 뒤, 각 FIT과 시간이 가장 많이 겹치는 정밀 로그(자동저장+불러온 로그)를
   // 찾아 둘 다 선택하고 바로 비교한다. 기존 로그→FIT 자동매칭(findBestGarminMatchDetailed)의 반대 방향. 매칭 실패 시 ADVANCED에서 수동 선택 안내.
-  function findBestPrecLogForGarmin(g) {
+  function findBestPrecLogForGarmin(g, logsOpt) {
     const gr = garminTimeRangeMs(g);
     if (!gr) return null;
     let best = null, bestScore = Infinity;
-    getCombinedPrecLogs().forEach(l => {
+    (logsOpt || getCombinedPrecLogs()).forEach(l => {
       const pr = precLogTimeRangeMs(l.log);
       if (!pr) return;
       const ovS = Math.max(pr.startMs, gr.startMs), ovE = Math.min(pr.endMs, gr.endMs);
