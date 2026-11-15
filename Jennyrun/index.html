@@ -995,7 +995,7 @@ body.prem-lock-dyn .h-det-box.lk-dyn { position:relative; }
 body.prem-lock-dyn .h-det-box.lk-dyn .h-det-val { visibility:hidden; }
 body.prem-lock-dyn .h-det-box.lk-dyn::after { content:'PRO'; position:absolute; left:0; right:0; bottom:10px; text-align:center; font-size:var(--fs-xxs); font-weight:800; letter-spacing:1px; color:#aaa; }
 body.prem-lock-garmin #btn-apply-calib::after { content:'PRO'; margin-left:8px; padding:2px 7px; border-radius:6px; background:#000; color:#ffcc66; font-size:.7em; font-weight:900; letter-spacing:1px; vertical-align:middle; }
-body.prem-lock-garmin #btn-save-good-calib, body.prem-lock-garmin #garmin-good-sets, body.prem-lock-garmin #btn-save-pending-calib, body.prem-lock-garmin #btn-save-calib-report, body.prem-lock-garmin #btn-calib-avg3-save { display:none; }
+body.prem-lock-garmin #btn-save-good-calib, body.prem-lock-garmin #btn-jump-good-sets, body.prem-lock-garmin #garmin-good-sets, body.prem-lock-garmin #btn-save-pending-calib, body.prem-lock-garmin #btn-save-calib-report, body.prem-lock-garmin #btn-calib-avg3-save { display:none; }
 body.prem-lock-garmin #garmin-calib-status > * { display:none; }
 body.prem-lock-garmin #garmin-calib-status:not(:empty)::before { content: var(--lk-status-title, 'APPLIED VALUES · PRO'); display:block; text-align:center; font-weight:800; color:#aaa; font-size:var(--fs-sm); letter-spacing:1px; padding:14px 0; }
 #garmin-sample-box { display:none; }
@@ -22106,6 +22106,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // [단순화 2026-10-10] 속도·지연 보정 제안 패널 (러닝 내 속도 기울기 + LOO 검증, 모션 엔진에 직접 저장)
     try { html += buildSpeedCalibPanelHtml(garminItems, precItems, resolvedDevicePos, curVertScale, isKo); } catch (e) { console.warn('[speedcalib panel]', e); }
     html += '<button id="btn-save-good-calib" style="margin-top:10px; background:#14261a; color:#5fd18a; border:1.5px solid #2d5a3f; padding:12px; border-radius:10px; width:100%; font-weight:900; font-size:var(--fs-sm); cursor:pointer;" onclick="garmin.saveGoodCalib()">' + (isKo ? '★ 이 계수 세트 저장 (저장만 해요 · 적용은 "저장된 계수"에서)' : '★ SAVE THIS SET (save only · apply from "Saved sets")') + '</button>';
+    html += '<button id="btn-jump-good-sets" style="margin-top:8px; background:transparent; color:#5fd18a; border:1.5px solid #2d5a3f; padding:12px; border-radius:10px; width:100%; font-weight:900; font-size:var(--fs-sm); cursor:pointer;" onclick="garmin.jumpToGoodSets()">' + (isKo ? '↩ 저장된 계수 보기 · 적용하기 ↓' : '↩ SAVED SETS · APPLY ↓') + '</button>';
     html += '<button id="btn-save-calib-report" style="margin-top:10px; background:transparent; color:#999; border:1.5px solid #333; padding:11px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.exportCalibReport()">' + (isKo ? '리포트 다운로드 (.txt)' : 'DOWNLOAD REPORT (.txt)') + '</button>';
     html += '</div>';
     resultBox.innerHTML = html;
@@ -22525,13 +22526,31 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
         { ok: isKo ? '저장' : 'SAVE', cancel: isKo ? '취소' : 'CANCEL', multiline: true });
       if (!ok) return;
       let list = loadGoodSets().filter(function (x) { return !(x.pos === pos && goodSetValsEqual(x.vals, vals)); });
-      list.unshift({ id: 'g' + Date.now(), pos: pos, savedAt: new Date().toISOString(), runAt: String(lastCompareData.precLogSavedAt || '').split(',')[0].trim() || null, vals: vals, table: table });
+      const _newGoodId = 'g' + Date.now();
+      list.unshift({ id: _newGoodId, pos: pos, savedAt: new Date().toISOString(), runAt: String(lastCompareData.precLogSavedAt || '').split(',')[0].trim() || null, vals: vals, table: table });
       const cnt = {};
       list = list.filter(function (x) { cnt[x.pos] = (cnt[x.pos] || 0) + 1; return cnt[x.pos] <= MAX_GOOD_PER_POS; });
       saveGoodSetsList(list);
       renderGoodSets(isKo);
-      await appAlert(isKo ? '저장했어요. 아직 앱에는 적용되지 않았어요. 아래 "저장된 계수"에서 "저장된 데이터로 적용"을 누르면 적용돼요.' : 'Saved — not applied to the app yet. Use "Apply saved data" in "Saved sets" below to apply it.');
+      const _goApply = await appConfirm(isKo ? '저장했어요. 아직 앱에는 적용되지 않았어요.\n\n지금 바로 적용할 항목을 고를까요?' : 'Saved — not applied to the app yet.\n\nPick items to apply now?',
+        { ok: isKo ? '지금 적용하기' : 'APPLY NOW', cancel: isKo ? '나중에' : 'LATER', multiline: true });
+      if (_goApply) { window.__goodRestoreOpenId = _newGoodId; jumpToGoodSets(); }
     } catch (e) { jrLogErr('saveGoodCalib', e); }
+  }
+  // [추가] 비교 결과 화면의 저장 버튼 바로 아래에서 "저장된 계수(적용하기)" 카드로 바로 이동 (같은 페이지 맨 아래에 있음)
+  function jumpToGoodSets() {
+    window.__goodSetsOpen = true;
+    renderGoodSets(isKoLang());
+    const el = document.getElementById('garmin-good-sets');
+    if (el) { el.style.scrollMarginTop = '130px'; try { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { el.scrollIntoView(); } }
+  }
+  // [추가] 저장된 계수 카드를 아무것도 적용하지 않고 접기 (열린 적용 패널도 같이 닫음)
+  function closeGoodSets() {
+    window.__goodSetsOpen = false;
+    window.__goodRestoreOpenId = null;
+    renderGoodSets(isKoLang());
+    const el = document.getElementById('garmin-good-sets');
+    if (el) { el.style.scrollMarginTop = '130px'; try { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { el.scrollIntoView(); } }
   }
   async function deleteGoodCalib(id) {
     const isKo = isKoLang();
@@ -22753,7 +22772,9 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
     box.innerHTML = '<details class="garmin-import-item calib-acc u-border-color-primary" style="margin-bottom:10px;"' + (window.__goodSetsOpen ? ' open' : '') + ' ontoggle="if(event.target===this)window.__goodSetsOpen=this.open">'
       + '<summary class="calib-acc-sum">' + (isKo ? '저장된 계수 (적용하기)' : 'SAVED COEFFICIENT SETS (APPLY)') + '<span class="garmin-import-chev">&#9662;</span></summary>'
       + '<div style="font-size:var(--fs-xxs); color:#888; line-height:1.5; padding:2px 0 4px 0;">' + (isKo ? '저장해 둔 계수를 비율 계산 없이 절대값 그대로 앱에 적용해요. "저장된 데이터로 적용"을 누르면 항목을 골라서 적용할 수 있어요. 직전 적용 UNDO도 그대로 쓸 수 있어요.' : 'Applies the saved coefficients as absolute values (no ratio math). Tap APPLY SAVED DATA to pick which items to apply. UNDO still works.') + '</div>'
-      + cards + '</details>';
+      + cards
+      + '<button type="button" style="width:100%; margin-top:12px; background:transparent; color:#999; border:1.5px solid #333; padding:12px; border-radius:10px; font-weight:800; font-size:var(--fs-sm); cursor:pointer;" onclick="garmin.closeGoodSets()">' + (isKo ? '닫기' : 'CLOSE') + '</button>'
+      + '</details>';
   }
 
   // [추가 2026-11-15] 지난 로그를 가민과 비교할 때는 \"지금 앱 저장소 값\"이 아니라 그 로그를 만든 러닝에 적용돼 있던 계수를 기준으로 한다.
@@ -23739,7 +23760,7 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
     saveTextFileNative(reportStr, fileName, 'text/plain;charset=utf-8', isKo);
   }
 
-  return { buildLogRestoreHtml, refreshCalibStatus: function () { renderCalibStatus(isKoLang()); }, clearAllSelections, hideAutoLog, clearHiddenList, toggleRestorePanel, toggleRestoreSel, restoreSelectedAutoLogs, importFitFile, deleteImport, quickCompareFit, quickRunGroup, quickTogglePair, quickReset, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, toggleGarminDetail, openInfo, closeInfo, togglePrecLogSelect, togglePrecLogSelectAutoMatch, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, undoCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, exportCalibReport, updateProjectedPreview, saveGoodCalib, applyGoodCalib, deleteGoodCalib, toggleGoodRestore, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
+  return { buildLogRestoreHtml, refreshCalibStatus: function () { renderCalibStatus(isKoLang()); }, clearAllSelections, hideAutoLog, clearHiddenList, toggleRestorePanel, toggleRestoreSel, restoreSelectedAutoLogs, importFitFile, deleteImport, quickCompareFit, quickRunGroup, quickTogglePair, quickReset, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, toggleGarminDetail, openInfo, closeInfo, togglePrecLogSelect, togglePrecLogSelectAutoMatch, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, undoCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, exportCalibReport, updateProjectedPreview, saveGoodCalib, jumpToGoodSets, closeGoodSets, applyGoodCalib, deleteGoodCalib, toggleGoodRestore, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
