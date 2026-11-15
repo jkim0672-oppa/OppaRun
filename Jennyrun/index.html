@@ -995,7 +995,7 @@ body.prem-lock-dyn .h-det-box.lk-dyn { position:relative; }
 body.prem-lock-dyn .h-det-box.lk-dyn .h-det-val { visibility:hidden; }
 body.prem-lock-dyn .h-det-box.lk-dyn::after { content:'PRO'; position:absolute; left:0; right:0; bottom:10px; text-align:center; font-size:var(--fs-xxs); font-weight:800; letter-spacing:1px; color:#aaa; }
 body.prem-lock-garmin #btn-apply-calib::after { content:'PRO'; margin-left:8px; padding:2px 7px; border-radius:6px; background:#000; color:#ffcc66; font-size:.7em; font-weight:900; letter-spacing:1px; vertical-align:middle; }
-body.prem-lock-garmin #btn-save-pending-calib, body.prem-lock-garmin #btn-save-calib-report, body.prem-lock-garmin #btn-calib-avg3-save { display:none; }
+body.prem-lock-garmin #btn-save-good-calib, body.prem-lock-garmin #garmin-good-sets, body.prem-lock-garmin #btn-save-pending-calib, body.prem-lock-garmin #btn-save-calib-report, body.prem-lock-garmin #btn-calib-avg3-save { display:none; }
 body.prem-lock-garmin #garmin-calib-status > * { display:none; }
 body.prem-lock-garmin #garmin-calib-status:not(:empty)::before { content: var(--lk-status-title, 'APPLIED VALUES · PRO'); display:block; text-align:center; font-weight:800; color:#aaa; font-size:var(--fs-sm); letter-spacing:1px; padding:14px 0; }
 #garmin-sample-box { display:none; }
@@ -2848,6 +2848,7 @@ alt="runner"/>
 <div id="garmin-calib-result" class="u-margin-top-12px"></div>
 <div id="garmin-calib-pending" class="u-margin-top-12px"></div>
 <div id="garmin-calib-status" class="u-margin-top-10px"></div>
+<div id="garmin-good-sets" class="u-margin-top-10px"></div>
 <!-- [/추가] 캘리브레이션 비교 -->
 </div>
 </div>
@@ -21681,6 +21682,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     // appliedFields/appliedAt은 아직 비어있고, applyCalibration()이
     // 실행될 때 채워져서 "제안만 됐는지" vs "실제로 적용됐는지"를 리포트에 구분해서 남긴다.
     lastCompareData = {
+      devicePos: resolvedDevicePos, // [추가 2026-11-14] 좋은 기록 세트 저장용
       comparedAt: new Date().toISOString(),
       garminSavedAt: garminItems.map(g => g.importedAt).filter(Boolean).join(', ') || null, // [수정] 여러 개 선택 시 콤마로 나열
       precLogSavedAt: precItems.map(p => p.savedAt).filter(Boolean).join(', ') || null, // [수정] 여러 개 선택 시 콤마로 나열
@@ -21817,7 +21819,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
 
     const hasSuggestion = suggestedRot != null || suggestedRotOS != null || suggestedGct != null || suggestedVertScale != null || suggestedStrideFactor != null || suggestedGpsDistFactor != null || suggestedCadFactor != null || suggestedPaceFactor != null;
 
-    if (hasSuggestion) {
+    if (true) { // [수정 2026-11-14] 제안이 없어도 전 항목을 신호등 색으로 항상 표시 (적용 버튼은 hasSuggestion일 때만)
       // [수정] 예전엔 아래 5개 값이 있으면 무조건 전부 한꺼번에 적용됐음.
       // 각 항목 앞에 체크박스를 둬서, 원하는 값만 선택해서 적용/대기목록 저장할 수 있게 함.
       // 기본은 전부 체크(기존 동작과 동일)라 아무것도 안 건드리면 이전과 똑같이 동작함.
@@ -21843,8 +21845,22 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
           + inputHtml
           + '</div>';
       };
+      // [추가 2026-11-14] 신호등 점: 비교표와 같은 기준(오차 5% 미만 초록 / 15% 미만 노랑 / 그 이상 빨강, 오차 없으면 회색)
+      const _dot = (pct) => {
+        if (pct == null || !isFinite(pct)) return '<span style="color:#666">●</span> ';
+        const a = Math.abs(pct);
+        const c = a < 5 ? 'var(--good)' : (a < 15 ? 'var(--warning)' : 'var(--danger)');
+        return '<span style="color:' + c + '">●</span> ';
+      };
+      const infoRow = (line, pct, note) => '<div style="padding:4px 0; color:#aaa;">' + _dot(pct) + line
+        + (note ? ' <span class="u-color-666">' + note + '</span>' : '') + '</div>';
+      const _legendHtml = '<div style="font-size:var(--fs-xxs); color:#888; padding:2px 0 8px 0; line-height:1.5;">'
+        + (isKo
+          ? '<span style="color:var(--good)">●</span> 오차 5% 미만(범위 내) · <span style="color:var(--warning)">●</span> 5~15%(보정할 만함) · <span style="color:var(--danger)">●</span> 15% 이상 · <span style="color:#666">●</span> 비교 불가/해당 없음'
+          : '<span style="color:var(--good)">●</span> under 5% (OK) · <span style="color:var(--warning)">●</span> 5-15% (worth tuning) · <span style="color:var(--danger)">●</span> 15%+ · <span style="color:#666">●</span> n/a')
+        + '</div>';
       html += '<div class="lk-garmin-sugg" style="margin-top:12px; font-size:var(--fs-xs); color:#ccc; line-height:1.5;">'
-        + '<div class="c58">' + (isKo ? '권장 보정수치 (적용할 항목 선택)' : 'RECOMMENDED CALIBRATION (select items to apply)') + '</div>';
+        + '<div class="c58">' + (isKo ? '보정수치 전체 (적용할 항목 선택)' : 'ALL CALIBRATION VALUES (select items to apply)') + '</div>' + _legendHtml;
       // [수정 2026-07-30] hand는 이제 suggestedRot/suggestedRotOS 자체가 계산 단계에서
       // null이므로(위 참고) 아래 두 항목이 hand에서는 자연히 표시되지 않는다 — 별도 경고문 불필요.
       if (suggestedRot != null) {
@@ -21855,14 +21871,14 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
           + (isKo ? '<span class="u-color-7fd3ff">(OS 센서 기준 대안 — 체크 시 위 값 대신 이 값이 적용됨)</span>' : '<span class="u-color-7fd3ff">(alt., based on OS sensor — overrides the row above if checked)</span>'), false);
       }
       if (suggestedGct != null) {
-        html += checkRow('calib-sel-gct', 'gctFallbackRatio: ' + curGct.toFixed(3) + ' → <b>' + suggestedGct.toFixed(3) + '</b>', true, 'calib-input-gct', suggestedGct.toFixed(3));
+        html += checkRow('calib-sel-gct', _dot(gctDiffPct) + 'gctFallbackRatio: ' + curGct.toFixed(3) + ' → <b>' + suggestedGct.toFixed(3) + '</b>', true, 'calib-input-gct', suggestedGct.toFixed(3));
       }
       if (suggestedGround != null) {
-        html += checkRow('calib-sel-ground', 'groundThreshold: ' + curGround.toFixed(2) + ' → <b>' + suggestedGround.toFixed(2) + '</b> '
+        html += checkRow('calib-sel-ground', _dot(gctDiffPct) + 'groundThreshold: ' + curGround.toFixed(2) + ' → <b>' + suggestedGround.toFixed(2) + '</b> '
           + (isKo ? '<span class="u-color-666">(GCT 실측 경로 보정)</span>' : '<span class="u-color-666">(corrects the measured-GCT path)</span>'), true, 'calib-input-ground', suggestedGround.toFixed(2));
       }
       if (suggestedImpact != null) {
-        html += checkRow('calib-sel-impact', 'impactThreshold: ' + curImpact.toFixed(2) + ' → <b>' + suggestedImpact.toFixed(2) + '</b>', true, 'calib-input-impact', suggestedImpact.toFixed(2));
+        html += checkRow('calib-sel-impact', _dot(gctDiffPct) + 'impactThreshold: ' + curImpact.toFixed(2) + ' → <b>' + suggestedImpact.toFixed(2) + '</b>', true, 'calib-input-impact', suggestedImpact.toFixed(2));
       }
       if ((suggestedGround != null || suggestedImpact != null) && gctMeasuredFrac != null) {
         html += '<div style="font-size:var(--fs-xxs); color:#888; padding:2px 0 6px 23px; line-height:1.5;">'
@@ -21889,13 +21905,13 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
           + '</div>';
       }
       if (suggestedVertScale != null) {
-        html += checkRow('calib-sel-vert', 'vertScale: ' + curVertScale.toFixed(3) + ' → <b>' + suggestedVertScale.toFixed(3) + '</b>', true, 'calib-input-vert', suggestedVertScale.toFixed(3));
+        html += checkRow('calib-sel-vert', _dot(vertDiffPct) + 'vertScale: ' + curVertScale.toFixed(3) + ' → <b>' + suggestedVertScale.toFixed(3) + '</b>', true, 'calib-input-vert', suggestedVertScale.toFixed(3));
       }
       if (suggestedStrideFactor != null) {
-        html += factorRow('calib-sel-stride', (isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ': ' + curStrideFactor.toFixed(3) + ' → <b>' + suggestedStrideFactor.toFixed(3) + '</b>', true, 'calib-input-stride', suggestedStrideFactor.toFixed(3));
+        html += factorRow('calib-sel-stride', _dot(stepDiffPct) + (isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ': ' + curStrideFactor.toFixed(3) + ' → <b>' + suggestedStrideFactor.toFixed(3) + '</b>', true, 'calib-input-stride', suggestedStrideFactor.toFixed(3));
       }
       if (suggestedGpsDistFactor != null) {
-        html += factorRow('calib-sel-gps', (isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + curGpsDistFactor.toFixed(3) + ' → <b>' + suggestedGpsDistFactor.toFixed(3) + '</b> ' + (isKo ? '(실제 거리·페이스에 직접 반영됨)' : '(directly affects real distance/pace)'), true, 'calib-input-gps', suggestedGpsDistFactor.toFixed(3));
+        html += factorRow('calib-sel-gps', _dot(distDiffPct) + (isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + curGpsDistFactor.toFixed(3) + ' → <b>' + suggestedGpsDistFactor.toFixed(3) + '</b> ' + (isKo ? '(실제 거리·페이스에 직접 반영됨)' : '(directly affects real distance/pace)'), true, 'calib-input-gps', suggestedGpsDistFactor.toFixed(3));
         // [수정 2026-08-04] 페이스는 GPS 거리 보정계수에서 자동으로 파생되는 실효 배율
         // (paceImpliedFactor, 아래 안내문)과는 별개로, 거리는 그대로 두고 페이스 표시값만
         // 따로 미세조정할 수 있는 전용 보정계수(paceCorrectionFactor)도 추가로 지원한다.
@@ -21908,25 +21924,45 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
         }
       }
       if (suggestedPaceFactor != null) {
-        html += factorRow('calib-sel-pacefactor', (isKo ? '페이스 전용 보정계수' : 'paceCorrectionFactor') + ': ' + curPaceFactor.toFixed(3) + ' → <b>' + suggestedPaceFactor.toFixed(3) + '</b> '
+        html += factorRow('calib-sel-pacefactor', _dot(paceDiffPct) + (isKo ? '페이스 전용 보정계수' : 'paceCorrectionFactor') + ': ' + curPaceFactor.toFixed(3) + ' → <b>' + suggestedPaceFactor.toFixed(3) + '</b> '
           + (isKo ? '<span class="u-color-666">(거리는 그대로 두고 표시 페이스에만 곱해짐 — 계수를 올리면 페이스가 빨라짐/숫자가 작아짐)</span>' : '<span class="u-color-666">(distance untouched — only affects displayed pace; higher = faster/smaller pace number)</span>'),
           true, 'calib-input-pacefactor', suggestedPaceFactor.toFixed(3));
       }
       if (suggestedCadFactor != null) {
-        html += factorRow('calib-sel-cad', (isKo ? '케이던스 보정계수' : 'cadCorrectionFactor') + ': ' + curCadFactor.toFixed(3) + ' → <b>' + suggestedCadFactor.toFixed(3) + '</b> ' + (isKo ? '(네이티브 걸음센서 원시값은 그대로, 표시/기록값에만 반영됨)' : '(native raw value untouched, applies only to displayed/logged cadence)'), true, 'calib-input-cad', suggestedCadFactor.toFixed(3));
+        html += factorRow('calib-sel-cad', _dot(cadDiffPct) + (isKo ? '케이던스 보정계수' : 'cadCorrectionFactor') + ': ' + curCadFactor.toFixed(3) + ' → <b>' + suggestedCadFactor.toFixed(3) + '</b> ' + (isKo ? '(네이티브 걸음센서 원시값은 그대로, 표시/기록값에만 반영됨)' : '(native raw value untouched, applies only to displayed/logged cadence)'), true, 'calib-input-cad', suggestedCadFactor.toFixed(3));
       }
-      html += '<div style="color:#888; margin-top:8px; margin-bottom:10px;">' + (isKo
+      // [추가 2026-11-14] 이번 비교에서 제안값이 없는 항목도 현재값 + 신호등 점으로 전부 표시한다.
+      {
+        const _na = isKo ? '해당 없음' : 'n/a';
+        const _noData = isKo ? '제안 없음(비교 데이터 부족)' : 'no suggestion (not enough data)';
+        const _frNote = isKo ? '프리런은 보정 대상 아님' : 'not calibrated in Free Run';
+        let _rows = '';
+        if (suggestedGct == null && curGct != null) _rows += infoRow('gctFallbackRatio: ' + curGct.toFixed(3), gctDiffPct, _noData);
+        if (suggestedVertScale == null && curVertScale != null) _rows += infoRow('vertScale: ' + curVertScale.toFixed(3), vertDiffPct, vertBasisOk ? _noData : (isKo ? '예전 로그(z축 기준)라 제안 생략' : 'old log basis — skipped'));
+        if (suggestedGround == null && curGround != null) _rows += infoRow('groundThreshold: ' + curGround.toFixed(2), null, isKo ? '현재 미사용(GCT 안정화 방식)' : 'currently unused');
+        if (suggestedImpact == null && curImpact != null) _rows += infoRow('impactThreshold: ' + curImpact.toFixed(2), null, isKo ? '현재 미사용(GCT 안정화 방식)' : 'currently unused');
+        if (curRot != null) _rows += infoRow('rotRejectThreshold: ' + curRot, null, isKo ? '걸음 판정에 안 쓰여 미사용' : 'unused (native step detection)');
+        if (suggestedStrideFactor == null) _rows += infoRow((isKo ? '보폭 보정계수' : 'strideCorrectionFactor') + ': ' + curStrideFactor.toFixed(3), stepDiffPct, isFreerunPos ? _frNote : _noData);
+        if (suggestedGpsDistFactor == null) _rows += infoRow((isKo ? 'GPS 거리 보정계수' : 'gpsDistCorrectionFactor') + ': ' + curGpsDistFactor.toFixed(3), distDiffPct, isFreerunPos ? _frNote : _noData);
+        if (suggestedPaceFactor == null) _rows += infoRow((isKo ? '페이스 전용 보정계수' : 'paceCorrectionFactor') + ': ' + curPaceFactor.toFixed(3), paceDiffPct, isFreerunPos ? _frNote : _noData);
+        if (suggestedCadFactor == null) _rows += infoRow((isKo ? '케이던스 보정계수' : 'cadCorrectionFactor') + ': ' + curCadFactor.toFixed(3), cadDiffPct, isFreerunPos ? _frNote : _noData);
+        if (_rows) {
+          html += '<div style="margin-top:8px; padding-top:6px; border-top:1px solid #2a2a2a; font-size:var(--fs-xxs); color:#888; font-weight:800;">'
+            + (isKo ? (hasSuggestion ? '변경 제안 없는 항목 (현재값)' : '이번 비교에서 적용할 권장값이 없어요 · 현재값') : (hasSuggestion ? 'No change suggested (current values)' : 'Nothing to apply this time · current values')) + '</div>' + _rows;
+        }
+      }
+      if (hasSuggestion) html += '<div style="color:#888; margin-top:8px; margin-bottom:10px;">' + (isKo
         ? '체크된 항목만 아래 버튼으로 즉시 적용/저장됩니다. 적용 후 러닝을 한 번 더 진행해서 오차가 줄었는지 다시 비교해보세요.'
         : 'Only the checked items are applied and saved when you tap the button below. Run again afterward and re-compare to confirm the error shrank.') + '</div>'
         + '<button id="btn-apply-calib" style="background:var(--primary); color:#000; border:none; padding:12px; border-radius:10px; width:100%; font-weight:900; font-size:var(--fs-sm); cursor:pointer;" onclick="garmin.applyCalibration()">' + (isKo ? '✓ 이 값으로 자동 반영' : '✓ APPLY THESE VALUES') + '</button>'
-        + '<button id="btn-save-pending-calib" style="margin-top:8px; background:transparent; color:var(--primary); border:1.5px solid #2a3a2f; padding:12px; border-radius:10px; width:100%; font-weight:900; font-size:var(--fs-sm); cursor:pointer;" onclick="garmin.addPendingCalib()">' + (isKo ? '＋ 같은 위치 3개 평균용으로 저장' : '＋ SAVE FOR 3-RESULT AVERAGE') + '</button>'
-        + '</div>';
+        + '<button id="btn-save-pending-calib" style="margin-top:8px; background:transparent; color:var(--primary); border:1.5px solid #2a3a2f; padding:12px; border-radius:10px; width:100%; font-weight:900; font-size:var(--fs-sm); cursor:pointer;" onclick="garmin.addPendingCalib()">' + (isKo ? '＋ 같은 위치 3개 평균용으로 저장' : '＋ SAVE FOR 3-RESULT AVERAGE') + '</button>';
+      html += '</div>';
 
       // [수정] devicePos는 위에서 이미 계산해둔 공용 resolvedDevicePos(선택한 로그의 실제
       // 기록 위치 우선, 없으면 현재 설정값)를 그대로 재사용한다. 위치가 서로 다른 로그를
       // 섞어 선택한 경우엔 위쪽 경고문(posMismatchWarningHtml)에서 이미 안내했으므로
       // 여기서는 대표값(resolvedDevicePos) 하나로만 저장한다.
-      lastSuggestion = {
+      lastSuggestion = !hasSuggestion ? null : {
         devicePos: resolvedDevicePos,
         logCount: precItems.length, // [추가 2026-10-10] 이 제안이 합산(평균)한 정밀 로그 수
         gct: suggestedGct,
@@ -21948,6 +21984,7 @@ const phoneAvgLeanLateralDeg = avgArr(precItems.map(p => avgFromPrecLog(p.log, '
     }
     // [단순화 2026-10-10] 속도·지연 보정 제안 패널 (러닝 내 속도 기울기 + LOO 검증, 모션 엔진에 직접 저장)
     try { html += buildSpeedCalibPanelHtml(garminItems, precItems, resolvedDevicePos, curVertScale, isKo); } catch (e) { console.warn('[speedcalib panel]', e); }
+    html += '<button id="btn-save-good-calib" style="margin-top:10px; background:#14261a; color:#5fd18a; border:1.5px solid #2d5a3f; padding:12px; border-radius:10px; width:100%; font-weight:900; font-size:var(--fs-sm); cursor:pointer;" onclick="garmin.saveGoodCalib()">' + (isKo ? '★ 이 계수 세트를 좋은 기록으로 저장' : '★ SAVE THIS SET AS GOOD RECORD') + '</button>';
     html += '<button id="btn-save-calib-report" style="margin-top:10px; background:transparent; color:#999; border:1.5px solid #333; padding:11px; border-radius:10px; width:100%; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.exportCalibReport()">' + (isKo ? '리포트 다운로드 (.txt)' : 'DOWNLOAD REPORT (.txt)') + '</button>';
     html += '</div>';
     resultBox.innerHTML = html;
@@ -22245,7 +22282,162 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
   const POS_LABEL_KO = getPosLabelMap(true);
   const POS_LABEL_EN = getPosLabelMap(false);
 
+  // ── [추가 2026-11-14] 좋은 기록 계수 세트 ──
+  // 비교 화면에서 "지금 계수 세트"를 위치별로 저장해두고, 나중에 폰 저장소가 틀어졌을 때
+  // 비율 계산 없이 저장된 절대값 그대로 되돌려 적용한다(적용은 기존 applyMotionCalibSuggestion 경로라 UNDO/이력 포함).
+  const GOOD_CALIB_KEY = 'oppaRunGoodCalibSets';
+  const MAX_GOOD_PER_POS = 5;
+  function loadGoodSets() {
+    try { const a = JSON.parse(localStorage.getItem(GOOD_CALIB_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+  }
+  function saveGoodSetsList(list) {
+    try { localStorage.setItem(GOOD_CALIB_KEY, JSON.stringify(list)); } catch (e) { jrLogErr('goodCalibSave', e); }
+  }
+  function goodSetValsEqual(a, b) {
+    const ka = Object.keys(a || {});
+    if (ka.length !== Object.keys(b || {}).length) return false;
+    return ka.every(function (k) { return typeof a[k] === 'number' && typeof b[k] === 'number' && Math.abs(a[k] - b[k]) < 1e-9; });
+  }
+  function fmtGoodVal(key, v) {
+    const f = CALIB_HISTORY_FIELDS.filter(function (x) { return x.key === key; })[0];
+    return (typeof v === 'number') ? v.toFixed(f ? f.dec : 3) : '-';
+  }
+  async function saveGoodCalib() {
+    const isKo = isKoLang();
+    if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 해제된 계정으로 로그인하면 쓸 수 있어요.', 'This is a PRO feature. Log in with a PRO-unlocked account to use it.'); return; }
+    if (!lastCompareData || !lastCompareData.devicePos) { await appAlert(isKo ? '먼저 비교를 실행해주세요.' : 'Run a comparison first.'); return; }
+    try {
+      const pos = lastCompareData.devicePos;
+      const prof = storage.loadProfile();
+      const snap = calibEffectiveSnapshot(prof, pos);
+      const vals = {};
+      CALIB_HISTORY_FIELDS.forEach(function (f) { if (typeof snap[f.key] === 'number') vals[f.key] = snap[f.key]; });
+      const m = lastCompareData.metrics || {};
+      const pick = function (k) { return (m[k] && typeof m[k].diffPct === 'number' && isFinite(m[k].diffPct)) ? Math.round(m[k].diffPct * 10) / 10 : null; };
+      const diffs = { cadence: pick('cadence'), gct: pick('gct'), stepLength: pick('stepLength'), vertOsc: pick('vertOsc'), distance: pick('distance'), pace: pick('pace') };
+      const lines = CALIB_HISTORY_FIELDS.filter(function (f) { return vals[f.key] != null; }).map(function (f) { return f.key + ': ' + fmtGoodVal(f.key, vals[f.key]); }).join('\n');
+      const ok = await appConfirm(
+        '[' + getPosLabel(pos, isKo) + '] ' + (isKo ? '이 계수 세트를 좋은 기록으로 저장할까요?' : 'Save this coefficient set as a good record?') + '\n\n' + lines + '\n\n'
+        + (isKo ? '※ 비교한 시점에 저장돼 있던 계수예요. 이 러닝을 뛴 뒤 계수를 바꾸지 않았다면 이 러닝에 쓰인 계수와 같아요.' : 'Note: these are the coefficients stored at compare time — same as the run\'s only if you did not change them after running.'),
+        { ok: isKo ? '저장' : 'SAVE', cancel: isKo ? '취소' : 'CANCEL', multiline: true });
+      if (!ok) return;
+      let list = loadGoodSets().filter(function (x) { return !(x.pos === pos && goodSetValsEqual(x.vals, vals)); });
+      list.unshift({ id: 'g' + Date.now(), pos: pos, savedAt: new Date().toISOString(), runAt: String(lastCompareData.precLogSavedAt || '').split(',')[0].trim() || null, vals: vals, diffs: diffs });
+      const cnt = {};
+      list = list.filter(function (x) { cnt[x.pos] = (cnt[x.pos] || 0) + 1; return cnt[x.pos] <= MAX_GOOD_PER_POS; });
+      saveGoodSetsList(list);
+      renderGoodSets(isKo);
+      await appAlert(isKo ? '좋은 기록으로 저장했어요. 아래 "좋은 기록 계수"에서 언제든 적용할 수 있어요.' : 'Saved. You can apply it any time from "Good record sets" below.');
+    } catch (e) { jrLogErr('saveGoodCalib', e); }
+  }
+  async function deleteGoodCalib(id) {
+    const isKo = isKoLang();
+    const ok = await appConfirm(isKo ? '이 좋은 기록 세트를 삭제할까요?' : 'Delete this good record set?', { ok: isKo ? '삭제' : 'DELETE', cancel: isKo ? '취소' : 'CANCEL' });
+    if (!ok) return;
+    saveGoodSetsList(loadGoodSets().filter(function (x) { return x.id !== id; }));
+    renderGoodSets(isKo);
+  }
+  async function applyGoodCalib(id) {
+    const isKo = isKoLang();
+    if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 해제된 계정으로 로그인하면 쓸 수 있어요.', 'This is a PRO feature. Log in with a PRO-unlocked account to use it.'); return; }
+    const set = loadGoodSets().filter(function (x) { return x.id === id; })[0];
+    if (!set) return;
+    const pos = set.pos;
+    try {
+      const prof = storage.loadProfile();
+      const snap = calibEffectiveSnapshot(prof, pos);
+      const motionOnly = isMotionOnlyPos(pos);
+      const changed = {};
+      CALIB_HISTORY_FIELDS.forEach(function (f) {
+        if (motionOnly && f.factor) return;
+        const v = set.vals[f.key];
+        if (typeof v !== 'number') return;
+        const cur = snap[f.key];
+        if (typeof cur !== 'number' || Math.abs(v - cur) > 1e-6) changed[f.key] = v;
+      });
+      const keys = Object.keys(changed);
+      if (!keys.length) { await appAlert(isKo ? '이미 같은 값이 적용돼 있어요.' : 'These values are already applied.'); return; }
+      const ok = await appConfirm(
+        '[' + getPosLabel(pos, isKo) + '] ' + (isKo ? '좋은 기록 값을 그대로 적용할까요? (비율 계산 없음)' : 'Apply the saved values as-is? (no ratio math)') + '\n\n'
+        + keys.map(function (k) { return k + ': ' + fmtGoodVal(k, snap[k]) + ' → ' + fmtGoodVal(k, changed[k]); }).join('\n'),
+        { ok: isKo ? '적용' : 'APPLY', cancel: isKo ? '취소' : 'CANCEL', multiline: true });
+      if (!ok) return;
+      const sugg = {};
+      if (changed.gctFallbackRatio != null) sugg.gct = changed.gctFallbackRatio;
+      if (changed.rotRejectThreshold != null) sugg.rot = changed.rotRejectThreshold;
+      if (changed.vertScale != null) sugg.vertScale = changed.vertScale;
+      if (changed.groundThreshold != null) sugg.ground = changed.groundThreshold;
+      if (changed.impactThreshold != null) sugg.impact = changed.impactThreshold;
+      if (changed.stride != null) sugg.strideFactor = changed.stride;
+      if (changed.gps != null) sugg.gpsDistFactor = changed.gps;
+      if (changed.cad != null) sugg.cadFactor = changed.cad;
+      if (changed.pace != null) sugg.paceFactor = changed.pace;
+      // 수동 입력과 같은 방식: 보정계수 스위치가 꺼져 있어도 저장은 되게 잠깐 켜서 적용 → 원래 상태 복원
+      const origFlag = prof.calibFactorsEnabled;
+      const flat = { s: prof.strideCorrectionFactor, g: prof.gpsDistCorrectionFactor, c: prof.cadCorrectionFactor, p: prof.paceCorrectionFactor };
+      const wasOn = calibFactorsFlag(prof);
+      prof.calibFactorsEnabled = true;
+      const override = applyMotionCalibSuggestion(prof, pos, sugg);
+      if (origFlag === undefined) delete prof.calibFactorsEnabled; else prof.calibFactorsEnabled = origFlag;
+      if (!wasOn) { prof.strideCorrectionFactor = flat.s; prof.gpsDistCorrectionFactor = flat.g; prof.cadCorrectionFactor = flat.c; prof.paceCorrectionFactor = flat.p; }
+      storage.saveProfile(prof);
+      if (typeof app !== 'undefined' && app && app.motion && prof.devicePos === pos) {
+        if (override.gctFallbackRatio != null) app.motion.gctFallbackRatio = override.gctFallbackRatio;
+        if (override.rotRejectThreshold != null) app.motion.rotRejectThreshold = override.rotRejectThreshold;
+        if (override.vertScale != null) app.motion.vertScale = override.vertScale;
+        if (override.groundThreshold != null) app.motion.groundThreshold = override.groundThreshold;
+        if (override.impactThreshold != null) app.motion.impactThreshold = override.impactThreshold;
+        if (wasOn && changed.cad != null) app.motion.cadCorrectionFactor = changed.cad;
+        if (wasOn && changed.pace != null) app.motion.paceCorrectionFactor = changed.pace;
+      }
+      renderCalibStatus(isKo);
+      try { const cd = document.getElementById('current-data-result'); if (cd && cd.classList.contains('is-open') && typeof ui !== 'undefined') { ui.toggleCurrentData(); ui.toggleCurrentData(); } } catch (_e) {}
+      await appAlert('[' + getPosLabel(pos, isKo) + '] ' + (isKo ? '좋은 기록 값이 적용됐어요. 다음 러닝부터 반영돼요.' : 'Good record values applied. Takes effect from your next run.'));
+    } catch (e) {
+      jrLogErr('applyGoodCalib', e);
+      await appAlert(isKo ? '적용 중 오류가 발생했어요.' : 'Failed to apply.');
+    }
+  }
+  function renderGoodSets(isKo) {
+    const box = document.getElementById('garmin-good-sets');
+    if (!box) return;
+    const list = loadGoodSets();
+    if (!list.length) { box.innerHTML = ''; return; }
+    let prof = {};
+    try { prof = storage.loadProfile(); } catch (e) {}
+    const order = ['chest', 'waist', 'armband', 'hand', 'freerun', 'trail', 'treadmill'];
+    const sorted = list.slice().sort(function (a, b) { return (order.indexOf(a.pos) - order.indexOf(b.pos)) || String(b.savedAt).localeCompare(String(a.savedAt)); });
+    const sg = function (v) { return (v > 0 ? '+' : '') + v.toFixed(1) + '%'; };
+    const short = { gctFallbackRatio: 'gct', vertScale: 'vert', rotRejectThreshold: 'rot', groundThreshold: 'ground', impactThreshold: 'impact', stride: 'stride', gps: 'gps', cad: 'cad', pace: 'pace' };
+    const cards = sorted.map(function (it) {
+      const cur = calibEffectiveSnapshot(prof, it.pos);
+      const isCur = Object.keys(it.vals).every(function (k) { return typeof cur[k] === 'number' && Math.abs(cur[k] - it.vals[k]) < 1e-6; });
+      const valTxt = CALIB_HISTORY_FIELDS.filter(function (f) { return it.vals[f.key] != null && f.key !== 'rotRejectThreshold'; })
+        .map(function (f) { return short[f.key] + ' ' + fmtGoodVal(f.key, it.vals[f.key]); }).join(' · ');
+      const d = it.diffs || {};
+      const dTxt = [['CAD', d.cadence], ['GCT', d.gct], ['STEP', d.stepLength], ['VERT', d.vertOsc], ['DIST', d.distance], ['PACE', d.pace]]
+        .filter(function (x) { return typeof x[1] === 'number'; }).map(function (x) { return x[0] + ' ' + sg(x[1]); }).join(' · ');
+      const dt = function (iso) { try { return new Date(iso).toLocaleDateString(isKo ? 'ko-KR' : 'en-US'); } catch (e) { return ''; } };
+      const runTxt = it.runAt ? (isKo ? '러닝 ' : 'Run ') + String(it.runAt).slice(0, 10) + ' · ' : '';
+      return '<div style="border-top:1px solid #2a2a2a; padding:10px 0 4px 0;">'
+        + '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">'
+        + '<span style="font-weight:900; color:var(--primary); font-size:var(--fs-sm);">' + getPosLabel(it.pos, isKo) + (isCur ? ' <span style="color:var(--good); font-size:var(--fs-xxs);">' + (isKo ? '● 현재 적용 중' : '● CURRENT') + '</span>' : '') + '</span>'
+        + '<span style="color:#888; font-size:var(--fs-xxs);">' + runTxt + (isKo ? '저장 ' : 'Saved ') + dt(it.savedAt) + '</span></div>'
+        + '<div style="font-size:var(--fs-xxs); color:#ccc; line-height:1.6; margin-top:4px;">' + valTxt + '</div>'
+        + (dTxt ? '<div style="font-size:var(--fs-xxs); color:#888; line-height:1.6;">' + (isKo ? '당시 오차 ' : 'Error then ') + dTxt + '</div>' : '')
+        + '<div style="display:flex; gap:8px; margin-top:8px;">'
+        + '<button type="button" ' + (isCur ? 'disabled ' : '') + 'style="flex:2; background:#14261a; color:#5fd18a; border:1.5px solid #2d5a3f; padding:10px; border-radius:10px; font-weight:900; font-size:var(--fs-xs); cursor:pointer;' + (isCur ? ' opacity:.5;' : '') + '" onclick="garmin.applyGoodCalib(\'' + it.id + '\')">' + (isKo ? '이 값 그대로 적용' : 'APPLY AS-IS') + '</button>'
+        + '<button type="button" style="flex:1; background:transparent; color:#999; border:1.5px solid #333; padding:10px; border-radius:10px; font-weight:800; font-size:var(--fs-xs); cursor:pointer;" onclick="garmin.deleteGoodCalib(\'' + it.id + '\')">' + (isKo ? '삭제' : 'DELETE') + '</button>'
+        + '</div></div>';
+    }).join('');
+    box.innerHTML = '<details class="garmin-import-item calib-acc u-border-color-primary" style="margin-bottom:10px;"' + (window.__goodSetsOpen ? ' open' : '') + ' ontoggle="if(event.target===this)window.__goodSetsOpen=this.open">'
+      + '<summary class="calib-acc-sum">' + (isKo ? '좋은 기록 계수 (되돌리기)' : 'GOOD RECORD SETS (RESTORE)') + '<span class="garmin-import-chev">&#9662;</span></summary>'
+      + '<div style="font-size:var(--fs-xxs); color:#888; line-height:1.5; padding:2px 0 4px 0;">' + (isKo ? '저장한 계수를 비율 계산 없이 절대값 그대로 폰 저장소에 적용해요. 직전 적용 UNDO도 그대로 쓸 수 있어요.' : 'Applies the saved coefficients as absolute values (no ratio math). UNDO still works.') + '</div>'
+      + cards + '</details>';
+  }
+
   function renderCalibStatus(isKo) {
+    try { renderGoodSets(isKo); } catch (_e) { jrLogErr('renderGoodSets', _e); }
     const box = document.getElementById('garmin-calib-status');
     if (!box) return;
     let overridesMap = {}, undosMap = {}, switchUndoOk = {};
@@ -23190,7 +23382,7 @@ if (premium.isGarminLocked()) { premium.proAlert('PRO 기능이에요. PRO가 �
     saveTextFileNative(reportStr, fileName, 'text/plain;charset=utf-8', isKo);
   }
 
-  return { refreshCalibStatus: function () { renderCalibStatus(isKoLang()); }, clearAllSelections, hideAutoLog, clearHiddenList, toggleRestorePanel, toggleRestoreSel, restoreSelectedAutoLogs, importFitFile, deleteImport, quickCompareFit, quickRunGroup, quickTogglePair, quickReset, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, toggleGarminDetail, openInfo, closeInfo, togglePrecLogSelect, togglePrecLogSelectAutoMatch, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, undoCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, exportCalibReport, updateProjectedPreview, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
+  return { refreshCalibStatus: function () { renderCalibStatus(isKoLang()); }, clearAllSelections, hideAutoLog, clearHiddenList, toggleRestorePanel, toggleRestoreSel, restoreSelectedAutoLogs, importFitFile, deleteImport, quickCompareFit, quickRunGroup, quickTogglePair, quickReset, clearAll, clearAllSilent, resetEverything, clearLogsOnly, selectImport, selectPrecLog, toggleGarminSelect, toggleGarminDetail, openInfo, closeInfo, togglePrecLogSelect, togglePrecLogSelectAutoMatch, importPrecLogCsv, clearPrecLogImports, deletePrecLogImport, runCalibrationCompare, applyCalibration, resetCalibration, applyCommittedDefault, undoCommittedDefault, applyCommittedDefaultAllPos, resetCalibrationAllPos, undoLastCalibration, copySnippet, downloadPatchedHtml, addPendingCalib, removePendingCalib, clearPendingCalib, exportCalibReport, updateProjectedPreview, saveGoodCalib, applyGoodCalib, deleteGoodCalib, render, renderSelfCalib, selfCalibSelectLog, selfCalibComputeDistance, selfCalibApplyDistance, selfCalibCancelDistance, selfCalibComputeCadence, selfCalibApplyCadence, selfCalibCancelCadence };
 })();
 // ===============================================================
 // [/GARMIN IMPORT] 독립 모듈 끝
