@@ -19771,7 +19771,7 @@ const hrManager = {
     const st = this._modalState;
     if (st !== 'searching' && st !== 'connecting' && st !== 'disconnecting') {
       // 지난 검색 실패/오류/해제 결과 문구는 다시 열 때 지우고 '연결된 기기 없음'으로 시작 (현재 상태가 아니므로)
-      if (st === 'notfound' || st === 'error' || st === 'disconnected') this._modalState = 'idle';
+      if (st === 'notfound' || st === 'error' || st === 'disconnected' || st === 'cancelled') this._modalState = 'idle';
       if (this._connected && !this._lost) this._modalState = 'connected';
       else if (this._connected && this._lost) this._modalState = 'nosignal';
       else if (this._lost || this._standbyLost) this._modalState = 'lost';
@@ -19790,10 +19790,10 @@ const hrManager = {
     let color = '#888', label = ko ? '연결하기' : 'CONNECT', action = 'connect', disabled = false;
     if (st === 'searching') {
       text = ko ? '심박 기기를 검색하는 중...' : 'Scanning for HR devices...';
-      label = ko ? '검색 중...' : 'Searching...'; disabled = true;
+      label = ko ? '검색 취소' : 'CANCEL'; action = 'cancel'; // [수정 2026-11-17] 검색 중에도 취소 가능
     } else if (st === 'connecting') {
       text = ko ? ('연결하는 중' + (n ? ': ' + n : '') + '...') : ('Connecting' + (n ? ' to ' + n : '') + '...');
-      label = ko ? '연결 중...' : 'Connecting...'; disabled = true;
+      label = ko ? '연결 취소' : 'CANCEL'; action = 'cancel';
     } else if (st === 'connected') {
       const hrTxt = this._hr > 0 ? ' · ♥ ' + this._hr + ' BPM' : (ko ? ' · 심박 수신 대기 중...' : ' · waiting for heart rate...');
       text = (ko ? '연결됨' : 'Connected') + nm + hrTxt; color = '#00ff88';
@@ -19806,6 +19806,8 @@ const hrManager = {
     } else if (st === 'disconnecting') {
       text = ko ? '연결 해제 중...' : 'Disconnecting...';
       label = ko ? '해제 중...' : 'Disconnecting...'; disabled = true;
+    } else if (st === 'cancelled') {
+      text = ko ? '취소했어요.' : 'Cancelled.';
     } else if (st === 'disconnected') {
       text = ko ? '연결이 해제되었습니다.' : 'Disconnected.';
     } else if (st === 'notfound') {
@@ -19816,7 +19818,7 @@ const hrManager = {
     if (status) { status.textContent = text; status.style.color = color; }
     if (btn) {
       btn.disabled = disabled; btn.textContent = label;
-      btn.onclick = action === 'disconnect' ? () => hrManager.disconnect() : (action === 'reconnect' ? () => hrManager.reconnect() : () => hrManager.connect());
+      btn.onclick = action === 'disconnect' ? () => hrManager.disconnect() : (action === 'reconnect' ? () => hrManager.reconnect() : (action === 'cancel' ? () => hrManager.cancelSearch() : () => hrManager.connect()));
     }
   },
   async connect() {
@@ -19828,12 +19830,15 @@ const hrManager = {
       return;
     }
     if (!navigator.bluetooth) { this._setModal('error', isKo ? '블루투스를 지원하지 않는 기기입니다.' : 'Bluetooth not supported.'); return; }
+    const tok = this._connTok = (this._connTok || 0) + 1; // 취소하면 값이 바뀌어 늦게 온 결과를 무시
     try {
       this._setModal('searching');
       this.device = await navigator.bluetooth.requestDevice({ filters:[{services:['heart_rate']}], optionalServices:['heart_rate'] });
+      if (tok !== this._connTok) return;
       this._devName = this.device.name || ''; this._saveDevName();
       this._setModal('connecting');
       const server = await this.device.gatt.connect();
+      if (tok !== this._connTok) { try { this.device.gatt.disconnect(); } catch (e) {} return; }
       const service = await server.getPrimaryService('heart_rate');
       this.char = await service.getCharacteristic('heart_rate_measurement');
       await this.char.startNotifications();
@@ -19850,9 +19855,23 @@ const hrManager = {
       this._markConnected();
       this._setModal('connected');
     } catch(e) {
+      if (tok !== this._connTok) return;
       if (e.name === 'NotFoundError') this._setModal('notfound', isKo ? '선택한 기기가 없습니다.' : 'No device selected.');
       else this._setModal('error', (isKo ? '오류: ' : 'Error: ') + e.message);
     }
+  },
+  // [신규 2026-11-17] 검색/연결 시도 취소 (연결된 기기를 해제하는 disconnect()와 다름)
+  cancelSearch() {
+    this._connTok = (this._connTok || 0) + 1; this._reconnecting = false;
+    if (window.AndroidHrBridge) {
+      try {
+        if (typeof window.AndroidHrBridge.stopScan === 'function') window.AndroidHrBridge.stopScan();
+        else { this._userDisc = true; window.AndroidHrBridge.disconnect(); } // stopScan이 없는 예전 앱(APK) 대비
+      } catch (e) {}
+    } else {
+      try { if (this.device && this.device.gatt && this.device.gatt.connected) this.device.gatt.disconnect(); } catch (e) {}
+    }
+    this._setModal('cancelled');
   },
   // [신규 2026-11-16] 연결은 남아 있는데 신호가 없을 때: 해제 후 바로 다시 검색 (해제 기록/끊김 경고는 건드리지 않음)
   reconnect() {
@@ -19890,13 +19909,15 @@ const hrManager = {
   },
   // ── 네이티브 BLE 콜백 (AndroidHrBridge → JS) ──
   onNativeScanStart() { this._setModal('searching'); },
-  onNativeDeviceFound(name) { this._devName = name || this._devName || ''; this._saveDevName(); this._setModal('connecting'); },
+  onNativeScanCancelled() { if (this._modalState === 'searching' || this._modalState === 'connecting') this._setModal('cancelled'); },
+  onNativeDeviceFound(name) { if (this._modalState === 'cancelled') return; this._devName = name || this._devName || ''; this._saveDevName(); this._setModal('connecting'); },
   onNativeConnected() { this._reconnecting = false; this._markConnected(); this._saveDevName(); this._setModal('connected'); },
   onNativeHr(bpm) {
     this.updateDisplay(bpm);
   },
   onNativeDisconnect() {
     this.updateDisplay(0);
+    if (this._modalState === 'cancelled') return; // [수정 2026-11-17] 연결 취소 뒤 늦게 온 해제 콜백은 '끊김'으로 취급하지 않음(가짜 끊김 경고 방지)
     if (this._reconnecting) { this._reconnecting = false; this._userDisc = false; this.connect(); return; } // 다시 연결: 끊김 경고 없이 재검색
     this.onLinkLost();
   },
