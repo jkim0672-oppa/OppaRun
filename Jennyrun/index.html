@@ -7288,7 +7288,7 @@ calEl.textContent = (liveKcal && liveKcal > 0) ? liveKcal : '0';
 // 연결 해제된 상태)일 때만 동작하며, 실제 심박 데이터가 들어오면 hrManager.updateDisplay()가
 // 라벨/값을 원래대로 되돌린다. 걷기 모드는 파워 계산 대상이 아니라 건너뜀.
 updateLiveHrPowerFallback() {
-if (typeof hrManager === 'undefined' || hrManager._hr) return; // 실제 심박 연결 중이면 건드리지 않음
+if (typeof hrManager === 'undefined' || hrManager._hr || hrManager._standbyLost) return; // 실제 심박 연결 중이거나, 연결했던 심박이 끊겨 '__' 깜빡이는 중이면 건드리지 않음 [수정 2026-11-16]
 const hrValEl = document.getElementById('hr-val');
 const hrUnitEl = document.getElementById('hr-unit');
 const hrZoneValEl = document.getElementById('hr-zone-val');
@@ -8681,7 +8681,7 @@ const labelSpeedMini = document.getElementById('label-speed-mini');
 if(labelSpeedMini) labelSpeedMini.textContent = t.speed;
 try { if (typeof ui !== 'undefined' && ui.applyTrailCardMode) ui.applyTrailCardMode(); } catch (e) {} // [추가 2026-10-20] 언어 변경 시 트레일 카드 라벨 갱신
 const btnHrConnectEl = document.getElementById('btn-hr-connect');
-if(btnHrConnectEl && !btnHrConnectEl.disabled && (typeof hrManager === 'undefined' || !hrManager.device || !hrManager.device.gatt || !hrManager.device.gatt.connected)) btnHrConnectEl.textContent = isKo ? '연결하기' : 'CONNECT';
+try { if (typeof hrManager !== 'undefined' && hrManager.renderModal) { hrManager.renderModal(); } else if (btnHrConnectEl) { btnHrConnectEl.textContent = isKo ? '연결하기' : 'CONNECT'; } } catch (e) { if (btnHrConnectEl) btnHrConnectEl.textContent = isKo ? '연결하기' : 'CONNECT'; } // [수정 2026-11-16] 네이티브 연결 중에도 CONNECT로 덮어쓰던 문제 → 모달 상태 기준으로 다시 그림
 // GPS 초기 상태바 (러닝 중이 아닐 때만)
 const statusEl = document.getElementById('status');
 if(statusEl && statusEl.textContent.indexOf('GPS') !== -1 && statusEl.textContent.indexOf('INIT') !== -1) {
@@ -9338,6 +9338,7 @@ const closeBtn = modal && modal.querySelector('.btn-confirm-cancel');
 if(closeBtn) closeBtn.textContent = isKo ? '닫기' : 'CLOSE';
 const labels = [isKo?'회복':'Recovery', isKo?'지방연소':'Fat Burn', isKo?'유산소':'Aerobic', isKo?'무산소':'Anaerobic', isKo?'최대':'Max'];
 labels.forEach((l,i)=>{ const el=document.getElementById('hz'+(i+1)+'-label'); if(el) el.textContent=l; });
+try { hrManager.syncModalState(); } catch (e) {} // [수정 2026-11-16] 열 때 현재 연결 상태(연결됨/끊김/신호없음)를 상태줄·버튼에 반영
 }
 closeHrModal() {
 const modal = document.getElementById('hr-modal');
@@ -19578,7 +19579,7 @@ const metro = new MetroEngine();
 const hrManager = {
   device: null, char: null, _hr: 0, _samples: [],
   // [추가] 러닝 시작 시 심박 샘플 초기화 (평균/최고 심박 계산용)
-  reset() { this._samples = []; this._hr = 0; this._stopLostBuzz(); },
+  reset() { this._samples = []; this._hr = 0; this._stopLostBuzz(); this._ranThisPage = true; this._setStandbyLost(false); }, // [수정 2026-11-16] _ranThisPage: 이 페이지에서 러닝이 시작됨(종료 후엔 새로고침되므로 대기 감시 제외)
   // [수정 2026-11-10] 러닝 중 심박 끊김 진동: '짧게 2번'을 끊긴 직후 1회 + 30초 뒤 1회, 총 2회만 울리고 멈춤.
   // (심박계가 아예 꺼진 경우 계속 울리지 않게 하기 위함.) 연결/복구될 때는 진동 없음.
   // 수동 일시정지 중에는 울리지 않고(횟수에도 안 셈), 연결 복구·러닝 종료·수동 해제 시에도 중단.
@@ -19625,7 +19626,7 @@ const hrManager = {
   updateDisplay(hr) {
     this._hr = hr;
     // [신규 2026-11-02] 심박 데이터가 들어오는 시각 기록 + 끊김 상태였다면 복구 처리
-    if (hr && hr > 0) { this._lastHrAt = Date.now(); if (this._lost) { this._lost = false; this._connected = true; this._stopLostBuzz(); this._setNoSignalUi(false); } }
+    if (hr && hr > 0) { this._lastHrAt = Date.now(); this._connected = true; this._markSession(); this._setStandbyLost(false); if (this._lost) { this._lost = false; this._connected = true; this._stopLostBuzz(); this._setNoSignalUi(false); } this._modalOnHr(hr); }
     // [추가] 러닝 중이면 심박 샘플 누적 (평균/최고 심박 계산용)
     if (hr && hr > 0 && typeof app !== 'undefined' && app.state && app.state.isRunning && !app.state.isPaused && !app.state.isAutoPaused) {
       this._samples.push(hr);
@@ -19637,7 +19638,7 @@ const hrManager = {
     const zoneEl = document.getElementById('hr-zone-val');
     const hrCard = document.getElementById('card-hr');
     const zoneCard = document.getElementById('card-hrzone');
-    if(hrEl) hrEl.textContent = hr || '--';
+    if(hrEl) hrEl.textContent = hr || (this._standbyLost ? '__' : '--'); // [수정 2026-11-16] 대기 중 끊김이면 '__'(깜빡임)
     if(hr && hr > 0) {
       const z = this.getZone(hr);
       if(zoneEl) { zoneEl.textContent = 'Z'+z.z; zoneEl.style.color = z.color; }
@@ -19666,13 +19667,14 @@ const hrManager = {
   // 1) 연결 해제 이벤트  2) 연결은 돼 있는데 15초 넘게 데이터가 없을 때  3) START 누를 때 끊겨 있으면 다시 알림
   _isWanted() { try { return localStorage.getItem('jrHrWanted') === '1'; } catch (e) { return false; } },
   _markConnected() {
-    this._connected = true; this._userDisc = false; this._lost = false; this._stopLostBuzz(); this._sessionUsed = true; this._lastHrAt = Date.now();
+    this._connected = true; this._userDisc = false; this._lost = false; this._stopLostBuzz(); this._markSession(); this._setStandbyLost(false); this._lastHrAt = Date.now();
     try { localStorage.setItem('jrHrWanted', '1'); } catch (e) {}
   },
   onLinkLost() {
     this._connected = false;
     const byUser = this._userDisc; this._userDisc = false;
-    if (byUser) return; // 사용자가 직접 해제한 경우는 알리지 않음
+    if (byUser) { this._setModal('disconnected'); return; } // 사용자가 직접 해제한 경우는 알리지 않음
+    this._setModal('lost');                                  // [수정 2026-11-16] 모달에도 '끊어졌어요'로 표시
     this.notifyLost();
   },
   notifyLost(force) {
@@ -19680,51 +19682,155 @@ const hrManager = {
     if (this._lost && !force) return;
     this._lost = true;
     this._setNoSignalUi(true); // [신규 2026-11-04] 연결은 남아 있는데 데이터만 끊긴 경우, 마지막 심박값/'Connected'가 그대로 남지 않게 함
-    this._startLostBuzz(); // [수정 2026-11-10] 팝업 제거 → 러닝 중이면 진동만 (짧게 2번 × 총 2회, 30초 간격)
+    this._setStandbyLost(true); // [수정 2026-11-16] 진동 제거 → 대기/러닝 모두 심박 숫자 '__' 깜빡임만
   },
   // [신규 2026-11-04] 연결은 유지된 채 심박 데이터가 끊긴 경우(워치에서 운동 저장 등) 화면 표시를 실제 상태에 맞춘다.
   // on=true: 심박 카드를 '--'로 비우고 연결 창 문구를 '심박 신호 없음'으로. on=false(데이터 복구): 문구를 '연결됨'으로 되돌린다.
   // 연결 자체가 끊긴 경우(_connected=false)는 기존 onNativeDisconnect 등이 문구를 처리하므로 건드리지 않는다.
   _setNoSignalUi(on) {
     try {
-      const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang() === 'ko' : false;
-      const status = document.getElementById('hr-modal-status');
       if (on) {
         if (!this._connected) return;
         this.updateDisplay(0);
-        if (status) status.textContent = isKo ? '심박 신호가 없어요' : 'No heart rate signal';
-      } else if (status && this._connected) {
-        status.textContent = isKo ? '연결됨' : 'Connected';
+        this._setModal('nosignal');
+      } else if (this._connected) {
+        this._setModal('connected');
       }
     } catch (e) {}
   },
+  // [수정 2026-11-16] 러닝 종료 저장 후 location.reload()로 hrManager가 새로 만들어져 _connected/_sessionUsed가 사라지던 문제.
+  // 세션 플래그는 sessionStorage(새로고침 유지, 앱 재실행 시 초기화)에 두고, 연결 판단은 '최근 15초 내 심박 수신'으로 한다.
+  _bootAt: Date.now(), _standbyLost: false, _ranThisPage: false,
+  _modalState: 'idle', _modalMsg: '', _reconnecting: false,
+  _devName: (function () { try { return localStorage.getItem('jrHrDevName') || ''; } catch (e) { return ''; } })(), // [신규 2026-11-16] 마지막 연결 기기 이름(새로고침 후에도 모달에 표시)
+  _markSession() { try { sessionStorage.setItem('jrHrSession', '1'); } catch (e) {} },
+  _hasSession() { try { return sessionStorage.getItem('jrHrSession') === '1'; } catch (e) { return false; } },
   checkOnStart() {
-    if (!this._isWanted() || !this._sessionUsed) return;
-    const stale = this._connected && this._lastHrAt && (Date.now() - this._lastHrAt > 15000);
-    if (!this._connected || stale) this.notifyLost(true);
+    if (!this._isWanted() || !this._hasSession()) return;
+    const alive = this._lastHrAt && (Date.now() - this._lastHrAt <= 15000);
+    if (alive) return;
+    // onStart()가 isRunning=true로 바꾼 뒤에 울리도록 한 틱 미룸(그 전에는 _startLostBuzz가 '러닝 중 아님'으로 조용히 return)
+    setTimeout(() => { try { this.notifyLost(true); } catch (e) {} }, 0);
   },
   _watch() {
     if (this._connected && !this._lost && this._lastHrAt && (Date.now() - this._lastHrAt > 15000)) this.notifyLost();
+    this._watchStandby();
   },
-  async connect() {
+  // [신규 2026-11-16] START 전 대기 상태에서의 심박 끊김 감지. 러닝 중 알림(진동)과 별개로, 대기 화면에서는 심박 숫자를 '__'로 깜빡이게만 한다.
+  _watchStandby() {
+    if (typeof app === 'undefined' || !app.state || app.state.isRunning) return;
+    if (this._ranThisPage) return;           // 러닝 종료 후 화면(공유 모달 등)에서는 경고하지 않음 — 곧 새로고침되어 대기 상태로 돌아옴
+    if (this._userDisc || !this._isWanted() || !this._hasSession()) return;
+    const now = Date.now();
+    // 새로고침 직후(_lastHrAt 없음)에는 네이티브 심박이 다시 흘러들어올 시간 25초를 준다
+    const alive = this._lastHrAt ? (now - this._lastHrAt <= 15000) : (now - this._bootAt <= 25000);
+    this._setStandbyLost(!alive);
+  },
+  _ensureStandbyStyle() {
+    if (document.getElementById('hr-lost-style')) return;
+    const st = document.createElement('style'); st.id = 'hr-lost-style';
+    st.textContent = '@keyframes hrLostBlink{0%,100%{opacity:1}50%{opacity:.1}}#hr-val.hr-lost-blink{animation:hrLostBlink 1s ease-in-out infinite}';
+    document.head.appendChild(st);
+  },
+  // [수정 2026-11-16] 진동/경고창 없이, 심박 숫자 자리를 '__'로 깜빡이게만 한다(대기·러닝 공통. 끊긴 뒤 마지막 값이 고정돼 연결된 것처럼 보이던 문제 방지).
+  _setStandbyLost(on) {
+    try {
+      on = !!on;
+      if (on === !!this._standbyLost) return;
+      this._standbyLost = on;
+      const hrEl = document.getElementById('hr-val');
+      if (on) {
+        this._ensureStandbyStyle();
+        this.updateDisplay(0);               // 값 비우기('__'로 표시됨)
+        const lang2 = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang() : 'ko';
+        const t2 = (typeof translations !== 'undefined') ? (translations[lang2] || translations['en']) : null;
+        const lEl = document.getElementById('label-hr'), lzEl = document.getElementById('label-hrzone'), uEl = document.getElementById('hr-unit');
+        if (t2 && lEl && t2.diagHrLabel) lEl.textContent = t2.diagHrLabel;      // 파워(W) 대체표시 중이었다면 HEART RATE로 되돌림
+        if (t2 && lzEl && t2.hrZoneLabel) lzEl.textContent = t2.hrZoneLabel;
+        if (uEl) uEl.textContent = ' BPM';
+        if (hrEl) { hrEl.style.color = '#e53935'; hrEl.classList.add('hr-lost-blink'); }
+      } else {
+        if (hrEl) { hrEl.classList.remove('hr-lost-blink'); if (hrEl.textContent === '__') hrEl.textContent = '--'; }
+      }
+    } catch (e) {}
+  },
+  // ── [신규 2026-11-16] 심박 연결 모달: 상태 → 문구/색/버튼을 한 곳(renderModal)에서 그린다 ──
+  // 상태: idle(연결 기기 없음) | searching | connecting | connected | nosignal(연결됐지만 신호 없음) | lost(끊김) | disconnecting | disconnected | notfound | error
+  _isKo() { try { return (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang() === 'ko' : false; } catch (e) { return false; } },
+  _setModal(state, msg) { this._modalState = state; this._modalMsg = msg || ''; this.renderModal(); },
+  _renderModalIfOpen() { const m = document.getElementById('hr-modal'); if (m && m.classList.contains('is-open')) this.renderModal(); },
+  _saveDevName() { try { if (this._devName) localStorage.setItem('jrHrDevName', this._devName); } catch (e) {} },
+  // 심박이 실제로 들어오면(새로고침 직후 포함) '연결됨'으로 보정하고, 열려 있으면 BPM을 실시간 갱신
+  _modalOnHr(hr) {
+    const st = this._modalState;
+    if (st === 'idle' || st === 'lost' || st === 'nosignal' || st === 'connecting') this._modalState = 'connected';
+    if (this._modalState === 'connected') this._renderModalIfOpen();
+  },
+  // 모달을 열 때 현재 실제 상태에 맞춰 보정
+  syncModalState() {
+    const st = this._modalState;
+    if (st !== 'searching' && st !== 'connecting' && st !== 'disconnecting') {
+      if (this._connected && !this._lost) this._modalState = 'connected';
+      else if (this._connected && this._lost) this._modalState = 'nosignal';
+      else if (this._lost || this._standbyLost) this._modalState = 'lost';
+    }
+    this.renderModal();
+  },
+  renderModal() {
     const btn = document.getElementById('btn-hr-connect');
     const status = document.getElementById('hr-modal-status');
-    const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang()==='ko' : false;
-    const L = isKo ? { searching:'검색 중...', scanning:'심박 기기를 검색하는 중...', noBt:'블루투스를 지원하지 않는 기기입니다.', connectingTo:(n)=>'연결하는 중: '+n+'...', disconnected:'연결이 해제되었습니다.', connect:'연결하기', connected:(n)=>'연결됨: '+n, disconnect:'연결 해제', noDevice:'선택한 기기가 없습니다.', error:(m)=>'오류: '+m }
-                    : { searching:'Searching...', scanning:'Scanning for HR devices...', noBt:'Bluetooth not supported.', connectingTo:(n)=>'Connecting to '+n+'...', disconnected:'Disconnected.', connect:'CONNECT', connected:(n)=>'Connected: '+n, disconnect:'DISCONNECT', noDevice:'No device selected.', error:(m)=>'Error: '+m };
+    if (!btn && !status) return;
+    const ko = this._isKo();
+    const n = this._devName || '';
+    const nm = n ? ' · ' + n : '';
+    const st = this._modalState;
+    let text = ko ? '연결된 기기 없음' : 'No device connected';
+    let color = '#888', label = ko ? '연결하기' : 'CONNECT', action = 'connect', disabled = false;
+    if (st === 'searching') {
+      text = ko ? '심박 기기를 검색하는 중...' : 'Scanning for HR devices...';
+      label = ko ? '검색 중...' : 'Searching...'; disabled = true;
+    } else if (st === 'connecting') {
+      text = ko ? ('연결하는 중' + (n ? ': ' + n : '') + '...') : ('Connecting' + (n ? ' to ' + n : '') + '...');
+      label = ko ? '연결 중...' : 'Connecting...'; disabled = true;
+    } else if (st === 'connected') {
+      const hrTxt = this._hr > 0 ? ' · ♥ ' + this._hr + ' BPM' : (ko ? ' · 심박 수신 대기 중...' : ' · waiting for heart rate...');
+      text = (ko ? '연결됨' : 'Connected') + nm + hrTxt; color = '#00ff88';
+      label = ko ? '연결 해제' : 'DISCONNECT'; action = 'disconnect';
+    } else if (st === 'nosignal') {
+      text = (ko ? '심박 신호가 없어요' : 'No heart rate signal') + nm; color = '#ffb74d';
+      label = ko ? '다시 연결' : 'RECONNECT'; action = 'reconnect';
+    } else if (st === 'lost') {
+      text = (ko ? '연결이 끊어졌어요' : 'Connection lost') + nm; color = '#ef5350';
+    } else if (st === 'disconnecting') {
+      text = ko ? '연결 해제 중...' : 'Disconnecting...';
+      label = ko ? '해제 중...' : 'Disconnecting...'; disabled = true;
+    } else if (st === 'disconnected') {
+      text = ko ? '연결이 해제되었습니다.' : 'Disconnected.';
+    } else if (st === 'notfound') {
+      text = this._modalMsg || (ko ? '심박 기기를 찾지 못했습니다. 다시 시도해주세요.' : 'No HR device found. Try again.'); color = '#ffb74d';
+    } else if (st === 'error') {
+      text = this._modalMsg || (ko ? '오류가 발생했어요.' : 'Error'); color = '#ef5350';
+    }
+    if (status) { status.textContent = text; status.style.color = color; }
+    if (btn) {
+      btn.disabled = disabled; btn.textContent = label;
+      btn.onclick = action === 'disconnect' ? () => hrManager.disconnect() : (action === 'reconnect' ? () => hrManager.reconnect() : () => hrManager.connect());
+    }
+  },
+  async connect() {
+    const isKo = this._isKo();
     // AndroidHrBridge 우선 사용 (WebView 환경)
     if (window.AndroidHrBridge) {
-      if(btn){btn.disabled=true;btn.textContent=L.searching;}
-      if(status) status.textContent=L.scanning;
+      this._setModal('searching');
       window.AndroidHrBridge.startScan();
       return;
     }
-    if (!navigator.bluetooth) { if(status) status.textContent=L.noBt; return; }
+    if (!navigator.bluetooth) { this._setModal('error', isKo ? '블루투스를 지원하지 않는 기기입니다.' : 'Bluetooth not supported.'); return; }
     try {
-      if(btn){btn.disabled=true;btn.textContent=L.searching;}
-      if(status) status.textContent=L.scanning;
+      this._setModal('searching');
       this.device = await navigator.bluetooth.requestDevice({ filters:[{services:['heart_rate']}], optionalServices:['heart_rate'] });
-      if(status) status.textContent=L.connectingTo(this.device.name);
+      this._devName = this.device.name || ''; this._saveDevName();
+      this._setModal('connecting');
       const server = await this.device.gatt.connect();
       const service = await server.getPrimaryService('heart_rate');
       this.char = await service.getCharacteristic('heart_rate_measurement');
@@ -19736,78 +19842,69 @@ const hrManager = {
       });
       this.device.addEventListener('gattserverdisconnected', () => {
         this.updateDisplay(0);
+        if (this._reconnecting) { this._reconnecting = false; this._userDisc = false; return; } // 다시 연결을 위한 끊김
         this.onLinkLost();
-        if(status) status.textContent=L.disconnected;
-        if(btn){btn.disabled=false;btn.textContent=L.connect;btn.onclick=()=>hrManager.connect();}
       });
-      if(status) status.textContent=L.connected(this.device.name);
       this._markConnected();
-      if(btn){btn.disabled=false;btn.textContent=L.disconnect;btn.onclick=()=>hrManager.disconnect();}
+      this._setModal('connected');
     } catch(e) {
-      if(status) status.textContent=e.name==='NotFoundError'?L.noDevice:L.error(e.message);
-      if(btn){btn.disabled=false;btn.textContent=L.connect;btn.onclick=()=>hrManager.connect();}
+      if (e.name === 'NotFoundError') this._setModal('notfound', isKo ? '선택한 기기가 없습니다.' : 'No device selected.');
+      else this._setModal('error', (isKo ? '오류: ' : 'Error: ') + e.message);
     }
+  },
+  // [신규 2026-11-16] 연결은 남아 있는데 신호가 없을 때: 해제 후 바로 다시 검색 (해제 기록/끊김 경고는 건드리지 않음)
+  reconnect() {
+    if (window.AndroidHrBridge) {
+      this._reconnecting = true; this._userDisc = true; // 이 끊김은 '끊김 경고'로 취급하지 않음
+      this._setModal('searching');
+      try { window.AndroidHrBridge.disconnect(); } catch (e) {}
+      // 네이티브 해제 콜백이 안 와도 멈추지 않도록 1.5초 뒤 그대로 검색 시작
+      setTimeout(() => { if (this._reconnecting) { this._reconnecting = false; this._userDisc = false; this.connect(); } }, 1500);
+      return;
+    }
+    this._reconnecting = true;
+    try { if (this.device && this.device.gatt && this.device.gatt.connected) this.device.gatt.disconnect(); } catch (e) {}
+    setTimeout(() => { this._reconnecting = false; }, 1500);
+    this.connect();
   },
   disconnect() {
     // [신규] 사용자가 직접 해제한 것이므로 끊김 알림을 띄우지 않고, 다음부터도 묻지 않도록 기록 제거
-    this._userDisc = true; this._lost = false; this._stopLostBuzz();
-    try { localStorage.removeItem('jrHrWanted'); } catch (e) {}
+    this._userDisc = true; this._lost = false; this._stopLostBuzz(); this._setStandbyLost(false);
+    this._lastHrAt = null; this._devName = '';
+    try { localStorage.removeItem('jrHrWanted'); localStorage.removeItem('jrHrDevName'); } catch (e) {}
     if (window.AndroidHrBridge) {
+      this._setModal('disconnecting'); // [수정 2026-11-16] 누르자마자 '해제 중...' 표시
+      this.updateDisplay(0);           // 마지막 심박값이 고정돼 보이지 않도록 바로 비움
       window.AndroidHrBridge.disconnect();
+      // 네이티브 콜백이 안 와도 UI가 멈추지 않도록 3초 뒤 강제로 해제 상태 반영
+      setTimeout(() => {
+        if (this._modalState === 'disconnecting') { this._connected = false; this._userDisc = false; this.updateDisplay(0); this._setModal('disconnected'); }
+      }, 3000);
       return;
     }
     if(this.device&&this.device.gatt.connected) this.device.gatt.disconnect();
     this.updateDisplay(0);
+    this._setModal('disconnected');
   },
   // ── 네이티브 BLE 콜백 (AndroidHrBridge → JS) ──
-  onNativeScanStart() {
-    const status = document.getElementById('hr-modal-status');
-    const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang()==='ko' : false;
-    if(status) status.textContent= isKo ? '심박 기기를 검색하는 중...' : 'Scanning for HR devices...';
-  },
-  onNativeDeviceFound(name) {
-    const status = document.getElementById('hr-modal-status');
-    const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang()==='ko' : false;
-    if(status) status.textContent= (isKo ? '연결하는 중: ' : 'Connecting to ') + name + '...';
-  },
-  onNativeConnected() {
-    const btn = document.getElementById('btn-hr-connect');
-    const status = document.getElementById('hr-modal-status');
-    const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang()==='ko' : false;
-    this._markConnected();
-    if(status) status.textContent= isKo ? '연결됨' : 'Connected';
-    if(btn){btn.disabled=false;btn.textContent= isKo ? '연결 해제' : 'DISCONNECT';btn.onclick=()=>hrManager.disconnect();}
-  },
+  onNativeScanStart() { this._setModal('searching'); },
+  onNativeDeviceFound(name) { this._devName = name || this._devName || ''; this._saveDevName(); this._setModal('connecting'); },
+  onNativeConnected() { this._reconnecting = false; this._markConnected(); this._saveDevName(); this._setModal('connected'); },
   onNativeHr(bpm) {
     this.updateDisplay(bpm);
   },
   onNativeDisconnect() {
-    const btn = document.getElementById('btn-hr-connect');
-    const status = document.getElementById('hr-modal-status');
-    const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang()==='ko' : false;
     this.updateDisplay(0);
+    if (this._reconnecting) { this._reconnecting = false; this._userDisc = false; this.connect(); return; } // 다시 연결: 끊김 경고 없이 재검색
     this.onLinkLost();
-    if(status) status.textContent= isKo ? '연결이 해제되었습니다.' : 'Disconnected.';
-    if(btn){btn.disabled=false;btn.textContent= isKo ? '연결하기' : 'CONNECT';btn.onclick=()=>hrManager.connect();}
   },
-  onNativeScanTimeout() {
-    const btn = document.getElementById('btn-hr-connect');
-    const status = document.getElementById('hr-modal-status');
-    const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang()==='ko' : false;
-    if(status) status.textContent= isKo ? '심박 기기를 찾지 못했습니다. 다시 시도해주세요.' : 'No HR device found. Try again.';
-    if(btn){btn.disabled=false;btn.textContent= isKo ? '연결하기' : 'CONNECT';btn.onclick=()=>hrManager.connect();}
-  },
-  onNativeError(msg) {
-    const btn = document.getElementById('btn-hr-connect');
-    const status = document.getElementById('hr-modal-status');
-    const isKo = (typeof storage !== 'undefined' && storage.getLang) ? storage.getLang()==='ko' : false;
-    if(status) status.textContent= (isKo ? '오류: ' : 'Error: ') + msg;
-    if(btn){btn.disabled=false;btn.textContent= isKo ? '연결하기' : 'CONNECT';btn.onclick=()=>hrManager.connect();}
-  }
+  onNativeScanTimeout() { this._setModal('notfound'); },
+  onNativeError(msg) { this._setModal('error', (this._isKo() ? '오류: ' : 'Error: ') + msg); }
 };
 
 // [신규 2026-11-02] 심박 끊김 감시(5초마다 점검)
 setInterval(() => { try { hrManager._watch(); } catch (e) {} }, 5000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { try { hrManager._watch(); } catch (e) {} } }); // [신규 2026-11-16] 화면 복귀 즉시 점검
 
 // ===============================================================
 // [GARMIN IMPORT] 독립 모듈 시작
