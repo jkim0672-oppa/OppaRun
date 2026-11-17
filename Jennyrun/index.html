@@ -21059,16 +21059,22 @@ const garmin = (function () {
     const curText = document.getElementById('current-selfcalib-run-text');
     const infoBox = document.getElementById('selfcalib-run-info');
     if (!opts || !curText || !infoBox) return;
-    const list = getCombinedPrecLogs();
+    // [수정 2026-11-17] 프리런/트레일/러닝머신 로그는 보정계수 슬롯이 없어 셀프 보정이 불가능하므로 목록에서 제외한다.
+    const allLogs = getCombinedPrecLogs();
+    const list = allLogs.filter(l => !isMotionOnlyPos(logPosOf(l)));
     if (!list.length) {
       opts.innerHTML = '';
+      selfCalibLogId = null;
       curText.textContent = isKo ? '저장된 정밀 로그 없음' : 'NO SAVED LOGS';
-      infoBox.innerHTML = isKo ? '먼저 러닝을 한 번 기록해주세요 (자동 저장됩니다).' : 'Record a run first (it auto-saves).';
+      infoBox.innerHTML = allLogs.length
+        ? (isKo ? '프리런·트레일·러닝머신 로그는 보정계수가 없어 여기서 보정할 수 없어요. 가슴/허리/암밴드/손 위치로 기록한 로그가 필요해요.' : 'Free Run, Trail and Treadmill logs have no calibration factors. You need a log recorded at chest, waist, armband or hand.')
+        : (isKo ? '먼저 러닝을 한 번 기록해주세요 (자동 저장됩니다).' : 'Record a run first (it auto-saves).');
       return;
     }
     if (!selfCalibLogId || !list.find(l => l.id === selfCalibLogId)) selfCalibLogId = list[0].id;
     opts.innerHTML = list.map(item => {
-      const posTxt = runPosText(item, { lang: isKo, noFreerun: true });
+      // [수정 2026-11-17] noFreerun 제거: 프리런/트레일/러닝머신 로그는 devicePos가 null이라 위치 라벨이 비어 'PRO'만 보이던 문제 → FREE RUN/TRAIL/TREADMILL 표시
+      const posTxt = runPosText(item, { lang: isKo });
       return '<div class="dropdown-option" onclick="garmin.selfCalibSelectLog(\'' + item.id + '\')">' + selfCalibLogLabel(item) + (posTxt ? ' · ' + posTxt : '') + '</div>';
     }).join('');
     const item = list.find(l => l.id === selfCalibLogId);
@@ -21076,7 +21082,7 @@ const garmin = (function () {
     curText.textContent = selfCalibLogLabel(item);
     const distKm = precLastDistKm(item.log);
     const cadSpm = avgFromPrecLog(item.log, 'cadence');
-    const posTxt = runPosText(item, { lang: isKo, noFreerun: true, unknown: true });
+    const posTxt = runPosText(item, { lang: isKo, unknown: true });
     infoBox.innerHTML = (isKo ? '측정 거리 ' : 'Measured dist ') + '<b>' + (distKm != null ? distKm.toFixed(3) : '--') + 'km</b> · '
       + (isKo ? '측정 케이던스 ' : 'measured cad ') + '<b>' + (cadSpm != null ? Math.round(cadSpm) : '--') + 'spm</b> · '
       + (isKo ? '위치 ' : 'pos ') + posTxt;
@@ -21093,11 +21099,56 @@ const garmin = (function () {
     if (dropdown) dropdown.classList.remove('is-open');
     renderSelfCalib();
   }
+  // [수정 2026-11-17] 프리런/트레일/러닝머신은 보정계수 슬롯이 없다(MOTION_ONLY_POS). 예전엔 CHECK→APPLY가 아무것도 저장하지 않으면서도
+  // "적용 완료"를 띄웠다. 이제 CHECK 단계에서 막고, 왜 안 되는지 위치별로 정확히 안내한다.
+  function selfCalibMotionOnlyHtml(pos, kind, isKo) {
+    if (!isMotionOnlyPos(pos)) return null;
+    let msg;
+    if (pos === 'treadmill') {
+      msg = kind === 'dist'
+        ? (isKo ? '러닝머신은 GPS가 없어 거리 보정계수가 없어요. 거리는 러닝 종료 후 입력한 실제 거리로 보폭 배율이 자동 학습돼요(설정 > 러닝머신 보정).'
+                : 'Treadmill has no GPS, so there is no distance factor. Distance is learned automatically from the distance you enter after the run (Settings > Treadmill calibration).')
+        : (isKo ? '러닝머신은 케이던스를 네이티브 걸음센서 값 그대로 쓰기 때문에 케이던스 보정계수가 없어요. 그래서 이 보정은 저장되지 않아요.'
+                : 'Treadmill uses the native step-sensor cadence as is, so there is no cadence factor. Nothing would be saved here.');
+    } else {
+      msg = isKo ? '프리런·트레일은 거리·케이던스를 GPS/네이티브 센서 값 그대로 쓰기 때문에 이 보정계수가 없어요. 그래서 이 보정은 저장되지 않아요.'
+                 : 'Free Run and Trail use GPS/native sensor values as is, so there is no distance or cadence factor. Nothing would be saved here.';
+    }
+    return selfCalibWarnHtml(msg);
+  }
   function selfCalibCurrentPosFactor(pos, key, defKey) {
     const prof = storage.loadProfile();
     const defFactors = DEFAULT_PROFILE_FACTORS_BY_POS[pos] || { stride: 1.0, gps: 1.0, cad: 1.0, pace: 1.0 };
     const byPos = prof[key] || {};
     return (typeof byPos[pos] === 'number' && byPos[pos] > 0) ? byPos[pos] : defFactors[defKey];
+  }
+  // [수정 2026-11-17] 제안값의 기준 계수 = "이 로그를 만든 러닝에 적용돼 있던 계수"(item.calib).
+  // 로그에 찍힌 거리/케이던스는 그 계수가 이미 곱해진 화면값이라, 지금 앱 값(selfCalibCurrentPosFactor)을 기준으로 삼으면
+  // 계수를 바꾼 뒤 예전 로그를 고를 때 제안값이 어긋난다(가민 비교의 precLogCalibBase와 동일한 규칙).
+  // 로그에 계수가 없는 예전 로그만 현재 앱 값으로 폴백하고 안내 문구를 띄운다.
+  function selfCalibBaseFactor(item, pos, mapKey, defKey, calibKey) {
+    const appF = selfCalibCurrentPosFactor(pos, mapKey, defKey);
+    const lf = item && item.calib && item.calib[calibKey];
+    if (typeof lf === 'number' && isFinite(lf) && lf > 0) return { base: lf, app: appF, fromLog: true };
+    return { base: appF, app: appF, fromLog: false };
+  }
+  function selfCalibBasisNoteHtml(b, isKo) {
+    if (!b.fromLog) {
+      return '<div style="font-size:var(--fs-xxs); color:#ffb86b; font-weight:700; margin-top:6px; line-height:1.5;">'
+        + (isKo ? '이 로그엔 기록 당시 계수가 없어 현재 앱 값을 기준으로 계산했어요. 로그를 만든 뒤 계수를 바꿨다면 제안값이 어긋날 수 있어요.'
+                : 'This log has no recorded factor, so the current app value was used as the base. If you changed the factor after recording, the suggestion may be off.') + '</div>';
+    }
+    if (Math.abs(b.base - b.app) > 1e-6) {
+      return '<div style="font-size:var(--fs-xxs); color:#7fd3ff; font-weight:700; margin-top:6px; line-height:1.5;">'
+        + (isKo ? '기록 당시 계수 ' + b.base.toFixed(3) + ' 기준으로 계산했어요 (현재 앱 값 ' + b.app.toFixed(3) + '). 반영하면 현재 값이 제안값으로 바뀝니다.'
+                : 'Based on the factor used when this run was recorded (' + b.base.toFixed(3) + '); the app currently has ' + b.app.toFixed(3) + '. Applying replaces it with the suggestion.') + '</div>';
+    }
+    return '';
+  }
+  function selfCalibOffNoteHtml(isKo) {
+    if (isCalibFactorsOn()) return '';
+    return '<div style="font-size:var(--fs-xxs); color:#ffb86b; font-weight:700; margin-top:6px; line-height:1.5;">'
+      + (isKo ? '보정계수 사용이 OFF라 지금은 반영되지 않아요. 설정에서 ON으로 바꾼 뒤 반영해주세요.' : 'Calibration factors are OFF, so applying will do nothing. Turn them ON in Settings first.') + '</div>';
   }
   function selfCalibComputeDistance() {
     const isKo = isKoLang();
@@ -21109,8 +21160,13 @@ const garmin = (function () {
     if (!actualKm || actualKm <= 0) { resultBox.innerHTML = selfCalibWarnHtml(isKo ? '실제 거리를 입력해주세요.' : 'Enter the actual distance.'); return; }
     const measuredKm = precLastDistKm(item.log);
     if (!measuredKm || measuredKm <= 0) { resultBox.innerHTML = selfCalibWarnHtml(isKo ? '이 로그에서 거리 데이터를 찾을 수 없습니다.' : 'No distance data in this log.'); return; }
-    const pos = item.devicePos || (function () { try { return storage.loadProfile().devicePos || 'chest'; } catch (e) { return 'chest'; } })();
-    const curFactor = selfCalibCurrentPosFactor(pos, 'gpsDistCorrectionFactorByPos', 'gps');
+    const pos = logPosOf(item) || (function () { try { return storage.loadProfile().devicePos || 'chest'; } catch (e) { return 'chest'; } })(); // [수정 2026-11-17] 프리런/트레일/러닝머신 로그는 자기 슬롯으로 보정(가민 비교의 logPosOf와 동일)
+    { const _mo = selfCalibMotionOnlyHtml(pos, 'dist', isKo); if (_mo) { selfCalibLastDist = null; resultBox.innerHTML = _mo; return; } }
+    // [추가 2026-11-17] 단위 실수(m로 입력) / 다른 로그 선택 방지: 오차가 너무 크면 제안하지 않는다
+    if (actualKm >= 50) { selfCalibLastDist = null; resultBox.innerHTML = selfCalibWarnHtml(isKo ? '실제 거리가 ' + actualKm + 'km로 너무 커요. m가 아니라 km 단위로 입력해주세요 (예: 400m → 0.4).' : 'Actual distance is ' + actualKm + ' km — enter km, not meters (e.g. 400 m → 0.4).'); return; }
+    if (Math.abs(measuredKm - actualKm) / actualKm > 0.5) { selfCalibLastDist = null; resultBox.innerHTML = selfCalibWarnHtml(isKo ? '측정 ' + measuredKm.toFixed(3) + 'km와 실제 ' + actualKm.toFixed(3) + 'km가 50% 넘게 달라요. 선택한 로그나 입력값(km 단위)을 확인해주세요.' : 'Measured ' + measuredKm.toFixed(3) + ' km vs actual ' + actualKm.toFixed(3) + ' km differ by over 50%. Check the selected log and the value (km).'); return; }
+    const _b = selfCalibBaseFactor(item, pos, 'gpsDistCorrectionFactorByPos', 'gps', 'gps');
+    const curFactor = _b.base;
     const diffPct = (measuredKm - actualKm) / actualKm * 100;
     const suggested = Math.round(curFactor * selfCalibStepRatio(actualKm / measuredKm, SELF_CALIB_GPS_FRACTION) * 1000) / 1000;
     selfCalibLastDist = { pos: pos, factor: suggested };
@@ -21118,6 +21174,7 @@ const garmin = (function () {
     resultBox.innerHTML = '<div class="c65">'
       + (isKo ? '측정 ' : 'Measured ') + measuredKm.toFixed(3) + 'km vs ' + (isKo ? '실제 ' : 'actual ') + actualKm.toFixed(3) + 'km (' + (diffPct >= 0 ? '+' : '') + diffPct.toFixed(1) + '%)<br>'
       + 'gpsDistCorrectionFactor: ' + curFactor.toFixed(3) + ' → <b class="u-color-primary">' + suggested.toFixed(3) + '</b>'
+      + selfCalibBasisNoteHtml(_b, isKo) + selfCalibOffNoteHtml(isKo)
       + '<div class="c53">'
       + '<button class="c46" onclick="garmin.selfCalibApplyDistance()">' + (isKo ? '✓ [' + posLabel + '] 이 값으로 반영' : '✓ APPLY TO [' + posLabel + ']') + '</button>'
       + '<button class="c49" onclick="garmin.selfCalibCancelDistance()">' + (isKo ? '취소' : 'CANCEL') + '</button>'
@@ -21135,6 +21192,7 @@ const garmin = (function () {
   function selfCalibApplyDistance() {
     const isKo = isKoLang();
     if (!selfCalibLastDist) return;
+    if (isMotionOnlyPos(selfCalibLastDist.pos)) { const _rb = document.getElementById('selfcalib-dist-result'); if (_rb) _rb.innerHTML = selfCalibMotionOnlyHtml(selfCalibLastDist.pos, 'dist', isKo); selfCalibLastDist = null; return; } // [추가] 저장되지 않는 슬롯에는 성공 메시지를 띄우지 않는다
     if (!isCalibFactorsOn()) { // [추가 2026-10-08] 스위치 OFF면 적용하지 않고 안내만
       const _rb = document.getElementById('selfcalib-dist-result');
       if (_rb) _rb.innerHTML = '<div class="c59">' + (isKo ? '보정계수 사용이 OFF라 적용되지 않았어요. 설정에서 ON으로 바꾼 뒤 다시 눌러주세요.' : 'Not applied: calibration factors are OFF. Turn them ON in Settings first.') + '</div>';
@@ -21158,8 +21216,11 @@ const garmin = (function () {
     if (!actualCad || actualCad <= 0) { resultBox.innerHTML = selfCalibWarnHtml(isKo ? '메트로놈 기준 실제 케이던스를 입력해주세요.' : 'Enter the actual (metronome) cadence.'); return; }
     const measuredCad = avgFromPrecLog(item.log, 'cadence');
     if (!measuredCad || measuredCad <= 0) { resultBox.innerHTML = selfCalibWarnHtml(isKo ? '이 로그에서 케이던스 데이터를 찾을 수 없습니다.' : 'No cadence data in this log.'); return; }
-    const pos = item.devicePos || (function () { try { return storage.loadProfile().devicePos || 'chest'; } catch (e) { return 'chest'; } })();
-    const curFactor = selfCalibCurrentPosFactor(pos, 'cadCorrectionFactorByPos', 'cad');
+    const pos = logPosOf(item) || (function () { try { return storage.loadProfile().devicePos || 'chest'; } catch (e) { return 'chest'; } })(); // [수정 2026-11-17] 프리런/트레일/러닝머신 로그는 자기 슬롯으로 보정(가민 비교의 logPosOf와 동일)
+    { const _mo = selfCalibMotionOnlyHtml(pos, 'cad', isKo); if (_mo) { selfCalibLastCad = null; resultBox.innerHTML = _mo; return; } }
+    if (Math.abs(measuredCad - actualCad) / actualCad > 0.5) { selfCalibLastCad = null; resultBox.innerHTML = selfCalibWarnHtml(isKo ? '측정 ' + Math.round(measuredCad) + 'spm과 실제 ' + Math.round(actualCad) + 'spm이 50% 넘게 달라요. 선택한 로그나 입력값을 확인해주세요.' : 'Measured ' + Math.round(measuredCad) + ' spm vs actual ' + Math.round(actualCad) + ' spm differ by over 50%. Check the selected log and the value.'); return; }
+    const _b = selfCalibBaseFactor(item, pos, 'cadCorrectionFactorByPos', 'cad', 'cad');
+    const curFactor = _b.base;
     const diffPct = (measuredCad - actualCad) / actualCad * 100;
     const suggested = Math.round(curFactor * selfCalibStepRatio(actualCad / measuredCad, SELF_CALIB_CAD_FRACTION) * 1000) / 1000;
     selfCalibLastCad = { pos: pos, factor: suggested };
@@ -21167,6 +21228,7 @@ const garmin = (function () {
     resultBox.innerHTML = '<div class="c65">'
       + (isKo ? '측정 ' : 'Measured ') + Math.round(measuredCad) + 'spm vs ' + (isKo ? '실제 ' : 'actual ') + Math.round(actualCad) + 'spm (' + (diffPct >= 0 ? '+' : '') + diffPct.toFixed(1) + '%)<br>'
       + 'cadCorrectionFactor: ' + curFactor.toFixed(3) + ' → <b class="u-color-primary">' + suggested.toFixed(3) + '</b>'
+      + selfCalibBasisNoteHtml(_b, isKo) + selfCalibOffNoteHtml(isKo)
       + '<div class="c53">'
       + '<button class="c46" onclick="garmin.selfCalibApplyCadence()">' + (isKo ? '✓ [' + posLabel + '] 이 값으로 반영' : '✓ APPLY TO [' + posLabel + ']') + '</button>'
       + '<button class="c49" onclick="garmin.selfCalibCancelCadence()">' + (isKo ? '취소' : 'CANCEL') + '</button>'
@@ -21182,6 +21244,7 @@ const garmin = (function () {
   function selfCalibApplyCadence() {
     const isKo = isKoLang();
     if (!selfCalibLastCad) return;
+    if (isMotionOnlyPos(selfCalibLastCad.pos)) { const _rb = document.getElementById('selfcalib-cad-result'); if (_rb) _rb.innerHTML = selfCalibMotionOnlyHtml(selfCalibLastCad.pos, 'cad', isKo); selfCalibLastCad = null; return; } // [추가]
     if (!isCalibFactorsOn()) { // [추가 2026-10-08] 스위치 OFF면 적용하지 않고 안내만
       const _rb = document.getElementById('selfcalib-cad-result');
       if (_rb) _rb.innerHTML = '<div class="c59">' + (isKo ? '보정계수 사용이 OFF라 적용되지 않았어요. 설정에서 ON으로 바꾼 뒤 다시 눌러주세요.' : 'Not applied: calibration factors are OFF. Turn them ON in Settings first.') + '</div>';
