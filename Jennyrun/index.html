@@ -14078,7 +14078,7 @@ opts = opts || {};
 try {
 if (window.AndroidSoundBridge && typeof window.AndroidSoundBridge.playCalibSound === 'function') {
 window.AndroidSoundBridge.playCalibSound(type, volPct);
-if (opts.vibrate && navigator.vibrate) navigator.vibrate(opts.vibratePattern || 60);
+if (opts.vibrate) jrVibrate(opts.vibratePattern || 60); // [수정 2026-11-17] 화면 꺼짐에서도 울리도록 네이티브 진동
 return;
 }
 } catch(e) {}
@@ -14095,7 +14095,7 @@ ctx = tempCtx;
 }
 if (ctx.state === 'suspended' && ctx.resume) ctx.resume();
 this.renderCalibSoundAt(ctx, type, peakGain);
-if (opts.vibrate && navigator.vibrate) navigator.vibrate(opts.vibratePattern || 60);
+if (opts.vibrate) jrVibrate(opts.vibratePattern || 60); // [수정 2026-11-17] 화면 꺼짐에서도 울리도록 네이티브 진동
 if (tempCtx) {
 // 임시 컨텍스트는 가장 긴 소리가 끝날 시간을 여유있게 잡아 정리
 setTimeout(() => { try { tempCtx.close(); } catch(e) {} }, 900);
@@ -15693,8 +15693,9 @@ if(ui.dom.afterStop) ui.dom.afterStop.classList.remove('is-open');
 this.startSilentKeepAlive();
 // [신규] 네이티브 Foreground Service 시작 (화면 꺼져도 GPS 계속 수집)
 if (window.AndroidLocationBridge && AndroidLocationBridge.startTracking) {
-AndroidLocationBridge.startTracking();
+if (!this._cdFgsOn) AndroidLocationBridge.startTracking(); // [수정 2026-11-17] 캘리브레이션 카운트다운에서 이미 시작했으면 중복 시작 안 함
 }
+this._cdFgsOn = false;
 // [신규] 러닝 중 주머니 안 오터치로 Home/최근앱 이탈되는 것 방지 (화면 고정)
 if (window.AndroidLockBridge && AndroidLockBridge.lockRun) {
 AndroidLockBridge.lockRun();
@@ -16324,24 +16325,30 @@ startCalibCountdown() {
   row.style.cssText = 'display:flex;gap:10px;width:100%;max-width:340px;';
   const close = function () { if (self._calibCd) { clearInterval(self._calibCd); self._calibCd = null; } try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {} if (ov.parentNode) ov.parentNode.removeChild(ov); };
   const go = function () { close(); self._calibCdDone = true; self.onStart(); };
-  const cancel = function () { close(); try { if (self.noSleep) self.noSleep.disable(); } catch (e) {} };
+  const cancel = function () { close(); try { if (self.noSleep) self.noSleep.disable(); } catch (e) {} if (self._cdFgsOn) { self._cdFgsOn = false; try { releaseRunNativeBridges(); } catch (e) {} } }; // [수정 2026-11-17] 카운트다운 중 취소하면 먼저 띄운 서비스도 정지
   const tick = function () {
     const rem = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
     if (rem !== lastRem) {
       lastRem = rem;
       num.textContent = String(rem);
       if (rem >= 1 && rem <= 10) { speak(String(rem), rem <= 3); }                       // 10~1초: 음성 카운트 (종소리는 0초에만)
-      if (rem >= 1 && rem <= 3) { setTimeout(function () { try { if (navigator.vibrate) navigator.vibrate(150); } catch (e) {} }, 250); } // 소리가 먼저 나고 진동은 0.25초 뒤(진동이 소리를 눌러 작아지는 것 방지) // 3·2·1초 진동 한 번씩
+      if (rem >= 1 && rem <= 3) { setTimeout(function () { try { jrVibrate(150); } catch (e) {} }, 250); } // 소리가 먼저 나고 진동은 0.25초 뒤(진동이 소리를 눌러 작아지는 것 방지) // 3·2·1초 진동 한 번씩
     }
     if (rem <= 0) {
       try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {}
-      try { self.playCalibDoneBeep(); if (navigator.vibrate) navigator.vibrate([300, 100, 300]); } catch (e) {} // 종소리 + 긴 진동
+      try { self.playCalibDoneBeep(); jrVibrate([300, 100, 300]); } catch (e) {} // 종소리 + 긴 진동 [수정 2026-11-17] 화면 꺼짐에서도 울리도록 네이티브 진동(jrVibrate)
       go();
     }
   };
   const mainBtn = mkBtn('START', ['#04180f', 'var(--primary)', 'var(--primary)'], function () {
     if (phase === 'select') {
       getCtx(); // 사용자 제스처 안에서 오디오 컨텍스트 준비
+      // [신규 2026-11-17] 카운트다운 시작 시점(앱이 화면에 보이고 사용자가 직접 누른 순간)에 포그라운드 서비스를 먼저 띄운다.
+      // 기존에는 카운트다운이 끝난 뒤 onStart()에서야 시작해서, 카운트다운 도중 화면이 꺼지면 앱이 '화면에도 없고 서비스도 없는'
+      // 상태가 되어 앱 자체 오디오(종소리)가 OS에 의해 무음 처리될 수 있었다(음성은 TTS 엔진 프로세스가 재생해서 영향 없음).
+      try {
+        if (window.AndroidLocationBridge && AndroidLocationBridge.startTracking) { AndroidLocationBridge.startTracking(); self._cdFgsOn = true; }
+      } catch (e) { jrLogErr('cdFgsStart', e); }
       phase = 'count';
       title.textContent = isKo ? '폰을 착용하고 출발선에 서세요' : 'Put the phone on and get to the start line';
       sub.textContent = isKo ? '10초부터 음성 카운트, 마지막 종소리가 울리면 출발' : 'Voice count from 10; start running at the final bell';
