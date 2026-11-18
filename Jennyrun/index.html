@@ -5294,7 +5294,7 @@ diagRecovSkip: "Distance under 100m, recovery analysis not provided.",
 calibTitle: "STRIDE CALIBRATION", calibDesc: "Run a known, exact distance (a track lap, etc.) so the app can learn your real stride length instead of an estimate — this improves stride, cadence, and efficiency-score accuracy going forward.",
 calibDist400: "400 m (track)", calibDist1000: "1000 m", calibStartBtn: "START CALIBRATION RUN",
 calibCurrentLabel: "Current correction factor", calibDefaultTag: "default, not yet calibrated",
-calibConfirmMsg: "Press START for a 10/20/30-second countdown (time to put the phone on). It counts down by voice from 10; at the final bell, run exactly {d}m, then slow down and press FINISH. Walking/slowing at the start and end is excluded automatically.",
+calibConfirmMsg: "Press START to pick a 10/20/30-second countdown, then press START in that dialog (time to put the phone on). Bell at 10s, voice count after, final bell = go; run exactly {d}m, then slow down and press FINISH. Walking/slowing at the start and end is excluded automatically.",
 calibTooShort: "Not enough steps were detected for a reliable calibration. Please try again with a longer, steady run.",
 calibResultMsg: "Calibration complete! Personal correction factor: {f} (stride readings adjusted by {p}%). This run was not saved to your history.",
 calibOutOfRange: "The result was far outside a normal range, so it wasn't applied — please check GPS signal and device placement, then try again.",
@@ -5409,7 +5409,7 @@ diagRecovSkip: "100m 미만 거리는 회복 분석이 제공되지 않습니다
 calibTitle: "정밀 보폭 캘리브레이션", calibDesc: "정확히 알고 있는 거리(트랙 한 바퀴 등)를 뛰어서, 추정값 대신 실제 보폭을 앱이 학습하게 하세요 — 이후 보폭, 케이던스, 효율점수 정확도가 개선됩니다.",
 calibDist400: "400m (트랙)", calibDist1000: "1000m", calibStartBtn: "캘리브레이션 러닝 시작",
 calibCurrentLabel: "현재 보정계수", calibDefaultTag: "기본값, 아직 보정 안됨",
-calibConfirmMsg: "START를 누르면 카운트다운(10/20/30초 선택)이 시작돼요(폰 착용 시간). 10초 전부터 음성으로 세고, 종소리가 울리면 출발해서 정확히 {d}m를 뛴 뒤, 천천히 걷다가 FINISH를 눌러주세요. 앞뒤로 걷거나 감속한 구간은 자동으로 빼요.",
+calibConfirmMsg: "START를 누르면 카운트다운 시간(10/20/30초)을 고르는 창이 떠요. 고른 뒤 그 창의 START를 누르면 시작되고(폰 착용 시간), 10초에 종소리·이후 음성 카운트·마지막 종소리가 울리면 출발해서 정확히 {d}m를 뛴 뒤, 천천히 걷다가 FINISH를 눌러주세요. 앞뒤로 걷거나 감속한 구간은 자동으로 빼요.",
 calibTooShort: "신뢰할 만한 보정을 하기엔 감지된 걸음 수가 너무 적어요. 좀 더 길고 꾸준한 페이스로 다시 시도해주세요.",
 calibResultMsg: "보정 완료! 개인 보정계수: {f} (보폭 값이 {p}% 조정됩니다). 이번 러닝은 기록에 저장되지 않았어요.",
 calibOutOfRange: "결과가 정상 범위를 크게 벗어나 적용하지 않았어요. GPS 신호와 기기 착용 위치를 확인한 뒤 다시 시도해주세요.",
@@ -16200,43 +16200,74 @@ this.state.isAutoPaused = false;
 releaseRunNativeBridges(); // [신규] 걷기 완전 종료 시 GPS 정지 + 화면 고정 해제
 ui.openShareCrewModal(record);
 }
-// [신규 2026-11-17] 캘리브레이션 러닝 시작 카운트다운. START → 10/20/30초(마지막 선택값 기억, 기본 20초) 동안 폰을 착용할 시간을 준다.
-// 화면을 못 봐도 되게: 10초부터 음성으로 "10, 9, … 1" 카운트(TTS), 3·2·1초에 진동 한 번씩(총 3회), 0초에 캘리브레이션 종소리+긴 진동.
-// 기기에서 음성(TTS)이 안 나오는 경우를 대비해 10초·5초에 종소리를 한 번씩 대신 울린다. 기록(거리·걸음·시간)은 카운트다운이 끝난 뒤부터 시작.
+// [신규 2026-11-17] 캘리브레이션 러닝 시작 카운트다운 (2단계).
+// 1) 선택 화면: 10/20/30초를 고르고(마지막 선택 기억, 기본 20초) 아래 START를 누를 때까지 카운트가 시작되지 않는다.
+// 2) 카운트다운: 10초에 종소리, 9~1초 음성 카운트, 3·2·1초 진동 한 번씩(총 3회), 0초에 종소리+긴 진동 후 실제 기록 시작.
+// 음성은 네이티브 브릿지 AndroidSoundBridge.speak(text, lang, volPct) → 웹 speechSynthesis → (둘 다 없으면) 짧은 틱음 순으로 시도한다.
 startCalibCountdown() {
-  if (this._calibCd) return;
+  if (this._calibCd || document.getElementById('calib-countdown-overlay')) return;
   const isKo = storage.getLang() === 'ko';
   const self = this;
   const KEY = 'jr_calib_cd_sec';
   let secSel = 20;
   try { const v = parseInt(localStorage.getItem(KEY), 10); if (v === 10 || v === 20 || v === 30) secSel = v; } catch (e) {}
-  let endAt = Date.now() + secSel * 1000;
-  let lastRem = null;
-  let ttsOk = false;
+  let phase = 'select';
+  let endAt = 0, lastRem = null;
+  const volPct = function () { try { return storage.getCalibSoundVolume(); } catch (e) { return 80; } };
+  const tickBeep = function () { // 음성 수단이 전혀 없을 때만 쓰는 짧은 틱음
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+      const c = new AC(), o = c.createOscillator(), g = c.createGain();
+      o.frequency.value = 880; g.gain.value = Math.max(0, Math.min(1, volPct() / 100)) * 0.5;
+      o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + 0.12);
+      setTimeout(function () { try { c.close(); } catch (e) {} }, 400);
+    } catch (e) {}
+  };
+  const VKEY = 'jr_calib_cd_voice';
+  let voiceSel = 'female';
+  try { const v = localStorage.getItem(VKEY); if (v === 'male' || v === 'female') voiceSel = v; } catch (e) {}
   const speak = function (text) {
+    // 1순위: 네이티브 브릿지 (성별 지정 가능한 speakGender → 없으면 기존 speak)
+    try {
+      if (window.AndroidSoundBridge && typeof window.AndroidSoundBridge.speakGender === 'function') {
+        window.AndroidSoundBridge.speakGender(text, isKo ? 'ko-KR' : 'en-US', volPct(), voiceSel); return;
+      }
+      if (window.AndroidSoundBridge && typeof window.AndroidSoundBridge.speak === 'function') {
+        window.AndroidSoundBridge.speak(text, isKo ? 'ko-KR' : 'en-US', volPct()); return;
+      }
+    } catch (e) {}
+    // 2순위: 웹 음성. 성별 정보가 없어 이름으로 추정하고, 맞는 음성이 없으면 음높이로 구분한다.
     try {
       if ('speechSynthesis' in window && window.SpeechSynthesisUtterance) {
         const u = new SpeechSynthesisUtterance(text);
-        u.lang = isKo ? 'ko-KR' : 'en-US'; u.rate = 1.15;
-        u.volume = Math.max(0, Math.min(1, (storage.getCalibSoundVolume() || 80) / 100));
-        window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
-        return true;
+        u.lang = isKo ? 'ko-KR' : 'en-US'; u.rate = 1.15; u.volume = Math.max(0, Math.min(1, volPct() / 100));
+        try {
+          const vs = window.speechSynthesis.getVoices() || [];
+          const L = (isKo ? 'ko' : 'en');
+          const lang = vs.filter(function (v) { return (v.lang || '').toLowerCase().indexOf(L) === 0; });
+          const maleRe = /(^|[^e])male|남성|injoon|david|mark|james|daniel|alex/i;
+          const femRe = /female|여성|yuna|sun-?hi|heami|seoyeon|zira|samantha|aria|jenny/i;
+          let pick = null;
+          if (voiceSel === 'male') pick = lang.filter(function (v) { return maleRe.test(v.name || '') && !femRe.test(v.name || ''); })[0];
+          else pick = lang.filter(function (v) { return femRe.test(v.name || ''); })[0] || lang.filter(function (v) { return !maleRe.test(v.name || ''); })[0];
+          if (pick) u.voice = pick;
+          u.pitch = (voiceSel === 'male') ? (pick ? 0.85 : 0.6) : 1.1;
+        } catch (e) {}
+        window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); return;
       }
     } catch (e) {}
-    return false;
+    tickBeep();
   };
-  try { if (typeof NoSleep !== 'undefined') { if (!this.noSleep) this.noSleep = new NoSleep(); this.noSleep.enable(); } } catch (e) { jrLogErr('noSleepCd', e); } // 카운트다운 중 화면 꺼짐 방지
+  try { if (typeof NoSleep !== 'undefined') { if (!this.noSleep) this.noSleep = new NoSleep(); this.noSleep.enable(); } } catch (e) { jrLogErr('noSleepCd', e); } // 화면 꺼짐 방지
   const ov = document.createElement('div');
   ov.id = 'calib-countdown-overlay';
   ov.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:999999;background:rgba(0,0,0,.94);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;color:#fff;text-align:center;padding:24px;';
   const title = document.createElement('div');
   title.style.cssText = 'font-size:var(--fs-base);font-weight:800;color:#aaa;line-height:1.5;';
-  title.textContent = isKo ? '폰을 착용하고 출발선에 서세요' : 'Put the phone on and get to the start line';
   const num = document.createElement('div');
   num.style.cssText = 'font-size:96px;font-weight:900;color:var(--primary);line-height:1;';
   const sub = document.createElement('div');
   sub.style.cssText = 'font-size:var(--fs-xs);color:#888;line-height:1.5;';
-  sub.textContent = isKo ? '10초 전부터 음성 카운트, 마지막에 종소리가 울리면 출발' : 'Voice count from 10; start running at the final bell';
   const mkBtn = function (label, tone, fn) {
     const b = document.createElement('button');
     b.type = 'button'; b.textContent = label;
@@ -16256,30 +16287,43 @@ startCalibCountdown() {
   };
   [10, 20, 30].forEach(function (n) {
     chips[n] = mkBtn(n + (isKo ? '초' : 's'), ['#2a2a2a', '#444', '#ddd'], function () {
+      if (phase !== 'select') return;
       secSel = n; try { localStorage.setItem(KEY, String(n)); } catch (e) {}
-      endAt = Date.now() + n * 1000; lastRem = null; paintChips(); tick();
+      num.textContent = String(n); paintChips();
     });
     chipRow.appendChild(chips[n]);
+  });
+  const voiceRow = document.createElement('div');
+  voiceRow.style.cssText = 'display:flex;gap:10px;width:100%;max-width:340px;';
+  const vchips = {};
+  const paintVoice = function () {
+    ['female', 'male'].forEach(function (k) {
+      const on = (k === voiceSel);
+      vchips[k].style.background = on ? '#04180f' : '#2a2a2a';
+      vchips[k].style.borderColor = on ? 'var(--primary)' : '#444';
+      vchips[k].style.color = on ? 'var(--primary)' : '#ddd';
+    });
+  };
+  [['female', isKo ? '여성 목소리' : 'Female voice'], ['male', isKo ? '남성 목소리' : 'Male voice']].forEach(function (kv) {
+    vchips[kv[0]] = mkBtn(kv[1], ['#2a2a2a', '#444', '#ddd'], function () {
+      if (phase !== 'select') return;
+      voiceSel = kv[0]; try { localStorage.setItem(VKEY, kv[0]); } catch (e) {}
+      paintVoice(); speak(isKo ? '카운트다운' : 'Countdown'); // 고르면 미리 들려줌
+    });
+    voiceRow.appendChild(vchips[kv[0]]);
   });
   const row = document.createElement('div');
   row.style.cssText = 'display:flex;gap:10px;width:100%;max-width:340px;';
   const close = function () { if (self._calibCd) { clearInterval(self._calibCd); self._calibCd = null; } try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {} if (ov.parentNode) ov.parentNode.removeChild(ov); };
   const go = function () { close(); self._calibCdDone = true; self.onStart(); };
   const cancel = function () { close(); try { if (self.noSleep) self.noSleep.disable(); } catch (e) {} };
-  row.appendChild(mkBtn(isKo ? '지금 시작' : 'START NOW', ['#04180f', 'var(--primary)', 'var(--primary)'], go));
-  row.appendChild(mkBtn(isKo ? '취소' : 'CANCEL', ['#2a1414', '#663333', 'var(--danger)'], cancel));
-  ov.appendChild(title); ov.appendChild(num); ov.appendChild(sub); ov.appendChild(chipRow); ov.appendChild(row);
-  document.body.appendChild(ov);
-  paintChips();
-  function tick() {
+  const tick = function () {
     const rem = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
     if (rem !== lastRem) {
       lastRem = rem;
       num.textContent = String(rem);
-      if (rem >= 1 && rem <= 10) {
-        const spoke = speak(String(rem)); if (spoke) ttsOk = true;
-        if (!spoke && (rem === 10 || rem === 5)) { try { self.playCalibDoneBeep(); } catch (e) {} } // 음성 불가 시 대체: 10초·5초 종소리
-      }
+      if (rem === 10) { try { self.playCalibDoneBeep(); } catch (e) {} }        // 10초: 종소리
+      else if (rem >= 1 && rem < 10) { speak(String(rem)); }                       // 9~1초: 음성 카운트
       if (rem >= 1 && rem <= 3) { try { if (navigator.vibrate) navigator.vibrate(150); } catch (e) {} } // 3·2·1초 진동 한 번씩
     }
     if (rem <= 0) {
@@ -16287,9 +16331,26 @@ startCalibCountdown() {
       try { self.playCalibDoneBeep(); if (navigator.vibrate) navigator.vibrate([300, 100, 300]); } catch (e) {} // 종소리 + 긴 진동
       go();
     }
-  }
-  this._calibCd = setInterval(tick, 200);
-  tick();
+  };
+  const mainBtn = mkBtn('START', ['#04180f', 'var(--primary)', 'var(--primary)'], function () {
+    if (phase === 'select') {
+      phase = 'count';
+      title.textContent = isKo ? '폰을 착용하고 출발선에 서세요' : 'Put the phone on and get to the start line';
+      sub.textContent = isKo ? '10초에 종소리, 이후 음성 카운트, 마지막 종소리가 울리면 출발' : 'Bell at 10s, then voice count; start running at the final bell';
+      chipRow.style.display = 'none'; voiceRow.style.display = 'none';
+      mainBtn.textContent = isKo ? '지금 시작' : 'START NOW';
+      endAt = Date.now() + secSel * 1000; lastRem = null;
+      self._calibCd = setInterval(tick, 200); tick();
+    } else { go(); }
+  });
+  row.appendChild(mainBtn);
+  row.appendChild(mkBtn(isKo ? '취소' : 'CANCEL', ['#2a1414', '#663333', 'var(--danger)'], cancel));
+  title.textContent = isKo ? '카운트다운 시간을 고르고 START를 누르세요' : 'Pick a countdown, then press START';
+  num.textContent = String(secSel);
+  sub.textContent = isKo ? 'START를 누르면 카운트가 시작돼요. 폰 착용에 걸리는 시간을 고려해 고르세요.' : 'The countdown begins when you press START. Allow time to put the phone on.';
+  ov.appendChild(title); ov.appendChild(num); ov.appendChild(sub); ov.appendChild(chipRow); ov.appendChild(voiceRow); ov.appendChild(row);
+  document.body.appendChild(ov);
+  paintChips(); paintVoice();
 }
 // [추가] 정밀 보폭 캘리브레이션 러닝 종료 처리 (4번 개선사항)
 // 사용자가 알고 있는 정확한 거리(트랙 400m 등)를 뛰었다는 전제 하에,
