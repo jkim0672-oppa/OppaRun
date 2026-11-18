@@ -16214,19 +16214,27 @@ startCalibCountdown() {
   let phase = 'select';
   let endAt = 0, lastRem = null;
   const volPct = function () { try { return storage.getCalibSoundVolume(); } catch (e) { return 80; } };
-  const tickBeep = function () { // 음성 수단이 전혀 없을 때만 쓰는 짧은 틱음
+  const getCtx = function () { // [수정 2026-11-17] 틱마다 새로 만들지 않고 START 누를 때(사용자 제스처) 만든 하나를 재사용 → 소리 작아짐/끊김 방지
     try {
-      const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
-      const c = new AC(), o = c.createOscillator(), g = c.createGain();
-      o.frequency.value = 880; g.gain.value = Math.max(0, Math.min(1, volPct() / 100)) * 0.5;
-      o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + 0.12);
-      setTimeout(function () { try { c.close(); } catch (e) {} }, 400);
+      if (!self._cdCtx) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) self._cdCtx = new AC(); }
+      if (self._cdCtx && self._cdCtx.state === 'suspended' && self._cdCtx.resume) self._cdCtx.resume();
+    } catch (e) {}
+    return self._cdCtx || null;
+  };
+  const tickBeep = function (high) { // 음성 수단이 전혀 없을 때만 쓰는 틱음 (원본: 볼륨 0.5배·0.12초·매번 새 컨텍스트)
+    try {
+      const c = getCtx(); if (!c) return;
+      const o = c.createOscillator(), g = c.createGain();
+      o.type = 'triangle'; o.frequency.value = high ? 1320 : 988;
+      const v = Math.max(0.2, Math.min(1, volPct() / 100)) * 0.95, t0 = c.currentTime;
+      g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(v, t0 + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+      o.connect(g); g.connect(c.destination); o.start(t0); o.stop(t0 + 0.25);
     } catch (e) {}
   };
   const VKEY = 'jr_calib_cd_voice';
   let voiceSel = 'female';
   try { const v = localStorage.getItem(VKEY); if (v === 'male' || v === 'female') voiceSel = v; } catch (e) {}
-  const speak = function (text) {
+  const speak = function (text, hi) {
     // 1순위: 네이티브 브릿지 (성별 지정 가능한 speakGender → 없으면 기존 speak)
     try {
       if (window.AndroidSoundBridge && typeof window.AndroidSoundBridge.speakGender === 'function') {
@@ -16256,7 +16264,7 @@ startCalibCountdown() {
         window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); return;
       }
     } catch (e) {}
-    tickBeep();
+    tickBeep(!!hi);
   };
   try { if (typeof NoSleep !== 'undefined') { if (!this.noSleep) this.noSleep = new NoSleep(); this.noSleep.enable(); } } catch (e) { jrLogErr('noSleepCd', e); } // 화면 꺼짐 방지
   const ov = document.createElement('div');
@@ -16323,8 +16331,8 @@ startCalibCountdown() {
       lastRem = rem;
       num.textContent = String(rem);
       if (rem === 10) { try { self.playCalibDoneBeep(); } catch (e) {} }        // 10초: 종소리
-      else if (rem >= 1 && rem < 10) { speak(String(rem)); }                       // 9~1초: 음성 카운트
-      if (rem >= 1 && rem <= 3) { try { if (navigator.vibrate) navigator.vibrate(150); } catch (e) {} } // 3·2·1초 진동 한 번씩
+      else if (rem >= 1 && rem < 10) { speak(String(rem), rem <= 3); }                       // 9~1초: 음성 카운트
+      if (rem >= 1 && rem <= 3) { setTimeout(function () { try { if (navigator.vibrate) navigator.vibrate(150); } catch (e) {} }, 250); } // 소리가 먼저 나고 진동은 0.25초 뒤(진동이 소리를 눌러 작아지는 것 방지) // 3·2·1초 진동 한 번씩
     }
     if (rem <= 0) {
       try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {}
@@ -16334,6 +16342,7 @@ startCalibCountdown() {
   };
   const mainBtn = mkBtn('START', ['#04180f', 'var(--primary)', 'var(--primary)'], function () {
     if (phase === 'select') {
+      getCtx(); // 사용자 제스처 안에서 오디오 컨텍스트 준비
       phase = 'count';
       title.textContent = isKo ? '폰을 착용하고 출발선에 서세요' : 'Put the phone on and get to the start line';
       sub.textContent = isKo ? '10초에 종소리, 이후 음성 카운트, 마지막 종소리가 울리면 출발' : 'Bell at 10s, then voice count; start running at the final bell';
