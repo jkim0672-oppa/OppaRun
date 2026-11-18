@@ -5294,7 +5294,7 @@ diagRecovSkip: "Distance under 100m, recovery analysis not provided.",
 calibTitle: "STRIDE CALIBRATION", calibDesc: "Run a known, exact distance (a track lap, etc.) so the app can learn your real stride length instead of an estimate — this improves stride, cadence, and efficiency-score accuracy going forward.",
 calibDist400: "400 m (track)", calibDist1000: "1000 m", calibStartBtn: "START CALIBRATION RUN",
 calibCurrentLabel: "Current correction factor", calibDefaultTag: "default, not yet calibrated",
-calibConfirmMsg: "Run exactly {d}m, then press FINISH as usual. Start only once you're ready to begin moving immediately.",
+calibConfirmMsg: "Press START for a 10/20/30-second countdown (time to put the phone on). It counts down by voice from 10; at the final bell, run exactly {d}m, then slow down and press FINISH. Walking/slowing at the start and end is excluded automatically.",
 calibTooShort: "Not enough steps were detected for a reliable calibration. Please try again with a longer, steady run.",
 calibResultMsg: "Calibration complete! Personal correction factor: {f} (stride readings adjusted by {p}%). This run was not saved to your history.",
 calibOutOfRange: "The result was far outside a normal range, so it wasn't applied — please check GPS signal and device placement, then try again.",
@@ -5409,7 +5409,7 @@ diagRecovSkip: "100m 미만 거리는 회복 분석이 제공되지 않습니다
 calibTitle: "정밀 보폭 캘리브레이션", calibDesc: "정확히 알고 있는 거리(트랙 한 바퀴 등)를 뛰어서, 추정값 대신 실제 보폭을 앱이 학습하게 하세요 — 이후 보폭, 케이던스, 효율점수 정확도가 개선됩니다.",
 calibDist400: "400m (트랙)", calibDist1000: "1000m", calibStartBtn: "캘리브레이션 러닝 시작",
 calibCurrentLabel: "현재 보정계수", calibDefaultTag: "기본값, 아직 보정 안됨",
-calibConfirmMsg: "정확히 {d}m를 뛴 뒤 평소처럼 FINISH를 눌러주세요. 바로 움직일 준비가 됐을 때 시작하세요.",
+calibConfirmMsg: "START를 누르면 카운트다운(10/20/30초 선택)이 시작돼요(폰 착용 시간). 10초 전부터 음성으로 세고, 종소리가 울리면 출발해서 정확히 {d}m를 뛴 뒤, 천천히 걷다가 FINISH를 눌러주세요. 앞뒤로 걷거나 감속한 구간은 자동으로 빼요.",
 calibTooShort: "신뢰할 만한 보정을 하기엔 감지된 걸음 수가 너무 적어요. 좀 더 길고 꾸준한 페이스로 다시 시도해주세요.",
 calibResultMsg: "보정 완료! 개인 보정계수: {f} (보폭 값이 {p}% 조정됩니다). 이번 러닝은 기록에 저장되지 않았어요.",
 calibOutOfRange: "결과가 정상 범위를 크게 벗어나 적용하지 않았어요. GPS 신호와 기기 착용 위치를 확인한 뒤 다시 시도해주세요.",
@@ -13477,6 +13477,43 @@ function avgFromPrecLogStepWeighted(log, field) {
 // 기존 avgFromPrecLog / avgFromPrecLogStepWeighted는 그대로 두고, 아래 함수만 분석실에서 사용한다.
 // 달리는 줄이 전체의 20% 미만이거나 케이던스가 없는 로그(손/암밴드 등)는 예전 방식으로 계산한다.
 const PREC_RUNNING_MIN_CAD = 130;
+// [신규 2026-11-17] 캘리브레이션용 '달린 구간' 자동 추출.
+// 앞뒤에서 걷거나 천천히 달린 구간(케이던스 < PREC_RUNNING_MIN_CAD 이거나 속도가 중앙값의 60% 미만)을 빼고,
+// 첫 달리기 초 ~ 마지막 달리기 초만 거리·시간·걸음·케이던스로 돌려준다. 조건이 안 맞으면 null(→ 기존 전체 계산).
+function calibRunWindow(log) {
+  if (!Array.isArray(log) || log.length < 10) return null;
+  const num = function (v) { if (v == null || v === '') return null; const n = Number(v); return isFinite(n) ? n : null; };
+  const spd = [];
+  log.forEach(function (r) { const c = num(r.cadence), sp = num(r.speedKmh); if (c != null && c >= PREC_RUNNING_MIN_CAD && sp != null && sp > 0) spd.push(sp); });
+  if (spd.length < 8) return null;
+  spd.sort(function (a, b) { return a - b; });
+  const med = spd[Math.floor(spd.length / 2)];
+  let first = -1, last = -1;
+  for (let i = 0; i < log.length; i++) {
+    const c = num(log[i].cadence), sp = num(log[i].speedKmh);
+    if (c != null && c >= PREC_RUNNING_MIN_CAD && sp != null && sp >= med * 0.6) { if (first < 0) first = i; last = i; }
+  }
+  if (first < 0 || last - first < 7) return null;
+  const from = Math.max(0, first - 1); // 첫 달리기 초에 쌓인 거리도 포함
+  const rows = log.slice(from, last + 1);
+  const d0 = num(rows[0].distKm), d1 = num(rows[rows.length - 1].distKm);
+  if (d0 == null || d1 == null || d1 <= d0) return null;
+  const tOf = function (r, fb) { const t = num(r && r.t); return t != null ? t : fb; };
+  const seconds = tOf(rows[rows.length - 1], rows.length - 1) - tOf(rows[0], 0);
+  if (!(seconds >= 10)) return null;
+  let cs = 0, cn = 0;
+  rows.forEach(function (r) { const c = num(r.cadence); if (c != null && c > 0) { cs += c; cn++; } });
+  const s0 = num(rows[0].stepDetectorCnt), s1 = num(rows[rows.length - 1].stepDetectorCnt);
+  return {
+    distKm: d1 - d0,
+    seconds: seconds,
+    avgCad: cn ? cs / cn : null,
+    nativeSteps: (s0 != null && s1 != null && s1 > s0) ? (s1 - s0) : null,
+    headSec: Math.max(0, tOf(rows[0], 0) - tOf(log[0], 0)),
+    tailSec: Math.max(0, tOf(log[log.length - 1], log.length - 1) - tOf(rows[rows.length - 1], 0)),
+    rowsUsed: rows.length
+  };
+}
 function precHasEnoughRunningRows(log) {
   if (!log || !log.length) return false;
   let n = 0;
@@ -15471,6 +15508,8 @@ if (!this.state.isAutoPaused && typeof this.maybeLogPrecisionSample === 'functio
 }
 // ── 러닝 시작 / 정지 / 재개 / 종료 흐름 ──
 onStart() {
+// [신규 2026-11-17] 캘리브레이션 러닝은 START 후 카운트다운(폰 착용 시간)+알림음 뒤에 실제 시작
+if (this.state.isCalibrationRun) { if (!this._calibCdDone) { this.startCalibCountdown(); return; } this._calibCdDone = false; }
 try { hrManager.checkOnStart(); } catch (e) {} // [신규 2026-11-02] 심박이 끊긴 채로 시작하면 알림
 if(this.timer) clearInterval(this.timer);
 this.state.isRunning = true;
@@ -16161,6 +16200,97 @@ this.state.isAutoPaused = false;
 releaseRunNativeBridges(); // [신규] 걷기 완전 종료 시 GPS 정지 + 화면 고정 해제
 ui.openShareCrewModal(record);
 }
+// [신규 2026-11-17] 캘리브레이션 러닝 시작 카운트다운. START → 10/20/30초(마지막 선택값 기억, 기본 20초) 동안 폰을 착용할 시간을 준다.
+// 화면을 못 봐도 되게: 10초부터 음성으로 "10, 9, … 1" 카운트(TTS), 3·2·1초에 진동 한 번씩(총 3회), 0초에 캘리브레이션 종소리+긴 진동.
+// 기기에서 음성(TTS)이 안 나오는 경우를 대비해 10초·5초에 종소리를 한 번씩 대신 울린다. 기록(거리·걸음·시간)은 카운트다운이 끝난 뒤부터 시작.
+startCalibCountdown() {
+  if (this._calibCd) return;
+  const isKo = storage.getLang() === 'ko';
+  const self = this;
+  const KEY = 'jr_calib_cd_sec';
+  let secSel = 20;
+  try { const v = parseInt(localStorage.getItem(KEY), 10); if (v === 10 || v === 20 || v === 30) secSel = v; } catch (e) {}
+  let endAt = Date.now() + secSel * 1000;
+  let lastRem = null;
+  let ttsOk = false;
+  const speak = function (text) {
+    try {
+      if ('speechSynthesis' in window && window.SpeechSynthesisUtterance) {
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = isKo ? 'ko-KR' : 'en-US'; u.rate = 1.15;
+        u.volume = Math.max(0, Math.min(1, (storage.getCalibSoundVolume() || 80) / 100));
+        window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  };
+  try { if (typeof NoSleep !== 'undefined') { if (!this.noSleep) this.noSleep = new NoSleep(); this.noSleep.enable(); } } catch (e) { jrLogErr('noSleepCd', e); } // 카운트다운 중 화면 꺼짐 방지
+  const ov = document.createElement('div');
+  ov.id = 'calib-countdown-overlay';
+  ov.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:999999;background:rgba(0,0,0,.94);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;color:#fff;text-align:center;padding:24px;';
+  const title = document.createElement('div');
+  title.style.cssText = 'font-size:var(--fs-base);font-weight:800;color:#aaa;line-height:1.5;';
+  title.textContent = isKo ? '폰을 착용하고 출발선에 서세요' : 'Put the phone on and get to the start line';
+  const num = document.createElement('div');
+  num.style.cssText = 'font-size:96px;font-weight:900;color:var(--primary);line-height:1;';
+  const sub = document.createElement('div');
+  sub.style.cssText = 'font-size:var(--fs-xs);color:#888;line-height:1.5;';
+  sub.textContent = isKo ? '10초 전부터 음성 카운트, 마지막에 종소리가 울리면 출발' : 'Voice count from 10; start running at the final bell';
+  const mkBtn = function (label, tone, fn) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = label;
+    b.style.cssText = 'flex:1;padding:14px 4px;border-radius:12px;font-weight:900;font-size:var(--fs-sm);cursor:pointer;border:1.5px solid ' + tone[1] + ';background:' + tone[0] + ';color:' + tone[2] + ';';
+    b.onclick = fn; return b;
+  };
+  const chipRow = document.createElement('div');
+  chipRow.style.cssText = 'display:flex;gap:10px;width:100%;max-width:340px;';
+  const chips = {};
+  const paintChips = function () {
+    [10, 20, 30].forEach(function (n) {
+      const on = (n === secSel);
+      chips[n].style.background = on ? '#04180f' : '#2a2a2a';
+      chips[n].style.borderColor = on ? 'var(--primary)' : '#444';
+      chips[n].style.color = on ? 'var(--primary)' : '#ddd';
+    });
+  };
+  [10, 20, 30].forEach(function (n) {
+    chips[n] = mkBtn(n + (isKo ? '초' : 's'), ['#2a2a2a', '#444', '#ddd'], function () {
+      secSel = n; try { localStorage.setItem(KEY, String(n)); } catch (e) {}
+      endAt = Date.now() + n * 1000; lastRem = null; paintChips(); tick();
+    });
+    chipRow.appendChild(chips[n]);
+  });
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:10px;width:100%;max-width:340px;';
+  const close = function () { if (self._calibCd) { clearInterval(self._calibCd); self._calibCd = null; } try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {} if (ov.parentNode) ov.parentNode.removeChild(ov); };
+  const go = function () { close(); self._calibCdDone = true; self.onStart(); };
+  const cancel = function () { close(); try { if (self.noSleep) self.noSleep.disable(); } catch (e) {} };
+  row.appendChild(mkBtn(isKo ? '지금 시작' : 'START NOW', ['#04180f', 'var(--primary)', 'var(--primary)'], go));
+  row.appendChild(mkBtn(isKo ? '취소' : 'CANCEL', ['#2a1414', '#663333', 'var(--danger)'], cancel));
+  ov.appendChild(title); ov.appendChild(num); ov.appendChild(sub); ov.appendChild(chipRow); ov.appendChild(row);
+  document.body.appendChild(ov);
+  paintChips();
+  function tick() {
+    const rem = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
+    if (rem !== lastRem) {
+      lastRem = rem;
+      num.textContent = String(rem);
+      if (rem >= 1 && rem <= 10) {
+        const spoke = speak(String(rem)); if (spoke) ttsOk = true;
+        if (!spoke && (rem === 10 || rem === 5)) { try { self.playCalibDoneBeep(); } catch (e) {} } // 음성 불가 시 대체: 10초·5초 종소리
+      }
+      if (rem >= 1 && rem <= 3) { try { if (navigator.vibrate) navigator.vibrate(150); } catch (e) {} } // 3·2·1초 진동 한 번씩
+    }
+    if (rem <= 0) {
+      try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {}
+      try { self.playCalibDoneBeep(); if (navigator.vibrate) navigator.vibrate([300, 100, 300]); } catch (e) {} // 종소리 + 긴 진동
+      go();
+    }
+  }
+  this._calibCd = setInterval(tick, 200);
+  tick();
+}
 // [추가] 정밀 보폭 캘리브레이션 러닝 종료 처리 (4번 개선사항)
 // 사용자가 알고 있는 정확한 거리(트랙 400m 등)를 뛰었다는 전제 하에,
 // GPS 거리 대신 그 알려진 거리를 사용해 개인 보폭을 역산하고,
@@ -16169,8 +16299,26 @@ async finishCalibrationRun() {
 const lang = storage.getLang();
 const t = translations[lang] || translations['en'];
 const knownDistanceM = this.state.calibrationKnownDistanceM || 0;
-const totalSteps = this.state.steps || 0;
-const totalSeconds = this.state.seconds || 0;
+// [원본 보존 2026-11-17] const totalSteps = this.state.steps || 0;
+// [원본 보존 2026-11-17] const totalSeconds = this.state.seconds || 0;
+// [수정 2026-11-17] 앞뒤로 걷거나 천천히 달린 구간은 자동으로 빼고 '달린 구간'의 걸음·시간만 쓴다(로그가 부족하면 예전처럼 전체 사용)
+const _rawSteps = this.state.steps || 0;
+const _rawSeconds = this.state.seconds || 0;
+let totalSteps = _rawSteps, totalSeconds = _rawSeconds, _trimInfo = null, _winCad = null;
+try {
+  const _w = calibRunWindow(this.state.precisionLog);
+  if (_w) {
+    const _cadEst = _w.avgCad ? Math.round(_w.avgCad * _w.seconds / 60) : null;
+    let _winSteps = null;
+    if (_w.nativeSteps != null && _w.nativeSteps <= _rawSteps * 1.05) {
+      _winSteps = (_cadEst == null || Math.abs(_w.nativeSteps - _cadEst) / _cadEst <= 0.06) ? _w.nativeSteps : _cadEst;
+    } else if (_cadEst != null) { _winSteps = _cadEst; }
+    if (_winSteps != null && _winSteps >= 30 && _winSteps <= _rawSteps * 1.05) {
+      totalSteps = _winSteps; totalSeconds = _w.seconds; _winCad = _w.avgCad;
+      _trimInfo = { head: Math.round(_w.headSec), tail: Math.round(_w.tailSec) };
+    }
+  }
+} catch (e) { jrLogErr('calibRunWindow', e); }
 // 정리는 결과와 상관없이 먼저 수행 (러닝 상태 원복)
 const cleanupAndReload = () => {
 storage.clearTempSession();
@@ -16188,9 +16336,10 @@ await appAlert(t.calibTooShort);
 cleanupAndReload();
 return;
 }
-const avgCadence = (this.state.cadenceSamples && this.state.cadenceSamples.length > 0)
+// [원본 보존 2026-11-17] const avgCadence = (this.state.cadenceSamples && this.state.cadenceSamples.length > 0) ? trimmedMeanCadence(this.state.cadenceSamples) : Math.round((totalSteps / totalSeconds) * 60);
+const avgCadence = _winCad ? Math.round(_winCad) : ((this.state.cadenceSamples && this.state.cadenceSamples.length > 0)
   ? trimmedMeanCadence(this.state.cadenceSamples)
-  : Math.round((totalSteps / totalSeconds) * 60);
+  : Math.round((totalSteps / totalSeconds) * 60));
 // GPS 거리 대신 사용자가 알고 있는 정확한 거리로 평균 속도를 계산 (더 정확함)
 const avgSpeedKmh = (knownDistanceM / 1000) / (totalSeconds / 3600);
 // 실측 개인 보폭 (한 걸음 기준) = 알려진 거리 ÷ 걸음 수
@@ -16220,9 +16369,11 @@ const _byPos = Object.assign({}, prof.strideCorrectionFactorByPos || {});
 _byPos[_calibPos] = roundedFactor;
 storage.saveProfile(Object.assign({}, prof, { strideCorrectionFactor: roundedFactor, strideCorrectionFactorByPos: _byPos }));
 const percentChange = Math.round((roundedFactor - 1) * 100);
-const msg = (t.calibResultMsg || '')
+let msg = (t.calibResultMsg || '')
   .replace('{f}', roundedFactor.toFixed(2))
   .replace('{p}', (percentChange >= 0 ? '+' : '') + percentChange);
+// [신규 2026-11-17] 자동으로 뺀 앞/뒤 구간 안내
+if (_trimInfo && (_trimInfo.head > 0 || _trimInfo.tail > 0)) msg += (lang === 'ko') ? ('\n(앞 ' + _trimInfo.head + '초·뒤 ' + _trimInfo.tail + '초는 걷기/감속 구간이라 자동으로 뺐어요)') : ('\n(Excluded ' + _trimInfo.head + 's at the start and ' + _trimInfo.tail + 's at the end as walking/slowing.)');
 await appAlert(msg);
 cleanupAndReload();
 }
@@ -21145,6 +21296,12 @@ const garmin = (function () {
     }
     return '';
   }
+  // [신규 2026-11-17] 자동 구간 추출 안내(앞뒤로 걷거나 감속한 구간을 뺀 경우)
+  function selfCalibWindowNoteHtml(w, isKo) {
+    if (!w || (w.headSec < 1 && w.tailSec < 1)) return '';
+    return '<div style="font-size:var(--fs-xxs); color:#7fd3ff; font-weight:700; margin-top:6px; line-height:1.5;">'
+      + (isKo ? '달린 구간만 사용했어요 (앞 ' + Math.round(w.headSec) + '초·뒤 ' + Math.round(w.tailSec) + '초 제외).' : 'Used the running part only (excluded ' + Math.round(w.headSec) + 's at the start, ' + Math.round(w.tailSec) + 's at the end).') + '</div>';
+  }
   function selfCalibOffNoteHtml(isKo) {
     if (isCalibFactorsOn()) return '';
     return '<div style="font-size:var(--fs-xxs); color:#ffb86b; font-weight:700; margin-top:6px; line-height:1.5;">'
@@ -21158,7 +21315,9 @@ const garmin = (function () {
     if (!item) { resultBox.innerHTML = selfCalibWarnHtml(isKo ? '먼저 로그를 선택해주세요.' : 'Select a log first.'); return; }
     const actualKm = parseFloat(document.getElementById('selfcalib-actual-dist').value);
     if (!actualKm || actualKm <= 0) { resultBox.innerHTML = selfCalibWarnHtml(isKo ? '실제 거리를 입력해주세요.' : 'Enter the actual distance.'); return; }
-    const measuredKm = precLastDistKm(item.log);
+    // [원본 보존 2026-11-17] const measuredKm = precLastDistKm(item.log);
+    const _win = calibRunWindow(item.log); // [수정 2026-11-17] 앞뒤 걷기/감속 구간 제외 (로그 부족 시 전체 사용)
+    const measuredKm = _win ? _win.distKm : precLastDistKm(item.log);
     if (!measuredKm || measuredKm <= 0) { resultBox.innerHTML = selfCalibWarnHtml(isKo ? '이 로그에서 거리 데이터를 찾을 수 없습니다.' : 'No distance data in this log.'); return; }
     const pos = logPosOf(item) || (function () { try { return storage.loadProfile().devicePos || 'chest'; } catch (e) { return 'chest'; } })(); // [수정 2026-11-17] 프리런/트레일/러닝머신 로그는 자기 슬롯으로 보정(가민 비교의 logPosOf와 동일)
     { const _mo = selfCalibMotionOnlyHtml(pos, 'dist', isKo); if (_mo) { selfCalibLastDist = null; resultBox.innerHTML = _mo; return; } }
@@ -21174,7 +21333,7 @@ const garmin = (function () {
     resultBox.innerHTML = '<div class="c65">'
       + (isKo ? '측정 ' : 'Measured ') + measuredKm.toFixed(3) + 'km vs ' + (isKo ? '실제 ' : 'actual ') + actualKm.toFixed(3) + 'km (' + (diffPct >= 0 ? '+' : '') + diffPct.toFixed(1) + '%)<br>'
       + 'gpsDistCorrectionFactor: ' + curFactor.toFixed(3) + ' → <b class="u-color-primary">' + suggested.toFixed(3) + '</b>'
-      + selfCalibBasisNoteHtml(_b, isKo) + selfCalibOffNoteHtml(isKo)
+      + selfCalibWindowNoteHtml(_win, isKo) + selfCalibBasisNoteHtml(_b, isKo) + selfCalibOffNoteHtml(isKo)
       + '<div class="c53">'
       + '<button class="c46" onclick="garmin.selfCalibApplyDistance()">' + (isKo ? '✓ [' + posLabel + '] 이 값으로 반영' : '✓ APPLY TO [' + posLabel + ']') + '</button>'
       + '<button class="c49" onclick="garmin.selfCalibCancelDistance()">' + (isKo ? '취소' : 'CANCEL') + '</button>'
@@ -21214,7 +21373,9 @@ const garmin = (function () {
     if (!item) { resultBox.innerHTML = selfCalibWarnHtml(isKo ? '먼저 로그를 선택해주세요.' : 'Select a log first.'); return; }
     const actualCad = parseFloat(document.getElementById('selfcalib-actual-cad').value);
     if (!actualCad || actualCad <= 0) { resultBox.innerHTML = selfCalibWarnHtml(isKo ? '메트로놈 기준 실제 케이던스를 입력해주세요.' : 'Enter the actual (metronome) cadence.'); return; }
-    const measuredCad = avgFromPrecLog(item.log, 'cadence');
+    // [원본 보존 2026-11-17] const measuredCad = avgFromPrecLog(item.log, 'cadence');
+    const _win = calibRunWindow(item.log); // [수정 2026-11-17] 달린 구간 케이던스만
+    const measuredCad = (_win && _win.avgCad) ? _win.avgCad : avgFromPrecLog(item.log, 'cadence');
     if (!measuredCad || measuredCad <= 0) { resultBox.innerHTML = selfCalibWarnHtml(isKo ? '이 로그에서 케이던스 데이터를 찾을 수 없습니다.' : 'No cadence data in this log.'); return; }
     const pos = logPosOf(item) || (function () { try { return storage.loadProfile().devicePos || 'chest'; } catch (e) { return 'chest'; } })(); // [수정 2026-11-17] 프리런/트레일/러닝머신 로그는 자기 슬롯으로 보정(가민 비교의 logPosOf와 동일)
     { const _mo = selfCalibMotionOnlyHtml(pos, 'cad', isKo); if (_mo) { selfCalibLastCad = null; resultBox.innerHTML = _mo; return; } }
@@ -21228,7 +21389,7 @@ const garmin = (function () {
     resultBox.innerHTML = '<div class="c65">'
       + (isKo ? '측정 ' : 'Measured ') + Math.round(measuredCad) + 'spm vs ' + (isKo ? '실제 ' : 'actual ') + Math.round(actualCad) + 'spm (' + (diffPct >= 0 ? '+' : '') + diffPct.toFixed(1) + '%)<br>'
       + 'cadCorrectionFactor: ' + curFactor.toFixed(3) + ' → <b class="u-color-primary">' + suggested.toFixed(3) + '</b>'
-      + selfCalibBasisNoteHtml(_b, isKo) + selfCalibOffNoteHtml(isKo)
+      + selfCalibWindowNoteHtml(_win, isKo) + selfCalibBasisNoteHtml(_b, isKo) + selfCalibOffNoteHtml(isKo)
       + '<div class="c53">'
       + '<button class="c46" onclick="garmin.selfCalibApplyCadence()">' + (isKo ? '✓ [' + posLabel + '] 이 값으로 반영' : '✓ APPLY TO [' + posLabel + ']') + '</button>'
       + '<button class="c49" onclick="garmin.selfCalibCancelCadence()">' + (isKo ? '취소' : 'CANCEL') + '</button>'
