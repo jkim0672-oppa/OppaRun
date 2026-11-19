@@ -2551,6 +2551,10 @@ alt="runner"/>
 <div class="profile-col"><div id="label-weight" class="settings-label">WEIGHT</div><div class="dropdown-select mini-select" onclick="ui.toggleDropdown('weight-options')"><span id="current-weight">70 kg</span><span class="c18">▼</span></div><div id="weight-options" class="dropdown-options"></div></div>
 <div class="profile-col"><div id="label-age" class="settings-label">AGE</div><div class="dropdown-select mini-select" onclick="ui.toggleDropdown('age-options')"><span id="current-age">30</span><span class="c18">▼</span></div><div id="age-options" class="dropdown-options"></div></div>
 </div>
+<!-- [추가 2026-11-19] 최대심박 직접 입력(AUTO면 나이로 계산) -->
+<div class="profile-row">
+<div class="profile-col"><div id="label-maxhr" class="settings-label">MAX HR</div><div class="dropdown-select mini-select" onclick="ui.toggleDropdown('maxhr-options')"><span id="current-maxhr">AUTO</span><span class="c18">▼</span></div><div id="maxhr-options" class="dropdown-options"></div></div>
+</div>
 <div class="section-title" id="section-title-run">RUN SETTINGS</div>
 <!-- [수정 2026-09-26] ACTIVITY MODE / DEVICE PLACEMENT 박스는 온보딩 + 퀵모드 팝업(RUN 탭 탭 시)과
      완전히 동일한 ui.setActivityMode()/ui.setDevicePos()를 호출하는 중복 UI라 설정 페이지에서 제거. -->
@@ -8366,6 +8370,8 @@ if(weightLabel) weightLabel.textContent = t.weight;
 // [추가] 나이/기기착용위치/데이터백업 라벨 번역 적용
 const ageLabel = document.getElementById('label-age');
 if(ageLabel) ageLabel.textContent = t.age;
+const maxHrLabel = document.getElementById('label-maxhr');
+if(maxHrLabel) maxHrLabel.textContent = t.maxHr || ((storage.getLang() === 'ko') ? '최대심박' : 'MAX HR');
 const dataBackupLabel = document.getElementById('label-data-backup');
 if(dataBackupLabel) dataBackupLabel.textContent = t.dataBackup;
 const exportBtn = document.getElementById('btn-export-data');
@@ -8769,6 +8775,9 @@ const ageEl = document.getElementById('current-age');
 if(heightEl) heightEl.textContent = this.formatHeight(p.h, p.hu);
 if(weightEl) weightEl.textContent = p.w + ' ' + p.wu;
 if(ageEl) ageEl.textContent = p.age;
+const maxHrEl = document.getElementById('current-maxhr');
+if (maxHrEl) { const _m = Number(p.maxHr); maxHrEl.textContent = (_m >= 120 && _m <= 230) ? (Math.round(_m) + ' bpm') : ('AUTO (' + Math.round(208 - 0.7 * (p.age || 30)) + ')'); } // hrManager는 파일 뒤쪽에서 선언돼 초기화 시점에 쓰면 TDZ 오류 → 같은 공식을 직접 계산
+this.renderProfileOptions('maxhr');
 this.renderProfileOptions('height', p.hu); this.renderProfileOptions('weight', p.wu); this.renderProfileOptions('age');
 this.updateDevicePosUI(p.devicePos);
 }
@@ -8784,6 +8793,10 @@ for (let i = min; i <= max; i++) html += `<div class="dropdown-option" onclick="
 html += `<div class="dropdown-option u-color-primary" onclick="ui.changeUnit('weight', '${unit === 'kg' ? 'lb' : 'kg'}')">SWITCH TO ${unit === 'kg' ? 'LB' : 'KG'}</div>`;
 const min = unit === 'kg' ? 40 : 130, max = unit === 'kg' ? 130 : 286;
 for (let i = min; i <= max; i++) html += `<div class="dropdown-option" onclick="ui.setProfile('weight', ${i}, '${unit}')">${i} ${unit}</div>`;
+} else if (type === 'maxhr') {
+// [추가 2026-11-19] 최대심박 선택 옵션: AUTO(나이로 계산) + 120~230 bpm
+html += `<div class="dropdown-option u-color-primary" onclick="ui.setMaxHr(null)">AUTO</div>`;
+for (let i = 120; i <= 230; i++) html += `<div class="dropdown-option" onclick="ui.setMaxHr(${i})">${i} bpm</div>`;
 } else if (type === 'age') {
 // [추가] 나이 선택 옵션 (10~99세)
 for (let i = 10; i <= 99; i++) html += `<div class="dropdown-option" onclick="ui.setAge(${i})">${i}</div>`;
@@ -8807,6 +8820,13 @@ setAge(age) {
 const p = storage.loadProfile();
 p.age = age;
 storage.saveProfile(p); this.initProfileDropdowns(); this.toggleDropdown('age-options');
+}
+// [추가 2026-11-19] 최대심박 직접 입력(null이면 AUTO). 존 범위 표시도 바로 갱신한다.
+setMaxHr(v) {
+const p = storage.loadProfile();
+if (v == null) delete p.maxHr; else p.maxHr = v;
+storage.saveProfile(p); this.initProfileDropdowns(); this.toggleDropdown('maxhr-options');
+try { if (typeof hrManager !== 'undefined' && hrManager.updateZoneRanges) hrManager.updateZoneRanges(); } catch (e) {}
 }
 // [추가] 기기 착용 위치 설정 + 센서 프로파일 즉시 적용
 setDevicePos(pos) {
@@ -19873,7 +19893,8 @@ const hrManager = {
     const max = Math.max(...this._samples);
     return { avg, max };
   },
-  getMaxHr() { const p = storage.loadProfile(); return 220 - (p.age || 30); },
+  // [수정 2026-11-19] 설정에서 직접 입력한 최대심박(p.maxHr)을 우선 사용. 없으면 나이로 계산(Tanaka: 208 - 0.7×나이. 220-나이는 고령일수록 실제보다 낮게 나옴).
+  getMaxHr() { const p = storage.loadProfile(); const m = Number(p.maxHr); if (m >= 120 && m <= 230) return Math.round(m); return Math.round(208 - 0.7 * (p.age || 30)); },
   getZone(hr) {
     const max = this.getMaxHr(); const pct = hr / max;
     if (pct < 0.60) return { z:1, color:'#64b5f6', label:'Zone 1 · Recovery' };
