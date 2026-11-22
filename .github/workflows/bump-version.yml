@@ -1,1 +1,75 @@
+name: Auto bump version.json
 
+on:
+  push:
+    branches: [main]   # 브랜치 이름이 master면 main → master로 바꾸세요
+    paths:
+      - 'index.html'   # index.html이 바뀐 푸시에서만 실행
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: bump-version
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 같은 푸시에서 version.json도 직접 고쳤다면 건너뜀 (이중 증가 방지)
+      - name: Check if version.json was already changed
+        id: check
+        run: |
+          BEFORE="${{ github.event.before }}"
+          if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
+             && git diff --name-only "$BEFORE" "${{ github.sha }}" | grep -qx 'version.json'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # "version": "1.2.213" → "1.2.214" (맨 뒤 숫자만 +1, 다른 내용/서식은 그대로)
+      - name: Bump version
+        id: bump
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          python3 - <<'PY'
+          import os, re
+          p = 'version.json'
+          s = open(p, encoding='utf-8').read()
+          def bump(m):
+              parts = m.group(2).split('.')
+              parts[-1] = str(int(parts[-1]) + 1)
+              return m.group(1) + '.'.join(parts) + m.group(3)
+          new, n = re.subn(r'("version"\s*:\s*")(\d+(?:\.\d+)*)(")', bump, s, count=1)
+          if n != 1:
+              raise SystemExit('version.json 에서 "version": "1.2.3" 형식을 찾지 못했어요')
+          open(p, 'w', encoding='utf-8').write(new)
+          ver = re.search(r'"version"\s*:\s*"([^"]+)"', new).group(1)
+          print('New version:', ver)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write('ver=' + ver + '\n')
+          PY
+
+      - name: Commit and push
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add version.json
+          git commit -m "bump version to ${{ steps.bump.outputs.ver }}"
+          git pull --rebase
+          git push
+
+      # 봇이 푸시한 커밋으로 Pages 재배포가 안 걸리는 경우를 대비한 안전장치
+      - name: Request Pages build
+        if: steps.check.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${{ github.repository }}/pages/builds" || true
