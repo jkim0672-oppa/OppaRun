@@ -1,1 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Spot Altimeter Pro</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+:root{
+  --navy:#0c1b2a; --ice:#eef3f6; --teal:#00a3a3; --amber:#f2a900; --mute:#5d7080; --line:rgba(12,27,42,.12);
+  --glass:rgba(244,248,250,.86); --sh:240px;
+  --num:"Barlow Semi Condensed","Arial Narrow",system-ui,sans-serif;
+  --ui:-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden;font-family:var(--ui);color:var(--navy);background:var(--navy)}
+#map{position:absolute;inset:0;background:#cfd8dc}
+button{font:inherit;color:inherit;background:none;border:0}
+.glass{background:var(--glass);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.6);box-shadow:0 6px 24px rgba(12,27,42,.18)}
 
+/* crosshair */
+#cross{position:absolute;left:50%;top:50%;width:44px;height:44px;margin:-22px 0 0 -22px;z-index:500;pointer-events:none}
+#cross i{position:absolute;background:var(--navy);box-shadow:0 0 0 1.5px rgba(255,255,255,.9)}
+#cross i:nth-child(1){left:21px;top:0;width:2px;height:15px}
+#cross i:nth-child(2){left:21px;bottom:0;width:2px;height:15px}
+#cross i:nth-child(3){top:21px;left:0;height:2px;width:15px}
+#cross i:nth-child(4){top:21px;right:0;height:2px;width:15px}
+#cross b{position:absolute;left:19px;top:19px;width:6px;height:6px;border-radius:50%;background:var(--teal);box-shadow:0 0 0 1.5px #fff}
+
+/* top bar */
+#top{position:absolute;z-index:600;left:12px;top:calc(12px + env(safe-area-inset-top,0px));display:flex;gap:8px}
+.seg{display:flex;padding:3px;border-radius:12px}
+.seg button{padding:7px 12px;font-size:13px;font-weight:600;border-radius:9px;color:var(--mute)}
+.seg button.on{background:var(--navy);color:#fff}
+
+/* side controls */
+#side{position:absolute;z-index:600;right:12px;bottom:calc(var(--sh) + 12px);display:flex;flex-direction:column;gap:8px;transition:bottom .2s}
+#side button{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;font-size:22px;font-weight:600}
+#side button svg{width:22px;height:22px;stroke:var(--navy);fill:none;stroke-width:2;stroke-linecap:round}
+#side button:active,.seg button:active{transform:scale(.95)}
+
+/* sheet */
+#sheet{position:absolute;z-index:700;left:0;right:0;bottom:0;border-radius:22px 22px 0 0;padding:8px 18px calc(14px + env(safe-area-inset-bottom,0px));max-height:70%;overflow:auto}
+.grab{width:38px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 10px}
+.hero{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.k{font-size:12px;color:var(--mute);font-weight:600;letter-spacing:.2px}
+.big{font-family:var(--num);font-weight:700;font-size:64px;line-height:1;font-variant-numeric:tabular-nums;margin-top:2px;display:flex;align-items:baseline;gap:4px}
+.big u{text-decoration:none;font-size:22px;font-weight:600;color:var(--mute)}
+.big.busy #cE{opacity:.35}
+.sub{font-family:var(--num);font-size:17px;font-weight:500;color:var(--mute);margin-top:4px;font-variant-numeric:tabular-nums}
+.chips{display:flex;gap:6px}
+.chip{padding:6px 10px;border-radius:9px;border:1px solid var(--line);font-size:12px;font-weight:700}
+.chip:active{background:var(--navy);color:#fff}
+
+.pin{display:none;margin-top:12px;padding:10px 12px;border-radius:14px;background:rgba(0,163,163,.1);border:1px solid rgba(0,163,163,.3)}
+.pin.show{display:block}
+.pin .top{display:flex;justify-content:space-between;align-items:baseline}
+.pin .pe{font-family:var(--num);font-size:30px;font-weight:700}
+.pin .pe u{text-decoration:none;font-size:14px;color:var(--mute);margin-left:3px}
+.pin .pc{font-family:var(--num);font-size:15px;color:var(--mute)}
+.stats{display:flex;gap:16px;margin-top:6px;font-size:12px;color:var(--mute)}
+.stats b{font-family:var(--num);font-size:16px;color:var(--navy);margin-left:4px}
+.gps{display:none;margin-top:8px;font-size:12px;color:var(--mute)}
+.gps.show{display:block}
+.gps b{font-family:var(--num);font-size:15px;color:var(--navy)}
+
+.acts{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:8px;margin-top:12px}
+.acts button{padding:13px 8px;border-radius:13px;font-size:14px;font-weight:700;border:1.5px solid var(--navy)}
+.acts button.pri{background:var(--navy);color:#fff}
+.acts button:active{background:var(--teal);border-color:var(--teal);color:#fff}
+
+.lh{display:flex;justify-content:space-between;align-items:center;margin-top:14px}
+.lh button{font-size:12px;font-weight:700;color:var(--teal)}
+#list{margin-top:4px}
+.item{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.item .e{font-family:var(--num);font-size:22px;font-weight:700;min-width:84px}
+.item .e u{text-decoration:none;font-size:12px;color:var(--mute);margin-left:2px}
+.item .c{flex:1;font-family:var(--num);font-size:14px;color:var(--mute)}
+.item .x{width:30px;height:30px;font-size:18px;color:var(--mute)}
+.empty{font-size:13px;color:var(--mute);padding:8px 0}
+
+/* map dots */
+.pinicon{width:22px;height:22px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:var(--teal);border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.savedot{width:12px;height:12px;border-radius:50%;background:var(--amber);border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+.gpsdot{width:16px;height:16px;border-radius:50%;background:#1d6fd1;border:3px solid #fff;box-shadow:0 0 0 6px rgba(29,111,209,.25)}
+.leaflet-control-attribution{font-size:9px!important;background:rgba(255,255,255,.7)!important}
+
+#toast{position:absolute;z-index:900;left:50%;top:calc(64px + env(safe-area-inset-top,0px));transform:translate(-50%,-8px);background:var(--navy);color:#fff;padding:9px 14px;border-radius:10px;font-size:13px;font-weight:600;opacity:0;transition:.2s;pointer-events:none;max-width:86%;text-align:center}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="cross"><i></i><i></i><i></i><i></i><b></b></div>
+<div id="toast"></div>
+
+<div id="top">
+  <div class="seg glass" id="layers">
+    <button data-l="map" class="on">Map</button>
+    <button data-l="topo">Terrain</button>
+    <button data-l="sat">Satellite</button>
+  </div>
+</div>
+
+<div id="side">
+  <button class="glass" id="bLoc" aria-label="My location"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
+  <button class="glass" id="bIn" aria-label="Zoom in"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  <button class="glass" id="bOut" aria-label="Zoom out"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+</div>
+
+<div id="sheet" class="glass">
+  <div class="grab"></div>
+  <div class="hero">
+    <div>
+      <div class="k">MAP CENTER ELEVATION</div>
+      <div class="big" id="bigBox"><span id="cE">&ndash;</span><u class="unit">m</u></div>
+      <div class="sub" id="cC">&ndash;</div>
+    </div>
+    <div class="chips">
+      <button class="chip" id="bUnit">m</button>
+      <button class="chip" id="bFmt">DD</button>
+    </div>
+  </div>
+
+  <div class="pin" id="pin">
+    <div class="top"><span class="k">PINNED POINT</span><span class="pe"><span id="pE">&ndash;</span><u class="unit">m</u></span></div>
+    <div class="pc" id="pC"></div>
+    <div class="stats"><span>Δ vs center<b id="pD">&ndash;</b></span><span>Distance<b id="pDist">&ndash;</b></span></div>
+  </div>
+
+  <div class="gps" id="gps">GPS altitude <b id="gA">&ndash;</b> &nbsp;·&nbsp; accuracy <b id="gAcc">&ndash;</b></div>
+
+  <div class="acts">
+    <button class="pri" id="bDrop">Drop pin here</button>
+    <button id="bSave">Save</button>
+    <button id="bCopy">Copy</button>
+  </div>
+
+  <div class="lh"><span class="k" id="lCount">SAVED POINTS</span><button id="bClear">Clear all</button></div>
+  <div id="list"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+};
+const S = Object.assign({unit:"m", fmt:"DD"}, store.get("alt_settings", {}));
+let saved = store.get("alt_saved", []);
+let pin = null, gps = null, centerElev = null;
+
+/* ---------- map ---------- */
+const map = L.map("map", {zoomControl:false, attributionControl:false}).setView([37.5665, 126.978], 13);
+L.control.attribution({position:"topright", prefix:false}).addTo(map);
+const tiles = {
+  map: L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom:19, attribution:"© OpenStreetMap"}),
+  topo: L.tileLayer("https://tile.opentopomap.org/{z}/{x}/{y}.png", {maxZoom:17, attribution:"© OpenTopoMap"}),
+  sat: L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {maxZoom:19, attribution:"Esri"})
+};
+let curLayer = store.get("alt_layer", "map"); if(!tiles[curLayer]) curLayer = "map";
+tiles[curLayer].addTo(map);
+function setLayer(k){
+  map.removeLayer(tiles[curLayer]); curLayer = k; tiles[k].addTo(map); store.set("alt_layer", k);
+  document.querySelectorAll("#layers button").forEach(b => b.classList.toggle("on", b.dataset.l === k));
+}
+document.querySelectorAll("#layers button").forEach(b => b.onclick = () => setLayer(b.dataset.l));
+setLayer(curLayer);
+
+const savedGroup = L.layerGroup().addTo(map);
+let pinMarker = null, gpsMarker = null;
+
+/* crosshair sits in the middle of the visible map (above the sheet) */
+function layout(){
+  const h = $("sheet").offsetHeight;
+  document.documentElement.style.setProperty("--sh", h + "px");
+  $("cross").style.top = "calc(50% - " + (h / 2) + "px)";
+}
+new ResizeObserver(layout).observe($("sheet")); window.addEventListener("resize", layout);
+function center(){
+  const s = map.getSize();
+  return map.containerPointToLatLng([s.x / 2, (s.y - $("sheet").offsetHeight) / 2]);
+}
+
+/* ---------- formatting ---------- */
+const M2FT = 3.28084;
+function elevText(m){ if(m == null) return "–"; return S.unit === "m" ? String(Math.round(m)) : String(Math.round(m * M2FT)); }
+function deltaText(m){ if(m == null) return "–"; const v = S.unit === "m" ? m : m * M2FT; const r = Math.round(v); return (r > 0 ? "+" : "") + r + " " + S.unit; }
+function distText(d){
+  if(S.unit === "m") return d < 1000 ? Math.round(d) + " m" : (d / 1000).toFixed(2) + " km";
+  const ft = d * M2FT; return ft < 5280 ? Math.round(ft) + " ft" : (ft / 5280).toFixed(2) + " mi";
+}
+function dms(v, pos, neg){
+  const h = v >= 0 ? pos : neg, a = Math.abs(v), d = Math.floor(a), m = Math.floor((a - d) * 60), s = ((a - d) * 60 - m) * 60;
+  return d + "°" + String(m).padStart(2, "0") + "′" + s.toFixed(1).padStart(4, "0") + "″" + h;
+}
+function coordText(lat, lng){
+  return S.fmt === "DD" ? lat.toFixed(6) + ", " + lng.toFixed(6) : dms(lat, "N", "S") + " " + dms(lng, "E", "W");
+}
+
+/* ---------- elevation ---------- */
+const cache = new Map();
+async function getElev(ll, signal){
+  const key = ll.lat.toFixed(4) + "," + ll.lng.toFixed(4);
+  if(cache.has(key)) return cache.get(key);
+  const r = await fetch("https://api.open-meteo.com/v1/elevation?latitude=" + ll.lat.toFixed(5) + "&longitude=" + ll.lng.toFixed(5), {signal});
+  if(!r.ok) throw new Error("HTTP " + r.status);
+  const e = (await r.json()).elevation[0];
+  cache.set(key, e); return e;
+}
+
+/* ---------- render ---------- */
+function renderUnits(){
+  document.querySelectorAll(".unit").forEach(u => u.textContent = S.unit);
+  $("bUnit").textContent = S.unit; $("bFmt").textContent = S.fmt;
+}
+function renderCenter(){
+  const c = center(); $("cC").textContent = coordText(c.lat, c.lng);
+  $("cE").textContent = elevText(centerElev); renderPin();
+}
+function renderPin(){
+  if(!pin){ $("pin").classList.remove("show"); return; }
+  $("pin").classList.add("show");
+  $("pE").textContent = pin.e == null ? "…" : elevText(pin.e);
+  $("pC").textContent = coordText(pin.lat, pin.lng);
+  $("pD").textContent = (pin.e != null && centerElev != null) ? deltaText(pin.e - centerElev) : "–";
+  $("pDist").textContent = distText(map.distance(center(), [pin.lat, pin.lng]));
+}
+function renderList(){
+  $("lCount").textContent = "SAVED POINTS (" + saved.length + ")";
+  $("bClear").style.display = saved.length ? "" : "none";
+  const el = $("list"); el.innerHTML = "";
+  if(!saved.length){ el.innerHTML = '<div class="empty">Pin a spot, then tap Save to keep it here.</div>'; }
+  saved.forEach((p, i) => {
+    const d = document.createElement("div"); d.className = "item";
+    d.innerHTML = '<div class="e">' + elevText(p.e) + '<u>' + S.unit + '</u></div><div class="c">' + coordText(p.lat, p.lng) + '</div><button class="x" aria-label="Delete">×</button>';
+    d.onclick = () => map.flyTo(center().lat === p.lat ? [p.lat, p.lng] : offsetTarget(p), Math.max(map.getZoom(), 15));
+    d.querySelector(".x").onclick = ev => { ev.stopPropagation(); saved.splice(i, 1); store.set("alt_saved", saved); drawSaved(); renderList(); };
+    el.appendChild(d);
+  });
+  layout();
+}
+function offsetTarget(p){ return [p.lat, p.lng]; }
+function drawSaved(){
+  savedGroup.clearLayers();
+  saved.forEach(p => L.marker([p.lat, p.lng], {icon:L.divIcon({className:"", html:'<div class="savedot"></div>', iconSize:[12,12]})}).addTo(savedGroup));
+}
+function renderAll(){ renderUnits(); renderCenter(); renderList(); }
+
+/* ---------- center tracking ---------- */
+let ctl = null, tmr = null;
+async function updateCenter(){
+  if(ctl) ctl.abort(); ctl = new AbortController();
+  $("bigBox").classList.add("busy");
+  try{
+    centerElev = await getElev(center(), ctl.signal);
+    $("bigBox").classList.remove("busy"); renderCenter();
+  }catch(e){
+    if(e.name === "AbortError") return;
+    $("bigBox").classList.remove("busy"); $("cE").textContent = "–"; toast("Couldn't load elevation. Check your connection.");
+  }
+}
+map.on("move", () => { renderCenter(); });
+map.on("moveend", () => { clearTimeout(tmr); tmr = setTimeout(updateCenter, 300); });
+
+/* ---------- pin ---------- */
+async function setPin(ll){
+  pin = {lat:ll.lat, lng:ll.lng, e:null};
+  const icon = L.divIcon({className:"", html:'<div class="pinicon"></div>', iconSize:[22,22], iconAnchor:[11,22]});
+  if(pinMarker) pinMarker.setLatLng(ll); else pinMarker = L.marker(ll, {icon}).addTo(map);
+  renderPin(); layout();
+  const mine = pin;
+  try{ const e = await getElev(ll); if(pin === mine){ pin.e = e; renderPin(); } }
+  catch(e){ if(pin === mine){ toast("Couldn't load elevation for this point."); } }
+}
+map.on("click", e => setPin(e.latlng));
+$("bDrop").onclick = () => setPin(center());
+$("bSave").onclick = () => {
+  if(!pin || pin.e == null){ toast("Pin a point first"); return; }
+  saved.unshift({lat:pin.lat, lng:pin.lng, e:pin.e, t:Date.now()});
+  saved = saved.slice(0, 30); store.set("alt_saved", saved); drawSaved(); renderList(); toast("Saved");
+};
+$("bClear").onclick = () => { saved = []; store.set("alt_saved", saved); drawSaved(); renderList(); };
+$("bCopy").onclick = async () => {
+  const p = pin && pin.e != null ? pin : {lat:center().lat, lng:center().lng, e:centerElev};
+  const text = p.lat.toFixed(6) + ", " + p.lng.toFixed(6) + "  |  " + elevText(p.e) + " " + S.unit;
+  try{ await navigator.clipboard.writeText(text); toast("Copied: " + text); }catch(e){ toast(text); }
+};
+
+/* ---------- settings ---------- */
+$("bUnit").onclick = () => { S.unit = S.unit === "m" ? "ft" : "m"; store.set("alt_settings", S); renderAll(); };
+$("bFmt").onclick = () => { S.fmt = S.fmt === "DD" ? "DMS" : "DD"; store.set("alt_settings", S); renderAll(); };
+$("bIn").onclick = () => map.zoomIn();
+$("bOut").onclick = () => map.zoomOut();
+
+/* ---------- GPS ---------- */
+$("bLoc").onclick = () => {
+  if(!navigator.geolocation){ toast("Location is not supported on this device"); return; }
+  toast("Locating…");
+  navigator.geolocation.getCurrentPosition(pos => {
+    const c = pos.coords, ll = L.latLng(c.latitude, c.longitude);
+    map.setView(ll, Math.max(map.getZoom(), 16));
+    if(gpsMarker) gpsMarker.setLatLng(ll); else gpsMarker = L.marker(ll, {icon:L.divIcon({className:"", html:'<div class="gpsdot"></div>', iconSize:[16,16]}), interactive:false}).addTo(map);
+    gps = c; $("gps").classList.add("show");
+    $("gA").textContent = c.altitude != null ? (S.unit === "m" ? Math.round(c.altitude) + " m" : Math.round(c.altitude * M2FT) + " ft") : "n/a";
+    $("gAcc").textContent = "±" + (S.unit === "m" ? Math.round(c.accuracy) + " m" : Math.round(c.accuracy * M2FT) + " ft");
+    layout();
+  }, err => toast(err.code === 1 ? "Location permission denied" : "Couldn't get a GPS fix"),
+  {enableHighAccuracy:true, timeout:15000, maximumAge:0});
+};
+
+/* ---------- toast ---------- */
+function toast(msg){
+  const t = $("toast"); t.textContent = msg; t.classList.add("on");
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("on"), 2000);
+}
+
+drawSaved(); renderAll(); layout(); updateCenter();
+</script>
+</body>
+</html>
