@@ -1,10 +1,14 @@
 name: Auto bump version.json
 
+# 저장소 맨 위의 앱 폴더 안 index.html 이 바뀌면 (예: Jennyrun/index.html),
+# 그 폴더에 version.json 이 있을 때만 맨 뒤 숫자를 +1 합니다. (1.2.213 → 1.2.214)
+# 새 앱도 폴더 안에 version.json 만 만들어 두면 자동으로 대상이 됩니다.
+
 on:
   push:
-    branches: [main]   # 브랜치 이름이 master면 main → master로 바꾸세요
+    branches: [main]
     paths:
-      - 'index.html'   # index.html이 바뀐 푸시에서만 실행
+      - '*/index.html'
 
 permissions:
   contents: write
@@ -22,26 +26,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 같은 푸시에서 version.json도 직접 고쳤다면 건너뜀 (이중 증가 방지)
-      - name: Check if version.json was already changed
-        id: check
-        run: |
-          BEFORE="${{ github.event.before }}"
-          if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
-             && git diff --name-only "$BEFORE" "${{ github.sha }}" | grep -qx 'version.json'; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      # "version": "1.2.213" → "1.2.214" (맨 뒤 숫자만 +1, 다른 내용/서식은 그대로)
-      - name: Bump version
+      - name: Bump version.json of changed apps
         id: bump
-        if: steps.check.outputs.skip == 'false'
+        env:
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
         run: |
-          python3 - <<'PY'
-          import os, re
-          p = 'version.json'
+          cat > /tmp/bump.py <<'PY'
+          import re, sys
+          p = sys.argv[1]
           s = open(p, encoding='utf-8').read()
           def bump(m):
               parts = m.group(2).split('.')
@@ -49,27 +42,55 @@ jobs:
               return m.group(1) + '.'.join(parts) + m.group(3)
           new, n = re.subn(r'("version"\s*:\s*")(\d+(?:\.\d+)*)(")', bump, s, count=1)
           if n != 1:
-              raise SystemExit('version.json 에서 "version": "1.2.3" 형식을 찾지 못했어요')
+              raise SystemExit(1)
           open(p, 'w', encoding='utf-8').write(new)
-          ver = re.search(r'"version"\s*:\s*"([^"]+)"', new).group(1)
-          print('New version:', ver)
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write('ver=' + ver + '\n')
+          print(re.search(r'"version"\s*:\s*"([^"]+)"', new).group(1))
           PY
 
-      - name: Commit and push
-        if: steps.check.outputs.skip == 'false'
-        run: |
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            BEFORE="$SHA~1"
+          fi
+          CHANGED=$(git diff --name-only "$BEFORE" "$SHA")
+
+          SUMMARY=""
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            dir=$(dirname "$f")
+            v="$dir/version.json"
+            if [ ! -f "$v" ]; then
+              echo "건너뜀: $dir (version.json 없음)"
+              continue
+            fi
+            if echo "$CHANGED" | grep -qxF "$v"; then
+              echo "건너뜀: $dir (이번 푸시에서 version.json 을 직접 고침)"
+              continue
+            fi
+            if NEW=$(python3 /tmp/bump.py "$v"); then
+              echo "올림: $dir → $NEW"
+              git add "$v"
+              SUMMARY="$SUMMARY $dir $NEW,"
+            else
+              echo "::warning::$v 에서 \"version\": \"1.2.3\" 형식을 찾지 못해 건너뜀"
+            fi
+          done < <(echo "$CHANGED" | grep -E '^[^/]+/index\.html$' || true)
+
+          if git diff --cached --quiet; then
+            echo "올릴 버전이 없어요"
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add version.json
-          git commit -m "bump version to ${{ steps.bump.outputs.ver }}"
+          git commit -m "bump version:${SUMMARY%,}"
           git pull --rebase
           git push
+          echo "bumped=true" >> "$GITHUB_OUTPUT"
 
       # 봇이 푸시한 커밋으로 Pages 재배포가 안 걸리는 경우를 대비한 안전장치
       - name: Request Pages build
-        if: steps.check.outputs.skip == 'false'
+        if: steps.bump.outputs.bumped == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh api -X POST "repos/${{ github.repository }}/pages/builds" || true
