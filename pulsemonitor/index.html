@@ -1,1 +1,212 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pulse Monitor</title>
+<!-- Kotlin 연동: webView.evaluateJavascript("onHeartRate(72,[830,835])", null)  (bpm, RR간격 ms 배열은 생략 가능) -->
+<style>
+:root{color-scheme:dark;--bg:#020605;--ink:#d8ffe6;--dim:#6b947b;--g:#3dff7a;--zc:#5aa9ff;box-sizing:border-box;padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
+main{max-width:560px;margin:0 auto;padding:12px}
+header{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+#dot{width:9px;height:9px;border-radius:50%;background:#444;flex:none}
+#dot.on{background:var(--g);box-shadow:0 0 8px var(--g)}
+#st{flex:1;font-size:13px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+button{font:inherit;font-size:13px;color:var(--ink);background:#0b1a12;border:1px solid #1f4a30;border-radius:8px;padding:8px 12px;min-height:36px}
+button:focus-visible{outline:2px solid var(--g);outline-offset:2px}
+button[aria-pressed=false]{opacity:.45}
+#maxbox{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:13px;color:var(--dim)}
+#maxbox[hidden]{display:none}
+#maxIn{font:inherit;width:84px;color:var(--ink);background:#0b1a12;border:1px solid #1f4a30;border-radius:8px;padding:8px;min-height:36px}
+.ecg{position:relative}
+.tag{position:absolute;left:8px;top:6px;font-size:11px;color:var(--g);opacity:.7}
+canvas{display:block;width:100%;border:1px solid rgba(61,255,122,.25);border-radius:6px;background-color:#030a06;background-image:linear-gradient(rgba(61,255,122,.15) 1px,transparent 1px),linear-gradient(90deg,rgba(61,255,122,.15) 1px,transparent 1px),linear-gradient(rgba(61,255,122,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(61,255,122,.06) 1px,transparent 1px);background-size:60px 60px,60px 60px,12px 12px,12px 12px}
+#ecg{height:160px}
+#trend{height:110px}
+.hr{display:flex;align-items:center;justify-content:space-between;padding:14px 4px 6px}
+.num{display:flex;align-items:baseline;gap:8px}
+#bpm{font:300 clamp(88px,27vw,140px)/1 "Roboto Mono",ui-monospace,Menlo,Consolas,monospace;color:var(--g);text-shadow:0 0 18px rgba(61,255,122,.45);font-variant-numeric:tabular-nums}
+.num small{font-size:16px;color:var(--dim)}
+#hrt{width:30px;height:30px;fill:var(--g);align-self:center;transform-origin:center}
+#hrt.p{animation:pl .32s ease-out}
+@keyframes pl{0%{transform:scale(1.35)}100%{transform:scale(1)}}
+#zone{text-align:center;color:var(--zc);border:2px solid var(--zc);border-radius:10px;padding:8px 14px;min-width:92px;transition:color .3s,border-color .3s}
+#zone b{display:block;font-size:26px}
+#zone span{font-size:13px}
+h2{margin:14px 0 6px;font-size:13px;font-weight:500;color:var(--dim)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+.stats div{border:1px solid #14301f;border-radius:8px;padding:8px;text-align:center}
+.stats b{display:block;font:400 22px "Roboto Mono",ui-monospace,Menlo,Consolas,monospace;color:var(--ink)}
+.stats span{font-size:12px;color:var(--dim)}
+#note{margin:16px 2px 0;font-size:12px;line-height:1.5;color:var(--dim)}
+@media (prefers-reduced-motion:reduce){#hrt.p{animation:none}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <span id="dot"></span><span id="st"></span>
+  <button id="bConn"></button><button id="bMax"></button><button id="bSnd" aria-pressed="true"></button>
+</header>
+<div id="maxbox" hidden><label for="maxIn" id="maxLbl"></label><input id="maxIn" type="number" inputmode="numeric" min="120" max="230"><button id="maxSave"></button></div>
+<div class="ecg"><span class="tag">ECG</span><canvas id="ecg"></canvas></div>
+<section class="hr">
+  <div class="num">
+    <svg id="hrt" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-8-5.2-8-11a4.6 4.6 0 0 1 8-3 4.6 4.6 0 0 1 8 3c0 5.800-8 11-8 11z"/></svg>
+    <b id="bpm">--</b><small>bpm</small>
+  </div>
+  <div id="zone"><b id="zn">-</b><span id="zl"></span></div>
+</section>
+<h2 id="tt"></h2>
+<canvas id="trend"></canvas>
+<section class="stats">
+  <div><b id="sAvg">--</b><span id="lAvg"></span></div>
+  <div><b id="sMax">--</b><span id="lMax"></span></div>
+  <div><b id="sMin">--</b><span id="lMin"></span></div>
+  <div><b id="sHrv">--</b><span>HRV</span></div>
+</section>
+<p id="note"></p>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const KO=navigator.language.startsWith('ko');
+const T=KO?{conn:'스트랩 연결',disc:'연결 해제',scan:'스트랩 찾는 중…',err:{not_found:'스트랩을 못 찾았어요. 착용하고 전극을 적신 뒤 다시 시도하세요',bluetooth_off:'블루투스를 켜 주세요',permission:'블루투스 권한이 필요해요',no_hr_service:'심박 기기가 아니에요'},maxl:'최대심박수',save:'저장',max2:'최대 ',snd:'소리',idle:'연결 대기 중',lost:'신호 없음',trend:'최근 5분',avg:'평균',max:'최고',min:'최저',z:['회복','가벼운 운동','유산소','고강도','최대'],nobt:'이 브라우저는 블루투스 연결을 지원하지 않아요. 크롬에서 열거나 앱에서 onHeartRate()로 값을 넘겨주세요.',note:'심전도 선은 심박수에 맞춰 그린 시각 효과예요. 실제 심전도 파형이 아니고, 의료 기기도 아니에요. HRV는 스트랩이 박동 간격을 보낼 때만 표시돼요.'}
+:{conn:'Connect strap',disc:'Disconnect',scan:'Searching for strap…',err:{not_found:'Strap not found. Wear it, wet the electrodes and try again',bluetooth_off:'Turn on Bluetooth',permission:'Bluetooth permission is needed',no_hr_service:'Not a heart rate device'},maxl:'Max heart rate',save:'Save',max2:'Max ',snd:'Sound',idle:'Waiting for strap',lost:'No signal',trend:'Last 5 min',avg:'Avg',max:'Max',min:'Min',z:['Recovery','Easy','Aerobic','Hard','Max'],nobt:'This browser has no Bluetooth support. Open in Chrome, or feed values with onHeartRate() from the app.',note:'The ECG line is a visual effect drawn from heart rate. It is not a real ECG waveform and this is not a medical device. HRV only shows if the strap sends beat intervals.'};
+let MAXHR=190,ZB=[];try{MAXHR=+localStorage.getItem('maxhr')||190}catch(e){}
+const ZC=['#5aa9ff','#4ed17a','#ffb02e','#ff5a4d','#d11f2a'];
+function calcZ(){ZB=[.6,.7,.8,.9].map(p=>Math.round(MAXHR*p))}
+calcZ();
+$('bSnd').textContent=T.snd;$('maxLbl').textContent=T.maxl;$('maxSave').textContent=T.save;$('tt').textContent=T.trend;$('note').textContent=T.note;
+$('lAvg').textContent=T.avg;$('lMax').textContent=T.max;$('lMin').textContent=T.min;
 
+let bpm=0,lastRx=0,mode='idle',name='',hist=[],n=0,sum=0,mx=0,mn=999,rrBuf=[],ac=null,snd=true,dev=null,wasLive=null;
+
+function setMode(m,nm){
+  mode=m;name=nm||'';if(m==='idle')bpm=0;
+  if(m!=='idle'){hist=[];n=sum=mx=0;mn=999;rrBuf=[];bpm=0;['sAvg','sMax','sMin','sHrv'].forEach(i=>$(i).textContent='--');try{navigator.wakeLock&&navigator.wakeLock.request('screen')}catch(e){}}
+  $('bConn').textContent=m==='ble'?T.disc:T.conn;
+  status(true);
+}
+function status(force){
+  const live=bpm>0&&performance.now()-lastRx<5000;
+  if(!force&&live===wasLive)return;wasLive=live;
+  $('dot').classList.toggle('on',live);
+  $('st').textContent=live?(name||'Heart rate'):(mode==='idle'?T.idle:T.lost);
+  if(!live){$('bpm').textContent='--';$('zn').textContent='-';$('zl').textContent=''}
+}
+
+function showZone(b){
+  const z=ZB.filter(v=>b>=v).length;
+  document.documentElement.style.setProperty('--zc',ZC[z]);
+  $('bpm').textContent=b;$('zn').textContent='Z'+(z+1);$('zl').textContent=T.z[z];
+}
+// 외부(Kotlin/BLE)에서 심박수를 넣는 단일 진입점
+window.onHeartRate=function(b,rr){
+  if(!(b>0))return;
+  bpm=b;lastRx=performance.now();status(false);
+  hist.push([Date.now(),b]);const cut=Date.now()-300000;while(hist.length&&hist[0][0]<cut)hist.shift();
+  n++;sum+=b;mx=Math.max(mx,b);mn=Math.min(mn,b);
+  showZone(b);
+  $('sAvg').textContent=Math.round(sum/n);$('sMax').textContent=mx;$('sMin').textContent=mn;
+  if(rr&&rr.length){rr.forEach(v=>{if(v>300&&v<2000)rrBuf.push(v)});rrBuf=rrBuf.slice(-40);
+    if(rrBuf.length>=8){let s=0;for(let i=1;i<rrBuf.length;i++)s+=(rrBuf[i]-rrBuf[i-1])**2;$('sHrv').textContent=Math.round(Math.sqrt(s/(rrBuf.length-1)))}}
+};
+
+// ---- Bluetooth (Web Bluetooth, 크롬/HTTPS) ----
+// Kotlin 브리지(NativeHr)가 상태를 알려주는 진입점: connected / scanning / disconnected / error
+window.onHrStatus=(s,nm)=>{
+  if(s==='connected')setMode('ble',nm||'');
+  else if(s==='scanning'){setMode('idle');$('st').textContent=T.scan}
+  else{setMode('idle');if(s==='error'&&nm)$('st').textContent=T.err[nm]||T.lost}
+};
+function parse(dv){
+  const f=dv.getUint8(0);let i=1,b;
+  if(f&1){b=dv.getUint16(i,true);i+=2}else{b=dv.getUint8(i);i+=1}
+  if(f&8)i+=2;
+  const rr=[];if(f&16){for(;i+1<dv.byteLength;i+=2)rr.push(dv.getUint16(i,true)/1024*1000)}
+  onHeartRate(b,rr);
+}
+async function connectBLE(){
+  if(window.NativeHr){
+    if(mode==='ble'){NativeHr.disconnect();setMode('idle')}
+    else{ac=ac||new AudioContext();ac.resume();NativeHr.connect()}
+    return;
+  }
+  if(mode==='ble'){dev&&dev.gatt.connected&&dev.gatt.disconnect();setMode('idle');return}
+  if(!navigator.bluetooth){alert(T.nobt);return}
+  ac=ac||new AudioContext();ac.resume();
+  try{
+    dev=await navigator.bluetooth.requestDevice({filters:[{services:['heart_rate']}]});
+    dev.addEventListener('gattserverdisconnected',()=>setMode('idle'));
+    const srv=await dev.gatt.connect();
+    const svc=await srv.getPrimaryService('heart_rate');
+    const ch=await svc.getCharacteristic('heart_rate_measurement');
+    ch.addEventListener('characteristicvaluechanged',e=>parse(e.target.value));
+    await ch.startNotifications();
+    setMode('ble',dev.name);
+  }catch(e){if(e.name!=='NotFoundError')alert(e.message)}
+}
+// 최대심박수: 존 경계는 최대값의 60/70/80/90%. Kotlin에서 setMaxHR(180)으로도 설정 가능
+function applyMax(m,save){
+  m=Math.round(m);if(!(m>=120&&m<=230))return false;
+  MAXHR=m;calcZ();$('bMax').textContent=T.max2+m;$('maxIn').value=m;
+  if(save){try{localStorage.setItem('maxhr',m)}catch(e){}}
+  drawTrend();if(bpm>0)showZone(bpm);return true;
+}
+window.setMaxHR=m=>applyMax(m,true);
+$('bMax').onclick=()=>{$('maxbox').hidden=!$('maxbox').hidden};
+$('maxSave').onclick=()=>{if(applyMax(+$('maxIn').value,true))$('maxbox').hidden=true};
+$('bConn').onclick=connectBLE;
+$('bSnd').onclick=()=>{snd=!snd;$('bSnd').setAttribute('aria-pressed',snd)};
+
+// ---- ECG sweep ----
+const G=(t,c,w,a)=>a*Math.exp(-((t-c)**2)/(2*w*w));
+const wave=p=>G(p,.12,.03,.14)+G(p,.215,.009,-.14)+G(p,.25,.011,1)+G(p,.285,.012,-.28)+G(p,.52,.045,.3);
+function setup(c,h){const r=devicePixelRatio||1,w=c.clientWidth;c.width=w*r;c.height=h*r;const x=c.getContext('2d');x.setTransform(r,0,0,r,0,0);return{x,w,h}}
+let E,TR,ph=0,px=0,py=null,smooth=0,last=performance.now();
+function init(){E=setup($('ecg'),160);TR=setup($('trend'),110);px=0;py=null;drawTrend()}
+function beep(){
+  if(!snd||!ac)return;
+  const o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime;
+  o.frequency.value=900;g.gain.setValueAtTime(.12,t);g.gain.exponentialRampToValueAtTime(.001,t+.08);
+  o.connect(g).connect(ac.destination);o.start(t);o.stop(t+.09);
+}
+function beat(){const h=$('hrt');h.classList.remove('p');void h.getBoundingClientRect();h.classList.add('p');beep()}
+function frame(now){
+  const dt=Math.min(.05,(now-last)/1000);last=now;
+  const live=bpm>0&&now-lastRx<5000;status(false);
+  if(live&&smooth<30)smooth=bpm;
+  smooth+=((live?bpm:0)-smooth)*Math.min(1,dt*2);
+  const{x,w,h}=E,base=h*.68,steps=Math.max(1,Math.ceil(dt/.002)),sd=dt/steps;
+  x.strokeStyle='#3dff7a';x.lineWidth=2;x.lineJoin='round';x.shadowColor='#3dff7a';x.shadowBlur=7;
+  x.beginPath();if(py!==null)x.moveTo(px,py);
+  for(let i=0;i<steps;i++){
+    let y=base;
+    if(live){const p0=ph;ph+=sd*smooth/60;if(ph>=1)ph-=1;if(p0<.25&&ph>=.25)beat();y=base-wave(ph)*h*.55}
+    px+=100*sd;
+    if(px>=w){px=0;py=null;x.stroke();x.beginPath();continue}
+    if(py===null)x.moveTo(px,y);else x.lineTo(px,y);
+    py=y;
+  }
+  x.stroke();x.shadowBlur=0;x.clearRect(px+3,0,22,h);
+  requestAnimationFrame(frame);
+}
+function drawTrend(){
+  if(!TR)return;const{x,w,h}=TR;x.clearRect(0,0,w,h);
+  const top=Math.max(190,MAXHR),Y=b=>h-Math.max(0,Math.min(1,(b-40)/(top-40)))*h;
+  x.font='10px system-ui';x.lineWidth=1;
+  ZB.forEach((v,i)=>{x.strokeStyle=ZC[i+1]+'55';x.setLineDash([3,4]);x.beginPath();x.moveTo(0,Y(v));x.lineTo(w,Y(v));x.stroke();x.fillStyle=ZC[i+1];x.fillText(v,4,Y(v)-3)});
+  x.setLineDash([]);
+  if(hist.length<2)return;
+  const now=Date.now();x.strokeStyle='#3dff7a';x.lineWidth=2;x.beginPath();
+  hist.forEach(([t,b],i)=>{const X=(t-(now-300000))/300000*w;i?x.lineTo(X,Y(b)):x.moveTo(X,Y(b))});
+  x.stroke();
+}
+setInterval(drawTrend,1000);
+addEventListener('resize',init);
+setMode('idle');init();applyMax(MAXHR);addEventListener('pointerdown',()=>{ac=ac||new AudioContext();ac.resume()},{once:true});requestAnimationFrame(frame);
+</script>
+</body>
+</html>
