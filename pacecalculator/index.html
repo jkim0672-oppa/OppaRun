@@ -1,1 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>페이스 · 케이던스 계산기</title>
+<style>
+  :root{
+    --bg:#0f1115;
+    --card:#181b21;
+    --card2:#1f232b;
+    --border:#2a2f3a;
+    --text:#f0f2f5;
+    --sub:#8a92a3;
+    --accent:#3ddc84;
+    --accent2:#4fa8ff;
+    --warn:#ff6b6b;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; padding:20px 16px 60px;
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  }
+  h1{font-size:19px; margin:0 0 4px; text-align:center;}
+  .sub{color:var(--sub); font-size:12.5px; text-align:center; margin-bottom:20px;}
+  .card{
+    background:var(--card); border:1px solid var(--border); border-radius:14px;
+    padding:16px; margin-bottom:14px;
+  }
+  .card h2{font-size:13px; color:var(--sub); margin:0 0 12px; font-weight:600; letter-spacing:.3px;}
+  .row{display:flex; gap:10px; margin-bottom:10px;}
+  .row:last-child{margin-bottom:0;}
+  .field{flex:1; min-width:0;}
+  .field label{display:block; font-size:11.5px; color:var(--sub); margin-bottom:5px;}
+  input[type=number], input[type=text]{
+    width:100%; padding:10px 10px; border-radius:9px; border:1px solid var(--border);
+    background:var(--card2); color:var(--text); font-size:15px; -webkit-appearance:none;
+  }
+  input:focus{outline:none; border-color:var(--accent2);}
+  .timegrp{display:flex; gap:6px;}
+  .timegrp input{text-align:center;}
+  .timegrp span{align-self:center; color:var(--sub); font-size:13px;}
+  .presets{display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;}
+  .preset-btn{
+    padding:6px 10px; border-radius:20px; border:1px solid var(--border);
+    background:var(--card2); color:var(--sub); font-size:12px; cursor:pointer;
+  }
+  .preset-btn.active{background:var(--accent); color:#06210f; border-color:var(--accent); font-weight:600;}
+  .results{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .result-box{
+    background:var(--card2); border-radius:12px; padding:12px; text-align:center;
+  }
+  .result-box .val{font-size:20px; font-weight:700; color:var(--accent);}
+  .result-box .val.blue{color:var(--accent2);}
+  .result-box .lbl{font-size:11px; color:var(--sub); margin-top:3px;}
+  table{width:100%; border-collapse:collapse; font-size:13.5px;}
+  th,td{padding:9px 6px; text-align:left; border-bottom:1px solid var(--border);}
+  th{color:var(--sub); font-weight:600; font-size:11.5px;}
+  td.time{font-weight:700; color:var(--accent2); font-variant-numeric:tabular-nums;}
+  tr.current td{color:var(--accent);}
+  tr.current td.time{color:var(--accent);}
+  .note{font-size:11px; color:var(--sub); margin-top:10px; line-height:1.5;}
+  .warn{color:var(--warn); font-size:12.5px; text-align:center; padding:8px;}
+  .topbar{display:flex; justify-content:flex-end; margin-bottom:8px;}
+  .lang-toggle{display:flex; border:1px solid var(--border); border-radius:20px; overflow:hidden;}
+  .lang-toggle button{
+    padding:5px 14px; font-size:12px; font-weight:600; border:none; cursor:pointer;
+    background:var(--card2); color:var(--sub);
+  }
+  .lang-toggle button.active{background:var(--accent2); color:#08131f;}
+  .page[hidden]{display:none;}
+  .sub-badge{display:inline-block; margin-top:4px; padding:2px 8px; border-radius:10px; background:var(--accent); color:#06210f; font-size:11px; font-weight:700;}
+  .pred-btns{display:flex; flex-direction:column; gap:10px; margin:0 0 20px;}
+  .go-btn{width:100%; padding:14px; border-radius:14px; border:1px solid var(--border); background:var(--accent2); color:#08131f; font-size:15px; font-weight:700; font-family:inherit;}
+  .back-btn{width:100%; padding:12px; border-radius:14px; border:1px solid var(--border); background:transparent; color:var(--text, #e6e8ee); font-size:14px; font-weight:600; font-family:inherit; margin:0 0 14px;}
+</style>
+</head>
+<body>
 
+<div class="topbar">
+  <div class="lang-toggle" id="langToggle">
+    <button data-lang="en" class="active">EN</button>
+    <button data-lang="ko">한글</button>
+  </div>
+</div>
+
+<h1 data-i18n="title">🏃 Pace &amp; Cadence Calculator</h1>
+<div class="sub" data-i18n="subtitle">Enter your time and distance to get pace, cadence, stride length, speed, and race predictions</div>
+
+<div class="page" id="page1">
+
+<div class="card">
+  <h2 data-i18n="distanceLabel">Distance (km)</h2>
+  <input type="number" id="distance" step="0.01" min="0" inputmode="decimal">
+  <div class="presets" id="presets">
+    <button class="preset-btn" data-d="5">5K</button>
+    <button class="preset-btn" data-d="10">10K</button>
+    <button class="preset-btn" data-d="21.0975" data-i18n="half">Half</button>
+    <button class="preset-btn" data-d="42.195" data-i18n="full">Full</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2 data-i18n="timeLabel">Time</h2>
+  <div class="timegrp">
+    <input type="number" id="hh" min="0" data-i18n-ph="hh" placeholder="시">
+    <span>:</span>
+    <input type="number" id="mm" min="0" max="59" data-i18n-ph="mm" placeholder="분">
+    <span>:</span>
+    <input type="number" id="ss" min="0" max="59" data-i18n-ph="ss" placeholder="초">
+  </div>
+</div>
+
+<div class="card">
+  <h2 data-i18n="cadenceLabel">Cadence (spm, steps per minute) — optional</h2>
+  <input type="number" id="cadence" min="0" data-i18n-ph="cadencePh" placeholder="e.g. 175" inputmode="decimal">
+</div>
+
+<div class="card">
+  <h2 data-i18n="resultsLabel">Results</h2>
+  <div class="results">
+    <div class="result-box">
+      <div class="val" id="outPace">-</div>
+      <div class="lbl" data-i18n="paceUnit">Pace (min/km)</div>
+    </div>
+    <div class="result-box">
+      <div class="val blue" id="outSpeed">-</div>
+      <div class="lbl" data-i18n="speedUnit">Speed (km/h)</div>
+    </div>
+    <div class="result-box">
+      <div class="val" id="outCadence">-</div>
+      <div class="lbl" data-i18n="cadenceUnit">Cadence (spm)</div>
+    </div>
+    <div class="result-box">
+      <div class="val blue" id="outStride">-</div>
+      <div class="lbl" data-i18n="strideUnit">Stride length (cm)</div>
+    </div>
+  </div>
+  <div class="note" id="strideNote"></div>
+</div>
+
+<div class="pred-btns">
+  <button class="go-btn" data-page="2" data-i18n="goPred">Predictions</button>
+  <button class="go-btn" data-page="3" data-i18n="goTarget">Target Record</button>
+  <button class="go-btn" data-page="4" data-i18n="goCal">Calories</button>
+</div>
+
+</div>
+
+<div class="page" id="page2" hidden>
+
+<button class="back-btn" data-i18n="back">← Back</button>
+
+<div class="card" id="constPage">
+  <h2 data-i18n="constLabel">Race Predictions (constant pace)</h2>
+  <table>
+    <thead><tr>
+      <th data-i18n="colDistance">Distance</th>
+      <th data-i18n="colTime">Predicted time</th>
+      <th data-i18n="colPace">Predicted pace</th>
+    </tr></thead>
+    <tbody id="constTable"></tbody>
+  </table>
+</div>
+
+<div class="card" id="riegelPage">
+  <h2 data-i18n="predictLabel">Race Predictions (Riegel formula)</h2>
+  <table>
+    <thead><tr>
+      <th data-i18n="colDistance">Distance</th>
+      <th data-i18n="colTime">Predicted time</th>
+      <th data-i18n="colPace">Predicted pace</th>
+    </tr></thead>
+    <tbody id="predictTable"></tbody>
+  </table>
+</div>
+
+</div>
+
+<div class="page" id="page3" hidden>
+
+<button class="back-btn" data-i18n="back">← Back</button>
+
+<div class="card">
+  <h2 data-i18n="tDistLabel">Target distance (km)</h2>
+  <input type="number" id="tDist" step="0.01" min="0" inputmode="decimal">
+  <div class="presets" id="tPresets">
+    <button class="preset-btn" data-d="5">5K</button>
+    <button class="preset-btn" data-d="10">10K</button>
+    <button class="preset-btn" data-d="21.0975" data-i18n="half">Half</button>
+    <button class="preset-btn" data-d="42.195" data-i18n="full">Full</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2 data-i18n="tTimeLabel">Target time</h2>
+  <div class="timegrp">
+    <input type="number" id="tHH" min="0" data-i18n-ph="hh" placeholder="hr">
+    <span>:</span>
+    <input type="number" id="tMM" min="0" max="59" data-i18n-ph="mm" placeholder="min">
+    <span>:</span>
+    <input type="number" id="tSS" min="0" max="59" data-i18n-ph="ss" placeholder="sec">
+  </div>
+</div>
+
+<div class="card">
+  <h2 data-i18n="tResultLabel">Required pace &amp; speed</h2>
+  <div class="results">
+    <div class="result-box">
+      <div class="val" id="tOutPace">-</div>
+      <div class="lbl" data-i18n="paceUnit">Pace (min/km)</div>
+    </div>
+    <div class="result-box">
+      <div class="val blue" id="tOutSpeed">-</div>
+      <div class="lbl" data-i18n="speedUnit">Speed (km/h)</div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<div class="page" id="page4" hidden>
+
+<button class="back-btn" data-i18n="back">← Back</button>
+
+<div class="card">
+  <h2 data-i18n="sexLabel">Sex</h2>
+  <div class="presets" id="sexBtns">
+    <button class="preset-btn" data-sex="m" data-i18n="male">Male</button>
+    <button class="preset-btn" data-sex="f" data-i18n="female">Female</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2 data-i18n="heightLabel">Height (cm)</h2>
+  <input type="number" id="cHeight" min="0" inputmode="decimal">
+</div>
+
+<div class="card">
+  <h2 data-i18n="weightLabel">Weight (kg)</h2>
+  <input type="number" id="cWeight" min="0" inputmode="decimal">
+</div>
+
+<div class="card">
+  <h2 data-i18n="ageLabel">Age</h2>
+  <input type="number" id="cAge" min="0" inputmode="numeric">
+</div>
+
+<div class="card">
+  <h2 data-i18n="calResultLabel">Calories</h2>
+  <div class="results">
+    <div class="result-box">
+      <div class="val" id="cOutTotal">-</div>
+      <div class="lbl" data-i18n="calTotal">Burned (kcal)</div>
+    </div>
+    <div class="result-box">
+      <div class="val blue" id="cOutKm">-</div>
+      <div class="lbl" data-i18n="calPerKm">kcal / km</div>
+    </div>
+    <div class="result-box">
+      <div class="val" id="cOutBmr">-</div>
+      <div class="lbl" data-i18n="calBmr">BMR (kcal/day)</div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<script>
+const I18N = {
+  en: {
+    title: "🏃 Pace &amp; Cadence Calculator",
+    subtitle: "Enter your time and distance to get pace, cadence, stride length, speed, and race predictions",
+    distanceLabel: "Distance (km)",
+    half: "Half",
+    full: "Full",
+    timeLabel: "Time",
+    hh: "hr", mm: "min", ss: "sec",
+    cadenceLabel: "Cadence (spm, steps per minute) — optional",
+    cadencePh: "e.g. 175",
+    resultsLabel: "Results",
+    paceUnit: "Pace (min/km)",
+    speedUnit: "Speed (km/h)",
+    cadenceUnit: "Cadence (spm)",
+    strideUnit: "Stride length (cm)",
+    predictLabel: "Race Predictions (Riegel formula)",
+    colDistance: "Distance", colTime: "Predicted time", colPace: "Predicted pace",
+    predictNote: "Estimated from your entered time using T2 = T1 × (D2/D1)^1.06 (Riegel formula). Actual results may vary with condition, course, and pacing strategy.",
+    goPred: "Predictions", back: "← Back",
+    goCal: "Calories", sexLabel: "Sex", male: "Male", female: "Female", heightLabel: "Height (cm)", weightLabel: "Weight (kg)", ageLabel: "Age", calResultLabel: "Calories", calTotal: "Burned (kcal)", calPerKm: "kcal / km", calBmr: "BMR (kcal/day)",
+    goTarget: "Target Record", tDistLabel: "Target distance (km)", tTimeLabel: "Target time", tResultLabel: "Required pace & speed",
+    tHint: "Enter a distance and target time.",
+    tNote: (km,p)=>`To run ${km} km in this time, hold ${p}/km the whole way.`,
+    constLabel: "Race Predictions (constant pace)",
+    constNote: "Assumes you hold your entered pace for the whole distance, with no slowdown (time = pace × distance).",
+    fillPrompt: "Please enter distance and time",
+    strideHint: "Enter cadence to also calculate stride length.",
+    stepsNote: (n)=>`Estimated total steps: about ${n.toLocaleString()} (cadence × time)`,
+    raceNames: {"5K":"5K","10K":"10K","half":"Half Marathon","full":"Full Marathon"},
+    currentTag: " (entered)"
+  },
+  ko: {
+    title: "🏃 페이스 · 케이던스 계산기",
+    subtitle: "시간과 거리를 입력하면 페이스/케이던스/보폭/스피드와 예상기록을 계산합니다",
+    distanceLabel: "거리 (km)",
+    half: "하프",
+    full: "풀코스",
+    timeLabel: "시간 (기록)",
+    hh: "시", mm: "분", ss: "초",
+    cadenceLabel: "케이던스 (spm, 분당 걸음수) — 선택 입력",
+    cadencePh: "예: 175",
+    resultsLabel: "계산 결과",
+    paceUnit: "페이스 (분/km)",
+    speedUnit: "스피드 (km/h)",
+    cadenceUnit: "케이던스 (spm)",
+    strideUnit: "보폭 (cm)",
+    predictLabel: "중장거리 예상기록 (Riegel 공식 기반)",
+    colDistance: "거리", colTime: "예상기록", colPace: "예상페이스",
+    predictNote: "현재 입력한 기록을 기준으로 T2 = T1 × (D2/D1)^1.06 공식(Riegel formula)을 사용해 추정합니다. 실제 기록은 컨디션, 코스, 페이싱 전략에 따라 달라질 수 있습니다.",
+    goPred: "예상기록", back: "← 돌아가기",
+    goCal: "칼로리", sexLabel: "성별", male: "남", female: "여", heightLabel: "키 (cm)", weightLabel: "몸무게 (kg)", ageLabel: "나이", calResultLabel: "칼로리", calTotal: "소모 칼로리 (kcal)", calPerKm: "kcal / km", calBmr: "기초대사량 (kcal/일)",
+    goTarget: "목표 기록", tDistLabel: "목표 거리 (km)", tTimeLabel: "목표 시간", tResultLabel: "필요한 페이스 · 스피드",
+    tHint: "거리와 목표 시간을 입력해 주세요.",
+    tNote: (km,p)=>`${km}km를 이 시간에 달리려면 처음부터 끝까지 ${p}/km 페이스로 달려야 합니다.`,
+    constLabel: "예상기록 (페이스 유지 시)",
+    constNote: "입력한 페이스를 끝까지 그대로 유지한다고 가정한 기록입니다 (시간 = 페이스 × 거리).",
+    fillPrompt: "거리와 시간을 입력해 주세요",
+    strideHint: "케이던스를 입력하면 보폭도 함께 계산됩니다.",
+    stepsNote: (n)=>`총 예상 걸음 수 약 ${n.toLocaleString()}보 (케이던스 × 시간 기준)`,
+    raceNames: {"5K":"5K","10K":"10K","half":"하프마라톤","full":"풀마라톤"},
+    currentTag: " (입력값)"
+  }
+};
+
+let currentLang = 'en';
+
+const RACES = [
+  {key:"5K", d:5},
+  {key:"10K", d:10},
+  {key:"half", d:21.0975},
+  {key:"full", d:42.195}
+];
+
+const distEl = document.getElementById('distance');
+const hhEl = document.getElementById('hh');
+const mmEl = document.getElementById('mm');
+const ssEl = document.getElementById('ss');
+const cadEl = document.getElementById('cadence');
+const presetsEl = document.getElementById('presets');
+const langToggleEl = document.getElementById('langToggle');
+
+function applyLang(){
+  const t = I18N[currentLang];
+  document.documentElement.lang = currentLang;
+  document.querySelectorAll('[data-i18n]').forEach(el=>{
+    const key = el.getAttribute('data-i18n');
+    if(t[key] !== undefined) el.innerHTML = t[key];
+  });
+  document.querySelectorAll('[data-i18n-ph]').forEach(el=>{
+    const key = el.getAttribute('data-i18n-ph');
+    if(t[key] !== undefined) el.placeholder = t[key];
+  });
+  langToggleEl.querySelectorAll('button').forEach(b=>{
+    b.classList.toggle('active', b.dataset.lang === currentLang);
+  });
+  calc();
+}
+
+langToggleEl.addEventListener('click', e=>{
+  const btn = e.target.closest('button');
+  if(!btn) return;
+  currentLang = btn.dataset.lang;
+  applyLang();
+  calcTarget();
+});
+
+const SUB_LEVELS = {
+  "5K":   [20,25,30,35,40],
+  "10K":  [40,45,50,55,60,70],
+  "half": [90,100,105,120,135,150,180],
+  "full": [180,210,240,270,300,330,360]
+};
+function subBadge(key, sec){
+  const lv = SUB_LEVELS[key];
+  if(!lv) return '';
+  const min = sec/60;
+  const target = lv.find(m => min < m);
+  if(!target) return '';
+  const hh = Math.floor(target/60), mm = target%60;
+  const label = hh > 0 ? (mm ? `${hh}:${String(mm).padStart(2,'0')}` : `${hh}`) : `${mm}`;
+  return `<div class="sub-badge">Sub-${label}</div>`;
+}
+
+function fmtTime(totalSeconds){
+  totalSeconds = Math.round(totalSeconds);
+  const h = Math.floor(totalSeconds/3600);
+  const m = Math.floor((totalSeconds%3600)/60);
+  const s = totalSeconds%60;
+  if(h > 0){
+    return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  }
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
+
+function fmtPace(minPerKm){
+  const m = Math.floor(minPerKm);
+  const s = Math.round((minPerKm - m) * 60);
+  const mm = s === 60 ? m+1 : m;
+  const ss = s === 60 ? 0 : s;
+  return `${mm}'${String(ss).padStart(2,'0')}"`;
+}
+
+function calc(){
+  const t = I18N[currentLang];
+  const distance = parseFloat(distEl.value) || 0;
+  const h = parseFloat(hhEl.value) || 0;
+  const m = parseFloat(mmEl.value) || 0;
+  const s = parseFloat(ssEl.value) || 0;
+  const totalSec = h*3600 + m*60 + s;
+  const cadence = parseFloat(cadEl.value) || 0;
+
+  if(distance <= 0 || totalSec <= 0){
+    ['outPace','outSpeed','outCadence','outStride'].forEach(id=>document.getElementById(id).textContent='-');
+    document.getElementById('predictTable').innerHTML = `<tr><td colspan="3" class="warn">${t.fillPrompt}</td></tr>`;
+    document.getElementById('constTable').innerHTML = `<tr><td colspan="3" class="warn">${t.fillPrompt}</td></tr>`;
+    return;
+  }
+
+  const totalMin = totalSec / 60;
+  const paceMinPerKm = totalMin / distance;
+  const speedKmh = distance / (totalSec/3600);
+
+  document.getElementById('outPace').textContent = fmtPace(paceMinPerKm) + '/km';
+  document.getElementById('outSpeed').textContent = speedKmh.toFixed(2);
+
+  if(cadence > 0){
+    const speedMPerMin = (distance*1000) / totalMin; // m per min
+    const strideM = speedMPerMin / cadence;
+    document.getElementById('outCadence').textContent = cadence.toFixed(0);
+    document.getElementById('outStride').textContent = (strideM*100).toFixed(1);
+    document.getElementById('strideNote').textContent = t.stepsNote(Math.round(cadence*totalMin));
+  } else {
+    document.getElementById('outCadence').textContent = '-';
+    document.getElementById('outStride').textContent = '-';
+    document.getElementById('strideNote').textContent = t.strideHint;
+  }
+
+  // Riegel prediction
+  const tbody = document.getElementById('predictTable');
+  tbody.innerHTML = '';
+  RACES.forEach(race=>{
+    const isCurrent = Math.abs(race.d - distance) < 0.05;
+    const predSec = isCurrent ? totalSec : totalSec * Math.pow(race.d/distance, 1.06);
+    const predPace = (predSec/60) / race.d;
+    const tr = document.createElement('tr');
+    if(isCurrent) tr.className = 'current';
+    tr.innerHTML = `<td>${t.raceNames[race.key]}${isCurrent ? t.currentTag : ''}</td>
+                    <td class="time">${fmtTime(predSec)}${subBadge(race.key, predSec)}</td>
+                    <td>${fmtPace(predPace)}/km</td>`;
+    tbody.appendChild(tr);
+  });
+
+  // Constant-pace prediction (no slowdown)
+  const ctbody = document.getElementById('constTable');
+  ctbody.innerHTML = '';
+  RACES.forEach(race=>{
+    const isCurrent = Math.abs(race.d - distance) < 0.05;
+    const cSec = isCurrent ? totalSec : paceMinPerKm * 60 * race.d;
+    const tr = document.createElement('tr');
+    if(isCurrent) tr.className = 'current';
+    tr.innerHTML = `<td>${t.raceNames[race.key]}${isCurrent ? t.currentTag : ''}</td>
+                    <td class="time">${fmtTime(cSec)}${subBadge(race.key, cSec)}</td>
+                    <td>${fmtPace(paceMinPerKm)}/km</td>`;
+    ctbody.appendChild(tr);
+  });
+}
+
+presetsEl.addEventListener('click', e=>{
+  const btn = e.target.closest('.preset-btn');
+  if(!btn) return;
+  distEl.value = btn.dataset.d;
+  presetsEl.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  calc();
+});
+
+[distEl, hhEl, mmEl, ssEl, cadEl].forEach(el=>{
+  el.addEventListener('input', calc);
+});
+
+const tDistEl = document.getElementById('tDist');
+const tHHEl = document.getElementById('tHH');
+const tMMEl = document.getElementById('tMM');
+const tSSEl = document.getElementById('tSS');
+
+function calcTarget(){
+  const t = I18N[currentLang];
+  const d = parseFloat(tDistEl.value) || 0;
+  const sec = (parseFloat(tHHEl.value)||0)*3600 + (parseFloat(tMMEl.value)||0)*60 + (parseFloat(tSSEl.value)||0);
+  const pEl = document.getElementById('tOutPace');
+  const sEl = document.getElementById('tOutSpeed');
+  if(d <= 0 || sec <= 0){
+    pEl.textContent = '-'; sEl.textContent = '-';
+    return;
+  }
+  const pace = (sec/60) / d;
+  pEl.textContent = fmtPace(pace) + '/km';
+  sEl.textContent = (d / (sec/3600)).toFixed(2);
+}
+
+document.getElementById('tPresets').addEventListener('click', e=>{
+  const btn = e.target.closest('.preset-btn');
+  if(!btn) return;
+  tDistEl.value = btn.dataset.d;
+  document.querySelectorAll('#tPresets .preset-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  calcTarget();
+});
+[tDistEl, tHHEl, tMMEl, tSSEl].forEach(el=>el.addEventListener('input', calcTarget));
+
+let cSex = '';
+const cHEl = document.getElementById('cHeight');
+const cWEl = document.getElementById('cWeight');
+const cAEl = document.getElementById('cAge');
+
+function calcCal(){
+  const dist = parseFloat(distEl.value) || 0;
+  const sec = (parseFloat(hhEl.value)||0)*3600 + (parseFloat(mmEl.value)||0)*60 + (parseFloat(ssEl.value)||0);
+  const w = parseFloat(cWEl.value) || 0;
+  const h = parseFloat(cHEl.value) || 0;
+  const age = parseFloat(cAEl.value) || 0;
+  const tot = document.getElementById('cOutTotal');
+  const km = document.getElementById('cOutKm');
+  const bmrEl = document.getElementById('cOutBmr');
+  tot.textContent = '-'; km.textContent = '-'; bmrEl.textContent = '-';
+  if(dist > 0 && sec > 0 && w > 0){
+    const vMin = (dist*1000) / (sec/60);           // m/min
+    const vo2 = 0.2*vMin + 3.5;                    // ml/kg/min (ACSM running)
+    const kcal = vo2 * w / 1000 * 5 * (sec/60);
+    tot.textContent = Math.round(kcal);
+    km.textContent = (kcal/dist).toFixed(1);
+  }
+  if(w > 0 && h > 0 && age > 0 && cSex){
+    const bmr = 10*w + 6.25*h - 5*age + (cSex === 'm' ? 5 : -161);
+    bmrEl.textContent = Math.round(bmr);
+  }
+}
+
+document.getElementById('sexBtns').addEventListener('click', e=>{
+  const btn = e.target.closest('.preset-btn');
+  if(!btn) return;
+  cSex = btn.dataset.sex;
+  document.querySelectorAll('#sexBtns .preset-btn').forEach(b=>b.classList.toggle('active', b===btn));
+  calcCal();
+});
+[cHEl, cWEl, cAEl, distEl, hhEl, mmEl, ssEl].forEach(el=>el.addEventListener('input', calcCal));
+
+const PROFILE_KEY = 'paceCalcProfile';
+function saveProfile(){
+  try{
+    localStorage.setItem(PROFILE_KEY, JSON.stringify({sex:cSex, h:cHEl.value, w:cWEl.value, age:cAEl.value}));
+  }catch(e){}
+}
+function loadProfile(){
+  try{
+    const d = JSON.parse(localStorage.getItem(PROFILE_KEY) || 'null');
+    if(!d) return;
+    cSex = d.sex || '';
+    cHEl.value = d.h || '';
+    cWEl.value = d.w || '';
+    cAEl.value = d.age || '';
+    document.querySelectorAll('#sexBtns .preset-btn').forEach(b=>b.classList.toggle('active', b.dataset.sex === cSex));
+  }catch(e){}
+}
+[cHEl, cWEl, cAEl].forEach(el=>el.addEventListener('input', saveProfile));
+document.getElementById('sexBtns').addEventListener('click', saveProfile);
+loadProfile();
+
+function showPage(n){
+  [1,2,3,4].forEach(i=>{ document.getElementById('page'+i).hidden = (i !== n); });
+  if(n === 4) calcCal();
+  window.scrollTo(0,0);
+}
+document.querySelectorAll('.go-btn').forEach(b=>b.addEventListener('click', ()=>showPage(parseInt(b.dataset.page))));
+document.querySelectorAll('.back-btn').forEach(b=>b.addEventListener('click', ()=>showPage(1)));
+
+applyLang();
+calcTarget();
+</script>
+
+</body>
+</html>
