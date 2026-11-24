@@ -30,7 +30,28 @@ button{font:inherit;color:inherit;background:none;border:0}
 #cross b{position:absolute;left:19px;top:19px;width:6px;height:6px;border-radius:50%;background:var(--teal);box-shadow:0 0 0 1.5px #fff}
 
 /* top bar */
-#top{position:absolute;z-index:600;left:12px;top:calc(12px + env(safe-area-inset-top,0px));display:flex;gap:8px}
+#top{position:absolute;z-index:600;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top,0px));display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+#top.searching #layers{display:none}
+#top{pointer-events:none}
+#top > *{pointer-events:auto}
+.search{align-self:stretch;display:flex;align-items:center;gap:6px;padding:4px 4px 4px 14px;border-radius:16px}
+.search svg{width:18px;height:18px;flex:none;stroke:var(--mute);fill:none;stroke-width:2;stroke-linecap:round}
+.search input{flex:1;min-width:0;border:0;outline:0;background:transparent;font:inherit;font-size:16px;color:var(--navy);padding:9px 0}
+.search input::placeholder{color:var(--mute)}
+.search input::-webkit-search-cancel-button{display:none}
+.search .clr{width:30px;height:30px;border-radius:50%;font-size:20px;line-height:1;color:var(--mute)}
+.search .go{padding:9px 14px;border-radius:12px;background:var(--navy);color:#fff;font-size:14px;font-weight:700}
+.search .go:active{background:var(--teal)}
+.search.busy .go{opacity:.55}
+#results{align-self:stretch;max-height:42vh;overflow:auto;border-radius:16px;padding:4px 0}
+#results[hidden]{display:none}
+.rs{display:block;width:100%;text-align:left;padding:10px 14px;border-top:1px solid var(--line)}
+.rs:first-child{border-top:0}
+.rs:active{background:rgba(0,163,163,.12)}
+.rs b{display:block;font-size:15px}
+.rs span{display:block;font-size:12px;color:var(--mute);margin-top:2px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.rs-empty{padding:12px 14px;font-size:13px;color:var(--mute)}
+.leaflet-bottom{bottom:var(--sh);z-index:500}
 .seg{display:flex;padding:3px;border-radius:12px}
 .seg button{padding:7px 12px;font-size:13px;font-weight:600;border-radius:9px;color:var(--mute)}
 .seg button.on{background:var(--navy);color:#fff}
@@ -97,6 +118,13 @@ button{font:inherit;color:inherit;background:none;border:0}
 <div id="toast"></div>
 
 <div id="top">
+  <form class="search glass" id="sf" role="search">
+    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <input id="q" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search address, place or lat, lng" aria-label="Search address, place or coordinates">
+    <button type="button" class="clr" id="qClear" aria-label="Clear" hidden>&times;</button>
+    <button type="submit" class="go" id="go">Go</button>
+  </form>
+  <div id="results" class="glass" hidden></div>
   <div class="seg glass" id="layers">
     <button data-l="map" class="on">Map</button>
     <button data-l="topo">Terrain</button>
@@ -130,7 +158,7 @@ button{font:inherit;color:inherit;background:none;border:0}
     <div class="stats"><span>Δ vs center<b id="pD">&ndash;</b></span><span>Distance<b id="pDist">&ndash;</b></span></div>
   </div>
 
-  <div class="gps" id="gps">GPS altitude <b id="gA">&ndash;</b> &nbsp;·&nbsp; accuracy <b id="gAcc">&ndash;</b></div>
+  <div class="gps" id="gps">My elevation (above sea level) <b id="gA">&ndash;</b><br>GPS raw (ellipsoid) <b id="gRaw">&ndash;</b> &nbsp;·&nbsp; accuracy <b id="gAcc">&ndash;</b></div>
 
   <div class="acts">
     <button class="pri" id="bDrop">Drop pin here</button>
@@ -154,7 +182,7 @@ let pin = null, gps = null, centerElev = null;
 
 /* ---------- map ---------- */
 const map = L.map("map", {zoomControl:false, attributionControl:false}).setView([37.5665, 126.978], 13);
-L.control.attribution({position:"topright", prefix:false}).addTo(map);
+L.control.attribution({position:"bottomleft", prefix:false}).addTo(map);
 const tiles = {
   map: L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom:19, attribution:"© OpenStreetMap"}),
   topo: L.tileLayer("https://tile.opentopomap.org/{z}/{x}/{y}.png", {maxZoom:17, attribution:"© OpenTopoMap"}),
@@ -184,9 +212,20 @@ function center(){
   return map.containerPointToLatLng([s.x / 2, (s.y - $("sheet").offsetHeight) / 2]);
 }
 
+/* Put a location exactly under the crosshair.
+   The crosshair sits in the middle of the visible map (above the sheet), which is higher than the
+   map container's own center, so plain setView() would leave the target below the crosshair. */
+function centerOn(ll, zoom, animate){
+  const z = zoom == null ? map.getZoom() : zoom;
+  const shift = $("sheet").offsetHeight / 2;
+  const target = map.unproject(map.project(ll, z).add([0, shift]), z);
+  if(animate) map.flyTo(target, z, {duration:0.6}); else map.setView(target, z, {animate:false});
+}
+
 /* ---------- formatting ---------- */
 const M2FT = 3.28084;
 function elevText(m){ if(m == null) return "–"; return S.unit === "m" ? String(Math.round(m)) : String(Math.round(m * M2FT)); }
+function lenText(m){ return S.unit === "m" ? Math.round(m) + " m" : Math.round(m * M2FT) + " ft"; }
 function deltaText(m){ if(m == null) return "–"; const v = S.unit === "m" ? m : m * M2FT; const r = Math.round(v); return (r > 0 ? "+" : "") + r + " " + S.unit; }
 function distText(d){
   if(S.unit === "m") return d < 1000 ? Math.round(d) + " m" : (d / 1000).toFixed(2) + " km";
@@ -236,13 +275,12 @@ function renderList(){
   saved.forEach((p, i) => {
     const d = document.createElement("div"); d.className = "item";
     d.innerHTML = '<div class="e">' + elevText(p.e) + '<u>' + S.unit + '</u></div><div class="c">' + coordText(p.lat, p.lng) + '</div><button class="x" aria-label="Delete">×</button>';
-    d.onclick = () => map.flyTo(center().lat === p.lat ? [p.lat, p.lng] : offsetTarget(p), Math.max(map.getZoom(), 15));
+    d.onclick = () => centerOn(L.latLng(p.lat, p.lng), Math.max(map.getZoom(), 15), true);
     d.querySelector(".x").onclick = ev => { ev.stopPropagation(); saved.splice(i, 1); store.set("alt_saved", saved); drawSaved(); renderList(); };
     el.appendChild(d);
   });
   layout();
 }
-function offsetTarget(p){ return [p.lat, p.lng]; }
 function drawSaved(){
   savedGroup.clearLayers();
   saved.forEach(p => L.marker([p.lat, p.lng], {icon:L.divIcon({className:"", html:'<div class="savedot"></div>', iconSize:[12,12]})}).addTo(savedGroup));
@@ -275,7 +313,7 @@ async function setPin(ll){
   try{ const e = await getElev(ll); if(pin === mine){ pin.e = e; renderPin(); } }
   catch(e){ if(pin === mine){ toast("Couldn't load elevation for this point."); } }
 }
-map.on("click", e => setPin(e.latlng));
+map.on("click", e => { closeResults(); qEl.blur(); setPin(e.latlng); });
 $("bDrop").onclick = () => setPin(center());
 $("bSave").onclick = () => {
   if(!pin || pin.e == null){ toast("Pin a point first"); return; }
@@ -289,6 +327,82 @@ $("bCopy").onclick = async () => {
   try{ await navigator.clipboard.writeText(text); toast("Copied: " + text); }catch(e){ toast(text); }
 };
 
+
+/* ---------- address search ---------- */
+const qEl = $("q"), resEl = $("results"), sfEl = $("sf");
+let lastSearch = 0, searching = false;
+
+function parseCoords(t){
+  const m = t.match(/^\s*(-?\d{1,3}(?:\.\d+)?)\s*[,\s]\s*(-?\d{1,3}(?:\.\d+)?)\s*$/);
+  if(!m) return null;
+  const lat = parseFloat(m[1]), lng = parseFloat(m[2]);
+  return (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) ? L.latLng(lat, lng) : null;
+}
+function closeResults(){ resEl.hidden = true; resEl.innerHTML = ""; $("top").classList.remove("searching"); }
+function openResults(){ resEl.hidden = false; $("top").classList.add("searching"); }
+
+function goTo(ll, bbox){
+  let z = 16;
+  if(bbox){
+    try{
+      const b = L.latLngBounds([parseFloat(bbox[0]), parseFloat(bbox[2])], [parseFloat(bbox[1]), parseFloat(bbox[3])]);
+      z = Math.min(16, Math.max(11, map.getBoundsZoom(b)));
+    }catch(e){ z = 16; }
+  }
+  closeResults(); qEl.blur();
+  centerOn(ll, z);
+  setPin(ll);
+}
+
+function showResults(list){
+  resEl.innerHTML = "";
+  list.forEach(r => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "rs";
+    const t = document.createElement("b");
+    t.textContent = (r.name && r.name.length) ? r.name : String(r.display_name).split(",")[0];
+    const s = document.createElement("span");
+    s.textContent = r.display_name;
+    b.appendChild(t); b.appendChild(s);
+    b.onclick = () => goTo(L.latLng(parseFloat(r.lat), parseFloat(r.lon)), r.boundingbox);
+    resEl.appendChild(b);
+  });
+  openResults();
+}
+function showEmpty(){
+  resEl.innerHTML = '<div class="rs-empty">No results. Try a more specific address or a nearby landmark.</div>';
+  openResults();
+}
+
+async function doSearch(){
+  const q = qEl.value.trim();
+  if(!q || searching) return;
+  const c = parseCoords(q);
+  if(c){ goTo(c, null); return; }
+  searching = true; sfEl.classList.add("busy");
+  try{
+    // Nominatim asks for at most one request per second
+    const wait = 1100 - (Date.now() - lastSearch);
+    if(wait > 0) await new Promise(r => setTimeout(r, wait));
+    lastSearch = Date.now();
+    const url = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&accept-language="
+      + encodeURIComponent(navigator.language || "en") + "&q=" + encodeURIComponent(q);
+    const r = await fetch(url, {headers:{"Accept":"application/json"}});
+    if(!r.ok) throw new Error("HTTP " + r.status);
+    const list = await r.json();
+    if(!list.length) showEmpty();
+    else if(list.length === 1) goTo(L.latLng(parseFloat(list[0].lat), parseFloat(list[0].lon)), list[0].boundingbox);
+    else showResults(list);
+  }catch(e){
+    toast("Search failed. Check your connection.");
+  }finally{
+    searching = false; sfEl.classList.remove("busy");
+  }
+}
+sfEl.addEventListener("submit", e => { e.preventDefault(); doSearch(); });
+qEl.addEventListener("input", () => { $("qClear").hidden = !qEl.value; if(!qEl.value) closeResults(); });
+$("qClear").onclick = () => { qEl.value = ""; $("qClear").hidden = true; closeResults(); qEl.focus(); };
+
 /* ---------- settings ---------- */
 $("bUnit").onclick = () => { S.unit = S.unit === "m" ? "ft" : "m"; store.set("alt_settings", S); renderAll(); };
 $("bFmt").onclick = () => { S.fmt = S.fmt === "DD" ? "DMS" : "DD"; store.set("alt_settings", S); renderAll(); };
@@ -301,12 +415,15 @@ $("bLoc").onclick = () => {
   toast("Locating…");
   navigator.geolocation.getCurrentPosition(pos => {
     const c = pos.coords, ll = L.latLng(c.latitude, c.longitude);
-    map.setView(ll, Math.max(map.getZoom(), 16));
+    centerOn(ll, Math.max(map.getZoom(), 16));
     if(gpsMarker) gpsMarker.setLatLng(ll); else gpsMarker = L.marker(ll, {icon:L.divIcon({className:"", html:'<div class="gpsdot"></div>', iconSize:[16,16]}), interactive:false}).addTo(map);
     gps = c; $("gps").classList.add("show");
-    $("gA").textContent = c.altitude != null ? (S.unit === "m" ? Math.round(c.altitude) + " m" : Math.round(c.altitude * M2FT) + " ft") : "n/a";
-    $("gAcc").textContent = "±" + (S.unit === "m" ? Math.round(c.accuracy) + " m" : Math.round(c.accuracy * M2FT) + " ft");
+    $("gA").textContent = "…";
+    $("gRaw").textContent = c.altitude != null ? lenText(c.altitude) : "n/a";
+    $("gAcc").textContent = "±" + lenText(c.accuracy);
     layout();
+    // GPS altitude is measured from the WGS84 ellipsoid, not sea level, so use terrain data at the fix for the sea-level value
+    getElev(ll).then(e => { $("gA").textContent = lenText(e); }).catch(() => { $("gA").textContent = "n/a"; });
   }, err => toast(err.code === 1 ? "Location permission denied" : "Couldn't get a GPS fix"),
   {enableHighAccuracy:true, timeout:15000, maximumAge:0});
 };
