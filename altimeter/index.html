@@ -117,6 +117,18 @@ button{font:inherit;color:inherit;background:none;border:0}
 .rm .slash{display:none}
 .rm.off .slash{display:inline}
 .rm.off{background:var(--navy);color:#fff}
+/* measure distance */
+#side button.on{background:var(--navy)}
+#side button.on svg{stroke:#fff}
+.meas{display:none;margin-top:8px;padding:8px 12px;border-radius:14px;background:rgba(229,72,77,.08);border:1px solid rgba(229,72,77,.3)}
+.meas.show{display:block}
+.meas .top{display:flex;justify-content:space-between;align-items:center}
+.meas .pe{font-family:var(--num);font-size:26px;font-weight:700}
+.meas .info{font-size:12px;color:var(--mute);margin-top:2px}
+.meas .madd{margin-top:8px;width:100%;padding:11px 8px;border-radius:13px;font-size:14px;font-weight:700;border:1.5px solid #e5484d;color:#c92a2a}
+.meas .madd:active{background:#e5484d;color:#fff}
+.mdot{width:22px;height:22px;border-radius:50%;background:#e5484d;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.45);color:#fff;font:700 11px/18px var(--num);text-align:center}
+.mseg{position:absolute;transform:translate(-50%,-50%);padding:2px 6px;border-radius:8px;background:rgba(255,255,255,.92);border:1px solid rgba(229,72,77,.5);font:700 12px var(--num);color:#c92a2a;white-space:nowrap;pointer-events:none}
 /* compact layout */
 #sheet{padding:6px 16px 10px;max-height:60%}
 .grab{margin-bottom:6px}
@@ -149,6 +161,7 @@ button{font:inherit;color:inherit;background:none;border:0}
 
 <div id="side">
   <button class="glass" id="bLayer" aria-label="Switch map layer"><svg viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg></button>
+  <button class="glass" id="bMeasure" aria-label="Measure distance"><svg viewBox="0 0 24 24"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.4 2.4 0 0 1 0-3.4l2.6-2.6a2.4 2.4 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></svg></button>
   <button class="glass" id="bLoc" aria-label="My location"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
   <button class="glass" id="bIn" aria-label="Zoom in"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
   <button class="glass" id="bOut" aria-label="Zoom out"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
@@ -172,6 +185,13 @@ button{font:inherit;color:inherit;background:none;border:0}
     <div class="top"><span class="k">PINNED POINT</span><span class="pr"><span class="pe"><span id="pE">&ndash;</span><u class="unit">m</u></span><button type="button" class="rm" id="bPinVis" aria-label="Hide pin on map"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path class="slash" d="M4 4l16 16"/></svg></button><button type="button" class="rm" id="bUnpin" aria-label="Remove pin">&times;</button></span></div>
     <div class="pc" id="pC"></div>
     <div class="stats"><span>Δ vs center<b id="pD">&ndash;</b></span><span>Distance<b id="pDist">&ndash;</b></span></div>
+  </div>
+
+  <div class="meas" id="meas">
+    <div class="top"><span class="k">MEASURE DISTANCE</span><span class="pr"><span class="pe" id="mTotal">0 m</span><button type="button" class="rm" id="bMUndo" aria-label="Undo last point"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button><button type="button" class="rm" id="bMClear" aria-label="Clear measurement">&times;</button></span></div>
+    <div class="info" id="mInfo"></div>
+    <div class="stats" id="mStats" style="display:none"><span>Ascent<b id="mUp">&ndash;</b></span><span>Descent<b id="mDown">&ndash;</b></span><span>Net<b id="mNet">&ndash;</b></span></div>
+    <button type="button" class="madd" id="bMAdd">+ Add point at crosshair</button>
   </div>
 
   <div class="gps" id="gps">My elevation <b id="gA">&ndash;</b> &nbsp;·&nbsp; GPS raw <b id="gRaw">&ndash;</b> &nbsp;·&nbsp; <b id="gAcc">&ndash;</b></div>
@@ -303,7 +323,7 @@ function drawSaved(){
   savedGroup.clearLayers();
   saved.forEach(p => L.marker([p.lat, p.lng], {icon:L.divIcon({className:"", html:'<div class="savedot"></div>', iconSize:[12,12]})}).addTo(savedGroup));
 }
-function renderAll(){ renderUnits(); renderCenter(); renderList(); }
+function renderAll(){ renderUnits(); renderCenter(); renderList(); drawMeasure(false); }
 
 /* ---------- center tracking ---------- */
 let ctl = null, tmr = null;
@@ -332,7 +352,15 @@ async function setPin(ll){
   try{ const e = await getElev(ll); if(pin === mine){ pin.e = e; renderPin(); } }
   catch(e){ if(pin === mine){ toast("Couldn't load elevation for this point."); } }
 }
-map.on("click", e => { closeResults(); qEl.blur(); setPin(e.latlng); });
+map.on("click", e => {
+  closeResults(); qEl.blur();
+  if(!measuring){ setPin(e.latlng); return; }
+  // a double-tap (zoom) fires two clicks: ignore the second so it doesn't add a duplicate point
+  const n = Date.now(), cp = e.containerPoint;
+  if(n - mLastTap.t < 450 && Math.hypot(cp.x - mLastTap.x, cp.y - mLastTap.y) < 20) return;
+  mLastTap = {t:n, x:cp.x, y:cp.y};
+  addMeasurePoint(e.latlng);
+});
 $("bDrop").onclick = () => { if(pin) clearPin(); else setPin(center()); };
 function clearPin(){
   pin = null;
@@ -362,6 +390,117 @@ $("bCopy").onclick = async () => {
   try{ await navigator.clipboard.writeText(text); toast("Copied: " + text); }catch(e){ toast(text); }
 };
 
+
+/* ---------- measure distance ---------- */
+const measureGroup = L.layerGroup().addTo(map);
+const MCOLOR = "#e5484d", MAX_PTS = 100;
+let measuring = false, mPts = [], mLine = null, mMarkers = [], mLabels = [], mLastTap = {t:0, x:0, y:0};
+let mElev = null, mElevTimer = null, mElevSeq = 0;   // mElev: null | "loading" | "error" | {up, down, net} (meters)
+function mTotal(){
+  let d = 0;
+  for(let i = 1; i < mPts.length; i++) d += map.distance([mPts[i-1].lat, mPts[i-1].lng], [mPts[i].lat, mPts[i].lng]);
+  return d;
+}
+function renderMeasureCard(){
+  const n = mPts.length;
+  $("meas").classList.toggle("show", measuring || n > 0);
+  $("bMAdd").style.display = measuring ? "" : "none";
+  $("bMeasure").classList.toggle("on", measuring);
+  $("mTotal").textContent = distText(mTotal());
+  $("mInfo").textContent = n === 0 ? "Tap the map to place points"
+    : n === 1 ? "1 point · add another to measure"
+    : n + " points · drag a dot to adjust";
+  $("mStats").style.display = n >= 2 ? "" : "none";
+  if(mElev && mElev !== "loading" && mElev !== "error"){
+    $("mUp").textContent = lenText(mElev.up); $("mDown").textContent = lenText(mElev.down); $("mNet").textContent = deltaText(mElev.net);
+  }else{
+    const t = mElev === "error" ? "n/a" : "…";
+    $("mUp").textContent = $("mDown").textContent = $("mNet").textContent = t;
+  }
+}
+
+/* ascent / descent along the measured line: sample the line, read terrain elevation, add up the climbs */
+function sampleRoute(pts, step){
+  const out = [pts[0]];
+  for(let i = 1; i < pts.length; i++){
+    const a = pts[i-1], b = pts[i], d = map.distance([a.lat, a.lng], [b.lat, b.lng]), n = Math.max(1, Math.ceil(d / step));
+    for(let k = 1; k <= n; k++){ const t = k / n; out.push({lat:a.lat + (b.lat - a.lat) * t, lng:a.lng + (b.lng - a.lng) * t}); }
+  }
+  return out;
+}
+function ascDesc(elevs, thr){
+  // ignore wiggles smaller than thr meters (terrain data is ~90 m resolution and a bit noisy)
+  let anchor = elevs[0], up = 0, down = 0;
+  for(const e of elevs){
+    const d = e - anchor;
+    if(d >= thr){ up += d; anchor = e; } else if(d <= -thr){ down -= d; anchor = e; }
+  }
+  return {up, down};
+}
+function scheduleElev(){
+  clearTimeout(mElevTimer); const seq = ++mElevSeq;
+  if(mPts.length < 2){ mElev = null; renderMeasureCard(); return; }
+  mElev = "loading"; renderMeasureCard();
+  mElevTimer = setTimeout(() => computeElev(seq), 600);
+}
+async function computeElev(seq){
+  try{
+    const step = Math.max(30, mTotal() / 290);      // at most ~300 samples along the line
+    const samples = sampleRoute(mPts, step), elevs = [];
+    for(let i = 0; i < samples.length; i += 100){   // the elevation service takes up to 100 points per request
+      const part = samples.slice(i, i + 100);
+      const url = "https://api.open-meteo.com/v1/elevation?latitude=" + part.map(p => p.lat.toFixed(5)).join(",")
+        + "&longitude=" + part.map(p => p.lng.toFixed(5)).join(",");
+      const r = await fetch(url);
+      if(!r.ok) throw new Error("HTTP " + r.status);
+      elevs.push(...(await r.json()).elevation);
+      if(seq !== mElevSeq) return;
+    }
+    if(seq !== mElevSeq) return;
+    const {up, down} = ascDesc(elevs, 2);
+    mElev = {up, down, net:elevs[elevs.length - 1] - elevs[0]};
+  }catch(e){
+    if(seq !== mElevSeq) return;
+    mElev = "error";
+  }
+  renderMeasureCard();
+}
+function drawMeasure(rebuild){
+  const lls = mPts.map(p => [p.lat, p.lng]);
+  if(!mLine) mLine = L.polyline(lls, {color:MCOLOR, weight:4, opacity:.9, interactive:false}).addTo(measureGroup);
+  else mLine.setLatLngs(lls);
+  if(rebuild){
+    mMarkers.forEach(m => measureGroup.removeLayer(m));
+    mMarkers = mPts.map((p, i) => {
+      const m = L.marker([p.lat, p.lng], {icon:L.divIcon({className:"", html:'<div class="mdot">' + (i + 1) + '</div>', iconSize:[22,22]}), draggable:true, keyboard:false});
+      m.on("drag", () => {
+        const ll = m.getLatLng(); mPts[i] = {lat:ll.lat, lng:ll.lng};
+        mLine.setLatLngs(mPts.map(q => [q.lat, q.lng])); $("mTotal").textContent = distText(mTotal());
+      });
+      m.on("dragend", () => { drawMeasure(false); scheduleElev(); });
+      return m.addTo(measureGroup);
+    });
+  }
+  mLabels.forEach(l => measureGroup.removeLayer(l)); mLabels = [];
+  for(let i = 1; i < mPts.length; i++){
+    const a = mPts[i-1], b = mPts[i], d = map.distance([a.lat, a.lng], [b.lat, b.lng]);
+    mLabels.push(L.marker([(a.lat + b.lat) / 2, (a.lng + b.lng) / 2], {
+      icon:L.divIcon({className:"", html:'<div class="mseg">' + distText(d) + '</div>', iconSize:[0,0]}), interactive:false, keyboard:false
+    }).addTo(measureGroup));
+  }
+  renderMeasureCard();
+}
+function addMeasurePoint(ll){
+  if(mPts.length >= MAX_PTS){ toast("Max " + MAX_PTS + " points"); return; }
+  mPts.push({lat:ll.lat, lng:ll.lng}); drawMeasure(true); scheduleElev();
+}
+$("bMeasure").onclick = () => {
+  measuring = !measuring; renderMeasureCard();
+  toast(measuring ? "Measure on — tap the map to add points" : "Measure off");
+};
+$("bMAdd").onclick = () => addMeasurePoint(center());
+$("bMUndo").onclick = () => { if(mPts.length){ mPts.pop(); drawMeasure(true); scheduleElev(); } };
+$("bMClear").onclick = () => { mPts = []; drawMeasure(true); scheduleElev(); };
 
 /* ---------- address search ---------- */
 const qEl = $("q"), resEl = $("results"), sfEl = $("sf");
