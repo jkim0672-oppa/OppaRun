@@ -16,10 +16,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  # 1) Build: prepare files and upload them as the Pages artifact
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -30,10 +28,30 @@ jobs:
           sed -i "s/__BUILD_TIME__/$BUILD_TIME/g" Jennyrun/index.html
       - name: Setup Pages
         uses: actions/configure-pages@v5
+      # Keep @v3 here: it includes dotfiles (.well-known, .nojekyll).
+      # v4+ drops them unless include-hidden-files is set.
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: '.'
+
+  # 2) Deploy: runs as a separate job, so the artifact is visible by the time it starts
+  deploy:
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment_retry.outputs.page_url || steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
+        uses: actions/deploy-pages@v5
+        continue-on-error: true
+      # If the first try fails (e.g. artifact not visible yet), wait and try once more
+      - name: Wait before retry
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 20
+      - name: Deploy to GitHub Pages (retry)
+        id: deployment_retry
+        if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v5
