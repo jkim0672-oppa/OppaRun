@@ -385,6 +385,7 @@ function goTo(ll, bbox){
     }catch(e){ z = 16; }
   }
   closeResults(); qEl.blur();
+  userTouched = true;
   centerOn(ll, z);
   setPin(ll);
 }
@@ -446,12 +447,15 @@ $("bIn").onclick = () => map.zoomIn();
 $("bOut").onclick = () => map.zoomOut();
 
 /* ---------- GPS ---------- */
-$("bLoc").onclick = () => {
-  if(!navigator.geolocation){ toast("Location is not supported on this device"); return; }
-  toast("Locating…");
+let userTouched = false;   // true once the person drags/zooms/searches, so a late GPS fix never yanks the map away
+map.on("dragstart zoomstart", () => { userTouched = true; });
+function locate(auto){
+  if(!navigator.geolocation){ if(!auto) toast("Location is not supported on this device"); return; }
+  if(!auto) toast("Locating…");
   navigator.geolocation.getCurrentPosition(pos => {
     const c = pos.coords, ll = L.latLng(c.latitude, c.longitude);
-    centerOn(ll, Math.max(map.getZoom(), 16));
+    store.set("alt_lastpos", {lat:c.latitude, lng:c.longitude});
+    if(!(auto && userTouched)) centerOn(ll, Math.max(map.getZoom(), 16));
     if(gpsMarker) gpsMarker.setLatLng(ll); else gpsMarker = L.marker(ll, {icon:L.divIcon({className:"", html:'<div class="gpsdot"></div>', iconSize:[16,16]}), interactive:false}).addTo(map);
     gps = c; $("gps").classList.add("show");
     $("gA").textContent = "…";
@@ -461,8 +465,9 @@ $("bLoc").onclick = () => {
     // GPS altitude is measured from the WGS84 ellipsoid, not sea level, so use terrain data at the fix for the sea-level value
     getElev(ll).then(e => { $("gA").textContent = lenText(e); }).catch(() => { $("gA").textContent = "n/a"; });
   }, err => toast(err.code === 1 ? "Location permission denied" : "Couldn't get a GPS fix"),
-  {enableHighAccuracy:true, timeout:15000, maximumAge:0});
-};
+  {enableHighAccuracy:true, timeout:15000, maximumAge:auto ? 60000 : 0});
+}
+$("bLoc").onclick = () => locate(false);
 
 /* ---------- toast ---------- */
 function toast(msg){
@@ -470,7 +475,13 @@ function toast(msg){
   clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("on"), 2000);
 }
 
-drawSaved(); renderAll(); layout(); updateCenter();
+drawSaved(); renderAll(); layout();
+/* start at the current location: last known fix first (no Seoul flash), then a fresh GPS fix */
+const lastPos = store.get("alt_lastpos", null);
+if(lastPos && isFinite(lastPos.lat) && isFinite(lastPos.lng)) centerOn(L.latLng(lastPos.lat, lastPos.lng), 16, false);
+userTouched = false;   // the jump above fires zoomstart too; it is not a user action
+updateCenter();
+locate(true);
 </script>
 </body>
 </html>
