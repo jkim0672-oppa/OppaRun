@@ -4262,7 +4262,7 @@ const _hasRef = !!(opts && typeof opts.refVal === 'number' && isFinite(opts.refV
 if (_hasRef) { if (opts.refVal < min) min = opts.refVal; if (opts.refVal > max) max = opts.refVal; }
 // [추가 2026-11-26] opts.markPt {idx(소수 가능, 값 인덱스 기준), v}: 묶인 그래프에서 평균에 묻힌 원본 최고값(예: 최고 100m)을 노란 점으로 표시. 세로 범위에 포함시킨다.
 const _mk = (opts && opts.markPt && !bucketed && typeof opts.markPt.v === 'number' && isFinite(opts.markPt.v) && typeof opts.markPt.idx === 'number') ? opts.markPt : null;
-if (_mk) { if (_mk.v < min) min = _mk.v; if (_mk.v > max) max = _mk.v; }
+// [수정 2026-11-26] 노란 점을 선 위에 찍도록 바꿔서, 더 이상 최고 100m 값(_mk.v)으로 세로 범위를 늘리지 않는다(선이 납작해지던 원인).
 if (max - min < 1e-6) { min -= 1; max += 1; }
 // [수정 2026-11-10] 선이 그래프 위쪽에 몰려 보이던 문제 개선:
 //  1) 위/아래 여백(Y_TOP/Y_BOT)을 둬서 실제 데이터 구간(min~max)이 박스 가운데쪽에 그려지게 함(위 라벨·바닥과 안 붙음).
@@ -4455,7 +4455,24 @@ return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style=
   + edgeSvg
   + '<path d="' + _lineD(firstCore, lastCore) + '" fill="none" stroke="' + colorHex + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>'
   + dotsSvg
-  + (_mk ? '<path d="M ' + _f1(Math.min(W - PAD, Math.max(PAD, PAD + _mk.idx * xStep))) + ',' + _f1(yFor(_mk.v)) + ' h0.01" fill="none" stroke="#FFD60A" stroke-width="7" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>' : '')
+  + (_mk ? (function () {
+      // [수정 2026-11-26] 노란 점을 최고 100m '값' 높이(선 위로 떠 있던 자리)가 아니라, 그 x 위치의 '선' 위에 얹는다.
+      // x는 기존과 동일(값 인덱스 기준), y는 이웃한 두 데이터 점 사이를 보간해 선 높이에 맞춘다.
+      const mx = Math.min(W - PAD, Math.max(PAD, PAD + _mk.idx * xStep));
+      let my = _xy[_xy.length - 1][1];
+      for (let k = 0; k < _xy.length - 1; k++) {
+        if (mx >= _xy[k][0] && mx <= _xy[k + 1][0]) {
+          const dx = _xy[k + 1][0] - _xy[k][0];
+          my = dx ? _xy[k][1] + (_xy[k + 1][1] - _xy[k][1]) * (mx - _xy[k][0]) / dx : _xy[k][1];
+          break;
+        }
+        if (mx < _xy[0][0]) { my = _xy[0][1]; break; }
+      }
+      const at = 'M ' + _f1(mx) + ',' + _f1(my) + ' h0.01" fill="none" stroke="';
+      // 어두운 테두리를 먼저 깔아서 초록 선·점과 구분되게 한 뒤 노란 점을 올린다.
+      return '<path d="' + at + '#111" stroke-width="9" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>'
+        + '<path d="' + at + '#FFD60A" stroke-width="7" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>';
+    })() : '')
   + '</svg>';
 }
 // [추가 2026-10-31] 긴 러닝 구간 묶기: 어떤 거리든 그래프 점/목록이 최대 10개 안팎이 되도록
