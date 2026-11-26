@@ -4260,6 +4260,9 @@ if (scaleFloor && (max - min) < scaleFloor) {
 // [추가 2026-11-08] opts.refVal: 확대 화면의 비교용 기준선(예: EI "최근 5회 평균"). 선이 그래프 밖에 걸리지 않게 세로 범위에 포함한다. 안 넘기면 아무 일도 없다.
 const _hasRef = !!(opts && typeof opts.refVal === 'number' && isFinite(opts.refVal));
 if (_hasRef) { if (opts.refVal < min) min = opts.refVal; if (opts.refVal > max) max = opts.refVal; }
+// [추가 2026-11-26] opts.markPt {idx(소수 가능, 값 인덱스 기준), v}: 묶인 그래프에서 평균에 묻힌 원본 최고값(예: 최고 100m)을 노란 점으로 표시. 세로 범위에 포함시킨다.
+const _mk = (opts && opts.markPt && !bucketed && typeof opts.markPt.v === 'number' && isFinite(opts.markPt.v) && typeof opts.markPt.idx === 'number') ? opts.markPt : null;
+if (_mk) { if (_mk.v < min) min = _mk.v; if (_mk.v > max) max = _mk.v; }
 if (max - min < 1e-6) { min -= 1; max += 1; }
 // [수정 2026-11-10] 선이 그래프 위쪽에 몰려 보이던 문제 개선:
 //  1) 위/아래 여백(Y_TOP/Y_BOT)을 둬서 실제 데이터 구간(min~max)이 박스 가운데쪽에 그려지게 함(위 라벨·바닥과 안 붙음).
@@ -4452,6 +4455,7 @@ return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style=
   + edgeSvg
   + '<path d="' + _lineD(firstCore, lastCore) + '" fill="none" stroke="' + colorHex + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>'
   + dotsSvg
+  + (_mk ? '<path d="M ' + _f1(Math.min(W - PAD, Math.max(PAD, PAD + _mk.idx * xStep))) + ',' + _f1(yFor(_mk.v)) + ' h0.01" fill="none" stroke="#FFD60A" stroke-width="7" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>' : '')
   + '</svg>';
 }
 // [추가 2026-10-31] 긴 러닝 구간 묶기: 어떤 거리든 그래프 점/목록이 최대 10개 안팎이 되도록
@@ -4590,8 +4594,8 @@ function buildDiagGraphFsPlotHtml(svg, lay, o) {
     const midX = '50%';
     head = '<div style="position:relative;height:28px;">'
       + bar(lay.half.r1) + bar(lay.half.r2)
-      + '<div style="position:absolute;top:0;left:0;text-align:left;white-space:nowrap;font-size:var(--fs-xs);font-weight:900;color:#e6e6e6;">' + (ko ? '전반 평균 ' : '1st half avg ') + fmt(lay.half.v1) + '</div>'
-      + '<div style="position:absolute;top:0;left:' + midX + ';right:2px;text-align:left;white-space:nowrap;overflow:hidden;font-size:var(--fs-xs);font-weight:900;color:#e6e6e6;">' + (ko ? '후반 평균 ' : '2nd half avg ') + fmt(lay.half.v2) + '</div>'
+      + (o.hideHalfLabels ? '' : '<div style="position:absolute;top:0;left:0;text-align:left;white-space:nowrap;font-size:var(--fs-xs);font-weight:900;color:#e6e6e6;">' + (ko ? '전반 평균 ' : '1st half avg ') + fmt(lay.half.v1) + '</div>')
+      + (o.hideHalfLabels ? '' : '<div style="position:absolute;top:0;left:' + midX + ';right:2px;text-align:left;white-space:nowrap;overflow:hidden;font-size:var(--fs-xs);font-weight:900;color:#e6e6e6;">' + (ko ? '후반 평균 ' : '2nd half avg ') + fmt(lay.half.v2) + '</div>')
       + '</div>';
   }
   // 방향 안내(빠름/느림 등): ▲▼ 글리프는 기기 폰트에 따라 크게 나와 옆 라벨을 가리므로 CSS 삼각형으로 그린다.
@@ -11284,7 +11288,19 @@ const _gPow = _G.grouped ? _gS.map(s => (typeof s.power === 'number' ? s.power :
 const _gNoEdge = new Set();
 const _gSliver = _G.grouped ? addSliverEdge(_gS, _gNoEdge) : _gNoEdge;
 const _gEdgePace = _G.grouped ? _gSliver : _edgePace, _gEdgeCad = _G.grouped ? _gSliver : _edgeCad, _gEdgeHr = _G.grouped ? _gSliver : _edgeHr, _gEdgePow = _G.grouped ? _gSliver : _edgePow;
-const paceSparkSvg = buildSparklineSVG(_gPace, '#00ff88', true, undefined, undefined, _gTimes, { edge: _gEdgePace, half: _G.remapHalf(_pm.paceHalf), minRangePct: GRAPH_MIN_RANGE_PCT.pace });
+// [추가 2026-11-26] 묶인(1km 등) 그래프에서 평균에 묻히는 최고 100m를 노란 점으로 표시(원본 100m 값 그대로, 위치는 구간 안에서 보간)
+const _b100N = (_G.grouped && typeof window.calcBest100Info === 'function') ? window.calcBest100Info(_splitsForGraph) : null;
+let _b100Mark = null;
+if (_b100N && _b100N.kmFrom != null && _b100N.kmTo != null) {
+  const _kp = (_b100N.kmFrom + _b100N.kmTo) / 2;
+  for (let k = 0; k < _gS.length; k++) {
+    const ke = parseFloat(_gS[k].km); if (!isFinite(ke) || ke < _kp) continue;
+    const ks = k > 0 ? parseFloat(_gS[k - 1].km) : ke;
+    _b100Mark = { idx: (k > 0 && ke > ks) ? (k - 1 + (_kp - ks) / (ke - ks)) : k, v: _b100N.val };
+    break;
+  }
+}
+const paceSparkSvg = buildSparklineSVG(_gPace, '#00ff88', true, undefined, undefined, _gTimes, { edge: _gEdgePace, half: _G.remapHalf(_pm.paceHalf), minRangePct: GRAPH_MIN_RANGE_PCT.pace, markPt: _b100Mark || undefined });
 const cadSparkSvg = buildSparklineSVG(_gCad, '#4fc3f7', false, undefined, undefined, _gTimes, { edge: _gEdgeCad, half: _G.remapHalf(_pm.cadHalf), minRangePct: GRAPH_MIN_RANGE_PCT.cad });
 const hrSparkSvg = buildSparklineSVG(_gHr, '#e53935', false, undefined, undefined, _gTimes, { edge: _gEdgeHr, half: _G.remapHalf(_pm.hrHalf), minRangePct: GRAPH_MIN_RANGE_PCT.hr });
 const altSparkSvg = buildSparklineSVG(_gS.map(s => (typeof s.altTo === 'number' ? s.altTo : null)), '#90a4ae', false, undefined, undefined, _gTimes, { minRange: 10 }); // [수정 2026-10-21] 최소 세로 폭 10m: 평지 런의 1~2m 잔떨림이 큰 오르내림처럼 보이지 않게
@@ -11297,10 +11313,11 @@ const _koN = storage.getLang() === 'ko';
 const _fmtPaceN = (sec) => { const tt = Math.round(sec); return Math.floor(tt / 60) + "'" + String(tt % 60).padStart(2, '0') + '"'; };
 const _sgnN = (v) => v > 0 ? '+' : (v < 0 ? '\u2212' : '');
 const _noteWrap = (txt) => '<div style="font-size:var(--fs-xxs);color:#aaa;font-weight:700;margin-top:6px;">' + txt + '</div>';
-const paceNoteHtml = _pm.paceHalf ? _noteWrap(
+const _paceNoteBase = _pm.paceHalf ? _noteWrap(
   (_koN ? '전반 ' : '1st half ') + _fmtPaceN(_pm.paceHalf.v1) + ' \u2192 ' + (_koN ? '후반 ' : '2nd half ') + _fmtPaceN(_pm.paceHalf.v2)
   + ' (' + _sgnN(_pm.splitDiff) + Math.abs(_pm.splitDiff) + (_koN ? '초' : 's') + ')'
   + (_pm.paceStab ? ' \u00b7 ' + (_koN ? '안정성 \u00b1' : 'stability \u00b1') + _pm.paceStab.sec + (_koN ? '초' : 's') : '')) : '';
+const paceNoteHtml = _paceNoteBase + (_b100N ? '<div style="font-size:var(--fs-xxs);color:#FFD60A;font-weight:700;margin-top:2px;">\u25cf ' + (_koN ? '최고 100m: ' : 'Best 100m: ') + (_b100N.kmFrom != null && _b100N.kmTo != null ? _b100N.kmFrom.toFixed(1) + '~' + _b100N.kmTo.toFixed(1) + 'km \u00b7 ' : '') + _fmtPaceN(_b100N.val) + '</div>' : '');
 const cadNoteHtml = _pm.cadHalf ? _noteWrap(
   (_koN ? '전반 ' : '1st ') + Math.round(_pm.cadHalf.v1) + ' \u2192 ' + (_koN ? '후반 ' : '2nd ') + Math.round(_pm.cadHalf.v2) + ' SPM'
   + ' (' + _sgnN(Math.round(_pm.cadDrift * 10) / 10) + Math.abs(Math.round(_pm.cadDrift * 10) / 10).toFixed(1) + '%)') : '';
@@ -25180,15 +25197,19 @@ if (subEl) subEl.textContent = this.formatRecordDateTimeLocalized(r.date) + (r.d
 // [수정 2026-09-25] 위 AVG와 동일한 이유로 공식 값을 우선 사용해 스탯카드/그래프 라벨이 서로도 어긋나지 않게 함.
 const _lblAvg = _hasOfficialAvg ? _officialAvg : (validVals.length ? validVals.reduce((a, b) => a + b, 0) / validVals.length : null);
 const _lblBest = validVals.length ? (invert ? Math.min(...validVals) : Math.max(...validVals)) : null;
-const _plotHtml = buildDiagGraphFsPlotHtml(svg, lay, { ko: koLang, fmt: fmt, invert: invert, heightPx: 150, avgVal: _lblAvg, bestVal: _lblBest, bestLabel: (G.grouped && (metricKey === 'pace' || metricKey === 'cadence' || metricKey === 'power')) ? (koLang ? '구간 최고 ' : 'Best split ') : undefined, info: rowInfo.map((x, i) => (i + 1) + ' \u00b7 ' + x.dist + ' \u00b7 ' + x.time + ' \u00b7 ' + x.val + (metricKey === 'ei' ? '<br><span style="color:#bbb;font-weight:700;">' + x.pace + ' \u00b7 ' + x.hr + ' bpm</span>' : '')) });
+let _plotOptsCap = null;
+const _plotHtml = buildDiagGraphFsPlotHtml(svg, lay, _plotOptsCap = { ko: koLang, fmt: fmt, invert: invert, heightPx: 150, avgVal: _lblAvg, bestVal: _lblBest, bestLabel: (G.grouped && (metricKey === 'pace' || metricKey === 'cadence' || metricKey === 'power')) ? (koLang ? '구간 최고 ' : 'Best split ') : undefined, info: rowInfo.map((x, i) => (i + 1) + ' \u00b7 ' + x.dist + ' \u00b7 ' + x.time + ' \u00b7 ' + x.val + (metricKey === 'ei' ? '<br><span style="color:#bbb;font-weight:700;">' + x.pace + ' \u00b7 ' + x.hr + ' bpm</span>' : '')) });
 // [실험D] 점이 많으면(점당 30px 고정 폭) 그래프+하단 축을 한 덩어리로 좌우 스크롤. 열릴 때 최고 200m 구간 중앙으로 이동.
 const _PT_PX = 18;
 const _availPx = Math.max(240, Math.min(window.innerWidth || 360, 640) - 60); // 화면 좌우 여백+그래프 박스 안쪽 여백을 뺀 가로 폭
 const _scrollW = splits.length * _PT_PX;
-let _scrollMode = false;
+let _scrollMode = false, _plotHtmlS = '', _pinHalf = '';
 if (svgWrapEl) {
   if (_detail && lay && lay.pts && _scrollW > _availPx) {
     _scrollMode = true;
+    // [수정 2026-11-26] 스크롤하면 전/후반 평균 글자가 화면 밖으로 밀려나던 문제: 글자는 스크롤 밖 고정 줄로, 막대선만 스크롤 안에 둔다.
+    _plotHtmlS = buildDiagGraphFsPlotHtml(svg, lay, Object.assign({}, _plotOptsCap, { hideHalfLabels: true }));
+    if (lay.half) _pinHalf = '<div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:2px;font-size:var(--fs-xs);font-weight:900;color:#e6e6e6;white-space:nowrap;"><span>' + (koLang ? '전반 평균 ' : '1st half avg ') + fmt(lay.half.v1) + '</span><span>' + (koLang ? '후반 평균 ' : '2nd half avg ') + fmt(lay.half.v2) + '</span></div>';
     const _totKm = parseFloat(splits[splits.length - 1].km) || 1;
     const _pxPerKm = _scrollW / _totKm;
     const _lblStepKm = [0.5, 1, 2, 5, 10].find(v => v * _pxPerKm >= 64) || 10;
@@ -25202,7 +25223,7 @@ if (svgWrapEl) {
       const tt = sp.t_sec != null ? sp.t_sec : 0;
       _ax += '<span style="position:absolute;top:0;left:' + (pt.x / lay.W * 100).toFixed(2) + '%;transform:translateX(' + (ii === 0 ? '0' : '-50%') + ');white-space:nowrap;font-size:var(--fs-xs);color:#aaa;font-weight:700;line-height:1.4;text-align:center;">' + _dv(kmv) + (_isMile ? 'mi' : 'km') + '<br>' + fmtDiagAxisTime(tt) + '</span>';
     });
-    svgWrapEl.innerHTML = '<div id="dgfs-scroller" style="overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;padding-bottom:2px;"><div style="width:' + _scrollW + 'px;">' + _plotHtml + '<div style="position:relative;height:34px;margin-top:4px;">' + _ax + '</div></div></div>';
+    svgWrapEl.innerHTML = _pinHalf + '<div id="dgfs-scroller" style="overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;padding-bottom:2px;"><div style="width:' + _scrollW + 'px;">' + _plotHtmlS + '<div style="position:relative;height:34px;margin-top:4px;">' + _ax + '</div></div></div>';
     noteHtml = '<span style="color:#888;">\u2190 ' + (koLang ? '좌우로 밀어서 전체 구간 보기' : 'Swipe to scroll') + '</span>' + (noteHtml ? '<br>' + noteHtml : '');
   } else {
     svgWrapEl.innerHTML = _plotHtml;
