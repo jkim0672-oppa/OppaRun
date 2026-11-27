@@ -24980,35 +24980,35 @@ function buildPaceBarChartHtml(o) {
   if (hi - lo < minR) { const c = (hi + lo) / 2; lo = c - minR / 2; hi = c + minR / 2; }
   const pad = (hi - lo) * 0.12, top = lo - pad, bot = hi + pad;
   const CH = 130, EH = 36, GAP = 8;
-  const barH = (v) => CH * Math.min(1, Math.max(0.03, (bot - v) / (bot - top)));
+  const inv = o.invert !== false, barH = (v) => CH * Math.min(1, Math.max(0.03, (inv ? (bot - v) : (v - top)) / (bot - top)));
   const alt = sp.map(x => (typeof x.altDiff === 'number' && isFinite(x.altDiff)) ? x.altDiff : 0);
   const altS = alt.map((v, i) => { let a = 0, c = 0; for (let k = i - 1; k <= i + 1; k++) if (k >= 0 && k < n) { a += alt[k]; c++; } return a / c; });
   const altMax = Math.max(3, Math.max.apply(null, altS.map(Math.abs)));
   const hasAlt = Math.max.apply(null, altS.map(Math.abs)) >= 1;
   const H = CH + (hasAlt ? GAP + EH : 0);
   const avail = o.availPx, pitch = Math.max(6, Math.min(16, avail / n)), W = Math.round(n * pitch * 10) / 10, scroll = W > avail + 1, bw = pitch * 0.74;
-  const hrRaw = sp.map(x => (typeof x.avgHr === 'number' && x.avgHr > 0) ? x.avgHr : null);
+  const hrRaw = o.lineVals || sp.map(x => (typeof x.avgHr === 'number' && x.avgHr > 0) ? x.avgHr : null), lineInv = !!o.lineInvert, lineMinR = o.lineMinR || 20, lineClr = o.lineColor || '#ff5c7a';
   const hrN = hrRaw.filter(v => v != null).length;
   const hr = hrRaw.map((v, i) => { if (v == null) return null; let a = 0, c = 0; for (let k = i - 1; k <= i + 1; k++) if (hrRaw[k] != null) { a += hrRaw[k]; c++; } return a / c; });
   let hrMin = 0, hrMax = 0, hrLo = 0, hrHi = 0;
-  if (hrN >= 3) { const hv = hr.filter(v => v != null); hrMin = hrLo = Math.min.apply(null, hv); hrMax = hrHi = Math.max.apply(null, hv); if (hrHi - hrLo < 20) { const c = (hrHi + hrLo) / 2; hrLo = c - 10; hrHi = c + 10; } }
+  if (hrN >= 3) { const hv = hr.filter(v => v != null); hrMin = hrLo = Math.min.apply(null, hv); hrMax = hrHi = Math.max.apply(null, hv); if (hrHi - hrLo < lineMinR) { const c = (hrHi + hrLo) / 2; hrLo = c - lineMinR / 2; hrHi = c + lineMinR / 2; } }
   const kmOf = (i) => { const k = parseFloat(sp[i].km); return isFinite(k) ? k : null; };
   const isBest = new Set(), b = o.best;
   if (b && b.kmFrom != null && b.kmTo != null) { for (let i = 0; i < n; i++) { const k1 = kmOf(i), k0 = i > 0 ? kmOf(i - 1) : 0; if (k1 != null && k0 != null && k1 > b.kmFrom + 1e-6 && k0 < b.kmTo - 1e-6) isBest.add(i); } }
   let bestVal = b && isBest.size ? b.val : null, bestLabel = ko ? '최고 ' : 'Best ';
-  if (!isBest.size) { let bi = -1; vals.forEach((v, i) => { if (okV(v) && !edge.has(i) && (bi < 0 || v < vals[bi])) bi = i; }); if (bi >= 0) { isBest.add(bi); bestVal = vals[bi]; if (o.grouped) bestLabel = ko ? '구간 최고 ' : 'Best split '; } }
+  if (!isBest.size) { let bi = -1; vals.forEach((v, i) => { if (okV(v) && !edge.has(i) && (bi < 0 || (inv ? v < vals[bi] : v > vals[bi]))) bi = i; }); if (bi >= 0) { isBest.add(bi); bestVal = vals[bi]; if (o.grouped) bestLabel = ko ? '구간 최고 ' : 'Best split '; } }
   let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="display:block;width:' + (scroll ? W + 'px' : '100%') + ';height:' + H + 'px;">';
   svg += '<line x1="0" y1="' + CH + '" x2="' + W + '" y2="' + CH + '" stroke="#333" stroke-width="1" vector-effect="non-scaling-stroke"/>';
   vals.forEach((v, i) => {
     if (!okV(v)) return;
     const h = barH(v), best = isBest.has(i);
-    svg += '<rect x="' + (i * pitch + (pitch - bw) / 2).toFixed(2) + '" y="' + (CH - h).toFixed(1) + '" width="' + bw.toFixed(2) + '" height="' + h.toFixed(1) + '" fill="' + (best ? '#FFD60A' : '#00ff88') + '" fill-opacity="' + (edge.has(i) ? 0.28 : (best ? 1 : 0.78)) + '"/>';
+    svg += '<rect x="' + (i * pitch + (pitch - bw) / 2).toFixed(2) + '" y="' + (CH - h).toFixed(1) + '" width="' + bw.toFixed(2) + '" height="' + h.toFixed(1) + '" fill="' + (best ? '#FFD60A' : (o.barColor || '#00ff88')) + '" fill-opacity="' + (edge.has(i) ? 0.28 : (best ? 1 : 0.78)) + '"/>';
   });
   if (okV(o.avgVal)) { const ay = (CH - barH(o.avgVal)).toFixed(1); svg += '<line x1="0" y1="' + ay + '" x2="' + W + '" y2="' + ay + '" stroke="#ccc" stroke-width="1" stroke-dasharray="4 3" opacity="0.8" vector-effect="non-scaling-stroke"/>'; }
   if (hrN >= 3) {
     let d = '';
-    hr.forEach((v, i) => { if (v == null) return; d += ((d && hr[i - 1] != null) ? 'L' : 'M') + (i * pitch + pitch / 2).toFixed(1) + ' ' + (CH * 0.94 - (v - hrLo) / (hrHi - hrLo) * CH * 0.84).toFixed(1); });
-    svg += '<path d="' + d + '" fill="none" stroke="#ff5c7a" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>';
+    hr.forEach((v, i) => { if (v == null) return; d += ((d && hr[i - 1] != null) ? 'L' : 'M') + (i * pitch + pitch / 2).toFixed(1) + ' ' + (CH * 0.94 - (lineInv ? (hrHi - v) : (v - hrLo)) / (hrHi - hrLo) * CH * 0.84).toFixed(1); });
+    svg += '<path d="' + d + '" fill="none" stroke="' + lineClr + '" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>';
   }
   if (hasAlt) {
     const mid = CH + GAP + EH / 2;
@@ -25029,7 +25029,7 @@ function buildPaceBarChartHtml(o) {
     marks += '<div class="dgfs-dot" data-i="' + i + '" style="position:absolute;left:' + pX(i * pitch + (pitch - bw) / 2) + ';width:' + (bw / W * 100).toFixed(2) + '%;top:' + pY(yT) + ';height:' + ((CH - yT) / H * 100).toFixed(2) + '%;background:#FFD60A;box-shadow:0 0 0 1px #fff;"></div>';
     const r = o.rows[i];
     let t = (i + 1) + ' \u00b7 ' + r.dist + ' \u00b7 ' + r.time + ' \u00b7 ' + r.val;
-    if (hrRaw[i] != null) t += ' \u00b7 ' + Math.round(hrRaw[i]) + ' bpm';
+    if (hrRaw[i] != null) t += ' \u00b7 ' + (o.lineFmt ? o.lineFmt(hrRaw[i]) : Math.round(hrRaw[i]) + ' bpm');
     if (hasAlt) t += ' \u00b7 ' + (alt[i] >= 0 ? '+' : '\u2212') + Math.abs(alt[i]).toFixed(1) + ' m';
     const fy = yT / H, xp = x / W;
     const ty = fy < 0.3 ? '' : 'translateY(-100%)';
@@ -25053,9 +25053,9 @@ function buildPaceBarChartHtml(o) {
     ax += '<span style="position:absolute;top:0;left:' + pX(x) + ';transform:translateX(' + (x < 30 ? '0' : (x > W - 30 ? '-100%' : '-50%')) + ');white-space:nowrap;font-size:var(--fs-xs);color:#aaa;font-weight:700;line-height:1.4;text-align:center;">' + o.dv(kmv) + (o.isMile ? 'mi' : 'km') + '<br>' + fmtDiagAxisTime(tt) + '</span>';
   }
   const sw = (c) => '<i style="display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;background:' + c + ';"></i>';
-  let lg = '<span>' + sw('rgba(0,255,136,0.78)') + (ko ? '페이스 (높을수록 빠름)' : 'PACE (taller = faster)') + '</span>';
+  let lg = '<span>' + sw(o.barColor || '#00ff88') + (o.barLabel || (ko ? '페이스 (높을수록 빠름)' : 'PACE (taller = faster)')) + '</span>';
   if (okV(o.avgVal)) lg += '<span style="color:#ccc;">' + (ko ? '점선 평균 ' : 'Dashed = avg ') + fmt(o.avgVal) + '</span>';
-  if (hrN >= 3) lg += '<span style="color:#ff5c7a;">' + sw('#ff5c7a') + (ko ? '심박 ' : 'HR ') + Math.round(hrMin) + '\u2013' + Math.round(hrMax) + '</span>';
+  if (hrN >= 3) lg += '<span style="color:' + lineClr + ';">' + sw(lineClr) + (o.lineLabel || (ko ? '심박' : 'HR')) + ' ' + (o.lineRange ? o.lineRange(hrMin, hrMax) : Math.round(hrMin) + '\u2013' + Math.round(hrMax)) + '</span>';
   if (hasAlt) lg += '<span style="color:#80cbc4;">' + sw('#80cbc4') + (ko ? '고도 ' : 'ELEV ') + ((typeof o.asc === 'number' && typeof o.desc === 'number') ? ('+' + o.asc + ' / \u2212' + o.desc + ' m') : '') + '</span>';
   const body = '<div style="position:relative;margin-top:16px;width:' + (scroll ? W + 'px' : '100%') + ';height:' + H + 'px;">' + svg
     + '<div style="position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;">' + hits + lbl + marks + '</div></div>'
@@ -25314,9 +25314,23 @@ let _scrollW = splits.length * _PT_PX;
 let _scrollMode = false, _plotHtmlS = '', _pinHalf = '';
 // [추가 2026-11-26] 페이스 확대 화면 기본 스타일 = 막대(Smashrun식). 칩으로 선 그래프와 전환(profile.diagGraphStyle).
 let _dgStyle = 'bar'; try { _dgStyle = storage.loadProfile().diagGraphStyle === 'line' ? 'line' : 'bar'; } catch (e) {}
+// [수정 2026-11-27] 페이스·케이던스·파워·심박을 같은 막대형으로: 막대=해당 지표, 선=연관 지표(페이스 화면은 심박, 나머지는 페이스), 아래=고도 오르내림.
+const _isBarMetric = metricKey === 'pace' || metricKey === 'cadence' || metricKey === 'power' || metricKey === 'hr';
 let _barRes = null;
-if (svgWrapEl && metricKey === 'pace' && _dgStyle === 'bar') {
-  try { _barRes = buildPaceBarChartHtml({ ko: koLang, fmt: fmt, splits: splits, vals: vals, edge: edge, minRangePct: minRangePct, avgVal: _lblAvg, availPx: _availPx, grouped: G.grouped, best: (G.grouped ? null : window.calcBest200Info(rawSplits, 'pace')), rows: rowInfo, dv: _dv, isMile: _isMile, asc: r.totalAscent, desc: r.totalDescent }); } catch (e) { _barRes = null; }
+if (svgWrapEl && _isBarMetric && _dgStyle === 'bar') {
+  try {
+    const _pf = (v) => { if (v == null || !isFinite(v)) return '--'; const sec = Math.round(v); let str = Math.floor(sec / 60) + "'" + String(sec % 60).padStart(2, '0') + '"'; if (this.currentUnit === 'mile') str = this.convertPaceToUnit(str, 'mile'); return str; };
+    const _lineHr = metricKey === 'pace';
+    const _lineVals = splits.map(s => { const v = _lineHr ? s.avgHr : paceStrToSeconds(s.pace); return (typeof v === 'number' && isFinite(v) && v > 0) ? v : null; });
+    _barRes = buildPaceBarChartHtml({ ko: koLang, fmt: fmt, splits: splits, vals: vals, edge: edge, minRangePct: minRangePct, avgVal: _lblAvg, availPx: _availPx, grouped: G.grouped,
+      best: ((G.grouped || metricKey === 'hr') ? null : window.calcBest200Info(rawSplits, metricKey)),
+      invert: invert, barColor: color,
+      barLabel: metricKey === 'pace' ? undefined : (metricKey === 'cadence' ? (koLang ? '케이던스' : 'CADENCE') : (metricKey === 'power' ? (koLang ? '파워' : 'POWER') : (koLang ? '심박' : 'HEART RATE'))),
+      lineVals: _lineVals, lineInvert: !_lineHr, lineColor: _lineHr ? '#ff5c7a' : '#00ff88', lineLabel: _lineHr ? (koLang ? '심박' : 'HR') : (koLang ? '페이스(선)' : 'Pace line'), lineMinR: 20,
+      lineFmt: _lineHr ? ((v) => Math.round(v) + ' bpm') : _pf,
+      lineRange: _lineHr ? ((a, b) => Math.round(a) + '\u2013' + Math.round(b)) : ((a, b) => _pf(a) + '\u2013' + _pf(b)),
+      rows: rowInfo, dv: _dv, isMile: _isMile, asc: r.totalAscent, desc: r.totalDescent });
+  } catch (e) { _barRes = null; }
 }
 if (svgWrapEl && _barRes) {
   svgWrapEl.innerHTML = _barRes.html; _scrollMode = _barRes.scroll; _scrollW = _barRes.scrollW;
@@ -25369,7 +25383,7 @@ const _ztEl = document.getElementById('diag-graph-fs-zoomtoggle');
 if (_ztEl) {
   _ztEl.innerHTML = '<button type="button" class="' + (_detail ? '' : 'on') + '" onclick="diagGraphFsSetDetail(false)">' + (koLang ? '기본' : 'STANDARD') + '</button>'
     + '<button type="button" class="' + (_detail ? 'on' : '') + '" onclick="diagGraphFsSetDetail(true)">' + (koLang ? '상세 (100m)' : 'DETAIL (100 m)') + '</button>'
-    + (metricKey === 'pace' ? '<button type="button" class="' + (_dgStyle === 'line' ? 'on' : '') + '" onclick="diagGraphFsSetStyle(\'' + (_dgStyle === 'line' ? 'bar' : 'line') + '\')">' + (koLang ? '선' : 'LINE') + '</button>' : '');
+    + (_isBarMetric ? '<button type="button" class="' + (_dgStyle === 'line' ? 'on' : '') + '" onclick="diagGraphFsSetStyle(\'' + (_dgStyle === 'line' ? 'bar' : 'line') + '\')">' + (koLang ? '선' : 'LINE') + '</button>' : '');
 }
 if (!isRerender) { try { history.pushState({ jrPage: 'diagGraphFull' }, ''); } catch (e) {} } // 전환 시 다시 그릴 때는 history를 쌓지 않음(CLOSE 한 번에 닫히게)
 };
