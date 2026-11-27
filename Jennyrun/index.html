@@ -2437,7 +2437,7 @@ button[style*="--danger"]:active, button[style*="#e57373"]:active, .c33:active, 
 <div class="diag-card dc-metric"><div id="info-lean-title" class="u-title-primary">UNDERSTANDING LEAN ANGLE</div><div id="info-lean-desc" class="u-desc-sm">LEAN ANGLE shows your forward lean, plus total lean and lateral sway alongside. Forward lean: 4-8° good, 8-12° borderline, 12°+ excessive. Lateral sway: under 5° fine, 10°+ may signal weak core/hip stability.</div></div>
 <div class="diag-card dc-metric"><div id="info-pacing-title" class="u-title-primary">UNDERSTANDING PACING METRICS</div><div id="info-pacing-desc" class="u-desc-sm">Pace stability is how much your 100 m split pace swings (±sec). Split diff is 2nd-half minus 1st-half pace (negative = negative split). Cadence drift is how much cadence changed in the 2nd half. HR drift is how much heart rate rose in the 2nd half (10+ min runs only).</div></div>
 <div class="diag-card dc-metric"><div id="info-ei-title" class="u-title-primary">UNDERSTANDING EFFICIENCY INDEX (EI)</div><div id="info-ei-desc" class="u-desc-sm">EI = speed (m/min) ÷ avg HR (bpm). Higher = faster at the same heart rate. Watch the trend over weeks.</div></div>
-<div class="diag-card dc-metric"><div id="info-best-title" class="u-title-primary">HOW BEST IS CALCULATED</div><div id="info-best-desc" class="u-desc-sm">Best pace, cadence and power use the best 200 m stretch. Sudden GPS spikes are ignored. Table rows and graph points are section averages, so they may differ.</div></div>
+<div class="diag-card dc-metric"><div id="info-best-title" class="u-title-primary">HOW BEST IS CALCULATED</div><div id="info-best-desc" class="u-desc-sm">Best pace uses the best 100 m split; cadence and power use the best 200 m stretch. Sudden GPS spikes are ignored. Table rows and graph points are section averages, so they may differ.</div></div>
 <div class="diag-card dc-care"><div id="info-warmup-title" class="u-title-primary">WARM-UP & COOL-DOWN</div><div id="info-warmup-desc" class="u-desc-sm">Start with 5~10 min of light jogging or dynamic stretching to raise your heart rate gradually. After running, walk and stretch for 5~10 min to help recovery and reduce muscle soreness.</div></div>
 <div class="diag-card dc-care"><div id="info-hydration-title" class="u-title-primary">HYDRATION & FUELING</div><div id="info-hydration-desc" class="u-desc-sm">For runs over 60 minutes, drink small amounts of water regularly. For runs over 90 minutes, consider light carbohydrate intake (gels, bananas, sports drinks).</div></div>
 <div class="diag-card dc-care"><div id="info-recovery-title" class="u-title-primary">REST & RECOVERY DAYS</div><div id="info-recovery-desc" class="u-desc-sm">Muscles rebuild during rest. Beginners should take at least 1~2 full rest days per week, and avoid running through persistent joint pain.</div></div>
@@ -4260,6 +4260,9 @@ if (scaleFloor && (max - min) < scaleFloor) {
 // [추가 2026-11-08] opts.refVal: 확대 화면의 비교용 기준선(예: EI "최근 5회 평균"). 선이 그래프 밖에 걸리지 않게 세로 범위에 포함한다. 안 넘기면 아무 일도 없다.
 const _hasRef = !!(opts && typeof opts.refVal === 'number' && isFinite(opts.refVal));
 if (_hasRef) { if (opts.refVal < min) min = opts.refVal; if (opts.refVal > max) max = opts.refVal; }
+// [추가 2026-11-26] opts.extraMark {idxF, val}: 묶인 점들 사이에 원본 100m 최고값 마커를 얹는다(세로 범위에 포함). 묶음(bucketed) 처리된 경우는 점 인덱스가 달라 무시.
+const _mk = (opts && opts.extraMark && !bucketed && typeof opts.extraMark.val === 'number' && isFinite(opts.extraMark.val) && typeof opts.extraMark.idxF === 'number') ? opts.extraMark : null;
+if (_mk) { if (_mk.val < min) min = _mk.val; if (_mk.val > max) max = _mk.val; }
 if (max - min < 1e-6) { min -= 1; max += 1; }
 // [수정 2026-11-10] 선이 그래프 위쪽에 몰려 보이던 문제 개선:
 //  1) 위/아래 여백(Y_TOP/Y_BOT)을 둬서 실제 데이터 구간(min~max)이 박스 가운데쪽에 그려지게 함(위 라벨·바닥과 안 붙음).
@@ -4374,7 +4377,7 @@ if (showAvgLine) {
 //   실제 곡선 y좌표에서 시작해 아래로만 그린다.
 // [수정] edge 구간(출발 첫 구간/끝 자투리)은 최고기록 후보에서 제외.
 let bestLineSvg = '';
-if (highlightBest) {
+if (highlightBest && !_mk) {
   const bestVal = invert ? Math.min(...scalePts.map(p => p.v)) : Math.max(...scalePts.map(p => p.v));
   const TOL = Math.abs(bestVal) * 0.03;
   const isNearBest = (v) => Math.abs(v - bestVal) <= TOL;
@@ -4417,6 +4420,15 @@ if (highlightBest) {
     _lay.best = [{ x: parseFloat(xAt(bestIdx)), y: parseFloat(yAt(bestIdx)) }];
   }
 }
+let markSvg = '';
+if (_mk) {
+  const mx = xFor(_mk.idxF), my = yFor(_mk.val);
+  const dotW2 = (opts && opts.heightPx && opts.heightPx > 40) ? 6.5 : 4.6;
+  bestLineSvg = '<line x1="' + mx.toFixed(1) + '" y1="' + my.toFixed(1) + '" x2="' + mx.toFixed(1) + '" y2="' + H + '" stroke="#FFD60A" stroke-width="1" stroke-dasharray="2,2" vector-effect="non-scaling-stroke"></line>';
+  markSvg = '<path d="M ' + mx.toFixed(1) + ',' + my.toFixed(1) + ' h0.01" fill="none" stroke="#111" stroke-width="' + (dotW2 + 2.4) + '" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>'
+    + '<path d="M ' + mx.toFixed(1) + ',' + my.toFixed(1) + ' h0.01" fill="none" stroke="#FFD60A" stroke-width="' + dotW2 + '" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>';
+  _lay.best = [{ x: mx, y: my }];
+}
 // [추가] 전/후반 평균선(흰색) + 가운데 세로 점선. 값은 호출부가 지표 계산과 같은 기준으로 넘겨준다.
 let halfSvg = '';
 if (opts && opts.half && !bucketed) {
@@ -4452,6 +4464,7 @@ return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style=
   + edgeSvg
   + '<path d="' + _lineD(firstCore, lastCore) + '" fill="none" stroke="' + colorHex + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>'
   + dotsSvg
+  + markSvg
   + '</svg>';
 }
 // [추가 2026-10-31] 긴 러닝 구간 묶기: 어떤 거리든 그래프 점/목록이 최대 10개 안팎이 되도록
@@ -4462,6 +4475,24 @@ return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style=
 //  - 원본 기록(record.diagSplits)은 건드리지 않고 화면 표시용으로만 쓴다. 묶인 상태에선 출발 흐린 구간(edge)을 따로 두지 않는다.
 const DIAG_MAX_POINTS = 10;
 const DIAG_GROUP_STEPS_KM = [0.1, 0.2, 0.5, 1, 2, 2.5, 5, 10, 20, 50]; // [수정 2026-11-14] 0.1(100m) 추가: 상세 확대 그래프 전용(작은 카드는 최대 10점이라 0.1이 선택되지 않음)
+// [추가 2026-11-26] 묶인(grouped) 그래프에서 4'20" 같은 100m 최고 페이스가 구간 평균에 묻혀 안 보이던 문제:
+// 원본 100m 기준 최고 페이스(calcBest100Info)를 묶인 점들의 x축(점 인덱스, 소수 가능) + 값으로 변환해 별도 마커로 그린다.
+// 묶이지 않았거나 계산 불가면 null(기존 동작 그대로).
+function diagBestPaceMark(rawSplits, G) {
+  try {
+    if (!G || !G.grouped || !G.splits || G.splits.length < 2 || typeof window.calcBest100Info !== 'function') return null;
+    const b = window.calcBest100Info(rawSplits);
+    if (!b || b.kmFrom == null || b.kmTo == null || !isFinite(b.val)) return null;
+    const sp = G.splits, c = (b.kmFrom + b.kmTo) / 2;
+    let k = sp.length - 1;
+    for (let q = 0; q < sp.length; q++) { if (c <= parseFloat(sp[q].km) + 1e-9) { k = q; break; } }
+    const e = parseFloat(sp[k].km), st = k > 0 ? parseFloat(sp[k - 1].km) : 0;
+    let f = k;
+    if (isFinite(e) && isFinite(st) && e > st) f = k + (c - (st + e) / 2) / (e - st);
+    f = Math.max(0, Math.min(sp.length - 1, f));
+    return { idxF: f, val: b.val };
+  } catch (err) { return null; }
+}
 function groupDiagSplits(splits, maxPoints, minStepKm) {
   const ident = { grouped: false, step: 0.1, splits: splits || [], remapHalf: function (h) { return h; } };
   const maxPts = maxPoints || DIAG_MAX_POINTS; // [실험D] 확대 화면은 maxPoints(75)·minStepKm(0.2)를 넘겨 항상 200m 이상 단위로 표시
@@ -5258,7 +5289,7 @@ function buildPersonalFeedback(record, profile, gender, isKo) {
 const USE_MODE_CHIP = true;
 const translations = {
 en: {
-pace: "PACE", dist: "DIST", time: "TIME", avg: "AVG", speed: "SPEED", cadence: "CADENCE", gct: "GCT", flight: "FLIGHT", cal: "KCAL", start: "START", stop: "STOP", resume: "RESUME", reset: "RESET", finish: "FINISH", run: "RUN", history: "HISTORY", historyTab: "REC•SET", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", selLang: "SELECT LANGUAGE", unitLabel: "DISTANCE UNIT", genderLabel: "GENDER", genderMale: "MALE", genderFemale: "FEMALE", autoPauseLabel: "AUTO PAUSE", calibSoundLabel: "CALIBRATION ALERT SOUND", calibSoundOpeningBell: "Open Bell", calibSoundCamBell: "Cam Bell", calibSoundTimeBell: "Time Bell", calibVolumeLabel: "VOLUME", calibPreviewLabel: "Preview sound", metro: "RHYTHM ASSISTANT", clear: "CLEAR ALL HISTORY", confirmClear: "Are you sure?", alertCleared: "History cleared.", clearLogs: "CLEAR ALL LOGS", confirmClearLogs: "Delete all phone precision logs and imported Garmin FIT data? This cannot be undone.", alertLogsCleared: "Log records cleared.", route: "ROUTE", diag: "DIAG", close: "CLOSE", alt: "ALT", mapStart: "START", mapFinish: "FINISH", activityModeLabel: "ACTIVITY MODE", modeRunLabel: "RUN", modeWalkLabel: "WALK", ascentLabel: "ASCENT", descentLabel: "DESCENT", gradeLabel: "GRADE", gapLabel: "GAP", avgGapLabel: "Avg GAP Pace", avgGradeLabel: "Avg Grade", modeTrailLabel: "TRAIL", modeFreerunLabel: "FREE RUN", modeAllLabel: "ALL RUN", stepsLabel: "STEPS", spmLabel: "SPM", walksCountLabel: "WALKS COUNT", totalStepsLabel: "TOTAL STEPS", quickModeTitle: "SWITCH MODE", confirmBtnLabel: "CONFIRM", cancelBtnLabel: "CANCEL", backBtnLabel: "BACK", onbSubtitle: "Set up your run before you start", onbGoSettings: "GO TO SETTINGS", onbLogRecordLabel: "LOG RECORDING", onbLeanAngleLabel: "LEAN ANGLE", resetConfirmMsg: "Discard this run and go back to start? This cannot be undone.", hSecRunData: "RUN DATA", hSecWalkData: "WALK DATA", hSecBalance: "BALANCE", hSecPacing: "PACING", paceStab: "PACE STABILITY", splitDiff: "SPLIT DIFF", cadDrift: "CADENCE DRIFT", hrDrift: "HR DRIFT", hSecEtc: "ETC",
+pace: "PACE", bestPace100: "BEST 100M", dist: "DIST", time: "TIME", avg: "AVG", speed: "SPEED", cadence: "CADENCE", gct: "GCT", flight: "FLIGHT", cal: "KCAL", start: "START", stop: "STOP", resume: "RESUME", reset: "RESET", finish: "FINISH", run: "RUN", history: "HISTORY", historyTab: "REC•SET", list: "LIST", total: "TOTAL", info: "INFO", settings: "SETTINGS", selLang: "SELECT LANGUAGE", unitLabel: "DISTANCE UNIT", genderLabel: "GENDER", genderMale: "MALE", genderFemale: "FEMALE", autoPauseLabel: "AUTO PAUSE", calibSoundLabel: "CALIBRATION ALERT SOUND", calibSoundOpeningBell: "Open Bell", calibSoundCamBell: "Cam Bell", calibSoundTimeBell: "Time Bell", calibVolumeLabel: "VOLUME", calibPreviewLabel: "Preview sound", metro: "RHYTHM ASSISTANT", clear: "CLEAR ALL HISTORY", confirmClear: "Are you sure?", alertCleared: "History cleared.", clearLogs: "CLEAR ALL LOGS", confirmClearLogs: "Delete all phone precision logs and imported Garmin FIT data? This cannot be undone.", alertLogsCleared: "Log records cleared.", route: "ROUTE", diag: "DIAG", close: "CLOSE", alt: "ALT", mapStart: "START", mapFinish: "FINISH", activityModeLabel: "ACTIVITY MODE", modeRunLabel: "RUN", modeWalkLabel: "WALK", ascentLabel: "ASCENT", descentLabel: "DESCENT", gradeLabel: "GRADE", gapLabel: "GAP", avgGapLabel: "Avg GAP Pace", avgGradeLabel: "Avg Grade", modeTrailLabel: "TRAIL", modeFreerunLabel: "FREE RUN", modeAllLabel: "ALL RUN", stepsLabel: "STEPS", spmLabel: "SPM", walksCountLabel: "WALKS COUNT", totalStepsLabel: "TOTAL STEPS", quickModeTitle: "SWITCH MODE", confirmBtnLabel: "CONFIRM", cancelBtnLabel: "CANCEL", backBtnLabel: "BACK", onbSubtitle: "Set up your run before you start", onbGoSettings: "GO TO SETTINGS", onbLogRecordLabel: "LOG RECORDING", onbLeanAngleLabel: "LEAN ANGLE", resetConfirmMsg: "Discard this run and go back to start? This cannot be undone.", hSecRunData: "RUN DATA", hSecWalkData: "WALK DATA", hSecBalance: "BALANCE", hSecPacing: "PACING", paceStab: "PACE STABILITY", splitDiff: "SPLIT DIFF", cadDrift: "CADENCE DRIFT", hrDrift: "HR DRIFT", hSecEtc: "ETC",
 powerLabel: "POWER", vo2Label: "VO2MAX", vo2LvNames: ["Low","Fair","Good","Excellent"], diagVo2Low: "Low aerobic fitness. Build it with easy runs.", diagVo2Normal: "Average level.", diagVo2Good: "Good level.", diagVo2Great: "Excellent level.", diagVo2NoData: "Needs HR sensor, 3 min / 0.5 km or more.", vo2Ref: "REF", diagVo2Short: "(Reference only. Stats count 10 min / 1 km or more.)", statVo2Trend: "VO2MAX TREND", infVo2: "VO2MAX (ESTIMATED)", infVo2D: "Aerobic fitness estimated from pace and heart rate (not sensor-measured). Max oxygen per kg per minute (ml/kg/min)\n・Low: under 35\n・Fair: 35~42\n・Good: 43~50\n・Excellent: 51+\n(Above is for men 30 or younger, and adjusts automatically for your age and sex. Women -5, -0.3 per year after 30)\nNeeds HR sensor. Calculated from 3 min / 0.5 km, stats count 10 min / 1 km or more", avgPowerLabel: "AVG POWER", infRunPower: "RUNNING POWER (WATTS)", infRunPowerD: "Estimated from weight, pace, and elevation (not sensor-measured). Watts per kg body weight\n(watts ÷ bodyweight kg = W/kg)\n・Z1 Recovery/Easy: under 12 W/kg\n・Z2 Moderate: 12-14 W/kg\n・Z3 Tempo/Threshold: 14-16 W/kg\n・Z4 Interval/Hard: 16-19 W/kg\n・Z5 Sprint: 19+ W/kg",
 settingsTabApp: "APP", settingsTabCrew: "CREW", settingsTabCalib: "CALIB", sectionGeneral: "GENERAL", sectionProfile: "MY INFO", sectionRunEnv: "RUN SETTINGS", sectionData: "DATA",
 metroTitle: "METRONOME", metroDesc: "Perfect your cadence.", metroAccent: "ACCENT FIRST BEAT", noRec: "NO RECORDS", totalStats: "LIFETIME STATS", runs: "RUNS", autoPaused: "AUTO PAUSED", pauseCalibWait: "CALIBRATING",
@@ -5373,7 +5404,7 @@ exitClosedTitle: "App Closed", exitClosedMsg: "Press the Home button<br>to retur
 },
 ko: {
 
-pace: "페이스", dist: "거리", time: "시간", avg: "평균", speed: "속도", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", cal: "칼로리", start: "시작", stop: "정지", resume: "재개", reset: "리셋", finish: "종료", run: "러닝", history: "기록", historyTab: "기록•설정", list: "목록", total: "통계", info: "정보", settings: "설정", selLang: "언어 설정", unitLabel: "거리 단위", genderLabel: "성별", genderMale: "남성", genderFemale: "여성", autoPauseLabel: "자동 멈춤", calibSoundLabel: "캘리브레이션 완료 알림음", calibSoundOpeningBell: "오픈벨", calibSoundCamBell: "캠벨", calibSoundTimeBell: "타임벨", calibVolumeLabel: "볼륨", calibPreviewLabel: "소리 미리듣기", metro: "리듬 어시스턴트", clear: "전체 기록 삭제", confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.", clearLogs: "전체 로그 삭제", confirmClearLogs: "폰에 저장된 정밀 로그와 가민 분석실에 가져온 FIT 기록을 모두 삭제할까요? 이 작업은 되돌릴 수 없습니다.", alertLogsCleared: "로그 기록이 삭제되었습니다.", route: "경로", diag: "진단", close: "닫기", alt: "고도", mapStart: "시작", mapFinish: "종료", activityModeLabel: "활동 모드", modeRunLabel: "러닝", modeWalkLabel: "걷기", ascentLabel: "상승", descentLabel: "하강", gradeLabel: "경사", gapLabel: "GAP", avgGapLabel: "평균 GAP 페이스", avgGradeLabel: "평균 경사", modeTrailLabel: "트레일", modeFreerunLabel: "프리러닝", modeAllLabel: "전체 러닝", stepsLabel: "걸음수", spmLabel: "분당걸음", walksCountLabel: "걷기 횟수", totalStepsLabel: "총 걸음수", quickModeTitle: "모드 전환", confirmBtnLabel: "확인", cancelBtnLabel: "취소", backBtnLabel: "뒤로가기", onbSubtitle: "시작하기 전에 러닝 설정을 선택해주세요", onbGoSettings: "설정으로 바로가기", onbLogRecordLabel: "로그 기록", onbLeanAngleLabel: "린각도", resetConfirmMsg: "이번 러닝 기록을 버리고 처음 화면으로 돌아갈까요? 이 작업은 되돌릴 수 없습니다.", hSecRunData: "러닝 데이터", hSecWalkData: "걷기 데이터", hSecBalance: "밸런스", hSecPacing: "페이싱", paceStab: "페이스 안정성", splitDiff: "전/후반 차", cadDrift: "케이던스 유지", hrDrift: "심박 드리프트", hSecEtc: "기타",
+pace: "페이스", bestPace100: "최고 100M", dist: "거리", time: "시간", avg: "평균", speed: "속도", cadence: "케이던스", gct: "지면접촉", flight: "체공시간", cal: "칼로리", start: "시작", stop: "정지", resume: "재개", reset: "리셋", finish: "종료", run: "러닝", history: "기록", historyTab: "기록•설정", list: "목록", total: "통계", info: "정보", settings: "설정", selLang: "언어 설정", unitLabel: "거리 단위", genderLabel: "성별", genderMale: "남성", genderFemale: "여성", autoPauseLabel: "자동 멈춤", calibSoundLabel: "캘리브레이션 완료 알림음", calibSoundOpeningBell: "오픈벨", calibSoundCamBell: "캠벨", calibSoundTimeBell: "타임벨", calibVolumeLabel: "볼륨", calibPreviewLabel: "소리 미리듣기", metro: "리듬 어시스턴트", clear: "전체 기록 삭제", confirmClear: "정말로 모든 기록을 삭제할까요?", alertCleared: "기록이 삭제되었습니다.", clearLogs: "전체 로그 삭제", confirmClearLogs: "폰에 저장된 정밀 로그와 가민 분석실에 가져온 FIT 기록을 모두 삭제할까요? 이 작업은 되돌릴 수 없습니다.", alertLogsCleared: "로그 기록이 삭제되었습니다.", route: "경로", diag: "진단", close: "닫기", alt: "고도", mapStart: "시작", mapFinish: "종료", activityModeLabel: "활동 모드", modeRunLabel: "러닝", modeWalkLabel: "걷기", ascentLabel: "상승", descentLabel: "하강", gradeLabel: "경사", gapLabel: "GAP", avgGapLabel: "평균 GAP 페이스", avgGradeLabel: "평균 경사", modeTrailLabel: "트레일", modeFreerunLabel: "프리러닝", modeAllLabel: "전체 러닝", stepsLabel: "걸음수", spmLabel: "분당걸음", walksCountLabel: "걷기 횟수", totalStepsLabel: "총 걸음수", quickModeTitle: "모드 전환", confirmBtnLabel: "확인", cancelBtnLabel: "취소", backBtnLabel: "뒤로가기", onbSubtitle: "시작하기 전에 러닝 설정을 선택해주세요", onbGoSettings: "설정으로 바로가기", onbLogRecordLabel: "로그 기록", onbLeanAngleLabel: "린각도", resetConfirmMsg: "이번 러닝 기록을 버리고 처음 화면으로 돌아갈까요? 이 작업은 되돌릴 수 없습니다.", hSecRunData: "러닝 데이터", hSecWalkData: "걷기 데이터", hSecBalance: "밸런스", hSecPacing: "페이싱", paceStab: "페이스 안정성", splitDiff: "전/후반 차", cadDrift: "케이던스 유지", hrDrift: "심박 드리프트", hSecEtc: "기타",
 powerLabel: "파워", vo2Label: "VO2MAX", vo2LvNames: ["낮음","보통","좋음","우수"], diagVo2Low: "유산소 체력이 낮은 편입니다. 이지런으로 쌓아보세요.", diagVo2Normal: "보통 수준입니다.", diagVo2Good: "좋은 수준입니다.", diagVo2Great: "우수한 수준입니다.", diagVo2NoData: "심박 연결, 3분·0.5km 이상 필요", vo2Ref: "참고", diagVo2Short: "(참고용: 통계는 10분·1km 이상 반영)", statVo2Trend: "VO2MAX 추이", infVo2: "VO2MAX (추정)", infVo2D: "페이스와 심박으로 추정한 유산소 체력(센서 측정값 아님). 1분간 체중 1kg당 최대 산소량(ml/kg/min)\n・낮음: 35 미만\n・보통: 35~42\n・좋음: 43~50\n・우수: 51 이상\n(위 기준은 30세 이하 남성 기준이며, 나이와 성별에 맞게 자동 보정됩니다. 여성 −5, 30세 이후 매년 −0.3)\n심박 센서 필요. 3분·0.5km 이상 계산, 통계는 10분·1km 이상 반영", avgPowerLabel: "평균 파워", infRunPower: "러닝 파워 (와트)", infRunPowerD: "체중・페이스・고도로 추정한 강도(센서 측정값 아님). 체중 1kg당 와트\n(와트 ÷ 체중kg = W/kg)\n・Z1 회복/이지: 12 W/kg 미만\n・Z2 보통: 12~14 W/kg\n・Z3 템포/역치: 14~16 W/kg\n・Z4 인터벌/하드: 16~19 W/kg\n・Z5 스프린트: 19 W/kg 이상",
 settingsTabApp: "앱설정", settingsTabCrew: "크루", settingsTabCalib: "보정", sectionGeneral: "일반", sectionProfile: "내 정보", sectionRunEnv: "러닝 환경", sectionData: "데이터",
 metroTitle: "메트로놈", metroDesc: "러닝 리듬을 일정하게 유지하세요.", metroAccent: "첫 박자 강조", noRec: "기록 없음", totalStats: "누적 통계", runs: "러닝 횟수", autoPaused: "자동 일시정지", pauseCalibWait: "캘리브레이션 중",
@@ -8587,11 +8618,11 @@ const infoBest = document.getElementById('info-best-title');
 if(infoBest) infoBest.textContent = isKo ? '최고값 기준' : 'HOW BEST IS CALCULATED';
 const infoBestD = document.getElementById('info-best-desc');
 if(infoBestD) infoBestD.innerHTML = buildInfoListRows(isKo ? [
-  ['기준', '최고 페이스·케이던스·파워는 연속 200m 평균 중 가장 좋은 값이에요'],
-  ['GPS 튐', 'GPS가 튄 구간은 자동으로 제외돼요'],
+  ['기준', '최고 페이스는 100m 한 구간, 케이던스·파워는 연속 200m 평균 중 가장 좋은 값이에요'],
+  ['GPS 튐', 'GPS가 튄 구간은 자동으로 제외돼요(케이던스가 같이 오른 구간은 실제 스피드업으로 인정)'],
   ['표·그래프', '묶은 구간 평균이라 최고값과 다를 수 있어요']
 ] : [
-  ['Basis', 'Best pace, cadence and power use the best 200 m stretch'],
+  ['Basis', 'Best pace uses the best 100 m split; cadence and power use the best 200 m stretch'],
   ['GPS spikes', 'Sudden GPS spikes are ignored'],
   ['Table & graph', 'Section averages, so they may differ from BEST']
 ]);
@@ -9832,6 +9863,17 @@ this.buildHrBoxHtml(r, t) +
 ) : (
 '<div class="h-group"><div class="h-group-title">' + t.hSecRunData + '</div><div class="h-group-grid">' +
 '<div class="h-det-box"><div class="h-det-label">' + t.pace + '</div><div class="h-det-val">' + displayPace + '</div></div>' +
+// [신규 2026-11-26] 최고 페이스(100m 구간 기준) — GPS 튐은 걸러내고 케이던스가 같이 오른 구간은 살림
+((() => {
+const _b100 = window.calcBest100Info(r.diagSplits);
+let _bv = '--';
+if (_b100) {
+  const _m = Math.floor(_b100.val / 60); let _s = Math.round(_b100.val % 60); let _mm = _m; if (_s === 60) { _s = 0; _mm += 1; }
+  _bv = _mm + "'" + String(_s).padStart(2, '0') + '"';
+  if (this.currentUnit === 'mile') _bv = this.convertPaceToUnit(_bv, 'mile');
+}
+return '<div class="h-det-box"><div class="h-det-label">' + (t.bestPace100 || (lang === 'ko' ? '최고 100M' : 'BEST 100M')) + '</div><div class="h-det-val" style="color:#FFD60A">' + _bv + '</div></div>';
+})()) +
 '<div class="h-det-box"><div class="h-det-label">' + t.cadence + '</div><div class="h-det-val" style="color:' + this.getCadenceColor(r.cadence) + '">' + (r.cadence || 0) + '</div></div>' +
 '<div class="h-det-box"><div class="h-det-label">' + t.cal + '</div><div class="h-det-val">' + (r.kcal || 0) + '<span class="c34">' + (r.weightKgSnapshot ? r.weightKgSnapshot.toFixed(1)+'kg' : '') + '</span></div></div>' +
 // [수정] 가슴·허리(러닝)가 아닌 기록은 GCT·FLIGHT에 '참고용' 표시 + 회색 값 (걷기는 위의 별도 분기)
@@ -11273,7 +11315,7 @@ const _gPow = _G.grouped ? _gS.map(s => (typeof s.power === 'number' ? s.power :
 const _gNoEdge = new Set();
 const _gSliver = _G.grouped ? addSliverEdge(_gS, _gNoEdge) : _gNoEdge;
 const _gEdgePace = _G.grouped ? _gSliver : _edgePace, _gEdgeCad = _G.grouped ? _gSliver : _edgeCad, _gEdgeHr = _G.grouped ? _gSliver : _edgeHr, _gEdgePow = _G.grouped ? _gSliver : _edgePow;
-const paceSparkSvg = buildSparklineSVG(_gPace, '#00ff88', true, undefined, undefined, _gTimes, { edge: _gEdgePace, half: _G.remapHalf(_pm.paceHalf), minRangePct: GRAPH_MIN_RANGE_PCT.pace });
+const paceSparkSvg = buildSparklineSVG(_gPace, '#00ff88', true, undefined, undefined, _gTimes, { extraMark: diagBestPaceMark(_splitsForGraph, _G), edge: _gEdgePace, half: _G.remapHalf(_pm.paceHalf), minRangePct: GRAPH_MIN_RANGE_PCT.pace });
 const cadSparkSvg = buildSparklineSVG(_gCad, '#4fc3f7', false, undefined, undefined, _gTimes, { edge: _gEdgeCad, half: _G.remapHalf(_pm.cadHalf), minRangePct: GRAPH_MIN_RANGE_PCT.cad });
 const hrSparkSvg = buildSparklineSVG(_gHr, '#e53935', false, undefined, undefined, _gTimes, { edge: _gEdgeHr, half: _G.remapHalf(_pm.hrHalf), minRangePct: GRAPH_MIN_RANGE_PCT.hr });
 const altSparkSvg = buildSparklineSVG(_gS.map(s => (typeof s.altTo === 'number' ? s.altTo : null)), '#90a4ae', false, undefined, undefined, _gTimes, { minRange: 10 }); // [수정 2026-10-21] 최소 세로 폭 10m: 평지 런의 1~2m 잔떨림이 큰 오르내림처럼 보이지 않게
@@ -11315,7 +11357,7 @@ if (cadPeakForDiag !== null) cadPeakForDiag = Math.round(cadPeakForDiag);
 // [수정 2026-11-06] 최고 페이스: 100m 순간값(GPS 튐) 대신 그래프/구간표와 같은 묶음 구간(_gS) 기준으로 계산
 // [재수정 2026-11-07] 최고 페이스는 100m 구간 연속 2개(200m) 평균 중 최소값 — 카드와 확대 화면이 같은 함수(calcBestPace200Sec)를 사용.
 // 0.5km 묶음은 막판 스퍼트를 평균에 묻어버리고, 100m 단독값은 GPS 점프에 취약하기 때문.
-let pacePeakSecForDiag = window.calcBestPace200SecRec(r, _splitsForGraph);
+let pacePeakSecForDiag = window.calcBestPace200Sec(_splitsForGraph);
 if (pacePeakSecForDiag === null) {
   const _pacePeakSecs = _gS.filter((s, i) => !_gEdgePace.has(i)).map(s => paceStrToSeconds(s.pace)).filter(v => typeof v === 'number' && v > 0);
   pacePeakSecForDiag = _pacePeakSecs.length ? Math.min(..._pacePeakSecs) : null;
@@ -14014,7 +14056,6 @@ currentAlt: 0, lowSpeedStartTime: null, wakeLock: null,
 maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
 splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
 diagSplits: [], lastDiagCheckpoint: 0, lastDiagSeconds: 0, lastDiagAlt: null, diagCadenceSamples: [], diagHrSamples: [],
-best200Buf: [], best200Sec: null, best200KmFrom: null, best200KmTo: null, // [추가 2026-11-26] 최고 페이스(연속 200m) 정밀 추적용
 // [추가] 실시간 상승고도 누적 상태 (트레일 모드 실시간 칼로리의 경사 보너스 계산용)
 totalAscent: 0, lastAscentAlt: null,
 // [추가 2026-10-20] 트레일 지형 상태: 하강 누적 / 기압계 / 평활 고도 / 경사도 / GAP
@@ -14838,36 +14879,6 @@ this.drawArrows();
 ui.updateRunningDisplay({dist: this.state.totalDist.toFixed(2)});
 this.state.lastPos = pos;
 this.state.lastPosTimestamp = fixTime;
-// [추가 2026-11-26] 최고 페이스 정밀 추적: 100m 고정 칸 2개 평균은 짧은 스퍼트(200~300m)가 칸 경계에 걸리면
-// 앞뒤 느린 구간(그리고 끝 정지 구간)에 희석돼 가민 최고 페이스(4분대)보다 느린 5분대로 나왔다.
-// 그래서 "어디서 시작하든 연속 200m" 중 가장 빠른 값을 달리는 동안 따로 계산해 기록에 저장한다(best200Sec = 초/km).
-try {
-  const _st = this.state, _s = _st.seconds, _d = _st.totalDist;
-  if (typeof _s === 'number' && typeof _d === 'number' && isFinite(_d)) {
-    const _buf = _st.best200Buf || (_st.best200Buf = []);
-    const _l1 = _buf.length ? _buf[_buf.length - 1] : null;
-    // 1초에 12m(약 43km/h) 넘게 간 점프는 GPS 튐으로 보고 그 앞 샘플은 버린다(튄 거리가 200m 창에 섞이지 않게).
-    if (_l1 && _s > _l1[0] && ((_d - _l1[1]) * 1000) / (_s - _l1[0]) > 12) _buf.length = 0;
-    const _l2 = _buf.length ? _buf[_buf.length - 1] : null;
-    if (_l2 && _s <= _l2[0]) _l2[1] = _d; else _buf.push([_s, _d]);
-    const _tgt = _d - 0.2;
-    let _j = -1;
-    for (let _k = _buf.length - 1; _k >= 0; _k--) { if (_buf[_k][1] <= _tgt) { _j = _k; break; } }
-    if (_j >= 0 && _j + 1 < _buf.length) {
-      const _a = _buf[_j], _b = _buf[_j + 1];
-      const _ti = _b[1] > _a[1] ? _a[0] + (_b[0] - _a[0]) * ((_tgt - _a[1]) / (_b[1] - _a[1])) : _b[0];
-      const _dt = _s - _ti, _pc = _dt / 0.2;
-      // 출발 후 30초는 제외(GPS 안정화), 2'30"/km보다 빠른 값은 비정상으로 무시
-      if (_s >= 30 && _dt > 0 && _pc >= 150 && (_st.best200Sec == null || _pc < _st.best200Sec)) {
-        _st.best200Sec = Math.round(_pc);
-        _st.best200KmFrom = Math.round(_tgt * 100) / 100;
-        _st.best200KmTo = Math.round(_d * 100) / 100;
-      }
-    }
-    while (_buf.length > 2 && _buf[1][1] <= _tgt) _buf.shift();
-    while (_buf.length > 900) _buf.shift(); // 오래 멈춰 있어도 버퍼가 무한히 커지지 않게
-  }
-} catch (_e) { /* 최고 페이스 추적 실패가 러닝 기록에 영향을 주지 않게 무시 */ }
 let currentTargetKm = this.state.lastKmCheckpoint + 1;
 if (this.state.totalDist >= currentTargetKm) {
 let splitDuration = this.state.seconds - this.state.lastKmSeconds;
@@ -15638,7 +15649,6 @@ this.state.pendingCadCount = 0;
 this.state.cadValHistory = [];
 this.state.splits = [];
 this.state.diagSplits = [];
-this.state.best200Buf = []; this.state.best200Sec = null; this.state.best200KmFrom = null; this.state.best200KmTo = null; // [추가 2026-11-26]
 this.state.diagCadenceSamples = []; // [추가] 진단 화면 미니 그래프용: 현재 100m 구간 케이던스 누적
 this.state.diagHrSamples = []; // [추가] 진단 화면 미니 그래프용: 현재 100m 구간 심박 누적
 this.state.lastDiagCheckpoint = 0;
@@ -16174,7 +16184,7 @@ avgAbsGrade: (this.state.activityMode === 'trail' && this.state.gradeSamples > 0
 altSource: this.state.trailAltSource || 'gps', // [수정 2026-10-21] 원본: 트레일만 기록
 path: this.state.pathCoords,
 splits: this.state.splits,
-diagSplits: this.state.diagSplits, best200Sec: this.state.best200Sec, best200KmFrom: this.state.best200KmFrom, best200KmTo: this.state.best200KmTo,
+diagSplits: this.state.diagSplits,
 avgHr: (() => { const hm = hrManager.getAvgMax(); return hm.avg !== null ? hm.avg : (hrManager._hr > 0 ? hrManager._hr : null); })(),
 maxHr: (() => { const hm = hrManager.getAvgMax(); return hm.max !== null ? hm.max : (hrManager._hr > 0 ? hrManager._hr : null); })(),
 hrZone: (() => { const hm = hrManager.getAvgMax(); const refHr = hm.avg !== null ? hm.avg : hrManager._hr; return refHr > 0 ? 'Z' + hrManager.getZone(refHr).z : null; })()
@@ -16278,7 +16288,7 @@ weightKgSnapshot: weightKg,
 alt: this.state.currentAlt,
 path: this.state.pathCoords,
 splits: this.state.splits,
-diagSplits: this.state.diagSplits, best200Sec: this.state.best200Sec, best200KmFrom: this.state.best200KmFrom, best200KmTo: this.state.best200KmTo,
+diagSplits: this.state.diagSplits,
 avgHr: (() => { const hm = hrManager.getAvgMax(); return hm.avg !== null ? hm.avg : (hrManager._hr > 0 ? hrManager._hr : null); })(),
 maxHr: (() => { const hm = hrManager.getAvgMax(); return hm.max !== null ? hm.max : (hrManager._hr > 0 ? hrManager._hr : null); })(),
 hrZone: (() => { const hm = hrManager.getAvgMax(); const refHr = hm.avg !== null ? hm.avg : hrManager._hr; return refHr > 0 ? 'Z' + hrManager.getZone(refHr).z : null; })()
@@ -16599,7 +16609,6 @@ startTimestamp: null, pausedMs: 0, pauseStartedAt: null,
 maxCadence: 0, totalGct: 0, totalFlight: 0, stepCount: 0,
 splits: [], lastKmCheckpoint: 0, lastKmSeconds: 0, lastKmAlt: 0,
 diagSplits: [], lastDiagCheckpoint: 0, lastDiagSeconds: 0, lastDiagAlt: null, diagCadenceSamples: [], diagHrSamples: [],
-best200Buf: [], best200Sec: null, best200KmFrom: null, best200KmTo: null, // [추가 2026-11-26] 최고 페이스(연속 200m) 정밀 추적용
 totalAscent: 0, lastAscentAlt: null,
 lastPosTimestamp: Date.now(),
 speedBuffer: [], lastValidSpeed: 0, emaSpeedKmh: 0, metricSpeedBuffer: [], lastValidMetricSpeed: 0, metricSpeedKmh: 0, cadenceSamples: [], cadValHistory: [],
@@ -24899,6 +24908,8 @@ window.diagSpikeSet = function(vals, key) {
 window.calcBest200Info = function(splits, key) {
   if (!splits || splits.length < 2) return null;
   const isPace = key === 'pace';
+  // [수정 2026-11-26] 페이스 최고값은 100m 1구간 기준(calcBest100Info). 구간이 너무 적어 null이면 아래 200m 방식으로 대체.
+  if (isPace && typeof window.calcBest100Info === 'function') { const _b100 = window.calcBest100Info(splits); if (_b100) return _b100; }
   const vals = splits.map(s => isPace ? paceStrToSeconds(s.pace)
     : key === 'cadence' ? (typeof s.avgCadence === 'number' && (s.cadN == null || s.cadN >= 3) ? s.avgCadence : null)
     : (typeof s.power === 'number' && isFinite(s.power) ? s.power : null));
@@ -24927,17 +24938,38 @@ window.calcBest200Info = function(splits, key) {
   return best;
 };
 window.calcBestPace200Sec = function(splits) { const b = window.calcBest200Info(splits, 'pace'); return b ? b.val : null; };
-// [추가 2026-11-26] 기록(r)에 달리는 중 정밀 추적한 최고 200m 페이스(best200Sec)가 있으면 그 값을 우선 사용.
-// 100m 칸 기반 값(calcBest200Info)이 더 빠르면 그쪽을 쓴다. 옛 기록(best200Sec 없음)은 기존 방식 그대로.
-window.calcBest200InfoRec = function(rec, splits, key) {
-  const b = window.calcBest200Info(splits, key);
-  if (key === 'pace' && rec && typeof rec.best200Sec === 'number' && rec.best200Sec > 0 && (!b || rec.best200Sec < b.val)) {
-    return { val: rec.best200Sec, kmFrom: (typeof rec.best200KmFrom === 'number' ? rec.best200KmFrom : null), kmTo: (typeof rec.best200KmTo === 'number' ? rec.best200KmTo : null) };
-  }
-  return b;
-};
-window.calcBestPace200SecRec = function(rec, splits) { const b = window.calcBest200InfoRec(rec, splits, 'pace'); return b ? b.val : null; };
 window.calcBest200Max = function(splits, key) { const b = window.calcBest200Info(splits, key); return b ? b.val : null; };
+// [신규 2026-11-26] 리스트용 최고 페이스: 100m 구간 1개 기준(200m 평균이 아님).
+// GPS 튐 vs 진짜 스퍼트 구분: (1) 출발 가속 구간·끝 자투리(70m 미만) 제외, (2) 중앙값보다 20% 넘게 빠르고 이웃 구간은 평범한
+// 고립 구간(diagSpikeSet)은 이상치로 제외하되, (3) 그 구간 케이던스가 중앙값보다 3% 이상 올라가 있으면 실제로 속도를 올린 것으로 보고 살린다
+// (GPS가 튀어도 발은 안 빨라지므로). (4) 2'30"/km보다 빠른 값은 무조건 GPS 오류로 본다.
+// 반환: { val(초/km), km(구간 끝 누적 km) } 또는 null.
+window.calcBest100Info = function(splits) {
+  if (!splits || splits.length < 4) return null;
+  const vals = splits.map(s => paceStrToSeconds(s.pace));
+  const cads = splits.map(s => (typeof s.avgCadence === 'number' && s.avgCadence > 0 && (s.cadN == null || s.cadN >= 3)) ? s.avgCadence : null);
+  const cadSorted = cads.filter(v => v != null).sort((a, b) => a - b);
+  const medCad = cadSorted.length ? cadSorted[Math.floor(cadSorted.length / 2)] : null;
+  const edge = new Set();
+  const lead = getLeadExcludeCount(splits, GRAPH_LEAD_SEC.pace);
+  for (let k = 0; k < Math.min(lead, splits.length); k++) edge.add(k);
+  for (let i = 0; i < splits.length; i++) {
+    const kA = parseFloat(splits[i].km), kB = i > 0 ? parseFloat(splits[i - 1].km) : 0;
+    if (isFinite(kA) && isFinite(kB) && (kA - kB) < 0.07) edge.add(i);
+  }
+  const spike = window.diagSpikeSet(vals, 'pace');
+  let best = null;
+  for (let i = 0; i < vals.length; i++) {
+    const v = vals[i];
+    if (typeof v !== 'number' || !isFinite(v) || v < 150 || edge.has(i)) continue;
+    if (spike.has(i)) {
+      const corroborated = medCad != null && cads[i] != null && cads[i] >= medCad * 1.03;
+      if (!corroborated) continue;
+    }
+    if (best === null || v < best.val) { const _kt = parseFloat(splits[i].km), _kf = i > 0 ? parseFloat(splits[i - 1].km) : 0; best = { val: v, km: _kt, kmFrom: isFinite(_kf) ? _kf : null, kmTo: isFinite(_kt) ? _kt : null }; }
+  }
+  return best;
+};
 UIManager.prototype.openDiagGraphFullscreen = function(metricKey, id, isRerender) {
 const h = storage.loadHistory();
 const r = h.find(rec => rec.id === id);
@@ -25050,7 +25082,8 @@ if (metricKey === 'pace') {
 if (G.grouped) { edge = (metricKey === 'pace' || metricKey === 'cadence' || metricKey === 'power') ? window.diagSpikeSet(vals, metricKey) : new Set(); half = G.remapHalf(half); } // 묶인 상태: 출발 흐림은 없지만 GPS 점프 같은 고립된 튐은 흐리게 제외(BEST와 같은 기준) // 묶인 상태: 흐린 출발 구간 없음, 전/후반 범위는 묶인 점 기준으로 변환
 if (G.grouped && metricKey !== 'alt') edge = addSliverEdge(splits, edge); // [추가 2026-11-10] 끝 자투리 제외
 let lay = null;
-const svg = buildSparklineSVG(vals, color, invert, true, true, times, { edge: edge, half: half, minRangePct: minRangePct, minRange: (metricKey === 'alt' ? 10 : 0), refVal: (metricKey === 'ei' && eiBase ? eiBase.avg : undefined), heightPx: 150, maxPoints: _detail ? FS_MAX_POINTS : undefined, smooth: _detail ? false : undefined, onLayout: (L) => { lay = L; } });
+const _mark = (metricKey === 'pace') ? diagBestPaceMark(rawSplits, G) : null; // [추가 2026-11-26] 100m 최고 페이스 마커
+const svg = buildSparklineSVG(vals, color, invert, true, true, times, { extraMark: _mark, edge: edge, half: half, minRangePct: minRangePct, minRange: (metricKey === 'alt' ? 10 : 0), refVal: (metricKey === 'ei' && eiBase ? eiBase.avg : undefined), heightPx: 150, maxPoints: _detail ? FS_MAX_POINTS : undefined, smooth: _detail ? false : undefined, onLayout: (L) => { lay = L; } });
 if (!svg) return;
 const axisHtml = buildDiagAxisLabelsHtml(splits);
 // 세부 지표: 작은 카드엔 없던 평균/최고/최저/구간 수/총 소요시간을 계산해 보여준다.
@@ -25076,12 +25109,12 @@ if (validVals.length) {
   let bestVal = invert ? Math.min(...validVals) : mx;
   // 카드와 동일한 200m 기준 최고값 + 그 위치를 안내(구간표는 구간 평균이라 값이 다를 수 있음)
   if (metricKey === 'pace' || metricKey === 'cadence' || metricKey === 'power') {
-    const _bi = window.calcBest200InfoRec(r, rawSplits, metricKey);
+    const _bi = window.calcBest200Info(rawSplits, metricKey);
     if (_bi) {
       bestVal = _bi.val;
       const _u = this.currentUnit === 'mile' ? 0.621371 : 1, _uTxt = this.currentUnit === 'mile' ? 'mi' : 'km';
       const _rng = (_bi.kmFrom != null && _bi.kmTo != null) ? ((_bi.kmFrom * _u).toFixed(1) + '~' + (_bi.kmTo * _u).toFixed(1) + _uTxt + ' \u00b7 ') : '';
-      noteHtml = (noteHtml ? noteHtml + '<br>' : '') + (koLang ? '최고 200m: ' : 'Best 200m: ') + _rng + fmt(_bi.val);
+      noteHtml = (noteHtml ? noteHtml + '<br>' : '') + (metricKey === 'pace' ? (koLang ? '최고 100m: ' : 'Best 100m: ') : (koLang ? '최고 200m: ' : 'Best 200m: ')) + _rng + fmt(_bi.val);
     }
   }
   let totalT = null;
@@ -25178,7 +25211,7 @@ if (subEl) subEl.textContent = this.formatRecordDateTimeLocalized(r.date) + (r.d
 // [추가 2026-09-19] 그래프 위에 글자 라벨 얹기(평균/최고는 아래 세부 지표와 같은 유효 구간 기준)
 // [수정 2026-09-25] 위 AVG와 동일한 이유로 공식 값을 우선 사용해 스탯카드/그래프 라벨이 서로도 어긋나지 않게 함.
 const _lblAvg = _hasOfficialAvg ? _officialAvg : (validVals.length ? validVals.reduce((a, b) => a + b, 0) / validVals.length : null);
-const _lblBest = validVals.length ? (invert ? Math.min(...validVals) : Math.max(...validVals)) : null;
+const _lblBest = _mark ? _mark.val : validVals.length ? (invert ? Math.min(...validVals) : Math.max(...validVals)) : null;
 const _plotHtml = buildDiagGraphFsPlotHtml(svg, lay, { ko: koLang, fmt: fmt, invert: invert, heightPx: 150, avgVal: _lblAvg, bestVal: _lblBest, info: rowInfo.map((x, i) => (i + 1) + ' \u00b7 ' + x.dist + ' \u00b7 ' + x.time + ' \u00b7 ' + x.val + (metricKey === 'ei' ? '<br><span style="color:#bbb;font-weight:700;">' + x.pace + ' \u00b7 ' + x.hr + ' bpm</span>' : '')) });
 // [실험D] 점이 많으면(점당 30px 고정 폭) 그래프+하단 축을 한 덩어리로 좌우 스크롤. 열릴 때 최고 200m 구간 중앙으로 이동.
 const _PT_PX = 18;
@@ -25215,7 +25248,7 @@ if (listEl) { listEl.innerHTML = listHtml; listEl.style.display = listHtml ? '' 
 const overlay = document.getElementById('diag-graph-fullscreen-overlay');
 if (overlay) overlay.classList.add('active');
 if (_scrollMode) {
-  const _bi2 = window.calcBest200InfoRec(r, rawSplits, metricKey === 'pace' || metricKey === 'cadence' || metricKey === 'power' ? metricKey : 'pace');
+  const _bi2 = window.calcBest200Info(rawSplits, metricKey === 'pace' || metricKey === 'cadence' || metricKey === 'power' ? metricKey : 'pace');
   const _sc = document.getElementById('dgfs-scroller');
   if (_sc) {
     const _tk = parseFloat(splits[splits.length - 1].km) || 1;
