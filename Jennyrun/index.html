@@ -875,7 +875,7 @@ overscroll-behavior-y: none; /* [수정 2026-11-07] contain은 끝에서 늘어�
 }
 .diag-graph-fs-title { font-size: var(--fs-xl); font-weight: 900; color: #fff; }
 .diag-graph-fs-sub { font-size: var(--fs-xs); color: #888; font-weight: 700; margin-top: 4px; }
-.diag-graph-fs-zoomtoggle { display: flex; gap: 8px; margin: 10px 0 4px; }
+.diag-graph-fs-zoomtoggle { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
 .diag-graph-fs-zoomtoggle button { flex: 0 0 auto; padding: 7px 16px; border-radius: 999px; border: 1px solid #333; background: #1a1a1a; color: #999; font-weight: 800; font-size: var(--fs-xs); font-family: inherit; }
 .diag-graph-fs-zoomtoggle button.on { color: #000; background: var(--primary); border-color: var(--primary); }
 .diag-graph-fs-svgwrap { margin: 14px 0 8px; background: #111; border-radius: 12px; padding: 14px 8px 10px; border: 1px solid #262626; }
@@ -24967,6 +24967,103 @@ window.calcBest100Info = function(splits) {
   }
   return best;
 };
+// [추가 2026-11-26] 확대 페이스 화면 막대 스타일(Smashrun식): 막대=구간 페이스(높을수록 빠름), 선=심박, 아래 작은 막대=고도 오르내림.
+// 구간 터치(diagGraphSelect), 출발/끝 흐림(edge), 최고 구간 노란색은 기존 선 그래프와 같은 규칙. 실패하면 null → 기존 선 그래프로 표시.
+function buildPaceBarChartHtml(o) {
+  const sp = o.splits, vals = o.vals, n = sp.length, edge = o.edge || new Set(), ko = o.ko, fmt = o.fmt;
+  const okV = (v) => typeof v === 'number' && isFinite(v) && v > 0;
+  const good = [];
+  vals.forEach((v, i) => { if (okV(v) && !edge.has(i)) good.push(v); });
+  if (n < 2 || good.length < 2) return null;
+  let lo = Math.min.apply(null, good), hi = Math.max.apply(null, good);
+  const mean = good.reduce((a, b) => a + b, 0) / good.length, minR = mean * (o.minRangePct || 0.25);
+  if (hi - lo < minR) { const c = (hi + lo) / 2; lo = c - minR / 2; hi = c + minR / 2; }
+  const pad = (hi - lo) * 0.12, top = lo - pad, bot = hi + pad;
+  const CH = 130, EH = 36, GAP = 8;
+  const barH = (v) => CH * Math.min(1, Math.max(0.03, (bot - v) / (bot - top)));
+  const alt = sp.map(x => (typeof x.altDiff === 'number' && isFinite(x.altDiff)) ? x.altDiff : 0);
+  const altS = alt.map((v, i) => { let a = 0, c = 0; for (let k = i - 1; k <= i + 1; k++) if (k >= 0 && k < n) { a += alt[k]; c++; } return a / c; });
+  const altMax = Math.max(3, Math.max.apply(null, altS.map(Math.abs)));
+  const hasAlt = alt.some(v => Math.abs(v) >= 0.3);
+  const H = CH + (hasAlt ? GAP + EH : 0);
+  const avail = o.availPx, pitch = Math.max(6, Math.min(16, avail / n)), W = Math.round(n * pitch * 10) / 10, scroll = W > avail + 1, bw = pitch * 0.74;
+  const hrRaw = sp.map(x => (typeof x.avgHr === 'number' && x.avgHr > 0) ? x.avgHr : null);
+  const hrN = hrRaw.filter(v => v != null).length;
+  const hr = hrRaw.map((v, i) => { if (v == null) return null; let a = 0, c = 0; for (let k = i - 1; k <= i + 1; k++) if (hrRaw[k] != null) { a += hrRaw[k]; c++; } return a / c; });
+  let hrMin = 0, hrMax = 0, hrLo = 0, hrHi = 0;
+  if (hrN >= 3) { const hv = hr.filter(v => v != null); hrMin = hrLo = Math.min.apply(null, hv); hrMax = hrHi = Math.max.apply(null, hv); if (hrHi - hrLo < 20) { const c = (hrHi + hrLo) / 2; hrLo = c - 10; hrHi = c + 10; } }
+  const kmOf = (i) => { const k = parseFloat(sp[i].km); return isFinite(k) ? k : null; };
+  const isBest = new Set(), b = o.best;
+  if (b && b.kmFrom != null && b.kmTo != null) { for (let i = 0; i < n; i++) { const k1 = kmOf(i), k0 = i > 0 ? kmOf(i - 1) : 0; if (k1 != null && k0 != null && k1 > b.kmFrom + 1e-6 && k0 < b.kmTo - 1e-6) isBest.add(i); } }
+  let bestVal = b && isBest.size ? b.val : null, bestLabel = ko ? '최고 ' : 'Best ';
+  if (!isBest.size) { let bi = -1; vals.forEach((v, i) => { if (okV(v) && !edge.has(i) && (bi < 0 || v < vals[bi])) bi = i; }); if (bi >= 0) { isBest.add(bi); bestVal = vals[bi]; if (o.grouped) bestLabel = ko ? '구간 최고 ' : 'Best split '; } }
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="display:block;width:' + (scroll ? W + 'px' : '100%') + ';height:' + H + 'px;">';
+  svg += '<line x1="0" y1="' + CH + '" x2="' + W + '" y2="' + CH + '" stroke="#333" stroke-width="1" vector-effect="non-scaling-stroke"/>';
+  vals.forEach((v, i) => {
+    if (!okV(v)) return;
+    const h = barH(v), best = isBest.has(i);
+    svg += '<rect x="' + (i * pitch + (pitch - bw) / 2).toFixed(2) + '" y="' + (CH - h).toFixed(1) + '" width="' + bw.toFixed(2) + '" height="' + h.toFixed(1) + '" fill="' + (best ? '#FFD60A' : '#00ff88') + '" fill-opacity="' + (edge.has(i) ? 0.28 : (best ? 1 : 0.78)) + '"/>';
+  });
+  if (okV(o.avgVal)) { const ay = (CH - barH(o.avgVal)).toFixed(1); svg += '<line x1="0" y1="' + ay + '" x2="' + W + '" y2="' + ay + '" stroke="#ccc" stroke-width="1" stroke-dasharray="4 3" opacity="0.8" vector-effect="non-scaling-stroke"/>'; }
+  if (hrN >= 3) {
+    let d = '';
+    hr.forEach((v, i) => { if (v == null) return; d += ((d && hr[i - 1] != null) ? 'L' : 'M') + (i * pitch + pitch / 2).toFixed(1) + ' ' + (CH * 0.94 - (v - hrLo) / (hrHi - hrLo) * CH * 0.84).toFixed(1); });
+    svg += '<path d="' + d + '" fill="none" stroke="#ff5c7a" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>';
+  }
+  if (hasAlt) {
+    const mid = CH + GAP + EH / 2;
+    svg += '<line x1="0" y1="' + mid + '" x2="' + W + '" y2="' + mid + '" stroke="#333" stroke-width="1" vector-effect="non-scaling-stroke"/>';
+    altS.forEach((v, i) => {
+      const h = Math.min(EH / 2, Math.abs(v) / altMax * EH / 2); if (h < 0.4) return;
+      svg += '<rect x="' + (i * pitch + (pitch - bw) / 2).toFixed(2) + '" y="' + (v >= 0 ? mid - h : mid).toFixed(1) + '" width="' + bw.toFixed(2) + '" height="' + h.toFixed(1) + '" fill="' + (v >= 0 ? '#80cbc4' : '#546e7a') + '" fill-opacity="' + (edge.has(i) ? 0.35 : 0.9) + '"/>';
+    });
+  }
+  svg += '</svg>';
+  const pX = (x) => (x / W * 100).toFixed(2) + '%', pY = (y) => (y / H * 100).toFixed(2) + '%';
+  let hits = '', marks = '', lbl = '';
+  const bx = [];
+  for (let i = 0; i < n; i++) {
+    const x = i * pitch + pitch / 2, v = vals[i], yT = okV(v) ? CH - barH(v) : CH;
+    if (isBest.has(i)) bx.push(x);
+    hits += '<div style="position:absolute;top:0;bottom:0;left:' + pX(i * pitch) + ';width:' + (pitch / W * 100).toFixed(2) + '%;pointer-events:auto;cursor:pointer;-webkit-tap-highlight-color:transparent;" onclick="diagGraphSelect(' + i + ')"></div>';
+    marks += '<div class="dgfs-dot" data-i="' + i + '" style="position:absolute;left:' + pX(x) + ';top:' + pY(yT) + ';width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;background:#ffb74d;box-shadow:0 0 0 1.5px #111;"></div>';
+    const r = o.rows[i];
+    let t = (i + 1) + ' \u00b7 ' + r.dist + ' \u00b7 ' + r.time + ' \u00b7 ' + r.val;
+    if (hrRaw[i] != null) t += ' \u00b7 ' + Math.round(hrRaw[i]) + ' bpm';
+    if (hasAlt) t += ' \u00b7 ' + (alt[i] >= 0 ? '+' : '\u2212') + Math.abs(alt[i]).toFixed(1) + ' m';
+    const fy = yT / H, xp = x / W;
+    const ty = fy < 0.3 ? '' : 'translateY(-100%)';
+    let horiz, tx;
+    if (xp < 0.3) { horiz = 'left:' + pX(x) + ';margin-left:-8px;'; tx = ''; }
+    else if (xp > 0.7) { horiz = 'right:' + pX(W - x) + ';margin-right:-8px;'; tx = ''; }
+    else { horiz = 'left:' + pX(x) + ';'; tx = 'translateX(-50%)'; }
+    const tf = (tx || ty) ? ('transform:' + (tx + ' ' + ty).trim() + ';') : '';
+    marks += '<div class="dgfs-tip" data-i="' + i + '" style="position:absolute;top:' + pY(yT) + ';' + horiz + (fy < 0.3 ? 'margin-top:10px;' : 'margin-top:-10px;') + tf + 'white-space:nowrap;font-size:var(--fs-xs);font-weight:900;line-height:1.2;padding:3px 8px;border-radius:6px;background:rgba(17,17,17,0.94);border:1px solid #ffb74d;color:#fff;">' + t + '</div>';
+  }
+  if (bx.length && bestVal != null) {
+    const cx = bx.reduce((a, c) => a + c, 0) / bx.length, ex = cx < 50 ? '0' : (cx > W - 60 ? '-100%' : '-50%');
+    lbl = '<div style="position:absolute;top:-16px;left:' + pX(cx) + ';transform:translateX(' + ex + ');white-space:nowrap;font-size:var(--fs-xs);font-weight:900;line-height:1.2;color:#FFD60A;">' + bestLabel + fmt(bestVal) + '</div>';
+  }
+  const totKm = parseFloat(sp[n - 1].km) || 1, step = [0.5, 1, 2, 5, 10].find(v => v * (W / totKm) >= 60) || 10;
+  let ax = '', prev = -1;
+  for (let i = 0; i < n; i++) {
+    const kmv = kmOf(i); if (kmv == null) continue;
+    const bin = Math.floor(kmv / step + 1e-6); if (bin === prev && i > 0) continue; prev = bin;
+    const x = i * pitch + pitch / 2, tt = sp[i].t_sec != null ? sp[i].t_sec : 0;
+    ax += '<span style="position:absolute;top:0;left:' + pX(x) + ';transform:translateX(' + (x < 30 ? '0' : (x > W - 30 ? '-100%' : '-50%')) + ');white-space:nowrap;font-size:var(--fs-xs);color:#aaa;font-weight:700;line-height:1.4;text-align:center;">' + o.dv(kmv) + (o.isMile ? 'mi' : 'km') + '<br>' + fmtDiagAxisTime(tt) + '</span>';
+  }
+  const sw = (c) => '<i style="display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;background:' + c + ';"></i>';
+  let lg = '<span>' + sw('rgba(0,255,136,0.78)') + (ko ? '페이스 (높을수록 빠름)' : 'PACE (taller = faster)') + '</span>';
+  if (okV(o.avgVal)) lg += '<span style="color:#ccc;">' + (ko ? '점선 평균 ' : 'Dashed = avg ') + fmt(o.avgVal) + '</span>';
+  if (hrN >= 3) lg += '<span style="color:#ff5c7a;">' + sw('#ff5c7a') + (ko ? '심박 ' : 'HR ') + Math.round(hrMin) + '\u2013' + Math.round(hrMax) + '</span>';
+  if (hasAlt) lg += '<span style="color:#80cbc4;">' + sw('#80cbc4') + (ko ? '고도 ' : 'ELEV ') + ((typeof o.asc === 'number' && typeof o.desc === 'number') ? ('+' + o.asc + ' / \u2212' + o.desc + ' m') : '') + '</span>';
+  const body = '<div style="position:relative;margin-top:16px;width:' + (scroll ? W + 'px' : '100%') + ';height:' + H + 'px;">' + svg
+    + '<div style="position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;">' + hits + lbl + marks + '</div></div>'
+    + '<div style="position:relative;height:34px;margin-top:4px;">' + ax + '</div>';
+  const html = '<div style="display:flex;flex-wrap:wrap;gap:4px 12px;font-size:var(--fs-xs);font-weight:800;color:#aaa;">' + lg + '</div>'
+    + (scroll ? '<div id="dgfs-scroller" style="overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;padding-bottom:2px;"><div style="width:' + W + 'px;">' + body + '</div></div>' : body);
+  return { html: html, scroll: scroll, scrollW: W };
+}
 UIManager.prototype.openDiagGraphFullscreen = function(metricKey, id, isRerender) {
 const h = storage.loadHistory();
 const r = h.find(rec => rec.id === id);
@@ -25213,9 +25310,18 @@ const _plotHtml = buildDiagGraphFsPlotHtml(svg, lay, _plotOptsCap = { ko: koLang
 // [실험D] 점이 많으면(점당 30px 고정 폭) 그래프+하단 축을 한 덩어리로 좌우 스크롤. 열릴 때 최고 200m 구간 중앙으로 이동.
 const _PT_PX = 18;
 const _availPx = Math.max(240, Math.min(window.innerWidth || 360, 640) - 60); // 화면 좌우 여백+그래프 박스 안쪽 여백을 뺀 가로 폭
-const _scrollW = splits.length * _PT_PX;
+let _scrollW = splits.length * _PT_PX;
 let _scrollMode = false, _plotHtmlS = '', _pinHalf = '';
-if (svgWrapEl) {
+// [추가 2026-11-26] 페이스 확대 화면 기본 스타일 = 막대(Smashrun식). 칩으로 선 그래프와 전환(profile.diagGraphStyle).
+let _dgStyle = 'bar'; try { _dgStyle = storage.loadProfile().diagGraphStyle === 'line' ? 'line' : 'bar'; } catch (e) {}
+let _barRes = null;
+if (svgWrapEl && metricKey === 'pace' && _dgStyle === 'bar') {
+  try { _barRes = buildPaceBarChartHtml({ ko: koLang, fmt: fmt, splits: splits, vals: vals, edge: edge, minRangePct: minRangePct, avgVal: _lblAvg, availPx: _availPx, grouped: G.grouped, best: (G.grouped ? null : window.calcBest200Info(rawSplits, 'pace')), rows: rowInfo, dv: _dv, isMile: _isMile, asc: r.totalAscent, desc: r.totalDescent }); } catch (e) { _barRes = null; }
+}
+if (svgWrapEl && _barRes) {
+  svgWrapEl.innerHTML = _barRes.html; _scrollMode = _barRes.scroll; _scrollW = _barRes.scrollW;
+  if (_barRes.scroll) noteHtml = '<span style="color:#888;">\u2190 ' + (koLang ? '좌우로 밀어서 전체 구간 보기' : 'Swipe to scroll') + '</span>' + (noteHtml ? '<br>' + noteHtml : '');
+} else if (svgWrapEl) {
   if (_detail && lay && lay.pts && _scrollW > _availPx) {
     _scrollMode = true;
     // [수정 2026-11-26] 스크롤하면 전/후반 평균 글자가 화면 밖으로 밀려나던 문제: 글자는 스크롤 밖 고정 줄로, 막대선만 스크롤 안에 둔다.
@@ -25240,7 +25346,7 @@ if (svgWrapEl) {
     svgWrapEl.innerHTML = _plotHtml;
   }
 }
-if (axisEl) axisEl.innerHTML = _scrollMode ? '' : axisHtml;
+if (axisEl) axisEl.innerHTML = (_scrollMode || _barRes) ? '' : axisHtml;
 if (noteEl) noteEl.innerHTML = noteHtml;
 if (statsEl) statsEl.innerHTML = statsHtml;
 const listEl = document.getElementById('diag-graph-fs-list');
@@ -25262,12 +25368,17 @@ window._dgfsCur = { metricKey: metricKey, id: id };
 const _ztEl = document.getElementById('diag-graph-fs-zoomtoggle');
 if (_ztEl) {
   _ztEl.innerHTML = '<button type="button" class="' + (_detail ? '' : 'on') + '" onclick="diagGraphFsSetDetail(false)">' + (koLang ? '기본' : 'STANDARD') + '</button>'
-    + '<button type="button" class="' + (_detail ? 'on' : '') + '" onclick="diagGraphFsSetDetail(true)">' + (koLang ? '상세 (100m)' : 'DETAIL (100 m)') + '</button>';
+    + '<button type="button" class="' + (_detail ? 'on' : '') + '" onclick="diagGraphFsSetDetail(true)">' + (koLang ? '상세 (100m)' : 'DETAIL (100 m)') + '</button>'
+    + (metricKey === 'pace' ? '<button type="button" class="' + (_dgStyle === 'bar' ? 'on' : '') + '" onclick="diagGraphFsSetStyle(\'bar\')">' + (koLang ? '막대' : 'BARS') + '</button><button type="button" class="' + (_dgStyle === 'bar' ? '' : 'on') + '" onclick="diagGraphFsSetStyle(\'line\')">' + (koLang ? '선' : 'LINE') + '</button>' : '');
 }
 if (!isRerender) { try { history.pushState({ jrPage: 'diagGraphFull' }, ''); } catch (e) {} } // 전환 시 다시 그릴 때는 history를 쌓지 않음(CLOSE 한 번에 닫히게)
 };
 window.diagGraphFsSetDetail = function(on) {
   try { const prof = storage.loadProfile(); if ((prof.diagDetailGraph !== false) === !!on) return; prof.diagDetailGraph = !!on; storage.saveProfile(prof); } catch (e) {} // [수정 2026-11-26] 기본값이 상세(true)라서 '미설정'도 상세로 취급
+  const c = window._dgfsCur; if (c) ui.openDiagGraphFullscreen(c.metricKey, c.id, true);
+};
+window.diagGraphFsSetStyle = function(st) {
+  try { const prof = storage.loadProfile(); if ((prof.diagGraphStyle === 'line' ? 'line' : 'bar') === st) return; prof.diagGraphStyle = st; storage.saveProfile(prof); } catch (e) {}
   const c = window._dgfsCur; if (c) ui.openDiagGraphFullscreen(c.metricKey, c.id, true);
 };
 UIManager.prototype.closeDiagGraphFullscreen = function() {
