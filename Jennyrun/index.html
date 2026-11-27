@@ -24997,12 +24997,35 @@ function buildPaceBarChartHtml(o) {
   if (b && b.kmFrom != null && b.kmTo != null) { for (let i = 0; i < n; i++) { const k1 = kmOf(i), k0 = i > 0 ? kmOf(i - 1) : 0; if (k1 != null && k0 != null && k1 > b.kmFrom + 1e-6 && k0 < b.kmTo - 1e-6) isBest.add(i); } }
   let bestVal = b && isBest.size ? b.val : null, bestLabel = ko ? '최고 ' : 'Best ';
   if (!isBest.size) { let bi = -1; vals.forEach((v, i) => { if (okV(v) && !edge.has(i) && (bi < 0 || (inv ? v < vals[bi] : v > vals[bi]))) bi = i; }); if (bi >= 0) { isBest.add(bi); bestVal = vals[bi]; if (o.grouped) bestLabel = ko ? '구간 최고 ' : 'Best split '; } }
+  // [추가 2026-11-27] 심박/케이던스/파워 막대: 구간 페이스에 따라 색 농도(빠름=진하게, 느림=연하게) + 세로 그라데이션 입체감
+  let shadeT = null;
+  if (o.shadeVals) {
+    const sv = []; o.shadeVals.forEach((v, i) => { if (okV(v) && !edge.has(i)) sv.push(v); });
+    if (sv.length >= 3) {
+      sv.sort((a, b) => a - b);
+      const q = (pp) => sv[Math.min(sv.length - 1, Math.max(0, Math.round((sv.length - 1) * pp)))];
+      let sLo = q(0.05), sHi = q(0.95);
+      if (sHi - sLo < 1) { sLo = sv[0]; sHi = sv[sv.length - 1]; }
+      if (sHi - sLo >= 1) shadeT = o.shadeVals.map(v => okV(v) ? Math.min(1, Math.max(0, (sHi - v) / (sHi - sLo))) : null);
+    }
+  }
+  const _hx = (c) => { const m = /^#?([0-9a-f]{6})$/i.exec(c || ''); if (!m) return null; const nn = parseInt(m[1], 16); return [(nn >> 16) & 255, (nn >> 8) & 255, nn & 255]; };
+  const _baseRgb = _hx(o.barColor || '#00ff88');
+  const shadeOn = !!(shadeT && _baseRgb);
+  const _mix = (rgb, tgt, a) => 'rgb(' + rgb.map((c, k) => Math.round(c + (tgt[k] - c) * a)).join(',') + ')';
+  const shadeFill = (i) => { const t = shadeT[i]; if (t == null) return o.barColor; return t < 0.5 ? _mix(_baseRgb, [255, 255, 255], (0.5 - t) * 0.9) : _mix(_baseRgb, [0, 0, 0], (t - 0.5) * 0.5); };
   let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="display:block;width:' + (scroll ? W + 'px' : '100%') + ';height:' + H + 'px;">';
+  if (shadeOn) svg += '<defs><linearGradient id="dgShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.28"/><stop offset="1" stop-color="#000" stop-opacity="0.30"/></linearGradient></defs>';
   svg += '<line x1="0" y1="' + CH + '" x2="' + W + '" y2="' + CH + '" stroke="#333" stroke-width="1" vector-effect="non-scaling-stroke"/>';
   vals.forEach((v, i) => {
     if (!okV(v)) return;
     const h = barH(v), best = isBest.has(i);
-    svg += '<rect x="' + (i * pitch + (pitch - bw) / 2).toFixed(2) + '" y="' + (CH - h).toFixed(1) + '" width="' + bw.toFixed(2) + '" height="' + h.toFixed(1) + '" fill="' + (best ? '#FFD60A' : (o.barColor || '#00ff88')) + '" fill-opacity="' + (edge.has(i) ? 0.28 : (best ? 1 : 0.78)) + '"/>';
+    const bxp = (i * pitch + (pitch - bw) / 2).toFixed(2), byp = (CH - h).toFixed(1);
+    svg += '<rect x="' + bxp + '" y="' + byp + '" width="' + bw.toFixed(2) + '" height="' + h.toFixed(1) + '" fill="' + (best ? '#FFD60A' : (shadeOn ? shadeFill(i) : (o.barColor || '#00ff88'))) + '" fill-opacity="' + (edge.has(i) ? 0.28 : (best ? 1 : (shadeOn ? 0.95 : 0.78))) + '"/>';
+    if (shadeOn && !edge.has(i)) {
+      svg += '<rect x="' + bxp + '" y="' + byp + '" width="' + bw.toFixed(2) + '" height="' + h.toFixed(1) + '" fill="url(#dgShade)"/>';
+      if (bw >= 8) svg += '<rect x="' + bxp + '" y="' + byp + '" width="' + Math.max(1, bw * 0.15).toFixed(2) + '" height="' + h.toFixed(1) + '" fill="#fff" fill-opacity="0.18"/>';
+    }
   });
   if (okV(o.avgVal)) { const ay = (CH - barH(o.avgVal)).toFixed(1); svg += '<line x1="0" y1="' + ay + '" x2="' + W + '" y2="' + ay + '" stroke="#ccc" stroke-width="1" stroke-dasharray="4 3" opacity="0.8" vector-effect="non-scaling-stroke"/>'; }
   if (hrN >= 3) {
@@ -25054,6 +25077,7 @@ function buildPaceBarChartHtml(o) {
   }
   const sw = (c) => '<i style="display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;background:' + c + ';"></i>';
   let lg = '<span>' + sw(o.barColor || '#00ff88') + (o.barLabel || (ko ? '페이스 (높을수록 빠름)' : 'PACE (taller = faster)')) + '</span>';
+  if (shadeOn) lg += '<span style="color:#ccc;"><i style="display:inline-block;width:34px;height:8px;border-radius:2px;margin-right:5px;background:linear-gradient(90deg,' + _mix(_baseRgb, [255, 255, 255], 0.45) + ',' + o.barColor + ',' + _mix(_baseRgb, [0, 0, 0], 0.25) + ');"></i>' + (ko ? '연함=느림 \u00b7 진함=빠름' : 'Light = slow \u00b7 Dark = fast') + '</span>';
   if (okV(o.avgVal)) lg += '<span style="color:#ccc;">' + (ko ? '점선 평균 ' : 'Dashed = avg ') + fmt(o.avgVal) + '</span>';
   if (hrN >= 3) lg += '<span style="color:' + lineClr + ';">' + sw(lineClr) + (o.lineLabel || (ko ? '심박' : 'HR')) + ' ' + (o.lineRange ? o.lineRange(hrMin, hrMax) : Math.round(hrMin) + '\u2013' + Math.round(hrMax)) + '</span>';
   if (hasAlt) lg += '<span style="color:#80cbc4;">' + sw('#80cbc4') + (ko ? '고도 ' : 'ELEV ') + ((typeof o.asc === 'number' && typeof o.desc === 'number') ? ('+' + o.asc + ' / \u2212' + o.desc + ' m') : '') + '</span>';
@@ -25326,7 +25350,7 @@ if (svgWrapEl && _isBarMetric && _dgStyle === 'bar') {
       best: ((G.grouped || metricKey === 'hr') ? null : window.calcBest200Info(rawSplits, metricKey)),
       invert: invert, barColor: color,
       barLabel: metricKey === 'pace' ? undefined : (metricKey === 'cadence' ? (koLang ? '케이던스' : 'CADENCE') : (metricKey === 'power' ? (koLang ? '파워' : 'POWER') : (koLang ? '심박' : 'HEART RATE'))),
-      lineVals: _lineVals, lineInvert: !_lineHr, lineColor: _lineHr ? '#ff5c7a' : '#00ff88', lineLabel: _lineHr ? (koLang ? '심박' : 'HR') : (koLang ? '페이스(선)' : 'Pace line'), lineMinR: 20,
+      lineVals: _lineVals, shadeVals: _lineHr ? null : _lineVals, lineInvert: !_lineHr, lineColor: _lineHr ? '#ff5c7a' : '#00ff88', lineLabel: _lineHr ? (koLang ? '심박' : 'HR') : (koLang ? '페이스(선)' : 'Pace line'), lineMinR: 20,
       lineFmt: _lineHr ? ((v) => Math.round(v) + ' bpm') : _pf,
       lineRange: _lineHr ? ((a, b) => Math.round(a) + '\u2013' + Math.round(b)) : ((a, b) => _pf(a) + '\u2013' + _pf(b)),
       rows: rowInfo, dv: _dv, isMile: _isMile, asc: r.totalAscent, desc: r.totalDescent });
